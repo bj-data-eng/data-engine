@@ -9,6 +9,7 @@ src/data_engine/docs/html/
 __pycache__/
 *.pyc
 build/
+dist/
 *.egg-info/
 artifacts/compiled_routines/
 artifacts/workspace_cache/
