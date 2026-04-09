@@ -117,10 +117,6 @@ def build_docs_view(window: "DataEngineWindow") -> QWidget:
     window.docs_status_label = QLabel("")
     window.docs_status_label.setObjectName("sectionMeta")
     header.addWidget(window.docs_status_label, 1)
-
-    window.docs_generate_button = QPushButton("Generate Documentation")
-    window.docs_generate_button.clicked.connect(window._start_docs_build)
-    header.addWidget(window.docs_generate_button)
     layout.addLayout(header)
 
     window.docs_browser = window._create_docs_browser()
@@ -387,15 +383,7 @@ def build_sidebar(window: "DataEngineWindow") -> QWidget:
     window.sidebar_layout.setSpacing(2)
     window.sidebar_layout.addStretch(1)
     window.sidebar_scroll.setWidget(window.sidebar_content)
-    window.sidebar_top_cue = QFrame()
-    window.sidebar_top_cue.setObjectName("sidebarCueTop")
-    window.sidebar_bottom_cue = QFrame()
-    window.sidebar_bottom_cue.setObjectName("sidebarCueBottom")
-    window.sidebar_top_cue.hide()
-    window.sidebar_bottom_cue.hide()
-    layout.addWidget(window.sidebar_top_cue)
     layout.addWidget(window.sidebar_scroll, 1)
-    layout.addWidget(window.sidebar_bottom_cue)
     return panel
 
 
@@ -452,17 +440,8 @@ def build_center_panel(window: "DataEngineWindow") -> QWidget:
     window.operation_scroll.verticalScrollBar().valueChanged.connect(window._update_operation_scroll_cues)
     window.operation_scroll.verticalScrollBar().rangeChanged.connect(window._update_operation_scroll_cues)
 
-    window.operation_top_cue = QFrame()
-    window.operation_top_cue.setObjectName("operationCueTop")
-    window.operation_bottom_cue = QFrame()
-    window.operation_bottom_cue.setObjectName("operationCueBottom")
-    window.operation_top_cue.hide()
-    window.operation_bottom_cue.hide()
-
     layout.addWidget(header)
-    layout.addWidget(window.operation_top_cue)
     layout.addWidget(window.operation_scroll, 1)
-    layout.addWidget(window.operation_bottom_cue)
     return panel
 
 

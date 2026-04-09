@@ -11,7 +11,14 @@ from data_engine.application import (
     WorkspaceSessionApplication,
 )
 from data_engine.authoring.model import FlowValidationError
-from data_engine.domain import DaemonLifecyclePolicy, FlowCatalogEntry, FlowLogEntry, OperationSessionState, RuntimeStepEvent
+from data_engine.domain import (
+    DaemonLifecyclePolicy,
+    FlowCatalogEntry,
+    FlowLogEntry,
+    OperationSessionState,
+    RuntimeSessionState,
+    RuntimeStepEvent,
+)
 from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
 from data_engine.platform.workspace_models import DiscoveredWorkspace
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
@@ -794,6 +801,49 @@ def test_operator_control_application_run_selected_flow_uses_verbose_fallback_wh
 
     assert result.requested is False
     assert result.error_text == "Failed to run poller. The daemon returned no additional detail."
+
+
+def test_operator_control_application_allows_manual_run_while_engine_is_active_for_other_group(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    workspace_root = tmp_path / "workspace"
+    monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
+    (workspace_root / "flow_modules").mkdir(parents=True)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    class _RuntimeApplication:
+        def run_flow(self, paths, *, name: str, wait: bool = False, timeout: float = 2.0):
+            del paths, wait, timeout
+            return type("Result", (), {"ok": True, "error": None, "name": name})()
+
+    control_app = OperatorControlApplication(
+        runtime_application=_RuntimeApplication(),
+        daemon_state_service=_FakeDaemonStateService(
+            WorkspaceDaemonSnapshot(
+                live=True,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=True,
+                runtime_stopping=False,
+                manual_runs=(),
+                last_checkpoint_at_utc=None,
+                source="runtime",
+            ),
+            control_state=object(),
+        ),
+    )
+
+    result = control_app.run_selected_flow(
+        paths=paths,
+        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",)),
+        selected_flow_name="manual_claims",
+        selected_flow_valid=True,
+        selected_flow_group="Manual",
+        selected_flow_group_active=False,
+        blocked_status_text="blocked",
+    )
+
+    assert result.requested is True
+    assert result.sync_after is True
 
 
 def test_operator_control_application_blocks_refresh_while_active(tmp_path: Path, monkeypatch) -> None:

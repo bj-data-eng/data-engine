@@ -9,20 +9,8 @@ if TYPE_CHECKING:
 
 
 def update_operation_scroll_cues(window: "DataEngineWindow", *args) -> None:
-    del args
-    scrollbar = window.operation_scroll.verticalScrollBar()
-    maximum = scrollbar.maximum()
-    value = scrollbar.value()
-    has_overflow = maximum > 0
-    window.operation_top_cue.setVisible(has_overflow and value > 0)
-    window.operation_bottom_cue.setVisible(has_overflow and value < maximum)
+    del window, args
 
 
 def update_sidebar_scroll_cues(window: "DataEngineWindow", *args) -> None:
-    del args
-    scrollbar = window.sidebar_scroll.verticalScrollBar()
-    maximum = scrollbar.maximum()
-    value = scrollbar.value()
-    has_overflow = maximum > 0
-    window.sidebar_top_cue.setVisible(has_overflow and value > 0)
-    window.sidebar_bottom_cue.setVisible(has_overflow and value < maximum)
+    del window, args

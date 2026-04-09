@@ -92,15 +92,23 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     }}
     QFrame#sidebarCueTop {{
         border-top: 1px solid transparent;
+        border-bottom: 1px solid transparent;
+    }}
+    QFrame#sidebarCueTop[active="true"] {{
+        border-top: 1px solid transparent;
         border-bottom: 1px solid {palette.panel_border};
     }}
     QFrame#sidebarCueBottom {{
+        border-top: 1px solid transparent;
+        border-bottom: 1px solid transparent;
+    }}
+    QFrame#sidebarCueBottom[active="true"] {{
         border-top: 1px solid {palette.panel_border};
         border-bottom: 1px solid transparent;
     }}
     QFrame#sidebarGroupRow, QFrame#sidebarFlowRow {{
         background: transparent;
-        border: none;
+        border: 1px solid transparent;
         border-radius: 5px;
     }}
     QFrame#sidebarGroupRow {{
@@ -227,9 +235,17 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     }}
     QFrame#operationCueTop {{
         border-top: 1px solid transparent;
+        border-bottom: 1px solid transparent;
+    }}
+    QFrame#operationCueTop[active="true"] {{
+        border-top: 1px solid transparent;
         border-bottom: 1px solid {palette.panel_border};
     }}
     QFrame#operationCueBottom {{
+        border-top: 1px solid transparent;
+        border-bottom: 1px solid transparent;
+    }}
+    QFrame#operationCueBottom[active="true"] {{
         border-top: 1px solid {palette.panel_border};
         border-bottom: 1px solid transparent;
     }}

@@ -25,6 +25,20 @@ def _close_workspace_scoped_dialogs(window: "DataEngineWindow") -> None:
         setattr(window, attr_name, None)
 
 
+def _sync_workspace_selector(window: "DataEngineWindow") -> None:
+    selector = getattr(window, "workspace_selector", None)
+    if selector is None:
+        return
+    target_index = selector.findData(window.workspace_paths.workspace_id)
+    if target_index < 0:
+        return
+    selector.blockSignals(True)
+    try:
+        selector.setCurrentIndex(target_index)
+    finally:
+        selector.blockSignals(False)
+
+
 def rebind_workspace_context(
     window: "DataEngineWindow",
     *,
@@ -63,6 +77,7 @@ def rebind_workspace_context(
     window.manual_flow_stop_events = {}
     window.step_output_index = StepOutputIndex.empty()
     window._reload_workspace_options()
+    _sync_workspace_selector(window)
     refresh_workspace_root_controls(window)
     window._load_flows()
     window._refresh_log_view(force_scroll_to_bottom=True)

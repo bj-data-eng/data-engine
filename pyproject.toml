@@ -1,5 +1,12 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = [
+  "setuptools>=68",
+  "wheel",
+  "polars>=1.39.0",
+  "myst-parser>=4.0.0",
+  "Sphinx>=9.1.0",
+  "sphinx_rtd_theme>=3.1.0",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -92,7 +99,7 @@ dev = [
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
-license-files = ["LICENSE.md"]
+license-files = ["LICENSE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -105,6 +112,8 @@ data_engine = [
   "docs/sphinx_source/*.rst",
   "docs/sphinx_source/guides/*.md",
   "docs/sphinx_source/_static/*.css",
+  "docs/html/*",
+  "docs/html/**/*",
 ]
 
 [tool.pytest.ini_options]

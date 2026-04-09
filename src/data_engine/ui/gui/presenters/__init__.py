@@ -3,12 +3,8 @@
 from data_engine.ui.gui.presenters.logs import add_log_run_item, format_raw_log_message, refresh_log_view
 from data_engine.ui.gui.presenters.docs import (
     create_docs_browser,
-    docs_build_dir,
-    finish_docs_build,
     initialize_docs_view,
     load_docs_page,
-    run_docs_build_worker,
-    start_docs_build,
 )
 from data_engine.ui.gui.presenters.runtime_projection import (
     apply_daemon_snapshot,
@@ -42,10 +38,8 @@ __all__ = [
     "apply_daemon_snapshot",
     "browse_workspace_collection_root_override",
     "create_docs_browser",
-    "docs_build_dir",
     "duration_text",
     "finish_daemon_startup",
-    "finish_docs_build",
     "format_raw_log_message",
     "format_seconds",
     "force_shutdown_daemon",
@@ -65,8 +59,6 @@ __all__ = [
     "render_operation_durations",
     "repolish_widget_tree",
     "reset_operation_state",
-    "run_docs_build_worker",
     "save_workspace_collection_root_override",
     "set_hovered",
-    "start_docs_build",
 ]

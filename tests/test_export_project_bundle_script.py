@@ -29,6 +29,8 @@ def test_build_archive_includes_project_source_and_excludes_artifacts_and_worksp
     (root / "INSTALL" / "INSTALL MAC.command").write_text("install\n", encoding="utf-8")
     (root / "INSTALL" / "INSTALL WINDOWS.bat").write_text("install\r\n", encoding="utf-8")
     (root / "INSTALL" / "INSTALL WINDOWS_VM.bat").write_text("install\r\n", encoding="utf-8")
+    (root / "INSTALL" / "BUILD DOCS.command").write_text("build\n", encoding="utf-8")
+    (root / "INSTALL" / "BUILD DOCS.bat").write_text("build\r\n", encoding="utf-8")
     (workspaces / "example_workspace" / "flow_modules").mkdir(parents=True)
     (workspaces / "example_workspace" / "flow_modules" / "demo.ipynb").write_text("{}", encoding="utf-8")
     (workspaces / "claims2" / "flow_modules").mkdir(parents=True)
@@ -52,6 +54,8 @@ def test_build_archive_includes_project_source_and_excludes_artifacts_and_worksp
     assert "INSTALL/INSTALL MAC.command" in members
     assert "INSTALL/INSTALL WINDOWS.bat" in members
     assert "INSTALL/INSTALL WINDOWS_VM.bat" in members
+    assert "INSTALL/BUILD DOCS.command" in members
+    assert "INSTALL/BUILD DOCS.bat" in members
     assert "repo.code-workspace" in members
     assert "workspaces/example_workspace/flow_modules/demo.ipynb" not in members
     assert "workspaces/claims2/flow_modules/other.ipynb" not in members
@@ -73,6 +77,8 @@ def test_build_archive_code_bundle_excludes_tests_but_keeps_workspaces(tmp_path)
     (root / "INSTALL" / "INSTALL MAC.command").write_text("install\n", encoding="utf-8")
     (root / "INSTALL" / "INSTALL WINDOWS.bat").write_text("install\r\n", encoding="utf-8")
     (root / "INSTALL" / "INSTALL WINDOWS_VM.bat").write_text("install\r\n", encoding="utf-8")
+    (root / "INSTALL" / "BUILD DOCS.command").write_text("build\n", encoding="utf-8")
+    (root / "INSTALL" / "BUILD DOCS.bat").write_text("build\r\n", encoding="utf-8")
     (root / "tests").mkdir(parents=True)
     (root / "tests" / "test_demo.py").write_text("def test_demo(): pass\n", encoding="utf-8")
     (workspaces / "example_workspace" / "flow_modules").mkdir(parents=True)
@@ -89,6 +95,8 @@ def test_build_archive_code_bundle_excludes_tests_but_keeps_workspaces(tmp_path)
     assert "INSTALL/INSTALL MAC.command" in members
     assert "INSTALL/INSTALL WINDOWS.bat" in members
     assert "INSTALL/INSTALL WINDOWS_VM.bat" in members
+    assert "INSTALL/BUILD DOCS.command" in members
+    assert "INSTALL/BUILD DOCS.bat" in members
     assert "repo.code-workspace" in members
     assert "workspaces/example_workspace/flow_modules/demo.py" not in members
     assert "workspaces/claims2/flow_modules/other.py" not in members

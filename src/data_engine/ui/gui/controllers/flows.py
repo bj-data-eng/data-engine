@@ -142,19 +142,20 @@ class _GuiWorkspaceCatalogController:
             window.workspace_selector.hidePopup()
         except Exception:
             pass
-        window._workspace_switch_generation += 1
-        switch_generation = window._workspace_switch_generation
+        if window.ui_closing or workspace_id == window.workspace_paths.workspace_id:
+            return
+        window._pending_workspace_switch_id = workspace_id
+        if window._workspace_switch_scheduled:
+            return
+        window._workspace_switch_scheduled = True
 
-        def _finish_switch() -> None:
-            if switch_generation != window._workspace_switch_generation:
-                return
+        def _flush_pending_switch() -> None:
+            window._workspace_switch_scheduled = False
             if window.ui_closing:
                 return
-            if workspace_id == window.workspace_paths.workspace_id:
-                return
-            window._rebind_workspace_context(workspace_id=workspace_id)
+            window._flush_deferred_ui_updates()
 
-        QTimer.singleShot(0, _finish_switch)
+        QTimer.singleShot(0, _flush_pending_switch)
 
     def refresh_flows_requested(self, window: "DataEngineWindow", presentation: "_GuiFlowPresentationController") -> None:
         result = window.control_application.refresh_flows(

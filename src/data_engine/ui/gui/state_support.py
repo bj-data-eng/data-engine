@@ -141,15 +141,6 @@ class GuiStateMixin:
         self._operator_session_state = self._operator_session_state.with_operations(value)
 
     @property
-    def docs_build_running(self: "DataEngineWindow") -> bool:
-        """Return whether the documentation build is currently active for this GUI window."""
-        return self._docs_build_running
-
-    @docs_build_running.setter
-    def docs_build_running(self: "DataEngineWindow", value: bool) -> None:
-        self._docs_build_running = bool(value)
-
-    @property
     def docs_root_dir(self: "DataEngineWindow") -> Path | None:
         """Return the current built-docs root directory for this GUI window, if available."""
         return self._docs_root_dir

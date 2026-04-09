@@ -132,6 +132,11 @@ def schedule_ui_refresh(window: "DataEngineWindow", *, log_view: bool = False, a
 
 def flush_deferred_ui_updates(window: "DataEngineWindow") -> None:
     """Flush any deferred GUI refresh work."""
+    pending_workspace_id = getattr(window, "_pending_workspace_switch_id", None)
+    if pending_workspace_id is not None:
+        window._pending_workspace_switch_id = None
+        if not window.ui_closing and pending_workspace_id != window.workspace_paths.workspace_id:
+            window._rebind_workspace_context(workspace_id=pending_workspace_id)
     if window._log_view_refresh_pending:
         window._log_view_refresh_pending = False
         window._refresh_log_view()

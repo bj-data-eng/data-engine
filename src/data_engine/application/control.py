@@ -68,7 +68,7 @@ class OperatorControlApplication:
                 requested=False,
                 status_text=f"{selected_flow_name} is invalid and cannot run.",
             )
-        if selected_flow_group_active or runtime_session.runtime_active or runtime_session.manual_run_active:
+        if selected_flow_group_active or runtime_session.manual_run_active:
             return OperatorActionResult(requested=False)
         if not runtime_session.control_available:
             return OperatorActionResult(requested=False, status_text=blocked_status_text)

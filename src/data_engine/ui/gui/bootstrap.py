@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -92,7 +92,9 @@ class GuiDependencyFactories:
     runtime_application_factory: Callable[[DaemonService, DaemonStateService, SharedStateService], RuntimeApplication]
     control_application_factory: Callable[[RuntimeApplication, DaemonStateService], OperatorControlApplication]
     theme_service_factory: Callable[[object, str, object, object, object, object], ThemeService]
-    workspace_provisioning_service_factory: Callable[[], WorkspaceProvisioningService]
+    workspace_provisioning_service_factory: Callable[[], WorkspaceProvisioningService] = field(
+        default=WorkspaceProvisioningService
+    )
 
 
 def default_gui_dependency_factories() -> GuiDependencyFactories:

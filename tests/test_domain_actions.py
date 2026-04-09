@@ -69,3 +69,22 @@ def test_action_states_disable_runtime_controls_when_workspace_is_missing():
     assert gui.engine_enabled is False
     assert tui.run_once_disabled is True
     assert tui.start_engine_disabled is True
+
+
+def test_action_states_allow_manual_run_while_engine_is_active_for_another_group():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_claims", label="Manual Claims", group="Manual"), description=None))
+    session = RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",))
+    selected = SelectedFlowState(card=card, state="manual", group_active=False, has_logs=False)
+    context = OperatorActionContext(
+        runtime_session=session,
+        selected_flow=selected,
+        has_automated_flows=True,
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+    tui = TuiActionState.from_context(context)
+
+    assert gui.flow_run_enabled is True
+    assert tui.run_once_disabled is False

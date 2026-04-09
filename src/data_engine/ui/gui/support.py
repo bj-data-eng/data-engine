@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING
 
@@ -16,9 +15,7 @@ from data_engine.ui.gui.helpers import (
 from data_engine.ui.gui.presenters import (
     browse_workspace_collection_root_override as present_browse_workspace_collection_root_override,
     create_docs_browser as present_create_docs_browser,
-    docs_build_dir as present_docs_build_dir,
     force_shutdown_daemon as present_force_shutdown_daemon,
-    finish_docs_build as present_finish_docs_build,
     initialize_docs_view as present_initialize_docs_view,
     load_docs_page as present_load_docs_page,
     provision_selected_workspace as present_provision_selected_workspace,
@@ -26,9 +23,7 @@ from data_engine.ui.gui.presenters import (
     refresh_workspace_visibility_panel as present_refresh_workspace_visibility_panel,
     refresh_workspace_root_controls as present_refresh_workspace_root_controls,
     reset_workspace_collection_root_override as present_reset_workspace_collection_root_override,
-    run_docs_build_worker as present_run_docs_build_worker,
     save_workspace_collection_root_override as present_save_workspace_collection_root_override,
-    start_docs_build as present_start_docs_build,
 )
 from data_engine.ui.gui.surface import show_message_box_later as surface_show_message_box_later
 from data_engine.views.state import build_flow_summary
@@ -133,14 +128,6 @@ class GuiWindowSupportMixin:
         """Defer one application dialog until the current UI update cycle completes."""
         surface_show_message_box_later(self, title=title, text=text, tone=tone)
 
-    def _docs_source_dir(self: "DataEngineWindow") -> Path:
-        """Return the authored Sphinx source directory."""
-        return self.workspace_paths.sphinx_source_dir
-
-    def _docs_build_dir(self: "DataEngineWindow") -> Path:
-        """Return the generated Sphinx HTML output directory."""
-        return present_docs_build_dir(self)
-
     def _refresh_workspace_root_controls(self: "DataEngineWindow") -> None:
         """Refresh local workspace-root override copy in the Settings view."""
         present_refresh_workspace_root_controls(self)
@@ -178,18 +165,6 @@ class GuiWindowSupportMixin:
 
     def _initialize_docs_view(self: "DataEngineWindow") -> None:
         present_initialize_docs_view(self)
-
-    def _start_docs_build(self: "DataEngineWindow") -> None:
-        """Launch the Sphinx HTML build in a background thread."""
-        present_start_docs_build(self)
-
-    def _run_docs_build_worker(self: "DataEngineWindow") -> None:
-        """Build the authored Sphinx site and report completion back to the UI thread."""
-        present_run_docs_build_worker(self)
-
-    def _finish_docs_build(self: "DataEngineWindow", succeeded: bool, message: str) -> None:
-        """Refresh the Docs tab after a build completes."""
-        present_finish_docs_build(self, succeeded, message)
 
     def _load_docs_page(self: "DataEngineWindow", file_name: str) -> None:
         present_load_docs_page(self, file_name)

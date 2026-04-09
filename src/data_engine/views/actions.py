@@ -30,7 +30,13 @@ class GuiActionState:
         active = session.runtime_active or session.runtime_stopping
         return cls(
             flow_run_label="Running..." if selected.running else "Run Once",
-            flow_run_enabled=selected.valid and not selected.group_active and session.control_available and context.workspace_available,
+            flow_run_enabled=(
+                selected.valid
+                and not selected.group_active
+                and not session.manual_run_active
+                and session.control_available
+                and context.workspace_available
+            ),
             flow_config_enabled=selected.present,
             engine_enabled=(
                 session.runtime_active
@@ -64,7 +70,12 @@ class TuiActionState:
         busy = session.runtime_active or session.manual_run_active or session.runtime_stopping
         return cls(
             refresh_disabled=busy,
-            run_once_disabled=busy or not session.control_available or not context.workspace_available,
+            run_once_disabled=(
+                session.manual_run_active
+                or context.selected_flow.group_active
+                or not session.control_available
+                or not context.workspace_available
+            ),
             start_engine_disabled=busy or not session.control_available or not context.workspace_available,
             stop_engine_disabled=not busy,
             view_config_disabled=not context.selected_flow.present,

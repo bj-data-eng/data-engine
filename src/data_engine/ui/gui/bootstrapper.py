@@ -81,7 +81,6 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.signals = UiSignals()
     window.signals.run_finished.connect(window._finish_run)
     window.signals.runtime_finished.connect(window._finish_runtime)
-    window.signals.docs_build_finished.connect(window._finish_docs_build)
     window.signals.daemon_startup_finished.connect(window._finish_daemon_startup)
 
     window.engine_runtime_stop_event = threading.Event()
@@ -100,7 +99,6 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.run_log_preview_dialog = None
     window._docs_root_dir = None
     window.docs_uses_webengine = False
-    window._docs_build_running = False
     window.ui_closing = False
     window._log_view_refresh_pending = False
     window._action_buttons_refresh_pending = False
@@ -114,7 +112,8 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window._message_box_scheduled = False
     window._message_box_open = False
     window._message_box_generation = 0
-    window._workspace_switch_generation = 0
+    window._pending_workspace_switch_id = None
+    window._workspace_switch_scheduled = False
 
     window._build_window()
     window._reload_workspace_options()
