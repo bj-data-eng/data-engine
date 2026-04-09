@@ -16,6 +16,7 @@ description = "Workbook-driven workflow jobs with strict filename parsing and Du
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   { name = "Data Engine contributors" },
 ]
@@ -99,7 +100,6 @@ dev = [
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
-license-files = ["LICENSE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
