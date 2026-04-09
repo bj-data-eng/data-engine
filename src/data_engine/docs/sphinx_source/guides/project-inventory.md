@@ -1,0 +1,5683 @@
+# Project Inventory
+
+This page is generated from the current AST map and is intentionally inventory-shaped rather than explanatory.
+
+- package root: `src/data_engine`
+- module count: `168`
+
+- module `data_engine`
+  - attribute `__all__`
+  - function `__getattr__`
+    - param `name: str`
+- module `data_engine.application`
+  - attribute `__all__`
+- module `data_engine.application.actions`
+  - attribute `__all__`
+  - class `ActionStateApplication`
+    - method `build_action_context`
+      - param `self`
+      - param `*`
+      - param `card`
+      - param `flow_states: dict[str, str]`
+      - param `runtime_session`
+      - param `flow_groups_by_name: dict[str, str | None]`
+      - param `active_flow_states`
+      - param `has_logs: bool`
+      - param `has_automated_flows: bool`
+      - param `workspace_available: bool=True`
+      - param `selected_run_group_present: bool=False`
+- module `data_engine.application.catalog`
+  - class `FlowCatalogLoadResult`
+    - attribute `catalog_state`
+    - attribute `loaded`
+    - attribute `error_text`
+  - class `FlowCatalogPresentation`
+    - attribute `entries`
+    - attribute `grouped_entries`
+    - attribute `selected_flow_name`
+    - method `entries_by_name`
+      - param `self`
+    - method `selected_entry`
+      - param `self`
+    - method `cards`
+      - param `self`
+    - method `grouped_cards`
+      - param `self`
+    - method `selected_card`
+      - param `self`
+    - method `selected_list_index`
+      - param `self`
+  - class `FlowCatalogApplication`
+    - instance attribute `flow_catalog_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `flow_catalog_service: FlowCatalogService`
+    - method `load_state`
+      - param `self`
+      - param `*`
+      - param `workspace_root: Path`
+      - param `current_state: FlowCatalogState | None=None`
+    - method `empty_state`
+      - param `self`
+      - param `*`
+      - param `message: str=''`
+      - param `current_state: FlowCatalogState | None=None`
+    - method `select_flow`
+      - param `self`
+      - param `*`
+      - param `catalog_state: FlowCatalogState`
+      - param `flow_name: str | None`
+    - method `build_presentation`
+      - param `self`
+      - param `*`
+      - param `catalog_state: FlowCatalogState`
+    - method `load_workspace_catalog`
+      - param `self`
+      - param `*`
+      - param `workspace_paths: WorkspacePaths`
+      - param `current_state: FlowCatalogState | None=None`
+      - param `missing_message: str='No flow modules discovered.'`
+- module `data_engine.application.control`
+  - attribute `__all__`
+  - function `_verbose_action_error`
+    - param `action: str`
+    - param `detail: object | None`
+  - class `OperatorActionResult`
+    - attribute `requested`
+    - attribute `sync_after`
+    - attribute `ensure_daemon_started`
+    - attribute `status_text`
+    - attribute `error_text`
+  - class `FlowRefreshResult`
+    - attribute `reload_catalog`
+    - attribute `sync_after`
+    - attribute `status_text`
+    - attribute `warning_text`
+    - attribute `error_text`
+  - class `OperatorControlApplication`
+    - instance attribute `runtime_application`
+    - instance attribute `daemon_state_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `runtime_application: RuntimeApplication`
+      - param `daemon_state_service: DaemonStateService`
+    - method `run_selected_flow`
+      - param `self`
+      - param `*`
+      - param `paths: WorkspacePaths`
+      - param `runtime_session: RuntimeSessionState`
+      - param `selected_flow_name: str | None`
+      - param `selected_flow_valid: bool`
+      - param `selected_flow_group: str | None`
+      - param `selected_flow_group_active: bool`
+      - param `blocked_status_text: str`
+      - param `timeout: float=2.0`
+    - method `start_engine`
+      - param `self`
+      - param `*`
+      - param `paths: WorkspacePaths`
+      - param `runtime_session: RuntimeSessionState`
+      - param `has_automated_flows: bool`
+      - param `blocked_status_text: str`
+      - param `timeout: float=2.0`
+    - method `stop_pipeline`
+      - param `self`
+      - param `*`
+      - param `paths: WorkspacePaths`
+      - param `runtime_session: RuntimeSessionState`
+      - param `selected_flow_group: str | None`
+      - param `blocked_status_text: str`
+      - param `timeout: float=2.0`
+    - method `request_control`
+      - param `self`
+      - param `daemon_manager: WorkspaceDaemonManager`
+    - method `refresh_flows`
+      - param `self`
+      - param `*`
+      - param `paths: WorkspacePaths`
+      - param `runtime_session: RuntimeSessionState`
+      - param `has_authored_workspace: bool`
+      - param `timeout: float=5.0`
+- module `data_engine.application.details`
+  - attribute `__all__`
+  - class `SelectedFlowPresentation`
+    - attribute `detail_state`
+    - attribute `run_groups`
+    - attribute `visible_run_groups`
+    - attribute `selected_run_key`
+    - attribute `empty_text`
+    - method `run_group_signature`
+      - param `self`
+    - method `selected_run_group`
+      - param `self`
+  - class `DetailApplication`
+    - method `build_selected_flow_presentation`
+      - param `self`
+      - param `*`
+      - param `card: FlowCatalogLike | None`
+      - param `tracker`
+      - param `flow_states: dict[str, str]`
+      - param `run_groups: tuple[FlowRunState, ...]`
+      - param `selected_run_key: tuple[str, str] | None`
+      - param `max_visible_runs: int | None=None`
+- module `data_engine.application.runtime`
+  - attribute `__all__`
+  - function `_daemon_command_error_text`
+    - param `payload: dict[str, Any]`
+    - param `detail: object | None`
+  - function `_daemon_command_action`
+    - param `command: object`
+  - function `_default_state_for_mode`
+    - param `mode: str | None`
+  - function `_error_text`
+    - param `error: Exception`
+  - class `DaemonCommandResult`
+    - attribute `ok`
+    - attribute `error`
+    - attribute `payload`
+  - class `RuntimeSyncState`
+    - attribute `daemon_status`
+    - attribute `workspace_control_state`
+    - attribute `runtime_session`
+    - attribute `snapshot_source`
+    - attribute `snapshot`
+  - class `RuntimeLogMessage`
+    - attribute `text`
+    - attribute `flow_name`
+  - class `RuntimeSnapshotPresentation`
+    - attribute `operation_tracker`
+    - attribute `flow_states`
+    - method `signature_for`
+      - param `self`
+      - param `runtime_session: RuntimeSessionState`
+  - class `FlowStateRefreshPlan`
+    - attribute `flow_states`
+    - attribute `changed_flow_names`
+    - attribute `signature`
+    - method `states_changed`
+      - param `self`
+  - class `ManualRunCompletion`
+    - attribute `runtime_session`
+    - attribute `state_updates`
+    - attribute `log_messages`
+    - attribute `capture_results`
+    - attribute `normalize_operations`
+    - attribute `render_durations`
+    - attribute `show_error_text`
+  - class `EngineRunCompletion`
+    - attribute `runtime_session`
+    - attribute `state_updates`
+    - attribute `failed_flow_names`
+    - attribute `log_messages`
+  - class `RuntimeApplication`
+    - instance attribute `daemon_service`
+    - instance attribute `daemon_state_service`
+    - instance attribute `shared_state_service`
+    - instance attribute `daemon_lifecycle_policy`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `daemon_service: DaemonService`
+      - param `daemon_state_service: DaemonStateService`
+      - param `shared_state_service: SharedStateService`
+      - param `daemon_lifecycle_policy: DaemonLifecyclePolicy=DaemonLifecyclePolicy.EPHEMERAL`
+    - method `sync_state`
+      - param `self`
+      - param `*`
+      - param `paths: WorkspacePaths`
+      - param `daemon_manager: WorkspaceDaemonManager`
+      - param `flow_cards`
+      - param `runtime_ledger`
+      - param `daemon_startup_in_progress: bool=False`
+    - method `build_runtime_snapshot`
+      - param `self`
+      - param `*`
+      - param `flow_cards: Iterable[FlowCatalogLike]`
+      - param `log_entries: Iterable[FlowLogEntry]`
+      - param `runtime_session: RuntimeSessionState`
+      - param `now: float`
+    - method `plan_flow_state_refresh`
+      - param `self`
+      - param `*`
+      - param `previous_states: dict[str, str] | None`
+      - param `next_states: dict[str, str]`
+      - param `runtime_session: RuntimeSessionState`
+    - method `run_flow`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `name: str`
+      - param `wait: bool=False`
+      - param `timeout: float=2.0`
+    - method `start_engine`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `timeout: float=2.0`
+    - method `refresh_flows`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `timeout: float=5.0`
+    - method `stop_engine`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `timeout: float=2.0`
+    - method `stop_flow`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `name: str`
+      - param `timeout: float=2.0`
+    - method `daemon_status`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `timeout: float=0.0`
+    - method `shutdown_daemon`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `timeout: float=0.0`
+    - method `force_shutdown_daemon`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `timeout: float=0.5`
+    - method `spawn_daemon`
+      - param `self`
+      - param `paths: WorkspacePaths`
+    - method `complete_manual_run`
+      - param `self`
+      - param `*`
+      - param `runtime_session: RuntimeSessionState`
+      - param `flow_name: str`
+      - param `group_name: str | None`
+      - param `flow_mode: str`
+      - param `results: object`
+      - param `error: object`
+      - param `stop_requested: bool`
+    - method `complete_engine_run`
+      - param `self`
+      - param `*`
+      - param `runtime_session: RuntimeSessionState`
+      - param `flow_names: tuple[str, ...]`
+      - param `flow_modes_by_name: dict[str, str]`
+      - param `error: object`
+      - param `runtime_stop_requested: bool`
+      - param `flow_stop_requested: bool`
+    - method `_spawn_and_request`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `payload: dict[str, Any]`
+      - param `*`
+      - param `timeout: float=0.0`
+    - method `_request`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `payload: dict[str, Any]`
+      - param `*`
+      - param `timeout: float=0.0`
+- module `data_engine.application.workspace`
+  - class `WorkspaceBinding`
+    - attribute `operator_session`
+    - attribute `workspace_session`
+  - class `WorkspaceSessionApplication`
+    - instance attribute `workspace_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `workspace_service: WorkspaceService`
+    - method `refresh_session`
+      - param `self`
+      - param `*`
+      - param `workspace_paths: WorkspacePaths`
+      - param `override_root: Path | None`
+    - method `bind_workspace`
+      - param `self`
+      - param `*`
+      - param `workspace_paths: WorkspacePaths`
+      - param `override_root: Path | None`
+- module `data_engine.authoring`
+  - attribute `__all__`
+  - function `__getattr__`
+    - param `name: str`
+- module `data_engine.authoring.builder`
+  - attribute `__all__`
+- module `data_engine.authoring.execution`
+  - attribute `__all__`
+- module `data_engine.authoring.execution.app`
+  - attribute `__all__`
+- module `data_engine.authoring.execution.context`
+  - attribute `__all__`
+  - class `_QueuedJob`
+    - attribute `flow`
+    - attribute `source_path`
+    - attribute `batch_signatures`
+  - class `RuntimeContextBuilder`
+    - method `_source_key_text`
+      - param `*`
+      - param `source_path: Path | None`
+      - param `relative_path: Path | None`
+    - method `_source_file_hash`
+      - param `cls`
+      - param `*`
+      - param `source_path: Path | None`
+      - param `relative_path: Path | None`
+    - method `new_run_id`
+      - param `self`
+    - method `build`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `run_id: str`
+- module `data_engine.authoring.execution.continuous`
+  - attribute `__all__`
+  - class `ContinuousRuntimeLoop`
+    - instance attribute `runtime`
+    - method `__init__`
+      - param `self`
+      - param `runtime: '_FlowRuntime'`
+    - method `run`
+      - param `self`
+    - method `_poll_watch_entries`
+      - param `self`
+      - param `watch_entries: list[dict[str, object]]`
+      - param `queue: deque[_QueuedJob]`
+      - param `queued_keys: set[tuple[str, str | None]]`
+      - param `now: float`
+    - method `_update_schedule_entries`
+      - param `self`
+      - param `schedule_entries: list[dict[str, object]]`
+      - param `now: float`
+- module `data_engine.authoring.execution.grouped`
+  - attribute `__all__`
+  - class `_GroupedFlowRuntime`
+    - instance attribute `flows`
+    - instance attribute `continuous`
+    - instance attribute `runtime_stop_event`
+    - instance attribute `flow_stop_event`
+    - instance attribute `status_callback`
+    - instance attribute `_runtime_ledger_service`
+    - instance attribute `_runtime_ledger_factory`
+    - instance attribute `runtime_ledger`
+    - method `__init__`
+      - param `self`
+      - param `flows: tuple['Flow', ...]`
+      - param `*`
+      - param `continuous: bool`
+      - param `runtime_stop_event: threading.Event | None=None`
+      - param `flow_stop_event: threading.Event | None=None`
+      - param `status_callback: Callable[[str], None] | None=None`
+      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `runtime_ledger_service: RuntimeLedgerService | None=None`
+      - param `runtime_ledger_factory: Callable[[], RuntimeLedger] | None=None`
+    - method `run`
+      - param `self`
+    - method `_grouped_flows`
+      - param `self`
+- module `data_engine.authoring.execution.logging`
+  - attribute `LOGGER`
+  - attribute `__all__`
+  - class `RuntimeLogEmitter`
+    - instance attribute `runtime_ledger`
+    - method `__init__`
+      - param `self`
+      - param `runtime_ledger: RuntimeLedger`
+    - method `log_runtime_message`
+      - param `self`
+      - param `message: str`
+      - param `*`
+      - param `level: str`
+      - param `run_id: str | None`
+      - param `flow_name: str | None`
+      - param `step_label: str | None=None`
+      - param `exc_info: bool=False`
+    - method `log_flow_event`
+      - param `self`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `status: str`
+      - param `elapsed: float | None=None`
+      - param `level: str='info'`
+      - param `exc_info: bool=False`
+    - method `log_step_event`
+      - param `self`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `step_label: str`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `status: str`
+      - param `elapsed: float | None=None`
+      - param `level: str='info'`
+      - param `exc_info: bool=False`
+- module `data_engine.authoring.execution.polling`
+  - attribute `__all__`
+  - class `RuntimePollingSupport`
+    - instance attribute `runtime_ledger`
+    - method `__init__`
+      - param `self`
+      - param `runtime_ledger: RuntimeLedger`
+    - method `make_watcher`
+      - param `self`
+      - param `trigger: WatchSpec`
+    - method `startup_sources`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `*`
+      - param `allow_missing: bool=False`
+    - method `enqueue_job`
+      - param `self`
+      - param `queue: deque[_QueuedJob]`
+      - param `queued_keys: set[tuple[str, str | None]]`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `batch_signatures: tuple[SourceSignature, ...]=()`
+    - method `job_key`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+    - method `stale_poll_sources`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `stale_batch_poll_signatures`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `is_poll_source_stale`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+    - method `poll_source_signature`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+    - method `normalized_source_path`
+      - param `self`
+      - param `source_path: Path | None`
+- module `data_engine.authoring.execution.runner`
+  - attribute `__all__`
+  - class `FlowRunExecutor`
+    - instance attribute `runtime`
+    - method `__init__`
+      - param `self`
+      - param `runtime: '_FlowRuntime'`
+    - method `run_one`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+      - param `*`
+      - param `batch_signatures=()`
+    - method `preview_one`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+      - param `*`
+      - param `use: str | None`
+    - method `_ensure_runtime_sources_available`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `context: FlowContext`
+      - param `source_path: 'Path | None'`
+    - method `_load_current_for_step`
+      - param `self`
+      - param `context: FlowContext`
+      - param `step: 'StepSpec'`
+- module `data_engine.authoring.execution.single`
+  - attribute `__all__`
+  - function `_open_default_runtime_ledger`
+  - function `default_runtime_ledger_service`
+  - class `RuntimeLedgerService`
+    - attribute `open_runtime_ledger_func`
+    - method `open_runtime_ledger`
+      - param `self`
+  - class `_FlowRuntime`
+    - instance attribute `flows`
+    - instance attribute `continuous`
+    - instance attribute `runtime_stop_event`
+    - instance attribute `flow_stop_event`
+    - instance attribute `status_callback`
+    - instance attribute `_runtime_ledger_factory`
+    - instance attribute `_owns_runtime_ledger`
+    - instance attribute `runtime_ledger`
+    - instance attribute `context_builder`
+    - instance attribute `log_emitter`
+    - instance attribute `polling`
+    - instance attribute `run_executor`
+    - instance attribute `continuous_loop`
+    - method `__init__`
+      - param `self`
+      - param `flows: tuple['Flow', ...]`
+      - param `*`
+      - param `continuous: bool`
+      - param `runtime_stop_event: threading.Event | None=None`
+      - param `flow_stop_event: threading.Event | None=None`
+      - param `status_callback: Callable[[str], None] | None=None`
+      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `runtime_ledger_service: RuntimeLedgerService | None=None`
+      - param `runtime_ledger_factory: Callable[[], RuntimeLedger] | None=None`
+    - method `run`
+      - param `self`
+    - method `preview`
+      - param `self`
+      - param `*`
+      - param `use: str | None=None`
+    - method `_close_owned_runtime_ledger`
+      - param `self`
+    - method `_validate`
+      - param `self`
+    - method `_run_once_all`
+      - param `self`
+    - method `_preview_one`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+      - param `*`
+      - param `use: str | None`
+    - method `_make_watcher`
+      - param `self`
+      - param `trigger: WatchSpec`
+    - method `_startup_sources`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `*`
+      - param `allow_missing: bool=False`
+    - method `_stale_poll_sources`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `_stale_batch_poll_signatures`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `_is_poll_source_stale`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+    - method `_poll_source_signature`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+    - method `_normalized_source_path`
+      - param `self`
+      - param `source_path: 'Path | None'`
+    - method `_check_flow_stop`
+      - param `self`
+    - method `_emit_status`
+      - param `self`
+      - param `message: str`
+- module `data_engine.authoring.flow`
+  - attribute `__all__`
+  - function `_resolve_authoring_services`
+    - param `*`
+    - param `authoring_services: AuthoringServices | None=None`
+    - param `runtime_execution_service: RuntimeExecutionService | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+  - function `load_flow`
+    - param `name: str`
+    - param `*`
+    - param `data_root: Path | None=None`
+    - param `authoring_services: AuthoringServices | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+  - function `discover_flows`
+    - param `*`
+    - param `data_root: Path | None=None`
+    - param `authoring_services: AuthoringServices | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+  - function `run`
+    - param `*flows: Flow`
+    - param `authoring_services: AuthoringServices | None=None`
+    - param `runtime_execution_service: RuntimeExecutionService | None=None`
+  - class `Flow`
+    - attribute `group`
+    - attribute `name`
+    - attribute `label`
+    - attribute `trigger`
+    - attribute `mirror_spec`
+    - attribute `steps`
+    - attribute `_workspace_root`
+    - method `__post_init__`
+      - param `self`
+    - method `_clone`
+      - param `self`
+      - param `**kwargs`
+    - method `_append`
+      - param `self`
+      - param `step: StepSpec`
+    - method `watch`
+      - param `self`
+      - param `*`
+      - param `mode: str`
+      - param `run_as: str='individual'`
+      - param `source: str | Path | None=None`
+      - param `interval: str | None=None`
+      - param `time: str | tuple[str, ...] | list[str] | set[str] | None=None`
+      - param `extensions: tuple[str, ...] | list[str] | set[str] | None=None`
+      - param `settle: int=1`
+    - method `mirror`
+      - param `self`
+      - param `*`
+      - param `root: str | Path`
+    - method `step`
+      - param `self`
+      - param `fn`
+      - param `*`
+      - param `use: str | None=None`
+      - param `save_as: str | None=None`
+      - param `label: str | None=None`
+    - method `map`
+      - param `self`
+      - param `fn`
+      - param `*`
+      - param `use: str | None=None`
+      - param `save_as: str | None=None`
+      - param `label: str | None=None`
+    - method `collect`
+      - param `self`
+      - param `extensions: tuple[str, ...] | list[str] | set[str]`
+      - param `*`
+      - param `root: str | Path | None=None`
+      - param `recursive: bool=False`
+      - param `use: str | None=None`
+      - param `save_as: str | None=None`
+      - param `label: str | None=None`
+    - method `step_each`
+      - param `self`
+      - param `fn`
+      - param `*`
+      - param `use: str | None=None`
+      - param `save_as: str | None=None`
+      - param `label: str | None=None`
+    - method `mode`
+      - param `self`
+    - method `run_once`
+      - param `self`
+      - param `*`
+      - param `authoring_services: AuthoringServices | None=None`
+      - param `runtime_execution_service: RuntimeExecutionService | None=None`
+    - method `preview`
+      - param `self`
+      - param `*`
+      - param `use: str | None=None`
+      - param `authoring_services: AuthoringServices | None=None`
+      - param `runtime_execution_service: RuntimeExecutionService | None=None`
+    - method `show`
+      - param `self`
+    - method `run`
+      - param `self`
+      - param `*`
+      - param `authoring_services: AuthoringServices | None=None`
+      - param `runtime_execution_service: RuntimeExecutionService | None=None`
+- module `data_engine.authoring.helpers`
+  - attribute `__all__`
+  - function `_parse_duration`
+    - param `value: str`
+  - function `_parse_schedule_at`
+    - param `value: str`
+  - function `_normalize_watch_times`
+    - param `value: str | tuple[str, ...] | list[str] | set[str]`
+  - function `_normalize_extensions`
+    - param `extensions: tuple[str, ...] | list[str] | set[str] | None`
+  - function `_title_case_words`
+    - param `value: str`
+    - param `*`
+    - param `empty: str='Step'`
+  - function `_callable_name`
+    - param `fn: Callable[..., object]`
+  - function `_callable_identifier`
+    - param `fn: Callable[..., object]`
+  - function `_resolve_flow_path`
+    - param `value: str | Path`
+  - function `_validate_slot_name`
+    - param `*`
+    - param `method_name: str`
+    - param `slot_name: str`
+    - param `value: str | None`
+  - function `_validate_label`
+    - param `*`
+    - param `method_name: str`
+    - param `label: str | None`
+- module `data_engine.authoring.model`
+  - attribute `__all__`
+  - class `FlowValidationError`
+  - class `FlowStoppedError`
+  - class `FlowExecutionError`
+    - instance attribute `flow_name`
+    - instance attribute `phase`
+    - instance attribute `detail`
+    - instance attribute `step_label`
+    - instance attribute `function_name`
+    - instance attribute `source_path`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `flow_name: str`
+      - param `phase: str`
+      - param `detail: str`
+      - param `step_label: str | None=None`
+      - param `function_name: str | None=None`
+      - param `source_path: Path | str | None=None`
+    - method `_render`
+      - param `self`
+- module `data_engine.authoring.primitives`
+  - attribute `T`
+  - attribute `__all__`
+  - function `collect_files`
+    - param `extensions: tuple[str, ...] | list[str] | set[str]`
+    - param `*`
+    - param `root: str | Path | None=None`
+    - param `recursive: bool=False`
+  - class `WatchSpec`
+    - attribute `mode`
+    - attribute `run_as`
+    - attribute `source`
+    - attribute `interval`
+    - attribute `interval_seconds`
+    - attribute `time`
+    - attribute `times`
+    - attribute `time_slots`
+    - attribute `extensions`
+    - attribute `settle`
+  - class `MirrorSpec`
+    - attribute `root`
+  - class `StepSpec`
+    - attribute `fn`
+    - attribute `use`
+    - attribute `save_as`
+    - attribute `label`
+    - attribute `function_name`
+  - class `SourceMetadata`
+    - attribute `path`
+    - attribute `name`
+    - attribute `size_bytes`
+    - attribute `modified_at_utc`
+  - class `WorkspaceConfigContext`
+    - attribute `workspace_root`
+    - attribute `_cache`
+    - attribute `_names`
+    - instance attribute `_names`
+    - method `config_dir`
+      - param `self`
+    - method `names`
+      - param `self`
+    - method `get`
+      - param `self`
+      - param `name: str`
+    - method `require`
+      - param `self`
+      - param `name: str`
+    - method `all`
+      - param `self`
+  - class `MirrorContext`
+    - attribute `root`
+    - attribute `source_path`
+    - attribute `relative_path`
+    - method `__post_init__`
+      - param `self`
+    - method `_prepare`
+      - param `self`
+      - param `path: Path`
+    - method `dir`
+      - param `self`
+    - method `folder`
+      - param `self`
+    - method `with_suffix`
+      - param `self`
+      - param `suffix: str`
+    - method `with_extension`
+      - param `self`
+      - param `suffix: str`
+    - method `file`
+      - param `self`
+      - param `name: str | Path`
+    - method `namespaced_file`
+      - param `self`
+      - param `name: str | Path`
+    - method `root_file`
+      - param `self`
+      - param `name: str | Path`
+  - class `SourceContext`
+    - attribute `root`
+    - attribute `path`
+    - attribute `relative_path`
+    - method `__post_init__`
+      - param `self`
+    - method `dir`
+      - param `self`
+    - method `folder`
+      - param `self`
+    - method `with_suffix`
+      - param `self`
+      - param `suffix: str`
+    - method `with_extension`
+      - param `self`
+      - param `suffix: str`
+    - method `file`
+      - param `self`
+      - param `name: str | Path`
+    - method `namespaced_file`
+      - param `self`
+      - param `name: str | Path`
+    - method `root_file`
+      - param `self`
+      - param `name: str | Path`
+  - class `FlowContext`
+    - attribute `flow_name`
+    - attribute `group`
+    - attribute `source`
+    - attribute `mirror`
+    - attribute `current`
+    - attribute `objects`
+    - attribute `metadata`
+    - attribute `config`
+    - method `source_metadata`
+      - param `self`
+    - method `database`
+      - param `self`
+      - param `name: str | Path`
+  - class `FileRef`
+    - attribute `path`
+    - method `__post_init__`
+      - param `self`
+    - method `name`
+      - param `self`
+    - method `stem`
+      - param `self`
+    - method `suffix`
+      - param `self`
+    - method `parent`
+      - param `self`
+    - method `exists`
+      - param `self`
+    - method `__fspath__`
+      - param `self`
+    - method `__str__`
+      - param `self`
+  - class `Batch`
+    - attribute `items`
+    - method `__iter__`
+      - param `self`
+    - method `__len__`
+      - param `self`
+    - method `__getitem__`
+      - param `self`
+      - param `index: int`
+    - method `names`
+      - param `self`
+    - method `paths`
+      - param `self`
+- module `data_engine.authoring.services`
+  - attribute `__all__`
+  - function `build_authoring_services`
+    - param `*`
+    - param `runtime_execution_service: RuntimeExecutionService | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+  - function `default_authoring_services`
+  - class `AuthoringServices`
+    - attribute `runtime_execution_service`
+    - attribute `flow_execution_service`
+- module `data_engine.devtools`
+  - attribute `__all__`
+- module `data_engine.devtools.project_ast_map`
+  - attribute `DEFAULT_PACKAGE_ROOT`
+  - function `build_project_ast_map`
+    - param `package_root: Path | str | None=None`
+  - function `render_project_inventory_markdown`
+    - param `package_root: Path | str | None=None`
+  - function `_summarize_module`
+    - param `package_root: Path`
+    - param `path: Path`
+  - function `_module_name_for_path`
+    - param `package_root: Path`
+    - param `path: Path`
+  - function `_display_package_root`
+    - param `package_root: Path`
+  - function `_is_flow_call`
+    - param `node: ast.AST`
+  - function `_function_summary`
+    - param `node: ast.FunctionDef | ast.AsyncFunctionDef`
+  - function `_class_summary`
+    - param `node: ast.ClassDef`
+  - function `_parameter_names`
+    - param `args: ast.arguments`
+  - function `_instance_attribute_names`
+    - param `node: ast.FunctionDef | ast.AsyncFunctionDef`
+  - function `_expr_text`
+    - param `node: ast.AST`
+  - function `_build_import_graph`
+    - param `modules: tuple[ModuleSummary, ...]`
+  - function `_build_package_rollups`
+    - param `modules: tuple[ModuleSummary, ...]`
+  - function `_build_hotspots`
+    - param `modules: tuple[ModuleSummary, ...]`
+  - function `_resolved_import_targets`
+    - param `module_name: str`
+    - param `item: ImportSummary`
+    - param `module_names: set[str]`
+  - function `_candidate_targets`
+    - param `base_module: str`
+    - param `names: tuple[str, ...]`
+    - param `module_names: set[str]`
+  - function `_package_bucket`
+    - param `module_name: str`
+  - function `main`
+    - param `argv: list[str] | None=None`
+  - class `ImportSummary`
+    - attribute `module`
+    - attribute `names`
+    - attribute `level`
+  - class `FunctionSummary`
+    - attribute `name`
+    - attribute `lineno`
+    - attribute `params`
+    - attribute `decorators`
+    - attribute `returns`
+    - attribute `async_def`
+  - class `ClassSummary`
+    - attribute `name`
+    - attribute `lineno`
+    - attribute `bases`
+    - attribute `attributes`
+    - attribute `instance_attributes`
+    - attribute `methods`
+    - attribute `decorators`
+  - class `AssignmentSummary`
+    - attribute `target`
+    - attribute `lineno`
+    - attribute `value_kind`
+  - class `ModuleSummary`
+    - attribute `module`
+    - attribute `path`
+    - attribute `docstring`
+    - attribute `imports`
+    - attribute `functions`
+    - attribute `classes`
+    - attribute `assignments`
+    - attribute `flow_calls`
+    - attribute `line_count`
+- module `data_engine.docs`
+  - no top-level symbols
+- module `data_engine.docs.sphinx_source.conf`
+  - attribute `ROOT`
+  - attribute `project`
+  - attribute `author`
+  - attribute `release`
+  - attribute `extensions`
+  - attribute `source_suffix`
+  - attribute `templates_path`
+  - attribute `exclude_patterns`
+  - attribute `html_theme`
+  - attribute `html_static_path`
+  - attribute `html_css_files`
+  - attribute `html_title`
+  - attribute `autodoc_member_order`
+  - attribute `autodoc_typehints`
+  - attribute `add_module_names`
+- module `data_engine.domain`
+  - attribute `__all__`
+- module `data_engine.domain.actions`
+  - attribute `__all__`
+  - class `SelectedFlowState`
+    - attribute `card`
+    - attribute `state`
+    - attribute `has_logs`
+    - attribute `group_active`
+    - method `present`
+      - param `self`
+    - method `valid`
+      - param `self`
+    - method `running`
+      - param `self`
+    - method `from_runtime`
+      - param `cls`
+      - param `*`
+      - param `card: FlowCatalogLike | None`
+      - param `flow_states: Mapping[str, str]`
+      - param `runtime_session: RuntimeSessionState`
+      - param `flow_groups_by_name: Mapping[str, str]`
+      - param `active_flow_states: Container[str]`
+      - param `has_logs: bool`
+  - class `OperatorActionContext`
+    - attribute `runtime_session`
+    - attribute `selected_flow`
+    - attribute `has_automated_flows`
+    - attribute `workspace_available`
+    - attribute `selected_run_group_present`
+- module `data_engine.domain.catalog`
+  - attribute `__all__`
+  - function `flow_category`
+    - param `mode: str`
+  - function `default_flow_state`
+    - param `mode: str | None`
+  - class `FlowCatalogEntry`
+    - attribute `name`
+    - attribute `group`
+    - attribute `title`
+    - attribute `description`
+    - attribute `source_root`
+    - attribute `target_root`
+    - attribute `mode`
+    - attribute `interval`
+    - attribute `operations`
+    - attribute `operation_items`
+    - attribute `state`
+    - attribute `valid`
+    - attribute `category`
+    - attribute `error`
+  - class `FlowCatalogLike`
+    - attribute `name`
+    - attribute `group`
+    - attribute `title`
+    - attribute `description`
+    - attribute `source_root`
+    - attribute `target_root`
+    - attribute `mode`
+    - attribute `interval`
+    - attribute `operations`
+    - attribute `operation_items`
+    - attribute `state`
+    - attribute `valid`
+    - attribute `category`
+    - attribute `error`
+  - class `FlowCatalogState`
+    - attribute `entries`
+    - attribute `flow_states`
+    - attribute `selected_flow_name`
+    - attribute `empty_message`
+    - method `empty`
+      - param `cls`
+      - param `*`
+      - param `empty_message: str=''`
+    - method `entries_by_name`
+      - param `self`
+    - method `valid_entries`
+      - param `self`
+    - method `has_automated_flows`
+      - param `self`
+    - method `selected_entry`
+      - param `self`
+    - method `with_entries`
+      - param `self`
+      - param `entries: Iterable[FlowCatalogEntry]`
+    - method `with_selected_flow_name`
+      - param `self`
+      - param `flow_name: str | None`
+    - method `with_flow_states`
+      - param `self`
+      - param `flow_states: dict[str, str]`
+    - method `with_empty_message`
+      - param `self`
+      - param `message: str`
+- module `data_engine.domain.details`
+  - attribute `__all__`
+  - class `FlowSummaryRow`
+    - attribute `label`
+    - attribute `value`
+    - method `rows_for_flow`
+      - param `cls`
+      - param `card: FlowCatalogLike | None`
+      - param `flow_states: dict[str, str]`
+    - method `pairs_for_flow`
+      - param `cls`
+      - param `card: FlowCatalogLike | None`
+      - param `flow_states: dict[str, str]`
+  - class `FlowSummaryState`
+    - attribute `rows`
+    - method `from_flow`
+      - param `cls`
+      - param `card: FlowCatalogLike | None`
+      - param `flow_states: dict[str, str]`
+    - method `pairs`
+      - param `self`
+  - class `OperationArtifactState`
+    - attribute `operation_name`
+    - method `inspectable`
+      - param `self`
+    - method `artifact_key`
+      - param `self`
+    - method `capture_outputs`
+      - param `cls`
+      - param `card: FlowCatalogLike`
+      - param `existing: dict[str, Path]`
+      - param `results: object`
+  - class `OperationDetailRow`
+    - attribute `name`
+    - attribute `status`
+    - attribute `elapsed_seconds`
+  - class `SelectedFlowDetailState`
+    - attribute `title`
+    - attribute `description`
+    - attribute `error`
+    - attribute `summary_rows`
+    - attribute `operation_rows`
+    - method `from_flow`
+      - param `cls`
+      - param `card: FlowCatalogLike`
+      - param `tracker: 'OperationSessionState'`
+      - param `*`
+      - param `flow_states: dict[str, str] | None=None`
+  - class `RunStepDetailRow`
+    - attribute `step_name`
+    - attribute `status`
+    - attribute `elapsed_seconds`
+  - class `RunDetailState`
+    - attribute `display_label`
+    - attribute `source_label`
+    - attribute `status`
+    - attribute `elapsed_seconds`
+    - attribute `step_rows`
+    - method `from_run`
+      - param `cls`
+      - param `run_state: 'FlowRunState'`
+- module `data_engine.domain.diagnostics`
+  - class `DoctorCheck`
+    - attribute `status`
+    - attribute `message`
+  - class `ProcessInfo`
+    - attribute `pid`
+    - attribute `ppid`
+    - attribute `status`
+    - attribute `command`
+  - class `ClassifiedProcessInfo`
+    - attribute `pid`
+    - attribute `ppid`
+    - attribute `status`
+    - attribute `command`
+    - attribute `kind`
+    - method `is_defunct`
+      - param `self`
+    - method `is_orphaned`
+      - param `self`
+  - class `WorkspaceLeaseDiagnostic`
+    - attribute `workspace_id`
+    - attribute `lease_pid`
+    - attribute `state`
+    - attribute `stale`
+    - attribute `local_owner`
+- module `data_engine.domain.errors`
+  - attribute `__all__`
+  - class `StructuredErrorField`
+    - attribute `label`
+    - attribute `value`
+  - class `StructuredErrorState`
+    - attribute `title`
+    - attribute `fields`
+    - attribute `detail`
+    - attribute `raw_text`
+    - method `parse`
+      - param `cls`
+      - param `text: str`
+- module `data_engine.domain.inspection`
+  - attribute `__all__`
+  - class `FlowStepOutputsState`
+    - attribute `outputs`
+    - method `get`
+      - param `self`
+      - param `operation_name: str`
+    - method `has`
+      - param `self`
+      - param `operation_name: str`
+  - class `StepOutputIndex`
+    - attribute `flow_outputs`
+    - method `empty`
+      - param `cls`
+    - method `from_mapping`
+      - param `cls`
+      - param `mapping: dict[str, dict[str, Path]]`
+    - method `outputs_for`
+      - param `self`
+      - param `flow_name: str`
+    - method `output_path`
+      - param `self`
+      - param `flow_name: str`
+      - param `operation_name: str`
+    - method `has_output`
+      - param `self`
+      - param `flow_name: str`
+      - param `operation_name: str`
+    - method `with_flow_outputs`
+      - param `self`
+      - param `flow_name: str`
+      - param `outputs: dict[str, Path]`
+  - class `ConfigPreviewState`
+    - attribute `title`
+    - attribute `description`
+    - attribute `summary`
+    - method `from_flow`
+      - param `cls`
+      - param `card: FlowCatalogLike | None`
+      - param `flow_states: dict[str, str]`
+- module `data_engine.domain.logs`
+  - attribute `LogKind`
+  - attribute `__all__`
+  - function `short_source_label`
+    - param `value: str | None`
+  - function `format_runtime_message`
+    - param `message: str`
+  - function `format_log_line`
+    - param `record: logging.LogRecord`
+  - function `parse_runtime_message`
+    - param `message: str`
+  - function `parse_runtime_event`
+    - param `record: logging.LogRecord`
+  - class `RuntimeStepEvent`
+    - attribute `flow_name`
+    - attribute `step_name`
+    - attribute `source_label`
+    - attribute `status`
+    - attribute `elapsed_seconds`
+    - attribute `run_id`
+  - class `FlowLogEntry`
+    - attribute `line`
+    - attribute `kind`
+    - attribute `event`
+    - attribute `flow_name`
+    - attribute `created_at_utc`
+    - method `format_runtime_message`
+      - param `message: str`
+- module `data_engine.domain.operations`
+  - attribute `__all__`
+  - class `OperationRowState`
+    - attribute `status`
+    - attribute `started_at`
+    - attribute `elapsed_seconds`
+    - method `started`
+      - param `self`
+      - param `*`
+      - param `now: float`
+    - method `finished`
+      - param `self`
+      - param `*`
+      - param `status: str`
+      - param `elapsed_seconds: float | None`
+    - method `normalized`
+      - param `self`
+    - method `duration_text`
+      - param `self`
+      - param `*`
+      - param `now: float`
+      - param `formatter`
+  - class `OperationFlowState`
+    - attribute `current_index`
+    - attribute `rows`
+    - method `from_operation_names`
+      - param `cls`
+      - param `operation_names: tuple[str, ...]`
+    - method `row_state`
+      - param `self`
+      - param `operation_name: str`
+    - method `apply_event`
+      - param `self`
+      - param `operation_names: tuple[str, ...]`
+      - param `event: 'RuntimeStepEvent'`
+      - param `*`
+      - param `now: float`
+    - method `normalized_completed`
+      - param `self`
+  - class `OperationSessionState`
+    - attribute `flow_states`
+    - method `empty`
+      - param `cls`
+    - method `state_for`
+      - param `self`
+      - param `flow_name: str`
+    - method `reset_flow`
+      - param `self`
+      - param `flow_name: str`
+      - param `operation_names: tuple[str, ...]`
+    - method `ensure_flow`
+      - param `self`
+      - param `flow_name: str`
+      - param `operation_names: tuple[str, ...]`
+    - method `row_state`
+      - param `self`
+      - param `flow_name: str`
+      - param `operation_name: str`
+    - method `apply_event`
+      - param `self`
+      - param `flow_name: str`
+      - param `operation_names: tuple[str, ...]`
+      - param `event: 'RuntimeStepEvent'`
+      - param `*`
+      - param `now: float`
+    - method `duration_text`
+      - param `self`
+      - param `flow_name: str`
+      - param `operation_name: str`
+      - param `*`
+      - param `now: float`
+      - param `formatter`
+    - method `normalize_completed`
+      - param `self`
+      - param `flow_name: str`
+    - method `reset`
+      - param `self`
+- module `data_engine.domain.operator`
+  - attribute `__all__`
+  - class `OperatorSessionState`
+    - attribute `workspace`
+    - attribute `workspace_control`
+    - attribute `runtime`
+    - attribute `catalog`
+    - attribute `operations`
+    - attribute `support`
+    - method `from_paths`
+      - param `cls`
+      - param `workspace_paths: 'WorkspacePaths'`
+      - param `*`
+      - param `override_root: Path | None=None`
+    - method `with_workspace`
+      - param `self`
+      - param `workspace: WorkspaceSessionState`
+    - method `with_workspace_control`
+      - param `self`
+      - param `workspace_control: WorkspaceControlState`
+    - method `with_runtime`
+      - param `self`
+      - param `runtime: RuntimeSessionState`
+    - method `with_catalog`
+      - param `self`
+      - param `catalog: FlowCatalogState`
+    - method `with_operations`
+      - param `self`
+      - param `operations: OperationSessionState`
+    - method `with_support`
+      - param `self`
+      - param `support: WorkspaceSupportState`
+- module `data_engine.domain.runs`
+  - attribute `RunKey`
+  - attribute `__all__`
+  - class `RunStepState`
+    - attribute `step_name`
+    - attribute `status`
+    - attribute `elapsed_seconds`
+    - attribute `entry`
+  - class `FlowRunState`
+    - attribute `key`
+    - attribute `display_label`
+    - attribute `source_label`
+    - attribute `status`
+    - attribute `elapsed_seconds`
+    - attribute `summary_entry`
+    - attribute `steps`
+    - attribute `entries`
+    - method `group_entries`
+      - param `cls`
+      - param `entries: tuple[FlowLogEntry, ...]`
+    - method `_display_label_for_run`
+      - param `run: dict[str, object]`
+- module `data_engine.domain.runtime`
+  - attribute `CONTROL_CHECKPOINT_INTERVAL_SECONDS`
+  - attribute `CONTROL_STALE_AFTER_SECONDS`
+  - class `DaemonLifecyclePolicy`
+    - attribute `EPHEMERAL`
+    - attribute `PERSISTENT`
+    - method `coerce`
+      - param `cls`
+      - param `value: object`
+  - class `ManualRunState`
+    - attribute `group_name`
+    - attribute `flow_name`
+  - class `RuntimeSessionState`
+    - attribute `workspace_owned`
+    - attribute `leased_by_machine_id`
+    - attribute `runtime_active`
+    - attribute `runtime_stopping`
+    - attribute `active_runtime_flow_names`
+    - attribute `manual_runs`
+    - method `empty`
+      - param `cls`
+    - method `from_daemon_snapshot`
+      - param `cls`
+      - param `snapshot: 'WorkspaceDaemonSnapshot'`
+      - param `flow_cards: Iterable[FlowCatalogLike]`
+    - method `control_available`
+      - param `self`
+    - method `manual_run_active`
+      - param `self`
+    - method `has_active_work`
+      - param `self`
+    - method `active_manual_runs`
+      - param `self`
+    - method `manual_flow_name_for_group`
+      - param `self`
+      - param `group_name: str | None`
+    - method `is_group_active`
+      - param `self`
+      - param `group_name: str`
+      - param `flow_groups_by_name: Mapping[str, str]`
+    - method `with_manual_runs_map`
+      - param `self`
+      - param `active_manual_runs: Mapping[str | None, str]`
+    - method `without_manual_group`
+      - param `self`
+      - param `group_name: str | None`
+    - method `with_active_runtime_flow_names`
+      - param `self`
+      - param `flow_names: Iterable[str]`
+    - method `with_runtime_flags`
+      - param `self`
+      - param `*`
+      - param `active: bool`
+      - param `stopping: bool`
+    - method `reset`
+      - param `self`
+  - class `DaemonStatusState`
+    - attribute `workspace_owned`
+    - attribute `leased_by_machine_id`
+    - attribute `engine_active`
+    - attribute `engine_stopping`
+    - attribute `manual_run_names`
+    - attribute `last_checkpoint_at_utc`
+    - attribute `source`
+    - method `empty`
+      - param `cls`
+    - method `from_snapshot`
+      - param `cls`
+      - param `snapshot: 'WorkspaceDaemonSnapshot'`
+    - method `as_runtime_session`
+      - param `self`
+      - param `flow_cards: Iterable[FlowCatalogLike]`
+  - class `WorkspaceControlState`
+    - attribute `daemon_status`
+    - attribute `control_status_text`
+    - attribute `blocked_status_text`
+    - attribute `local_request_pending`
+    - attribute `takeover_remaining_seconds`
+    - method `empty`
+      - param `cls`
+    - method `from_snapshot`
+      - param `cls`
+      - param `snapshot: 'WorkspaceDaemonSnapshot'`
+      - param `*`
+      - param `daemon_live: bool`
+      - param `local_machine_id: str`
+      - param `control_request: Mapping[str, object] | None=None`
+      - param `daemon_startup_in_progress: bool=False`
+      - param `now_utc: datetime | None=None`
+- module `data_engine.domain.source_state`
+  - attribute `__all__`
+  - class `SourceSignature`
+    - attribute `source_path`
+    - attribute `mtime_ns`
+    - attribute `size_bytes`
+- module `data_engine.domain.support`
+  - attribute `__all__`
+  - class `DocumentationSessionState`
+    - attribute `build_running`
+    - attribute `root_dir`
+    - method `empty`
+      - param `cls`
+    - method `available`
+      - param `self`
+    - method `with_build_running`
+      - param `self`
+      - param `running: bool`
+    - method `with_root_dir`
+      - param `self`
+      - param `root_dir: Path | None`
+  - class `WorkspaceSupportState`
+    - attribute `documentation`
+    - method `empty`
+      - param `cls`
+    - method `with_documentation`
+      - param `self`
+      - param `documentation: DocumentationSessionState`
+- module `data_engine.domain.time`
+  - attribute `__all__`
+  - function `utcnow_text`
+  - function `parse_utc_text`
+    - param `value: str | None`
+- module `data_engine.domain.workspace`
+  - attribute `__all__`
+  - class `WorkspaceRootState`
+    - attribute `effective_root`
+    - attribute `configured`
+    - attribute `override_root`
+    - method `from_paths`
+      - param `cls`
+      - param `workspace_paths: 'WorkspacePaths'`
+      - param `*`
+      - param `override_root: Path | None=None`
+    - method `using_override`
+      - param `self`
+    - method `input_text`
+      - param `self`
+    - method `status_text`
+      - param `self`
+    - method `with_override_root`
+      - param `self`
+      - param `override_root: Path | None`
+  - class `WorkspaceSelectionState`
+    - attribute `current_workspace_id`
+    - attribute `discovered_workspace_ids`
+    - method `from_paths`
+      - param `cls`
+      - param `workspace_paths: 'WorkspacePaths'`
+      - param `*`
+      - param `discovered_workspace_ids: Iterable[str]=()`
+    - method `selector_enabled`
+      - param `self`
+    - method `selector_options`
+      - param `self`
+    - method `with_discovered_workspace_ids`
+      - param `self`
+      - param `workspace_ids: Iterable[str]`
+    - method `with_current_workspace_id`
+      - param `self`
+      - param `workspace_id: str`
+  - class `WorkspaceSessionState`
+    - attribute `root`
+    - attribute `selection`
+    - method `from_paths`
+      - param `cls`
+      - param `workspace_paths: 'WorkspacePaths'`
+      - param `*`
+      - param `override_root: Path | None=None`
+      - param `discovered_workspace_ids: Iterable[str]=()`
+    - method `workspace_collection_root_override`
+      - param `self`
+    - method `discovered_workspace_ids`
+      - param `self`
+    - method `current_workspace_id`
+      - param `self`
+    - method `with_paths`
+      - param `self`
+      - param `workspace_paths: 'WorkspacePaths'`
+    - method `with_override_root`
+      - param `self`
+      - param `override_root: Path | None`
+    - method `with_discovered_workspace_ids`
+      - param `self`
+      - param `workspace_ids: Iterable[str]`
+    - method `with_current_workspace_id`
+      - param `self`
+      - param `workspace_id: str`
+- module `data_engine.flow_modules`
+  - no top-level symbols
+- module `data_engine.flow_modules.flow_module_compiler`
+  - attribute `__all__`
+  - function `compile_stale_flow_module_notebooks`
+    - param `*`
+    - param `data_root: Path | None=None`
+  - function `resolve_flow_module_paths`
+    - param `*`
+    - param `data_root: Path | None=None`
+  - function `compile_flow_module_notebook`
+    - param `notebook_path: Path`
+    - param `module_path: Path`
+  - function `mirror_flow_module_python_module`
+    - param `source_path: Path`
+    - param `module_path: Path`
+  - function `_mirror_helper_modules`
+    - param `helper_modules_dir: Path`
+    - param `compiled_helper_modules_dir: Path`
+  - function `_validate_unique_authored_flow_module_stems`
+    - param `notebook_paths: list[Path]`
+    - param `python_paths: list[Path]`
+  - function `_remove_orphaned_compiled_modules`
+    - param `modules_dir: Path`
+    - param `authored_names: set[str]`
+  - function `_is_generated_module`
+    - param `module_path: Path`
+  - class `CompiledFlowModule`
+    - attribute `name`
+    - attribute `source_path`
+    - attribute `module_path`
+- module `data_engine.flow_modules.flow_module_loader`
+  - attribute `_COMPILED_FLOW_MODULE_CONTEXT`
+  - attribute `_COMPILED_FLOW_MODULE_DIR`
+  - attribute `__all__`
+  - function `_load_module`
+    - param `name: str`
+    - param `*`
+    - param `data_root: Path | None=None`
+  - function `_authored_flow_module_source_path`
+    - param `name: str`
+    - param `*`
+    - param `flow_modules_dir: Path`
+  - function `_available_flow_module_names`
+    - param `*`
+    - param `flow_modules_dir: Path`
+  - function `_compiled_flow_module_import_path`
+    - param `compiled_flow_modules_dir: Path`
+  - function `load_flow_module_definition`
+    - param `name: str`
+    - param `*`
+    - param `data_root: Path | None=None`
+  - function `discover_flow_module_definitions`
+    - param `*`
+    - param `data_root: Path | None=None`
+  - function `in_compiled_flow_module_context`
+  - function `current_compiled_flow_module_dir`
+  - function `compiled_flow_module_context`
+    - param `flow_modules_dir: Path | None=None`
+  - class `FlowModuleDefinition`
+    - attribute `name`
+    - attribute `description`
+    - attribute `module_path`
+    - attribute `build`
+- module `data_engine.helpers`
+  - attribute `__all__`
+- module `data_engine.helpers.duckdb`
+  - attribute `__all__`
+  - function `_quote_identifier`
+    - param `value: str`
+  - function `_quote_table_ref`
+    - param `value: str`
+  - function `_schema_ref`
+    - param `value: str`
+  - function `_join_predicate`
+    - param `*`
+    - param `left_alias: str`
+    - param `right_alias: str`
+    - param `columns: tuple[str, ...]`
+  - function `_ordered_columns`
+    - param `columns: tuple[str, ...]`
+  - function `_qualified_columns`
+    - param `alias: str`
+    - param `columns: tuple[str, ...]`
+  - function `_index_name`
+    - param `*`
+    - param `table: str`
+    - param `columns: tuple[str, ...]`
+  - function `_existing_table_columns`
+    - param `connection`
+    - param `table: str`
+  - function `_table_column_names`
+    - param `connection`
+    - param `table: str`
+  - function `_normalize_selected_columns`
+    - param `select: str | list[str] | tuple[str, ...]`
+  - function `_normalize_key_columns`
+    - param `on: str | list[str] | tuple[str, ...]`
+  - function `_normalize_optional_limit`
+    - param `limit: int | None`
+  - function `build_dimension`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `df: pl.DataFrame`
+    - param `key_column: str='dimension_key'`
+    - param `return_df: bool=True`
+  - function `replace_rows_by_file`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `df: pl.DataFrame`
+    - param `file_hash: str`
+    - param `file_hash_column: str='file_key'`
+    - param `return_df: bool=True`
+  - function `replace_rows_by_values`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `df: pl.DataFrame`
+    - param `column: str`
+    - param `return_df: bool=True`
+  - function `attach_dimension`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `df: pl.DataFrame`
+    - param `on: str | list[str] | tuple[str, ...]`
+    - param `key_column: str='dimension_key'`
+    - param `drop_key: bool=False`
+  - function `denormalize_columns`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `df: pl.DataFrame`
+    - param `key_column: str='dimension_key'`
+    - param `select: str | list[str] | tuple[str, ...]='*'`
+    - param `drop_key: bool=False`
+  - function `normalize_columns`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `df: pl.DataFrame`
+    - param `on: str | list[str] | tuple[str, ...]`
+    - param `key_column: str='dimension_key'`
+    - param `drop_key: bool=True`
+    - param `returns: str | None='df'`
+  - function `read_rows_by_values`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `column: str`
+    - param `is_in: list[object] | tuple[object, ...]`
+    - param `select: str | list[str] | tuple[str, ...]`
+  - function `read_sql`
+    - param `db_path: str | Path`
+    - param `*`
+    - param `sql: str`
+  - function `read_table`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `select: str | list[str] | tuple[str, ...]='*'`
+    - param `where: str | None=None`
+    - param `limit: int | None=None`
+  - function `replace_table`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `df: pl.DataFrame`
+    - param `return_df: bool=True`
+- module `data_engine.hosts`
+  - no top-level symbols
+- module `data_engine.hosts.daemon`
+  - attribute `__all__`
+- module `data_engine.hosts.daemon.app`
+  - attribute `DAEMON_LOG_RETENTION_DAYS`
+  - attribute `__all__`
+  - function `main`
+    - param `argv: list[str] | None=None`
+    - param `*`
+    - param `workspace_service=None`
+    - param `workspace_service_factory=None`
+    - param `resolve_paths_func=None`
+  - function `serve_workspace_daemon`
+    - param `*`
+    - param `workspace_root=None`
+    - param `workspace_id=None`
+    - param `lifecycle_policy: DaemonLifecyclePolicy=DaemonLifecyclePolicy.PERSISTENT`
+    - param `workspace_service=None`
+    - param `resolve_paths_func=None`
+  - class `DataEngineDaemonService`
+    - instance attribute `paths`
+    - instance attribute `lifecycle_policy`
+    - instance attribute `started_at_utc`
+    - instance attribute `state`
+    - instance attribute `host`
+    - instance attribute `runtime_ledger`
+    - instance attribute `flow_catalog_service`
+    - instance attribute `flow_execution_service`
+    - instance attribute `runtime_execution_service`
+    - instance attribute `shared_state_adapter`
+    - instance attribute `machine_id`
+    - instance attribute `daemon_id`
+    - instance attribute `pid`
+    - instance attribute `_state_lock`
+    - instance attribute `command_handler`
+    - method `__init__`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `dependencies: DaemonHostDependencies | None=None`
+      - param `identity: DaemonHostIdentity | None=None`
+      - param `lifecycle_policy: DaemonLifecyclePolicy=DaemonLifecyclePolicy.PERSISTENT`
+    - method `_workspace_root_is_available`
+      - param `self`
+    - method `_retained_daemon_log_lines`
+      - param `self`
+      - param `lines: list[str]`
+      - param `*`
+      - param `now: datetime | None=None`
+    - method `_debug_log`
+      - param `self`
+      - param `message: str`
+    - method `initialize`
+      - param `self`
+    - method `serve_forever`
+      - param `self`
+    - method `_handle_command`
+      - param `self`
+      - param `payload: Any`
+    - method `_load_flow_cards`
+      - param `self`
+      - param `*`
+      - param `force: bool=False`
+    - method `_checkpoint_loop`
+      - param `self`
+    - method `_checkpoint_once`
+      - param `self`
+      - param `*`
+      - param `status: str`
+    - method `_refresh_observer_snapshot`
+      - param `self`
+    - method `_update_daemon_state`
+      - param `self`
+      - param `*`
+      - param `status: str`
+    - method `_relinquish_workspace_after_checkpoint_failures`
+      - param `self`
+    - method `_relinquish_workspace_for_control_request`
+      - param `self`
+      - param `requester_machine_id: str`
+    - method `_relinquish_workspace_for_missing_root`
+      - param `self`
+    - method `_shutdown_if_unowned_and_idle`
+      - param `self`
+      - param `*`
+      - param `reason: str`
+    - method `_wake_listener`
+      - param `self`
+    - method `_shutdown`
+      - param `self`
+- module `data_engine.hosts.daemon.bootstrap`
+  - attribute `__all__`
+  - function `initialize_service`
+    - param `service: 'DataEngineDaemonService'`
+- module `data_engine.hosts.daemon.client`
+  - attribute `DAEMON_AUTHKEY_FILE_NAME`
+  - attribute `_SHARED_STATE_ADAPTER`
+  - attribute `__all__`
+  - function `endpoint_address`
+    - param `paths: WorkspacePaths`
+  - function `endpoint_family`
+    - param `paths: WorkspacePaths`
+  - function `_daemon_authkey_path`
+    - param `paths: WorkspacePaths`
+  - function `daemon_authkey`
+    - param `paths: WorkspacePaths`
+  - function `_encode_message`
+    - param `payload: dict[str, Any]`
+  - function `_decode_message`
+    - param `raw: bytes`
+  - function `daemon_request`
+    - param `paths: WorkspacePaths`
+    - param `payload: dict[str, Any]`
+    - param `*`
+    - param `timeout: float=5.0`
+  - function `is_daemon_live`
+    - param `paths: WorkspacePaths`
+  - function `_kill_pid`
+    - param `pid: int`
+  - function `_pid_is_live`
+    - param `pid: int | None`
+  - function `_same_machine_unreachable_lease_metadata`
+    - param `paths: WorkspacePaths`
+  - function `_same_machine_live_lease_process`
+    - param `paths: WorkspacePaths`
+  - function `_same_machine_lease_pid`
+    - param `paths: WorkspacePaths`
+  - function `_reachable_daemon_pid`
+    - param `paths: WorkspacePaths`
+  - function `_cleanup_forced_shutdown`
+    - param `paths: WorkspacePaths`
+  - function `_lease_checkpoint_age_seconds`
+    - param `metadata: dict[str, Any]`
+  - function `_wait_for_fresh_local_daemon`
+    - param `paths: WorkspacePaths`
+  - function `_should_force_recover_local_lease`
+    - param `paths: WorkspacePaths`
+  - function `_recover_broken_local_lease`
+    - param `paths: WorkspacePaths`
+  - function `_remove_stale_unix_endpoint`
+    - param `paths: WorkspacePaths`
+  - function `_startup_lock_path`
+    - param `paths: WorkspacePaths`
+  - function `_acquire_startup_lock`
+    - param `paths: WorkspacePaths`
+  - function `_release_startup_lock`
+    - param `paths: WorkspacePaths`
+  - function `_wait_for_daemon_live`
+    - param `paths: WorkspacePaths`
+    - param `*`
+    - param `timeout_seconds: float`
+  - function `spawn_daemon_process`
+    - param `paths: WorkspacePaths`
+    - param `*`
+    - param `lifecycle_policy: DaemonLifecyclePolicy=DaemonLifecyclePolicy.PERSISTENT`
+  - function `force_shutdown_daemon_process`
+    - param `paths: WorkspacePaths`
+    - param `*`
+    - param `timeout: float=0.5`
+  - class `DaemonClientError`
+  - class `WorkspaceLeaseError`
+- module `data_engine.hosts.daemon.commands`
+  - attribute `__all__`
+  - class `DaemonCommandHandler`
+    - instance attribute `service`
+    - instance attribute `runtime_commands`
+    - instance attribute `state_sync`
+    - method `__init__`
+      - param `self`
+      - param `service: 'DataEngineDaemonService'`
+    - method `handle`
+      - param `self`
+      - param `payload: Any`
+    - method `checkpoint_once`
+      - param `self`
+      - param `*`
+      - param `status: str`
+    - method `refresh_observer_snapshot`
+      - param `self`
+    - method `update_daemon_state`
+      - param `self`
+      - param `*`
+      - param `status: str`
+- module `data_engine.hosts.daemon.composition`
+  - attribute `__all__`
+  - attribute `DaemonHostInitialState`
+  - function `default_daemon_host_dependency_factories`
+  - class `DaemonHostDependencyFactories`
+    - attribute `flow_catalog_service_factory`
+    - attribute `flow_execution_service_factory`
+    - attribute `runtime_execution_service_factory`
+    - attribute `shared_state_adapter_factory`
+  - class `DaemonHostDependencies`
+    - attribute `runtime_ledger`
+    - attribute `flow_catalog_service`
+    - attribute `flow_execution_service`
+    - attribute `runtime_execution_service`
+    - attribute `shared_state_adapter`
+    - method `build_default`
+      - param `cls`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `ledger_service: LedgerService | None=None`
+      - param `factories: DaemonHostDependencyFactories | None=None`
+  - class `DaemonHostIdentity`
+    - attribute `machine_id`
+    - attribute `daemon_id`
+    - attribute `pid`
+    - method `current_process`
+      - param `cls`
+  - class `DaemonHostState`
+    - attribute `status`
+    - attribute `last_checkpoint_at_utc`
+    - attribute `workspace_owned`
+    - attribute `leased_by_machine_id`
+    - attribute `runtime_active`
+    - attribute `runtime_stopping`
+    - attribute `engine_starting`
+    - attribute `engine_thread`
+    - attribute `engine_runtime_stop_event`
+    - attribute `engine_flow_stop_event`
+    - attribute `pending_manual_run_names`
+    - attribute `manual_run_threads`
+    - attribute `manual_stop_events`
+    - attribute `shutdown_event`
+    - attribute `checkpoint_thread`
+    - attribute `consecutive_checkpoint_failures`
+    - attribute `listener`
+    - instance attribute `workspace_owned`
+    - instance attribute `leased_by_machine_id`
+    - instance attribute `status`
+    - instance attribute `engine_starting`
+    - instance attribute `runtime_active`
+    - instance attribute `runtime_stopping`
+    - instance attribute `last_checkpoint_at_utc`
+    - instance attribute `consecutive_checkpoint_failures`
+    - instance attribute `engine_runtime_stop_event`
+    - instance attribute `engine_flow_stop_event`
+    - instance attribute `engine_thread`
+    - instance attribute `listener`
+    - method `build`
+      - param `cls`
+      - param `*`
+      - param `started_at_utc: str`
+    - method `claim_workspace`
+      - param `self`
+    - method `release_workspace`
+      - param `self`
+      - param `*`
+      - param `leased_by_machine_id: str | None=None`
+      - param `status: str | None=None`
+    - method `begin_runtime`
+      - param `self`
+      - param `*`
+      - param `status: str='running'`
+    - method `stop_runtime`
+      - param `self`
+      - param `*`
+      - param `status: str='stopping'`
+    - method `end_runtime`
+      - param `self`
+      - param `*`
+      - param `status: str='idle'`
+    - method `set_checkpoint_time`
+      - param `self`
+      - param `checkpoint_at_utc: str`
+      - param `*`
+      - param `status: str | None=None`
+    - method `set_leased_by_machine_id`
+      - param `self`
+      - param `machine_id: str | None`
+    - method `increment_checkpoint_failures`
+      - param `self`
+    - method `reset_checkpoint_failures`
+      - param `self`
+    - method `set_engine_threads`
+      - param `self`
+      - param `*`
+      - param `runtime_stop_event: threading.Event`
+      - param `flow_stop_event: threading.Event`
+      - param `engine_thread: threading.Thread | None=None`
+    - method `reserve_engine_start`
+      - param `self`
+    - method `clear_engine_start_reservation`
+      - param `self`
+    - method `reserve_manual_run`
+      - param `self`
+      - param `name: str`
+    - method `clear_manual_run_reservation`
+      - param `self`
+      - param `name: str`
+    - method `register_manual_run`
+      - param `self`
+      - param `name: str`
+      - param `*`
+      - param `thread: threading.Thread`
+      - param `stop_event: threading.Event`
+    - method `unregister_manual_run`
+      - param `self`
+      - param `name: str`
+    - method `set_listener`
+      - param `self`
+      - param `listener: object | None`
+  - class `DaemonHostFacade`
+    - instance attribute `state`
+    - method `__init__`
+      - param `self`
+      - param `state: DaemonHostState`
+    - method `status`
+      - param `self`
+    - method `status`
+      - param `self`
+      - param `value: str`
+    - method `workspace_owned`
+      - param `self`
+    - method `workspace_owned`
+      - param `self`
+      - param `value: bool`
+    - method `leased_by_machine_id`
+      - param `self`
+    - method `leased_by_machine_id`
+      - param `self`
+      - param `value: str | None`
+    - method `runtime_active`
+      - param `self`
+    - method `runtime_active`
+      - param `self`
+      - param `value: bool`
+    - method `runtime_stopping`
+      - param `self`
+    - method `runtime_stopping`
+      - param `self`
+      - param `value: bool`
+    - method `shutdown_event`
+      - param `self`
+    - method `shutdown_event`
+      - param `self`
+      - param `value: threading.Event`
+    - method `listener`
+      - param `self`
+    - method `listener`
+      - param `self`
+      - param `value: object | None`
+- module `data_engine.hosts.daemon.constants`
+  - attribute `APP_VERSION`
+  - attribute `CHECKPOINT_INTERVAL_SECONDS`
+  - attribute `CONTROL_REQUEST_POLL_INTERVAL_SECONDS`
+  - attribute `STALE_AFTER_SECONDS`
+  - attribute `DAEMON_STARTUP_LOCK_STALE_SECONDS`
+  - attribute `__all__`
+- module `data_engine.hosts.daemon.entrypoints`
+  - attribute `__all__`
+  - function `default_workspace_service_factory`
+  - function `serve_workspace_daemon`
+    - param `service_type`
+    - param `*`
+    - param `workspace_root: Path | None=None`
+    - param `workspace_id: str | None=None`
+    - param `lifecycle_policy: DaemonLifecyclePolicy=DaemonLifecyclePolicy.PERSISTENT`
+    - param `workspace_service: WorkspaceService | None=None`
+    - param `resolve_paths_func=None`
+  - function `build_parser`
+  - function `main`
+    - param `service_type`
+    - param `argv: list[str] | None=None`
+    - param `*`
+    - param `workspace_service: WorkspaceService | None=None`
+    - param `workspace_service_factory: Callable[[], WorkspaceService] | None=None`
+    - param `resolve_paths_func=None`
+    - param `serve_workspace_daemon_func=None`
+- module `data_engine.hosts.daemon.lifecycle`
+  - attribute `__all__`
+  - function `checkpoint_loop`
+    - param `service: 'DataEngineDaemonService'`
+  - function `relinquish_workspace_after_checkpoint_failures`
+    - param `service: 'DataEngineDaemonService'`
+  - function `relinquish_workspace_for_control_request`
+    - param `service: 'DataEngineDaemonService'`
+    - param `requester_machine_id: str`
+  - function `relinquish_workspace_for_missing_root`
+    - param `service: 'DataEngineDaemonService'`
+  - function `relinquish_workspace_for_missing_clients`
+    - param `service: 'DataEngineDaemonService'`
+  - function `_should_shutdown_for_missing_clients`
+    - param `service: 'DataEngineDaemonService'`
+  - function `shutdown_if_unowned_and_idle`
+    - param `service: 'DataEngineDaemonService'`
+    - param `*`
+    - param `reason: str`
+  - function `shutdown`
+    - param `service: 'DataEngineDaemonService'`
+- module `data_engine.hosts.daemon.manager`
+  - attribute `_DEFAULT_SHARED_STATE_ADAPTER`
+  - attribute `__all__`
+  - function `read_lease_metadata`
+    - param `paths: WorkspacePaths`
+  - function `recover_stale_workspace`
+    - param `*`
+    - param `paths: WorkspacePaths`
+    - param `machine_id: str`
+    - param `stale_after_seconds: float`
+  - function `write_control_request`
+    - param `paths: WorkspacePaths`
+    - param `**kwargs: object`
+  - function `_lease_pid_is_live`
+    - param `metadata: dict[str, object] | None`
+  - class `WorkspaceDaemonSnapshot`
+    - attribute `live`
+    - attribute `workspace_owned`
+    - attribute `leased_by_machine_id`
+    - attribute `runtime_active`
+    - attribute `runtime_stopping`
+    - attribute `manual_runs`
+    - attribute `last_checkpoint_at_utc`
+    - attribute `source`
+  - class `WorkspaceDaemonManager`
+    - instance attribute `paths`
+    - instance attribute `max_sync_misses`
+    - instance attribute `shared_state_adapter`
+    - instance attribute `_daemon_live`
+    - instance attribute `_sync_misses`
+    - instance attribute `_last_snapshot`
+    - method `__init__`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `max_sync_misses: int=3`
+      - param `shared_state_adapter: DaemonSharedStateAdapter | None=None`
+    - method `daemon_live`
+      - param `self`
+    - method `sync`
+      - param `self`
+    - method `_lease_snapshot`
+      - param `self`
+    - method `control_status_text`
+      - param `self`
+      - param `snapshot: WorkspaceDaemonSnapshot`
+      - param `*`
+      - param `daemon_startup_in_progress: bool=False`
+    - method `leased_elsewhere_status_text`
+      - param `self`
+      - param `snapshot: WorkspaceDaemonSnapshot`
+    - method `control_state`
+      - param `self`
+      - param `snapshot: WorkspaceDaemonSnapshot`
+      - param `*`
+      - param `daemon_startup_in_progress: bool=False`
+    - method `request_control`
+      - param `self`
+- module `data_engine.hosts.daemon.ownership`
+  - attribute `__all__`
+  - function `control_request_metadata`
+    - param `service: 'DataEngineDaemonService'`
+  - function `honor_control_request_if_needed`
+    - param `service: 'DataEngineDaemonService'`
+  - function `try_claim_requested_control`
+    - param `service: 'DataEngineDaemonService'`
+  - function `lease_error_text`
+    - param `service: 'DataEngineDaemonService'`
+  - function `try_claim_released_workspace`
+    - param `service: 'DataEngineDaemonService'`
+  - function `release_workspace_claim`
+    - param `service: 'DataEngineDaemonService'`
+    - param `*`
+    - param `leased_by_machine_id: str | None=None`
+    - param `status: str | None=None`
+    - param `update_state: bool=False`
+- module `data_engine.hosts.daemon.runtime_commands`
+  - attribute `__all__`
+  - class `DaemonRuntimeCommandHandler`
+    - instance attribute `service`
+    - method `__init__`
+      - param `self`
+      - param `service: 'DataEngineDaemonService'`
+    - method `automated_flow_names`
+      - param `self`
+      - param `*`
+      - param `force: bool=False`
+    - method `run_flow`
+      - param `self`
+      - param `*`
+      - param `name: str`
+      - param `wait: bool`
+    - method `start_engine`
+      - param `self`
+    - method `stop_engine`
+      - param `self`
+    - method `stop_flow`
+      - param `self`
+      - param `name: str`
+- module `data_engine.hosts.daemon.runtime_control`
+  - attribute `__all__`
+  - function `stop_active_work`
+    - param `service: 'DataEngineDaemonService'`
+- module `data_engine.hosts.daemon.server`
+  - attribute `__all__`
+  - function `serve_forever`
+    - param `service: 'DataEngineDaemonService'`
+  - function `serve_workspace_daemon`
+    - param `service_type: type['DataEngineDaemonService']`
+    - param `*`
+    - param `workspace_root: Path | None=None`
+    - param `workspace_id: str | None=None`
+    - param `lifecycle_policy: DaemonLifecyclePolicy=DaemonLifecyclePolicy.PERSISTENT`
+    - param `workspace_service: WorkspaceService | None=None`
+    - param `resolve_paths_func=None`
+- module `data_engine.hosts.daemon.shared_state`
+  - attribute `__all__`
+  - class `DaemonSharedStateAdapter`
+    - method `initialize_workspace`
+      - param `self`
+      - param `paths: WorkspacePaths`
+    - method `claim_workspace`
+      - param `self`
+      - param `paths: WorkspacePaths`
+    - method `release_workspace`
+      - param `self`
+      - param `paths: WorkspacePaths`
+    - method `recover_stale_workspace`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `machine_id: str`
+      - param `stale_after_seconds: float`
+      - param `reclaim: bool=True`
+    - method `lease_is_stale`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `stale_after_seconds: float`
+    - method `hydrate_local_runtime`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `ledger: RuntimeLedger`
+    - method `checkpoint_workspace_state`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `ledger: RuntimeLedger`
+      - param `*`
+      - param `workspace_id: str`
+      - param `machine_id: str`
+      - param `daemon_id: str`
+      - param `pid: int`
+      - param `status: str`
+      - param `started_at_utc: str`
+      - param `last_checkpoint_at_utc: str`
+      - param `app_version: str | None`
+    - method `read_lease_metadata`
+      - param `self`
+      - param `paths: WorkspacePaths`
+    - method `write_lease_metadata`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `workspace_id: str`
+      - param `machine_id: str`
+      - param `daemon_id: str`
+      - param `pid: int`
+      - param `status: str`
+      - param `started_at_utc: str`
+      - param `last_checkpoint_at_utc: str`
+      - param `app_version: str | None`
+    - method `remove_lease_metadata`
+      - param `self`
+      - param `paths: WorkspacePaths`
+    - method `read_control_request`
+      - param `self`
+      - param `paths: WorkspacePaths`
+    - method `write_control_request`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `workspace_id: str`
+      - param `requester_machine_id: str`
+      - param `requester_host_name: str`
+      - param `requester_pid: int`
+      - param `requester_client_kind: str`
+      - param `requested_at_utc: str`
+    - method `remove_control_request`
+      - param `self`
+      - param `paths: WorkspacePaths`
+- module `data_engine.hosts.daemon.state_sync`
+  - attribute `__all__`
+  - class `DaemonStateSyncHandler`
+    - instance attribute `service`
+    - method `__init__`
+      - param `self`
+      - param `service: 'DataEngineDaemonService'`
+    - method `load_flow_cards`
+      - param `self`
+      - param `*`
+      - param `force: bool=False`
+    - method `status_payload`
+      - param `self`
+    - method `checkpoint_once`
+      - param `self`
+      - param `*`
+      - param `status: str`
+    - method `refresh_observer_snapshot`
+      - param `self`
+    - method `update_daemon_state`
+      - param `self`
+      - param `*`
+      - param `status: str`
+- module `data_engine.platform`
+  - no top-level symbols
+- module `data_engine.platform.identity`
+  - attribute `APP_INTERNAL_ID`
+  - attribute `APP_DISTRIBUTION_NAME`
+  - attribute `APP_DISPLAY_NAME`
+  - attribute `APP_ENV_PREFIX`
+  - attribute `APP_CACHE_DIR_NAME`
+  - attribute `APP_RUNTIME_NAMESPACE`
+  - attribute `APP_ARTIFACTS_DIR_NAME`
+  - attribute `WORKSPACE_CACHE_DIR_NAME`
+  - attribute `RUNTIME_STATE_DIR_NAME`
+  - attribute `__all__`
+  - function `env_var`
+    - param `name: str`
+- module `data_engine.platform.local_settings`
+  - attribute `DATA_ENGINE_APP_ROOT_ENV_VAR`
+  - attribute `DATA_ENGINE_STATE_ROOT_ENV_VAR`
+  - attribute `__all__`
+  - function `default_state_root`
+    - param `*`
+    - param `app_root: Path | None=None`
+  - function `default_settings_db_path`
+    - param `*`
+    - param `app_root: Path | None=None`
+  - function `sys_platform`
+  - class `LocalSettingsStore`
+    - instance attribute `db_path`
+    - method `__init__`
+      - param `self`
+      - param `db_path: Path`
+    - method `open_default`
+      - param `cls`
+      - param `*`
+      - param `app_root: Path | None=None`
+    - method `_connection`
+      - param `self`
+    - method `_ensure_schema`
+      - param `connection: sqlite3.Connection`
+    - method `_initialize`
+      - param `self`
+    - method `get`
+      - param `self`
+      - param `key: str`
+    - method `set`
+      - param `self`
+      - param `key: str`
+      - param `value: str | None`
+    - method `workspace_collection_root`
+      - param `self`
+    - method `set_workspace_collection_root`
+      - param `self`
+      - param `value: Path | str | None`
+    - method `default_workspace_id`
+      - param `self`
+    - method `set_default_workspace_id`
+      - param `self`
+      - param `value: str | None`
+    - method `runtime_root`
+      - param `self`
+    - method `set_runtime_root`
+      - param `self`
+      - param `value: Path | str | None`
+- module `data_engine.platform.theme`
+  - attribute `GITHUB_DARK`
+  - attribute `GITHUB_LIGHT`
+  - attribute `THEMES`
+  - attribute `DEFAULT_THEME`
+  - attribute `__all__`
+  - function `toggle_theme_name`
+    - param `theme_name: str`
+  - function `theme_button_text`
+    - param `theme_name: str`
+  - function `_qt_theme_name`
+  - function `_macos_theme_name`
+  - function `_windows_theme_name`
+  - function `_linux_theme_name`
+  - function `system_theme_name`
+  - function `resolve_theme_name`
+    - param `theme_name: str=DEFAULT_THEME`
+  - class `ThemePalette`
+    - attribute `name`
+    - attribute `window_bg`
+    - attribute `app_bg`
+    - attribute `panel_bg`
+    - attribute `panel_border`
+    - attribute `text`
+    - attribute `muted_text`
+    - attribute `section_text`
+    - attribute `accent_text`
+    - attribute `warning_text`
+    - attribute `error_text`
+    - attribute `button_bg`
+    - attribute `button_hover`
+    - attribute `button_checked_bg`
+    - attribute `button_checked_border`
+    - attribute `button_disabled_bg`
+    - attribute `button_disabled_border`
+    - attribute `button_disabled_text`
+    - attribute `input_bg`
+    - attribute `input_border`
+    - attribute `hover_bg`
+    - attribute `hover_border`
+    - attribute `selection_bg`
+    - attribute `selection_text`
+    - attribute `selection_border`
+    - attribute `tab_bg`
+    - attribute `tab_hover_bg`
+    - attribute `tab_selected_bg`
+    - attribute `progress_bg`
+    - attribute `progress_chunk`
+    - attribute `summary_bg`
+    - attribute `summary_border`
+    - attribute `request_control_bg`
+    - attribute `request_control_border`
+    - attribute `request_control_hover`
+    - attribute `engine_start_bg`
+    - attribute `engine_start_border`
+    - attribute `engine_start_hover`
+    - attribute `engine_stop_bg`
+    - attribute `engine_stop_border`
+    - attribute `engine_stop_hover`
+- module `data_engine.platform.workspace_models`
+  - attribute `APP_ROOT_PATH`
+  - attribute `DATA_ENGINE_APP_ROOT_ENV_VAR`
+  - attribute `DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR`
+  - attribute `DATA_ENGINE_WORKSPACE_ID_ENV_VAR`
+  - attribute `DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR`
+  - attribute `DATA_ENGINE_RUNTIME_ROOT_ENV_VAR`
+  - attribute `DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR`
+  - attribute `WORKSPACE_CONFIG_DIR_NAME`
+  - attribute `WORKSPACE_FLOW_MODULES_DIR_NAME`
+  - attribute `WORKSPACE_FLOW_HELPERS_DIR_NAME`
+  - attribute `WORKSPACE_DATABASES_DIR_NAME`
+  - attribute `WORKSPACE_STATE_DIR_NAME`
+  - attribute `WORKSPACE_AVAILABLE_MARKERS_DIR_NAME`
+  - attribute `WORKSPACE_LEASED_MARKERS_DIR_NAME`
+  - attribute `WORKSPACE_STALE_MARKERS_DIR_NAME`
+  - attribute `WORKSPACE_LEASE_METADATA_DIR_NAME`
+  - attribute `WORKSPACE_CONTROL_REQUESTS_DIR_NAME`
+  - attribute `WORKSPACE_SHARED_STATE_DIR_NAME`
+  - attribute `WORKSPACE_SHARED_RUNS_DIR_NAME`
+  - attribute `WORKSPACE_SHARED_STEP_RUNS_DIR_NAME`
+  - attribute `WORKSPACE_SHARED_LOGS_DIR_NAME`
+  - attribute `WORKSPACE_SHARED_FILE_STATE_DIR_NAME`
+  - attribute `__all__`
+  - function `_resolve_app_root_path`
+  - function `normalized_path_text`
+    - param `value: Path | str`
+  - function `path_display`
+    - param `value: Path | str | None`
+    - param `*`
+    - param `empty: str='(not set)'`
+  - function `toml_path_text`
+    - param `value: Path | str`
+  - function `validate_workspace_id`
+    - param `workspace_id: str`
+  - function `local_workspace_namespace`
+    - param `workspace_root: Path | str`
+    - param `workspace_id: str`
+  - function `authored_workspace_is_available`
+    - param `paths: WorkspacePaths`
+  - function `machine_id_text`
+  - class `InvalidWorkspaceIdError`
+  - class `WorkspaceSettings`
+    - attribute `app_root`
+    - attribute `settings_path`
+    - attribute `state_root`
+    - attribute `runtime_root`
+    - attribute `workspace_collection_root`
+    - attribute `default_selected`
+  - class `DiscoveredWorkspace`
+    - attribute `workspace_id`
+    - attribute `workspace_root`
+  - class `WorkspacePaths`
+    - attribute `app_root`
+    - attribute `workspace_collection_root`
+    - attribute `workspace_id`
+    - attribute `workspace_root`
+    - attribute `config_dir`
+    - attribute `flow_modules_dir`
+    - attribute `databases_dir`
+    - attribute `workspace_state_dir`
+    - attribute `available_markers_dir`
+    - attribute `leased_markers_dir`
+    - attribute `stale_markers_dir`
+    - attribute `lease_metadata_dir`
+    - attribute `lease_metadata_path`
+    - attribute `control_requests_dir`
+    - attribute `control_request_path`
+    - attribute `shared_state_dir`
+    - attribute `shared_runs_path`
+    - attribute `shared_step_runs_path`
+    - attribute `shared_logs_path`
+    - attribute `shared_file_state_path`
+    - attribute `artifacts_dir`
+    - attribute `workspace_cache_dir`
+    - attribute `compiled_flow_modules_dir`
+    - attribute `runtime_state_dir`
+    - attribute `runtime_db_path`
+    - attribute `daemon_log_path`
+    - attribute `documentation_dir`
+    - attribute `daemon_endpoint_kind`
+    - attribute `daemon_endpoint_path`
+    - attribute `sphinx_source_dir`
+    - attribute `workspace_configured`
+- module `data_engine.platform.workspace_policy`
+  - attribute `__all__`
+  - class `AppStatePolicy`
+    - method `effective_app_root`
+      - param `self`
+      - param `*`
+      - param `app_root: Path | None=None`
+    - method `settings_path`
+      - param `self`
+      - param `*`
+      - param `app_root: Path | None=None`
+    - method `load_settings`
+      - param `self`
+      - param `*`
+      - param `app_root: Path | None=None`
+    - method `write_settings`
+      - param `self`
+      - param `settings: WorkspaceSettings`
+  - class `WorkspaceDiscoveryPolicy`
+    - attribute `PLACEHOLDER_WORKSPACE_ROOT_NAME`
+    - attribute `PLACEHOLDER_WORKSPACE_ID`
+    - instance attribute `app_state_policy`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `app_state_policy: AppStatePolicy | None=None`
+    - method `_normalize_workspace_id`
+      - param `self`
+      - param `candidate: str`
+      - param `*`
+      - param `fallback: str | None=None`
+    - method `_placeholder_workspace`
+      - param `self`
+      - param `*`
+      - param `app_root: Path`
+      - param `preferred_id: str | None=None`
+    - method `discover`
+      - param `self`
+      - param `*`
+      - param `app_root: Path | None=None`
+      - param `workspace_collection_root: Path | None=None`
+      - param `explicit_workspace_root: Path | None=None`
+    - method `select_workspace`
+      - param `self`
+      - param `*`
+      - param `app_root: Path`
+      - param `workspace_id: str | None`
+      - param `workspace_root: Path | None`
+      - param `workspace_collection_root: Path | None`
+      - param `data_root: Path | None`
+  - class `RuntimeLayoutPolicy`
+    - instance attribute `app_state_policy`
+    - instance attribute `discovery_policy`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `app_state_policy: AppStatePolicy | None=None`
+      - param `discovery_policy: WorkspaceDiscoveryPolicy | None=None`
+    - method `resolve_paths`
+      - param `self`
+      - param `*`
+      - param `workspace_id: str | None=None`
+      - param `workspace_root: Path | None=None`
+      - param `workspace_collection_root: Path | None=None`
+      - param `data_root: Path | None=None`
+      - param `app_root: Path | None=None`
+    - method `local_workspace_namespace`
+      - param `workspace_root: Path | str`
+      - param `workspace_id: str`
+    - method `daemon_endpoint`
+      - param `*`
+      - param `runtime_state_dir: Path`
+      - param `workspace_id: str`
+- module `data_engine.runtime`
+  - no top-level symbols
+- module `data_engine.runtime.file_watch`
+  - attribute `__all__`
+  - function `_normalize_path`
+    - param `value: Path`
+  - function `_normalized_name`
+    - param `value: str`
+  - function `_queue_key`
+    - param `path: Path`
+  - function `_normalize_extensions`
+    - param `extensions: tuple[str, ...] | None`
+  - function `is_temporary_file_path`
+    - param `path: Path`
+  - function `iter_candidate_paths`
+    - param `input_root: Path`
+    - param `*`
+    - param `extensions: tuple[str, ...] | None=None`
+    - param `recursive: bool=True`
+    - param `allow_missing: bool=False`
+  - class `IFileWatcher`
+    - method `start`
+      - param `self`
+    - method `stop`
+      - param `self`
+    - method `drain_events`
+      - param `self`
+  - class `PollingWatcher`
+    - instance attribute `input_root`
+    - instance attribute `recursive`
+    - instance attribute `extensions`
+    - instance attribute `settle`
+    - instance attribute `_seen`
+    - instance attribute `_stable_counts`
+    - instance attribute `_emitted`
+    - instance attribute `_running`
+    - method `__init__`
+      - param `self`
+      - param `input_root: Path`
+      - param `*`
+      - param `recursive: bool=True`
+      - param `extensions: tuple[str, ...] | None=None`
+      - param `settle: int=1`
+    - method `start`
+      - param `self`
+    - method `stop`
+      - param `self`
+    - method `drain_events`
+      - param `self`
+    - method `_snapshot`
+      - param `self`
+    - method `_prune_removed_paths`
+      - param `self`
+      - param `current: dict[Path, tuple[int, int, int]]`
+- module `data_engine.runtime.ledger_models`
+  - attribute `__all__`
+  - function `elapsed_seconds`
+    - param `started_at_utc: str`
+    - param `finished_at_utc: str | None`
+  - class `PersistedRun`
+    - attribute `run_id`
+    - attribute `flow_name`
+    - attribute `group_name`
+    - attribute `source_path`
+    - attribute `status`
+    - attribute `started_at_utc`
+    - attribute `finished_at_utc`
+    - attribute `error_text`
+    - method `elapsed_seconds`
+      - param `self`
+  - class `PersistedStepRun`
+    - attribute `id`
+    - attribute `run_id`
+    - attribute `flow_name`
+    - attribute `step_label`
+    - attribute `status`
+    - attribute `started_at_utc`
+    - attribute `finished_at_utc`
+    - attribute `elapsed_ms`
+    - attribute `error_text`
+    - attribute `output_path`
+  - class `PersistedLogEntry`
+    - attribute `id`
+    - attribute `run_id`
+    - attribute `flow_name`
+    - attribute `step_label`
+    - attribute `level`
+    - attribute `message`
+    - attribute `created_at_utc`
+  - class `PersistedFileState`
+    - attribute `flow_name`
+    - attribute `source_path`
+    - attribute `mtime_ns`
+    - attribute `size_bytes`
+    - attribute `last_success_run_id`
+    - attribute `last_success_at_utc`
+    - attribute `last_status`
+    - attribute `last_error_text`
+  - class `PersistedDaemonState`
+    - attribute `workspace_id`
+    - attribute `pid`
+    - attribute `endpoint_kind`
+    - attribute `endpoint_path`
+    - attribute `started_at_utc`
+    - attribute `last_checkpoint_at_utc`
+    - attribute `status`
+    - attribute `app_root`
+    - attribute `workspace_root`
+    - attribute `version_text`
+  - class `PersistedClientSession`
+    - attribute `client_id`
+    - attribute `workspace_id`
+    - attribute `client_kind`
+    - attribute `pid`
+    - attribute `started_at_utc`
+    - attribute `updated_at_utc`
+- module `data_engine.runtime.runtime_db`
+  - attribute `__all__`
+  - class `RuntimeLedger`
+    - attribute `HISTORY_RETENTION_DAYS`
+    - instance attribute `db_path`
+    - instance attribute `_connections`
+    - instance attribute `_connections_lock`
+    - method `__init__`
+      - param `self`
+      - param `db_path: Path`
+    - method `open_default`
+      - param `cls`
+      - param `*`
+      - param `data_root: Path | None=None`
+    - method `_ensure_parent_dir`
+      - param `self`
+    - method `_connection`
+      - param `self`
+    - method `close`
+      - param `self`
+    - method `__del__`
+      - param `self`
+    - method `_initialize_schema`
+      - param `self`
+    - method `upsert_daemon_state`
+      - param `self`
+      - param `*`
+      - param `workspace_id: str`
+      - param `pid: int`
+      - param `endpoint_kind: str`
+      - param `endpoint_path: str`
+      - param `started_at_utc: str`
+      - param `last_checkpoint_at_utc: str`
+      - param `status: str`
+      - param `app_root: str`
+      - param `workspace_root: str`
+      - param `version_text: str | None=None`
+    - method `get_daemon_state`
+      - param `self`
+      - param `workspace_id: str`
+    - method `clear_daemon_state`
+      - param `self`
+      - param `workspace_id: str`
+    - method `upsert_client_session`
+      - param `self`
+      - param `*`
+      - param `client_id: str`
+      - param `workspace_id: str`
+      - param `client_kind: str`
+      - param `pid: int`
+    - method `remove_client_session`
+      - param `self`
+      - param `client_id: str`
+    - method `remove_client_sessions_for_process`
+      - param `self`
+      - param `*`
+      - param `workspace_id: str`
+      - param `client_kind: str`
+      - param `pid: int`
+    - method `count_live_client_sessions`
+      - param `self`
+      - param `workspace_id: str`
+      - param `*`
+      - param `exclude_client_id: str | None=None`
+    - method `_pid_is_running`
+      - param `pid: int`
+    - method `normalize_source_path`
+      - param `self`
+      - param `source_path: Path | str`
+    - method `source_signature_for_path`
+      - param `self`
+      - param `source_path: Path`
+    - method `is_poll_source_stale`
+      - param `self`
+      - param `flow_name: str`
+      - param `signature: SourceSignature | None`
+    - method `record_run_started`
+      - param `self`
+      - param `*`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `group_name: str`
+      - param `source_path: str | None`
+      - param `started_at_utc: str`
+    - method `record_run_finished`
+      - param `self`
+      - param `*`
+      - param `run_id: str`
+      - param `status: str`
+      - param `finished_at_utc: str`
+      - param `error_text: str | None=None`
+    - method `record_step_started`
+      - param `self`
+      - param `*`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `step_label: str`
+      - param `started_at_utc: str`
+    - method `record_step_finished`
+      - param `self`
+      - param `*`
+      - param `step_run_id: int`
+      - param `status: str`
+      - param `finished_at_utc: str`
+      - param `elapsed_ms: int | None`
+      - param `error_text: str | None=None`
+      - param `output_path: str | None=None`
+    - method `upsert_file_state`
+      - param `self`
+      - param `*`
+      - param `flow_name: str`
+      - param `signature: SourceSignature`
+      - param `status: str`
+      - param `run_id: str | None=None`
+      - param `finished_at_utc: str | None=None`
+      - param `error_text: str | None=None`
+    - method `append_log`
+      - param `self`
+      - param `*`
+      - param `level: str`
+      - param `message: str`
+      - param `created_at_utc: str`
+      - param `run_id: str | None=None`
+      - param `flow_name: str | None=None`
+      - param `step_label: str | None=None`
+    - method `prune_history`
+      - param `self`
+      - param `*`
+      - param `retention_days: int`
+    - method `prune_missing_file_state`
+      - param `self`
+      - param `*`
+      - param `flow_name: str`
+      - param `current_source_paths: set[str]`
+    - method `list_logs`
+      - param `self`
+      - param `*`
+      - param `flow_name: str | None=None`
+      - param `run_id: str | None=None`
+    - method `list_runs`
+      - param `self`
+      - param `*`
+      - param `flow_name: str | None=None`
+    - method `list_step_runs`
+      - param `self`
+      - param `run_id: str`
+    - method `list_file_states`
+      - param `self`
+      - param `*`
+      - param `flow_name: str | None=None`
+    - method `replace_runs`
+      - param `self`
+      - param `rows: tuple[PersistedRun, ...]`
+    - method `replace_step_runs`
+      - param `self`
+      - param `rows: tuple[PersistedStepRun, ...]`
+    - method `replace_logs`
+      - param `self`
+      - param `rows: tuple[PersistedLogEntry, ...]`
+    - method `replace_file_states`
+      - param `self`
+      - param `rows: tuple[PersistedFileState, ...]`
+    - method `replace_runtime_snapshot`
+      - param `self`
+      - param `*`
+      - param `runs: tuple[PersistedRun, ...]`
+      - param `step_runs: tuple[PersistedStepRun, ...]`
+      - param `logs: tuple[PersistedLogEntry, ...]`
+      - param `file_states: tuple[PersistedFileState, ...]`
+- module `data_engine.runtime.shared_state`
+  - attribute `_LEASE_METADATA_SCHEMA`
+  - attribute `_CONTROL_REQUEST_SCHEMA`
+  - attribute `_RUNS_SCHEMA`
+  - attribute `_STEP_RUNS_SCHEMA`
+  - attribute `_LOGS_SCHEMA`
+  - attribute `_FILE_STATE_SCHEMA`
+  - attribute `_PARQUET_READ_RETRIES`
+  - attribute `__all__`
+  - function `initialize_workspace_state`
+    - param `paths: WorkspacePaths`
+  - function `claim_workspace`
+    - param `paths: WorkspacePaths`
+  - function `release_workspace`
+    - param `paths: WorkspacePaths`
+  - function `lease_is_stale`
+    - param `paths: WorkspacePaths`
+    - param `*`
+    - param `stale_after_seconds: float`
+  - function `recover_stale_workspace`
+    - param `paths: WorkspacePaths`
+    - param `*`
+    - param `machine_id: str`
+    - param `stale_after_seconds: float`
+    - param `reclaim: bool=True`
+  - function `checkpoint_workspace_state`
+    - param `paths: WorkspacePaths`
+    - param `ledger: RuntimeLedger`
+    - param `*`
+    - param `workspace_id: str`
+    - param `machine_id: str`
+    - param `daemon_id: str`
+    - param `pid: int`
+    - param `status: str`
+    - param `started_at_utc: str`
+    - param `last_checkpoint_at_utc: str`
+    - param `app_version: str | None`
+  - function `write_lease_metadata`
+    - param `paths: WorkspacePaths`
+    - param `*`
+    - param `workspace_id: str`
+    - param `machine_id: str`
+    - param `daemon_id: str`
+    - param `pid: int`
+    - param `status: str`
+    - param `started_at_utc: str`
+    - param `last_checkpoint_at_utc: str`
+    - param `app_version: str | None`
+  - function `hydrate_local_runtime_state`
+    - param `paths: WorkspacePaths`
+    - param `ledger: RuntimeLedger`
+  - function `read_lease_metadata`
+    - param `paths: WorkspacePaths`
+  - function `read_control_request`
+    - param `paths: WorkspacePaths`
+  - function `remove_lease_metadata`
+    - param `paths: WorkspacePaths`
+  - function `write_control_request`
+    - param `paths: WorkspacePaths`
+    - param `*`
+    - param `workspace_id: str`
+    - param `requester_machine_id: str`
+    - param `requester_host_name: str`
+    - param `requester_pid: int`
+    - param `requester_client_kind: str`
+    - param `requested_at_utc: str`
+  - function `remove_control_request`
+    - param `paths: WorkspacePaths`
+  - function `_atomic_write_parquet`
+    - param `path: Path`
+    - param `frame: pl.DataFrame`
+  - function `_frame_with_schema`
+    - param `rows: list[dict[str, Any]]`
+    - param `schema: dict[str, pl.DataType]`
+  - function `_write_lease_metadata`
+    - param `path: Path`
+    - param `row: dict[str, Any]`
+  - function `_write_runs`
+    - param `path: Path`
+    - param `rows: tuple[PersistedRun, ...]`
+    - param `*`
+    - param `snapshot_generation_id: str`
+  - function `_write_step_runs`
+    - param `path: Path`
+    - param `rows: tuple[PersistedStepRun, ...]`
+    - param `*`
+    - param `snapshot_generation_id: str`
+  - function `_write_logs`
+    - param `path: Path`
+    - param `rows: tuple[PersistedLogEntry, ...]`
+    - param `*`
+    - param `snapshot_generation_id: str`
+  - function `_write_file_states`
+    - param `path: Path`
+    - param `rows: tuple[PersistedFileState, ...]`
+    - param `*`
+    - param `snapshot_generation_id: str`
+  - function `remove_file_if_exists`
+    - param `path: Path`
+  - function `_read_runs`
+    - param `path: Path`
+  - function `_read_step_runs`
+    - param `path: Path`
+  - function `_read_logs`
+    - param `path: Path`
+  - function `_read_file_states`
+    - param `path: Path`
+  - function `_snapshot_generation_id_from_frame`
+    - param `frame: pl.DataFrame`
+  - function `_drop_snapshot_generation_id`
+    - param `row: dict[str, Any]`
+  - function `_read_parquet_with_retries`
+    - param `path: Path`
+    - param `*`
+    - param `retries: int=_PARQUET_READ_RETRIES`
+  - function `_read_single_row_parquet`
+    - param `path: Path`
+  - function `_read_consistent_runtime_snapshot`
+    - param `paths: WorkspacePaths`
+    - param `*`
+    - param `retries: int=_PARQUET_READ_RETRIES`
+- module `data_engine.services`
+  - attribute `__all__`
+  - attribute `_SERVICE_MODULES`
+  - function `__getattr__`
+    - param `name: str`
+- module `data_engine.services.daemon`
+  - attribute `__all__`
+  - class `DaemonService`
+    - instance attribute `_spawn_process`
+    - instance attribute `_request`
+    - instance attribute `_is_live`
+    - instance attribute `_force_shutdown`
+    - instance attribute `_client_error_type`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `spawn_process_func: Callable[..., object]=spawn_daemon_process`
+      - param `request_func: Callable[..., dict[str, Any]]=daemon_request`
+      - param `is_live_func: Callable[[WorkspacePaths], bool]=is_daemon_live`
+      - param `force_shutdown_func: Callable[..., None]=force_shutdown_daemon_process`
+      - param `client_error_type: type[Exception]=DaemonClientError`
+    - method `spawn`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `lifecycle_policy: DaemonLifecyclePolicy=DaemonLifecyclePolicy.PERSISTENT`
+    - method `request`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `payload: dict[str, Any]`
+      - param `*`
+      - param `timeout: float=0.0`
+    - method `is_live`
+      - param `self`
+      - param `paths: WorkspacePaths`
+    - method `force_shutdown`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `timeout: float=0.5`
+    - method `client_error_type`
+      - param `self`
+- module `data_engine.services.daemon_state`
+  - attribute `__all__`
+  - class `DaemonStateService`
+    - instance attribute `shared_state_adapter`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `shared_state_adapter: DaemonSharedStateAdapter | None=None`
+    - method `create_manager`
+      - param `self`
+      - param `paths: WorkspacePaths`
+    - method `sync`
+      - param `self`
+      - param `manager: WorkspaceDaemonManager`
+    - method `control_state`
+      - param `self`
+      - param `manager: WorkspaceDaemonManager`
+      - param `snapshot: WorkspaceDaemonSnapshot`
+      - param `*`
+      - param `daemon_startup_in_progress: bool=False`
+    - method `request_control`
+      - param `self`
+      - param `manager: WorkspaceDaemonManager`
+- module `data_engine.services.flow_catalog`
+  - attribute `__all__`
+  - function `_flow_paths`
+    - param `flow: Flow`
+  - function `_flow_interval`
+    - param `flow: Flow`
+  - function `flow_catalog_entry_from_flow`
+    - param `flow: Flow`
+    - param `*`
+    - param `description: str | None`
+  - function `_invalid_entry`
+    - param `definition: FlowModuleDefinition`
+    - param `exc: Exception`
+  - class `FlowCatalogService`
+    - instance attribute `_discover_definitions`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `discover_definitions_func: Callable[..., tuple[FlowModuleDefinition, ...]]=discover_flow_module_definitions`
+    - method `load_entries`
+      - param `self`
+      - param `*`
+      - param `workspace_root: Path | None=None`
+- module `data_engine.services.flow_execution`
+  - attribute `__all__`
+  - function `_default_load_flow`
+    - param `name: str`
+    - param `*`
+    - param `data_root: Path | None=None`
+  - function `_default_discover_flows`
+    - param `*`
+    - param `data_root: Path | None=None`
+  - class `FlowExecutionService`
+    - instance attribute `_load_flow`
+    - instance attribute `_discover_flows`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `load_flow_func: Callable[..., 'Flow']=_default_load_flow`
+      - param `discover_flows_func: Callable[..., tuple['Flow', ...]]=_default_discover_flows`
+    - method `load_flow`
+      - param `self`
+      - param `name: str`
+      - param `*`
+      - param `workspace_root: Path | None=None`
+    - method `load_flows`
+      - param `self`
+      - param `names: tuple[str, ...]`
+      - param `*`
+      - param `workspace_root: Path | None=None`
+    - method `discover_flows`
+      - param `self`
+      - param `*`
+      - param `workspace_root: Path | None=None`
+- module `data_engine.services.ledger`
+  - attribute `__all__`
+  - class `LedgerService`
+    - instance attribute `runtime_layout_policy`
+    - instance attribute `_open_ledger_func`
+    - method `__init__`
+      - param `self`
+      - param `open_ledger_func: Callable[[Path], RuntimeLedger] | None=None`
+      - param `*`
+      - param `runtime_layout_policy: RuntimeLayoutPolicy | None=None`
+    - method `_open_default_ledger`
+      - param `self`
+      - param `workspace_root: Path`
+    - method `open_for_workspace`
+      - param `self`
+      - param `workspace_root: Path`
+    - method `close`
+      - param `self`
+      - param `ledger: RuntimeLedger`
+    - method `register_client_session`
+      - param `self`
+      - param `ledger: RuntimeLedger`
+      - param `*`
+      - param `client_id: str`
+      - param `workspace_id: str`
+      - param `client_kind: str`
+      - param `pid: int`
+    - method `remove_client_session`
+      - param `self`
+      - param `ledger: RuntimeLedger`
+      - param `client_id: str`
+    - method `purge_process_client_sessions`
+      - param `self`
+      - param `ledger: RuntimeLedger`
+      - param `*`
+      - param `workspace_id: str`
+      - param `client_kind: str`
+      - param `pid: int`
+    - method `count_live_client_sessions`
+      - param `self`
+      - param `ledger: RuntimeLedger`
+      - param `workspace_id: str`
+      - param `*`
+      - param `exclude_client_id: str | None=None`
+- module `data_engine.services.logs`
+  - attribute `__all__`
+  - class `LogService`
+    - method `create_store`
+      - param `self`
+      - param `runtime_ledger: RuntimeLedger | None=None`
+    - method `reload`
+      - param `self`
+      - param `store: FlowLogStore`
+    - method `append_entry`
+      - param `self`
+      - param `store: FlowLogStore`
+      - param `entry: FlowLogEntry`
+    - method `clear_flow`
+      - param `self`
+      - param `store: FlowLogStore`
+      - param `flow_name: str | None`
+    - method `all_entries`
+      - param `self`
+      - param `store: FlowLogStore`
+    - method `entries_for_flow`
+      - param `self`
+      - param `store: FlowLogStore`
+      - param `flow_name: str | None`
+    - method `runs_for_flow`
+      - param `self`
+      - param `store: FlowLogStore`
+      - param `flow_name: str | None`
+    - method `_hydrate_entries`
+      - param `self`
+      - param `runtime_ledger: RuntimeLedger | None`
+- module `data_engine.services.runtime_binding`
+  - attribute `__all__`
+  - class `WorkspaceRuntimeBinding`
+    - attribute `workspace_paths`
+    - attribute `runtime_ledger`
+    - attribute `log_store`
+    - attribute `daemon_manager`
+  - class `WorkspaceRuntimeBindingService`
+    - instance attribute `ledger_service`
+    - instance attribute `log_service`
+    - instance attribute `daemon_state_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `ledger_service: LedgerService`
+      - param `log_service: LogService`
+      - param `daemon_state_service: DaemonStateService`
+    - method `open_binding`
+      - param `self`
+      - param `workspace_paths: WorkspacePaths`
+    - method `close_binding`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+    - method `register_client_session`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `client_id: str`
+      - param `client_kind: str`
+      - param `pid: int | None=None`
+    - method `remove_client_session`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `client_id: str`
+    - method `purge_process_client_sessions`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `client_kind: str`
+      - param `pid: int | None=None`
+    - method `count_live_client_sessions`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `exclude_client_id: str | None=None`
+- module `data_engine.services.runtime_execution`
+  - attribute `__all__`
+  - class `RuntimeExecutionService`
+    - instance attribute `_flow_runtime_type`
+    - instance attribute `_grouped_runtime_type`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `flow_runtime_type: type[_FlowRuntime]=_FlowRuntime`
+      - param `grouped_runtime_type: type[_GroupedFlowRuntime]=_GroupedFlowRuntime`
+    - method `run_once`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `*`
+      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `flow_stop_event: Event | None=None`
+    - method `preview`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `*`
+      - param `use: str | None=None`
+      - param `runtime_ledger: RuntimeLedger | None=None`
+    - method `run_manual`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `*`
+      - param `runtime_ledger: RuntimeLedger`
+      - param `flow_stop_event: Event`
+    - method `run_continuous`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `*`
+      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `flow_stop_event: Event | None=None`
+    - method `run_grouped`
+      - param `self`
+      - param `flows: tuple['Flow', ...]`
+      - param `*`
+      - param `runtime_ledger: RuntimeLedger`
+      - param `runtime_stop_event: Event`
+      - param `flow_stop_event: Event`
+    - method `run_grouped_continuous`
+      - param `self`
+      - param `flows: tuple['Flow', ...]`
+      - param `*`
+      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `runtime_stop_event: Event | None=None`
+      - param `flow_stop_event: Event | None=None`
+- module `data_engine.services.runtime_history`
+  - attribute `__all__`
+  - class `RuntimeHistoryService`
+    - method `rebuild_step_outputs`
+      - param `self`
+      - param `ledger: RuntimeLedger`
+      - param `flow_cards: dict[str, FlowCatalogLike]`
+    - method `error_text_for_entry`
+      - param `self`
+      - param `ledger: RuntimeLedger`
+      - param `run_group: FlowRunState`
+      - param `entry: FlowLogEntry`
+- module `data_engine.services.settings`
+  - attribute `__all__`
+  - class `SettingsService`
+    - instance attribute `_store`
+    - method `__init__`
+      - param `self`
+      - param `store: LocalSettingsStore`
+    - method `default_store`
+      - param `cls`
+      - param `*`
+      - param `app_root: Path | None=None`
+    - method `open_default`
+      - param `cls`
+      - param `*`
+      - param `app_root: Path | None=None`
+      - param `store_factory: Callable[[Path | None], LocalSettingsStore] | None=None`
+    - method `workspace_collection_root`
+      - param `self`
+    - method `set_workspace_collection_root`
+      - param `self`
+      - param `value: Path | str | None`
+    - method `default_workspace_id`
+      - param `self`
+    - method `set_default_workspace_id`
+      - param `self`
+      - param `value: str | None`
+    - method `runtime_root`
+      - param `self`
+    - method `set_runtime_root`
+      - param `self`
+      - param `value: Path | str | None`
+- module `data_engine.services.shared_state`
+  - attribute `__all__`
+  - class `SharedStateService`
+    - method `hydrate_local_runtime`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `ledger: RuntimeLedger`
+    - method `read_lease_metadata`
+      - param `self`
+      - param `paths: WorkspacePaths`
+    - method `lease_is_stale`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `stale_after_seconds: float`
+- module `data_engine.services.theme`
+  - attribute `__all__`
+  - class `ThemeService`
+    - instance attribute `_themes`
+    - instance attribute `default_theme_name`
+    - instance attribute `_resolve_theme_name`
+    - instance attribute `_system_theme_name`
+    - instance attribute `_toggle_theme_name`
+    - instance attribute `_theme_button_text`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `themes: Mapping[str, ThemePalette]=THEMES`
+      - param `default_theme_name: str=DEFAULT_THEME`
+      - param `resolve_theme_name_func: Callable[[str], str]=resolve_theme_name`
+      - param `system_theme_name_func: Callable[[], str]=system_theme_name`
+      - param `toggle_theme_name_func: Callable[[str], str]=toggle_theme_name`
+      - param `theme_button_text_func: Callable[[str], str]=theme_button_text`
+    - method `resolve_name`
+      - param `self`
+      - param `theme_name: str=DEFAULT_THEME`
+    - method `system_name`
+      - param `self`
+    - method `toggle_name`
+      - param `self`
+      - param `theme_name: str`
+    - method `button_text`
+      - param `self`
+      - param `theme_name: str`
+    - method `palette`
+      - param `self`
+      - param `theme_name: str=DEFAULT_THEME`
+- module `data_engine.services.workspace_provisioning`
+  - attribute `__all__`
+  - function `checkout_source_dir`
+    - param `app_root: Path`
+  - function `checkout_tests_dir`
+    - param `app_root: Path`
+  - function `workspace_vscode_settings`
+    - param `workspace_root: Path`
+    - param `*`
+    - param `app_root: Path`
+    - param `interpreter_path: Path | None=None`
+  - function `collection_vscode_settings`
+    - param `collection_root: Path`
+    - param `*`
+    - param `app_root: Path`
+    - param `interpreter_path: Path | None=None`
+  - function `write_workspace_vscode_settings`
+    - param `workspace_root: Path`
+    - param `*`
+    - param `app_root: Path`
+    - param `interpreter_path: Path | None=None`
+    - param `overwrite: bool=False`
+  - function `write_collection_vscode_settings`
+    - param `collection_root: Path`
+    - param `*`
+    - param `app_root: Path`
+    - param `interpreter_path: Path | None=None`
+    - param `overwrite: bool=False`
+  - class `WorkspaceProvisioningResult`
+    - attribute `workspace_root`
+    - attribute `created_paths`
+    - attribute `preserved_paths`
+    - method `created_anything`
+      - param `self`
+  - class `WorkspaceProvisioningService`
+    - method `provision_workspace`
+      - param `self`
+      - param `workspace_paths: WorkspacePaths`
+      - param `*`
+      - param `interpreter_path: Path | None=None`
+- module `data_engine.services.workspaces`
+  - attribute `__all__`
+  - class `WorkspaceService`
+    - instance attribute `_app_state_policy`
+    - instance attribute `_discovery_policy`
+    - instance attribute `_runtime_layout_policy`
+    - instance attribute `_discover_workspaces`
+    - instance attribute `_resolve_workspace_paths`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `app_state_policy: AppStatePolicy | None=None`
+      - param `discovery_policy: WorkspaceDiscoveryPolicy | None=None`
+      - param `runtime_layout_policy: RuntimeLayoutPolicy | None=None`
+      - param `discover_workspaces_func: Callable[..., tuple[DiscoveredWorkspace, ...]] | None=None`
+      - param `resolve_workspace_paths_func: Callable[..., WorkspacePaths] | None=None`
+    - method `discover`
+      - param `self`
+      - param `*`
+      - param `app_root: Path | None=None`
+      - param `workspace_collection_root: Path | None=None`
+    - method `resolve_paths`
+      - param `self`
+      - param `*`
+      - param `workspace_id: str | None=None`
+      - param `workspace_root: Path | None=None`
+      - param `data_root: Path | None=None`
+      - param `workspace_collection_root: Path | None=None`
+- module `data_engine.ui`
+  - attribute `__all__`
+- module `data_engine.ui.cli`
+  - attribute `__all__`
+- module `data_engine.ui.cli.app`
+  - attribute `__all__`
+  - function `_default_cli_dependencies`
+  - function `main`
+    - param `argv: list[str] | None=None`
+    - param `*`
+    - param `dependencies: CliDependencies | None=None`
+  - function `_apply_environment`
+    - param `args: argparse.Namespace`
+  - function `_infer_project_root_from_cwd`
+    - param `cwd: Path`
+  - function `_run_command`
+    - param `args: argparse.Namespace`
+    - param `*`
+    - param `dependencies: CliDependencies`
+  - function `_test_slice_args`
+    - param `slice_name: str`
+    - param `*`
+    - param `app_root: Path`
+  - function `_run_tests`
+    - param `*`
+    - param `slice_name: str`
+    - param `list_slices: bool`
+    - param `dependencies: CliDependencies`
+  - function `_doctor`
+    - param `*`
+    - param `dependencies: CliDependencies`
+  - function `_doctor_command`
+    - param `args: argparse.Namespace`
+    - param `*`
+    - param `dependencies: CliDependencies`
+  - function `_run_process_listing`
+  - function `_classify_process_kind`
+    - param `command: str`
+  - function `_doctor_daemons`
+    - param `*`
+    - param `dependencies: CliDependencies`
+- module `data_engine.ui.cli.commands_doctor`
+  - function `doctor`
+    - param `*`
+    - param `settings: Any`
+    - param `paths: Any`
+  - function `run_process_listing`
+  - function `classify_process_kind`
+    - param `command: str`
+  - function `doctor_daemons`
+    - param `*`
+    - param `settings: Any`
+    - param `workspace_service: Any`
+    - param `process_rows: list[ProcessInfo] | None=None`
+    - param `process_listing_func: Callable[[], list[ProcessInfo]]=run_process_listing`
+    - param `classify_process_kind_func: Callable[[str], str | None]=classify_process_kind`
+    - param `read_lease_metadata_func: Callable[[Any], dict[str, Any] | None]`
+    - param `lease_is_stale_func: Callable[[Any, float], bool]`
+    - param `machine_id_text_func: Callable[[], str]=machine_id_text`
+- module `data_engine.ui.cli.commands_run`
+  - attribute `TEST_SLICE_CHOICES`
+  - function `checkout_tests_dir`
+    - param `app_root: Path`
+  - function `raise_open_file_limit`
+    - param `*`
+    - param `minimum_soft_limit: int=4096`
+  - function `test_slice_args`
+    - param `slice_name: str`
+    - param `*`
+    - param `app_root: Path`
+  - function `run_tests`
+    - param `*`
+    - param `slice_name: str`
+    - param `list_slices: bool`
+    - param `app_root: Path`
+- module `data_engine.ui.cli.commands_start`
+  - attribute `__all__`
+  - function `start_surface`
+    - param `surface: str`
+  - function `preferred_gui_python_executable`
+  - function `start_gui_subprocess`
+  - function `launch_desktop_ui`
+    - param `*`
+    - param `theme_name: str | None=None`
+  - function `launch_terminal_ui`
+- module `data_engine.ui.cli.commands_workspace`
+  - attribute `__all__`
+  - function `create_command`
+    - param `args`
+    - param `*`
+    - param `dependencies`
+  - function `create_workspace`
+    - param `path: Path`
+    - param `*`
+    - param `dependencies`
+  - function `workspace_vscode_settings`
+    - param `workspace_root: Path`
+    - param `*`
+    - param `app_root: Path`
+  - function `collection_vscode_settings`
+    - param `collection_root: Path`
+    - param `*`
+    - param `app_root: Path`
+  - function `write_collection_vscode_settings`
+    - param `collection_root: Path`
+    - param `*`
+    - param `dependencies`
+  - function `write_workspace_vscode_settings`
+    - param `workspace_root: Path`
+    - param `*`
+    - param `dependencies`
+- module `data_engine.ui.cli.dependencies`
+  - function `default_cli_dependency_factories`
+  - function `build_default_cli_dependencies`
+    - param `*`
+    - param `factories: CliDependencyFactories | None=None`
+  - class `CliDependencies`
+    - attribute `app_state_policy`
+    - attribute `shared_state_service`
+    - attribute `workspace_service`
+  - class `CliDependencyFactories`
+    - attribute `app_state_policy_factory`
+    - attribute `shared_state_service_factory`
+    - attribute `workspace_service_factory`
+- module `data_engine.ui.cli.parser`
+  - function `build_parser`
+  - class `_HelpFormatter`
+- module `data_engine.ui.gui`
+  - attribute `__all__`
+  - function `__getattr__`
+    - param `name: str`
+- module `data_engine.ui.gui.app`
+  - attribute `__all__`
+  - class `DataEngineWindow`
+    - attribute `_MAX_LOG_EVENTS_PER_TICK`
+    - attribute `_MAX_VISIBLE_LOG_RUNS`
+    - attribute `_MAX_DAEMON_SYNC_MISSES`
+    - attribute `_DOCS_HOME_PAGE`
+    - attribute `_ACTIVE_FLOW_STATES`
+    - attribute `_VIEW_RAIL_ICON_NAMES`
+    - attribute `_ACTION_ICON_NAMES`
+    - attribute `_LOG_ICON_NAMES`
+    - attribute `_LOG_ICON_COLORS`
+    - instance attribute `workspace_counts_footer_label`
+    - instance attribute `view_stack`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `theme_name: str=DEFAULT_THEME`
+      - param `services: GuiServices | None=None`
+    - method `showEvent`
+      - param `self`
+      - param `event`
+    - method `closeEvent`
+      - param `self`
+      - param `event`
+    - method `_build_window`
+      - param `self`
+- module `data_engine.ui.gui.bootstrap`
+  - attribute `__all__`
+  - function `default_gui_dependency_factories`
+  - function `default_gui_service_kwargs`
+    - param `theme_name: str`
+  - function `_gui_services_from_kwargs`
+    - param `service_kwargs: dict[str, object]`
+  - function `build_gui_service_kwargs`
+    - param `*`
+    - param `settings_service: SettingsService | None=None`
+    - param `workspace_service: WorkspaceService | None=None`
+    - param `workspace_session_application: WorkspaceSessionApplication | None=None`
+    - param `action_state_application: ActionStateApplication | None=None`
+    - param `detail_application: DetailApplication | None=None`
+    - param `flow_catalog_service: FlowCatalogService | None=None`
+    - param `flow_catalog_application: FlowCatalogApplication | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+    - param `daemon_service: DaemonService | None=None`
+    - param `daemon_state_service: DaemonStateService | None=None`
+    - param `runtime_application: RuntimeApplication | None=None`
+    - param `control_application: OperatorControlApplication | None=None`
+    - param `ledger_service: LedgerService | None=None`
+    - param `log_service: LogService | None=None`
+    - param `runtime_binding_service: WorkspaceRuntimeBindingService | None=None`
+    - param `runtime_history_service: RuntimeHistoryService | None=None`
+    - param `shared_state_service: SharedStateService | None=None`
+    - param `theme_service: ThemeService | None=None`
+    - param `workspace_provisioning_service: WorkspaceProvisioningService | None=None`
+    - param `settings_store: LocalSettingsStore | None=None`
+    - param `factories: GuiDependencyFactories | None=None`
+    - param `app_root: Path | None=None`
+    - param `discover_workspaces_func=None`
+    - param `resolve_workspace_paths_func=None`
+    - param `discover_definitions_func=discover_flow_module_definitions`
+    - param `load_flow_func=load_flow`
+    - param `spawn_process_func=spawn_daemon_process`
+    - param `request_func=daemon_request`
+    - param `is_live_func=is_daemon_live`
+    - param `client_error_type: type[Exception]=DaemonClientError`
+    - param `resolve_theme_name_func=resolve_theme_name`
+    - param `system_theme_name_func=system_theme_name`
+    - param `toggle_theme_name_func=toggle_theme_name`
+    - param `theme_button_text_func=theme_button_text`
+    - param `themes=THEMES`
+    - param `default_theme_name: str | None=None`
+  - function `build_default_gui_services`
+    - param `*`
+    - param `settings_service: SettingsService | None=None`
+    - param `workspace_service: WorkspaceService | None=None`
+    - param `workspace_session_application: WorkspaceSessionApplication | None=None`
+    - param `action_state_application: ActionStateApplication | None=None`
+    - param `detail_application: DetailApplication | None=None`
+    - param `flow_catalog_service: FlowCatalogService | None=None`
+    - param `flow_catalog_application: FlowCatalogApplication | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+    - param `daemon_service: DaemonService | None=None`
+    - param `daemon_state_service: DaemonStateService | None=None`
+    - param `runtime_application: RuntimeApplication | None=None`
+    - param `control_application: OperatorControlApplication | None=None`
+    - param `ledger_service: LedgerService | None=None`
+    - param `log_service: LogService | None=None`
+    - param `runtime_binding_service: WorkspaceRuntimeBindingService | None=None`
+    - param `runtime_history_service: RuntimeHistoryService | None=None`
+    - param `shared_state_service: SharedStateService | None=None`
+    - param `theme_service: ThemeService | None=None`
+    - param `workspace_provisioning_service: WorkspaceProvisioningService | None=None`
+    - param `settings_store: LocalSettingsStore | None=None`
+    - param `factories: GuiDependencyFactories | None=None`
+    - param `app_root: Path | None=None`
+    - param `discover_workspaces_func=None`
+    - param `resolve_workspace_paths_func=None`
+    - param `discover_definitions_func=None`
+    - param `load_flow_func=None`
+    - param `spawn_process_func=None`
+    - param `request_func=None`
+    - param `is_live_func=None`
+    - param `client_error_type: type[Exception]=DaemonClientError`
+    - param `resolve_theme_name_func=None`
+    - param `system_theme_name_func=None`
+    - param `toggle_theme_name_func=None`
+    - param `theme_button_text_func=None`
+    - param `themes=None`
+    - param `default_theme_name: str | None=None`
+  - function `build_gui_services`
+    - param `*`
+    - param `settings_service: SettingsService | None=None`
+    - param `workspace_service: WorkspaceService | None=None`
+    - param `workspace_session_application: WorkspaceSessionApplication | None=None`
+    - param `action_state_application: ActionStateApplication | None=None`
+    - param `detail_application: DetailApplication | None=None`
+    - param `flow_catalog_service: FlowCatalogService | None=None`
+    - param `flow_catalog_application: FlowCatalogApplication | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+    - param `daemon_service: DaemonService | None=None`
+    - param `daemon_state_service: DaemonStateService | None=None`
+    - param `runtime_application: RuntimeApplication | None=None`
+    - param `control_application: OperatorControlApplication | None=None`
+    - param `ledger_service: LedgerService | None=None`
+    - param `log_service: LogService | None=None`
+    - param `runtime_history_service: RuntimeHistoryService | None=None`
+    - param `shared_state_service: SharedStateService | None=None`
+    - param `theme_service: ThemeService | None=None`
+    - param `workspace_provisioning_service: WorkspaceProvisioningService | None=None`
+    - param `settings_store: LocalSettingsStore | None=None`
+    - param `factories: GuiDependencyFactories | None=None`
+    - param `app_root: Path | None=None`
+    - param `discover_workspaces_func=None`
+    - param `resolve_workspace_paths_func=None`
+    - param `discover_definitions_func=None`
+    - param `load_flow_func=None`
+    - param `spawn_process_func=None`
+    - param `request_func=None`
+    - param `is_live_func=None`
+    - param `client_error_type: type[Exception]=DaemonClientError`
+    - param `resolve_theme_name_func=None`
+    - param `system_theme_name_func=None`
+    - param `toggle_theme_name_func=None`
+    - param `theme_button_text_func=None`
+    - param `themes=None`
+    - param `default_theme_name: str | None=None`
+  - class `GuiServices`
+    - attribute `settings_service`
+    - attribute `workspace_service`
+    - attribute `workspace_session_application`
+    - attribute `action_state_application`
+    - attribute `detail_application`
+    - attribute `flow_catalog_service`
+    - attribute `flow_catalog_application`
+    - attribute `flow_execution_service`
+    - attribute `daemon_service`
+    - attribute `daemon_state_service`
+    - attribute `runtime_application`
+    - attribute `control_application`
+    - attribute `ledger_service`
+    - attribute `log_service`
+    - attribute `runtime_binding_service`
+    - attribute `runtime_history_service`
+    - attribute `shared_state_service`
+    - attribute `theme_service`
+    - attribute `workspace_provisioning_service`
+  - class `GuiDependencyFactories`
+    - attribute `settings_store_factory`
+    - attribute `settings_service_factory`
+    - attribute `workspace_service_factory`
+    - attribute `workspace_session_application_factory`
+    - attribute `action_state_application_factory`
+    - attribute `detail_application_factory`
+    - attribute `flow_catalog_service_factory`
+    - attribute `flow_catalog_application_factory`
+    - attribute `flow_execution_service_factory`
+    - attribute `daemon_service_factory`
+    - attribute `daemon_state_service_factory`
+    - attribute `ledger_service_factory`
+    - attribute `log_service_factory`
+    - attribute `runtime_binding_service_factory`
+    - attribute `runtime_history_service_factory`
+    - attribute `shared_state_service_factory`
+    - attribute `runtime_application_factory`
+    - attribute `control_application_factory`
+    - attribute `theme_service_factory`
+    - attribute `workspace_provisioning_service_factory`
+- module `data_engine.ui.gui.bootstrapper`
+  - attribute `__all__`
+  - function `bootstrap_gui_window`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `theme_name: str`
+    - param `services: GuiServices | None=None`
+- module `data_engine.ui.gui.cache_models`
+  - attribute `__all__`
+  - class `OperationRowWidgets`
+    - attribute `row_card`
+    - attribute `title_label`
+    - attribute `duration_label`
+    - attribute `inspect_button`
+    - attribute `operation_name`
+- module `data_engine.ui.gui.control_support`
+  - attribute `__all__`
+  - class `GuiControlMixin`
+    - instance attribute `run_log_preview_dialog`
+    - method `_load_flows`
+      - param `self: 'DataEngineWindow'`
+    - method `_populate_flow_tree`
+      - param `self: 'DataEngineWindow'`
+    - method `_select_flow`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_name: str | None`
+    - method `_refresh_selection`
+      - param `self: 'DataEngineWindow'`
+      - param `card`
+    - method `_refresh_summary`
+      - param `self: 'DataEngineWindow'`
+    - method `_refresh_action_buttons`
+      - param `self: 'DataEngineWindow'`
+    - method `_reload_workspace_options`
+      - param `self: 'DataEngineWindow'`
+    - method `_workspace_selection_changed`
+      - param `self: 'DataEngineWindow'`
+      - param `index: int`
+    - method `_switch_workspace`
+      - param `self: 'DataEngineWindow'`
+      - param `workspace_id: str`
+    - method `_refresh_lease_status`
+      - param `self: 'DataEngineWindow'`
+    - method `_request_control`
+      - param `self: 'DataEngineWindow'`
+    - method `_update_engine_button`
+      - param `self: 'DataEngineWindow'`
+    - method `_set_flow_state`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_name: str`
+      - param `state: str`
+    - method `_set_flow_states`
+      - param `self: 'DataEngineWindow'`
+      - param `updates: dict[str, str]`
+    - method `_sync_from_daemon`
+      - param `self: 'DataEngineWindow'`
+    - method `_ensure_daemon_started`
+      - param `self: 'DataEngineWindow'`
+    - method `_start_daemon_worker`
+      - param `self: 'DataEngineWindow'`
+    - method `_finish_daemon_startup`
+      - param `self: 'DataEngineWindow'`
+      - param `success: bool`
+      - param `error_text: str`
+    - method `_apply_daemon_snapshot`
+      - param `self: 'DataEngineWindow'`
+      - param `snapshot`
+    - method `_rebuild_runtime_snapshot`
+      - param `self: 'DataEngineWindow'`
+    - method `_refresh_log_view`
+      - param `self: 'DataEngineWindow'`
+      - param `*`
+      - param `force_scroll_to_bottom: bool=False`
+    - method `_add_log_run_item`
+      - param `self: 'DataEngineWindow'`
+      - param `run_group: FlowRunState`
+    - method `_refresh_flows_requested`
+      - param `self: 'DataEngineWindow'`
+    - method `_clear_logs`
+      - param `self: 'DataEngineWindow'`
+    - method `_poll_log_queue`
+      - param `self: 'DataEngineWindow'`
+    - method `_show_run_log_preview`
+      - param `self: 'DataEngineWindow'`
+      - param `run_group: FlowRunState`
+    - method `_show_run_error_details`
+      - param `self: 'DataEngineWindow'`
+      - param `run_group: FlowRunState`
+      - param `entry: FlowLogEntry`
+    - method `_run_selected_flow`
+      - param `self: 'DataEngineWindow'`
+    - method `_start_runtime`
+      - param `self: 'DataEngineWindow'`
+    - method `_stop_runtime`
+      - param `self: 'DataEngineWindow'`
+    - method `_toggle_runtime`
+      - param `self: 'DataEngineWindow'`
+    - method `_stop_pipeline`
+      - param `self: 'DataEngineWindow'`
+    - method `_safe_emit_run_finished`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_name: str`
+      - param `results: object`
+      - param `error: object`
+    - method `_safe_emit_runtime_finished`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_names: tuple[str, ...]`
+      - param `results: object`
+      - param `error: object`
+    - method `_finish_run`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_name: object`
+      - param `results: object`
+      - param `error: object`
+    - method `_finish_runtime`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_names: object`
+      - param `results: object`
+      - param `error: object`
+    - method `_is_group_active`
+      - param `self: 'DataEngineWindow'`
+      - param `group_name: str`
+- module `data_engine.ui.gui.controllers`
+  - attribute `__all__`
+- module `data_engine.ui.gui.controllers.flows`
+  - attribute `__all__`
+  - class `_GuiWorkspaceCatalogController`
+    - instance attribute `workspace_session_application`
+    - instance attribute `flow_catalog_application`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `workspace_session_application: WorkspaceSessionApplication`
+      - param `flow_catalog_application: FlowCatalogApplication`
+    - method `load_flows`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `presentation: '_GuiFlowPresentationController'`
+    - method `populate_flow_tree`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `reload_workspace_options`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `workspace_selection_changed`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `index: int`
+    - method `switch_workspace`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `workspace_id: str`
+    - method `refresh_flows_requested`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `presentation: '_GuiFlowPresentationController'`
+  - class `_GuiFlowPresentationController`
+    - instance attribute `flow_catalog_application`
+    - instance attribute `log_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `flow_catalog_application: FlowCatalogApplication`
+      - param `log_service: LogService`
+    - method `select_flow`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `flow_name: str | None`
+    - method `refresh_selection`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `card: QtFlowCard | None`
+    - method `refresh_summary`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `refresh_action_buttons`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `refresh_lease_status`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `request_control`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `update_engine_button`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `set_flow_state`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `flow_name: str`
+      - param `state: str`
+    - method `set_flow_states`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `updates: dict[str, str]`
+    - method `refresh_flows_requested`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `clear_logs`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+  - class `GuiFlowController`
+    - instance attribute `workspace`
+    - instance attribute `presentation`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `workspace_session_application: WorkspaceSessionApplication`
+      - param `flow_catalog_application: FlowCatalogApplication`
+      - param `log_service: LogService`
+    - method `load_flows`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `populate_flow_tree`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `select_flow`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `flow_name: str | None`
+    - method `refresh_selection`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `card: QtFlowCard | None`
+    - method `refresh_summary`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `refresh_action_buttons`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `reload_workspace_options`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `workspace_selection_changed`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `index: int`
+    - method `switch_workspace`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `workspace_id: str`
+    - method `refresh_lease_status`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `request_control`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `update_engine_button`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `set_flow_state`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `flow_name: str`
+      - param `state: str`
+    - method `set_flow_states`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `updates: dict[str, str]`
+    - method `refresh_flows_requested`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `clear_logs`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+- module `data_engine.ui.gui.controllers.runtime`
+  - attribute `__all__`
+  - class `GuiRuntimeController`
+    - instance attribute `runtime_application`
+    - instance attribute `daemon_service`
+    - instance attribute `log_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `runtime_application: RuntimeApplication`
+      - param `daemon_service: DaemonService`
+      - param `log_service: LogService`
+    - method `sync_from_daemon`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `ensure_daemon_started`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `start_daemon_worker`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `rebuild_runtime_snapshot`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `start_runtime`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `stop_runtime`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `toggle_runtime`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `stop_pipeline`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `finish_run`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `flow_name: object`
+      - param `results: object`
+      - param `error: object`
+    - method `finish_runtime`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `flow_names: object`
+      - param `results: object`
+      - param `error: object`
+    - method `is_group_active`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `group_name: str`
+- module `data_engine.ui.gui.dialogs`
+  - attribute `__all__`
+- module `data_engine.ui.gui.dialogs.messages`
+  - attribute `__all__`
+  - function `structured_error_content`
+    - param `text: str`
+  - function `show_message_box`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `title: str`
+    - param `text: str`
+    - param `tone: str`
+- module `data_engine.ui.gui.dialogs.previews`
+  - attribute `__all__`
+  - function `show_run_log_preview`
+    - param `window: 'DataEngineWindow'`
+    - param `request: RunLogPreviewRequest`
+  - function `_build_raw_log_entry_widget`
+    - param `window: 'DataEngineWindow'`
+    - param `entry: 'FlowLogEntry'`
+    - param `*`
+    - param `run_group: 'FlowRunState'`
+  - function `show_output_preview`
+    - param `window: 'DataEngineWindow'`
+    - param `request: OutputPreviewRequest`
+  - function `show_config_preview`
+    - param `window: 'DataEngineWindow'`
+    - param `request: ConfigPreviewRequest`
+  - function `_present_dialog`
+    - param `dialog: QDialog`
+- module `data_engine.ui.gui.helpers`
+  - attribute `__all__`
+- module `data_engine.ui.gui.helpers.inspection`
+  - function `is_inspectable_operation`
+    - param `operation_name: str`
+  - function `artifact_key_for_operation`
+    - param `operation_name: str`
+  - function `capture_step_outputs`
+    - param `window: 'DataEngineWindow'`
+    - param `flow_name: str`
+    - param `results: object`
+  - function `rehydrate_step_outputs_from_ledger`
+    - param `window: 'DataEngineWindow'`
+  - function `refresh_operation_buttons`
+    - param `window: 'DataEngineWindow'`
+    - param `flow_name: str`
+  - function `inspect_step_output`
+    - param `window: 'DataEngineWindow'`
+    - param `operation_name: str`
+  - function `show_output_preview`
+    - param `window: 'DataEngineWindow'`
+    - param `operation_name: str`
+    - param `output_path: Path`
+  - function `show_config_preview`
+    - param `window: 'DataEngineWindow'`
+  - function `build_output_preview_request`
+    - param `window: 'DataEngineWindow'`
+    - param `operation_name: str`
+- module `data_engine.ui.gui.helpers.lifecycle`
+  - attribute `__all__`
+  - function `register_client_session`
+    - param `window: 'DataEngineWindow'`
+  - function `is_last_process_ui_window`
+    - param `window: 'DataEngineWindow'`
+  - function `unregister_client_session_and_check_for_shutdown`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `purge_process_ui_sessions: bool=False`
+  - function `shutdown_daemon_on_close`
+    - param `window: 'DataEngineWindow'`
+  - function `start_worker_thread`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `target`
+    - param `args=()`
+  - function `run_tracked_worker`
+    - param `window: 'DataEngineWindow'`
+    - param `target`
+    - param `args`
+  - function `wait_for_worker_threads`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `timeout_seconds: float`
+- module `data_engine.ui.gui.helpers.scroll`
+  - function `update_operation_scroll_cues`
+    - param `window: 'DataEngineWindow'`
+    - param `*args`
+  - function `update_sidebar_scroll_cues`
+    - param `window: 'DataEngineWindow'`
+    - param `*args`
+- module `data_engine.ui.gui.helpers.theming`
+  - function `group_icon`
+    - param `window: 'DataEngineWindow'`
+    - param `group_name: str`
+  - function `group_icon_color`
+    - param `window: 'DataEngineWindow'`
+  - function `render_svg_icon_pixmap`
+    - param `window: 'DataEngineWindow'`
+    - param `icon_name: str`
+    - param `size: int`
+    - param `*`
+    - param `fill_color: str | None=None`
+  - function `view_rail_icon`
+    - param `window: 'DataEngineWindow'`
+    - param `view_name: str`
+  - function `action_bar_icon`
+    - param `window: 'DataEngineWindow'`
+    - param `action_name: str`
+  - function `log_icon`
+    - param `window: 'DataEngineWindow'`
+    - param `icon_name: str`
+    - param `size: int=16`
+  - function `render_group_icon_pixmap`
+    - param `window: 'DataEngineWindow'`
+    - param `group_name: str`
+    - param `size: int`
+  - function `toggle_theme`
+    - param `window: 'DataEngineWindow'`
+  - function `sync_theme_to_system`
+    - param `window: 'DataEngineWindow'`
+    - param `*args`
+  - function `apply_theme`
+    - param `window: 'DataEngineWindow'`
+- module `data_engine.ui.gui.icons`
+  - attribute `ICON_ASSETS`
+  - attribute `__all__`
+  - function `load_svg_icon_text`
+    - param `icon_name: str`
+  - class `SvgIconAsset`
+    - attribute `file_name`
+    - attribute `svg_text`
+    - method `read_text`
+      - param `self`
+- module `data_engine.ui.gui.launcher`
+  - attribute `__all__`
+  - function `_configure_qt_webengine_environment`
+  - function `launch`
+    - param `theme_name: str=DEFAULT_THEME`
+  - function `main`
+- module `data_engine.ui.gui.presenters`
+  - attribute `__all__`
+- module `data_engine.ui.gui.presenters.docs`
+  - attribute `__all__`
+  - function `_explicit_missing_error_detail`
+    - param `subject: str`
+  - function `create_docs_browser`
+    - param `window: 'DataEngineWindow'`
+  - function `docs_build_dir`
+    - param `window: 'DataEngineWindow'`
+  - function `initialize_docs_view`
+    - param `window: 'DataEngineWindow'`
+  - function `start_docs_build`
+    - param `window: 'DataEngineWindow'`
+  - function `run_docs_build_worker`
+    - param `window: 'DataEngineWindow'`
+  - function `finish_docs_build`
+    - param `window: 'DataEngineWindow'`
+    - param `succeeded: bool`
+    - param `message: str`
+  - function `load_docs_page`
+    - param `window: 'DataEngineWindow'`
+    - param `file_name: str`
+- module `data_engine.ui.gui.presenters.logs`
+  - attribute `__all__`
+  - function `refresh_log_view`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `force_scroll_to_bottom: bool=False`
+  - function `add_log_run_item`
+    - param `window: 'DataEngineWindow'`
+    - param `run_group: 'FlowRunState'`
+  - function `format_raw_log_message`
+    - param `entry: 'FlowLogEntry'`
+- module `data_engine.ui.gui.presenters.runtime_projection`
+  - attribute `__all__`
+  - function `finish_daemon_startup`
+    - param `window: 'DataEngineWindow'`
+    - param `success: bool`
+    - param `error_text: str`
+  - function `apply_daemon_snapshot`
+    - param `window: 'DataEngineWindow'`
+    - param `snapshot`
+- module `data_engine.ui.gui.presenters.sidebar`
+  - attribute `__all__`
+  - function `refresh_sidebar_selection`
+    - param `window: 'DataEngineWindow'`
+  - function `refresh_sidebar_state_views`
+    - param `window: 'DataEngineWindow'`
+    - param `changed_flow_names: set[str]`
+  - function `set_hovered`
+    - param `widget: QFrame`
+    - param `hovered: bool`
+  - function `repolish_widget_tree`
+    - param `widget: QWidget`
+- module `data_engine.ui.gui.presenters.steps`
+  - attribute `__all__`
+  - function `reset_operation_state`
+    - param `window: 'DataEngineWindow'`
+    - param `flow_name: str`
+  - function `apply_runtime_event`
+    - param `window: 'DataEngineWindow'`
+    - param `event: RuntimeStepEvent`
+  - function `render_operation_durations`
+    - param `window: 'DataEngineWindow'`
+    - param `flow_name: str`
+  - function `duration_text`
+    - param `window: 'DataEngineWindow'`
+    - param `flow_name: str`
+    - param `operation_name: str`
+  - function `refresh_live_operation_durations`
+    - param `window: 'DataEngineWindow'`
+  - function `apply_operation_row_state`
+    - param `row_card: QFrame`
+    - param `status: str`
+  - function `flash_operation_row`
+    - param `window: 'DataEngineWindow'`
+    - param `index: int`
+  - function `normalize_completed_operation_rows`
+    - param `window: 'DataEngineWindow'`
+    - param `flow_name: str`
+- module `data_engine.ui.gui.presenters.workspace`
+  - attribute `__all__`
+- module `data_engine.ui.gui.presenters.workspace_binding`
+  - attribute `__all__`
+  - function `_close_workspace_scoped_dialogs`
+    - param `window: 'DataEngineWindow'`
+  - function `rebind_workspace_context`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `workspace_id: str | None=None`
+    - param `override_root: Path | None | object=...`
+- module `data_engine.ui.gui.presenters.workspace_settings`
+  - attribute `__all__`
+  - function `refresh_workspace_root_controls`
+    - param `window: 'DataEngineWindow'`
+  - function `save_workspace_collection_root_override`
+    - param `window: 'DataEngineWindow'`
+  - function `reset_workspace_collection_root_override`
+    - param `window: 'DataEngineWindow'`
+  - function `browse_workspace_collection_root_override`
+    - param `window: 'DataEngineWindow'`
+  - function `provision_selected_workspace`
+    - param `window: 'DataEngineWindow'`
+  - function `force_shutdown_daemon`
+    - param `window: 'DataEngineWindow'`
+  - function `refresh_workspace_provisioning_controls`
+    - param `window: 'DataEngineWindow'`
+  - function `refresh_workspace_visibility_panel`
+    - param `window: 'DataEngineWindow'`
+  - function `_workspace_module_count`
+    - param `flow_modules_dir: Path`
+  - function `_workspace_counts_footer_text`
+    - param `window: 'DataEngineWindow'`
+  - function `_recent_workspace_run_count`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `days: int`
+- module `data_engine.ui.gui.preview_models`
+  - class `OutputPreviewRequest`
+    - attribute `operation_name`
+    - attribute `output_path`
+  - class `RunLogPreviewRequest`
+    - attribute `run_group`
+    - attribute `detail`
+    - method `from_run`
+      - param `cls`
+      - param `run_group: FlowRunState`
+  - class `ConfigPreviewRequest`
+    - attribute `preview`
+- module `data_engine.ui.gui.render_support`
+  - class `GuiRenderingMixin`
+    - method `_format_raw_log_message`
+      - param `self: 'DataEngineWindow'`
+      - param `entry: FlowLogEntry`
+    - method `_set_operation_cards`
+      - param `self: 'DataEngineWindow'`
+      - param `operation_items: tuple[str, ...]`
+    - method `_update_operation_scroll_cues`
+      - param `self: 'DataEngineWindow'`
+      - param `*args`
+    - method `_update_sidebar_scroll_cues`
+      - param `self: 'DataEngineWindow'`
+      - param `*args`
+    - method `_format_operation_title`
+      - param `self: 'DataEngineWindow'`
+      - param `operation_name: str`
+    - method `_reset_operation_state`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_name: str`
+    - method `_apply_runtime_event`
+      - param `self: 'DataEngineWindow'`
+      - param `event: RuntimeStepEvent`
+    - method `_render_operation_durations`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_name: str`
+    - method `_duration_text`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_name: str`
+      - param `operation_name: str`
+    - method `_refresh_live_operation_durations`
+      - param `self: 'DataEngineWindow'`
+    - method `_apply_operation_row_state`
+      - param `self: 'DataEngineWindow'`
+      - param `row_card: QFrame`
+      - param `row_state`
+    - method `_flash_operation_row`
+      - param `self: 'DataEngineWindow'`
+      - param `index: int`
+    - method `_normalize_completed_operation_rows`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_name: str`
+    - method `_format_seconds`
+      - param `self: 'DataEngineWindow'`
+      - param `seconds: float`
+    - method `_group_icon`
+      - param `self: 'DataEngineWindow'`
+      - param `group_name: str`
+    - method `_group_icon_color`
+      - param `self: 'DataEngineWindow'`
+    - method `_render_svg_icon_pixmap`
+      - param `self: 'DataEngineWindow'`
+      - param `icon_name: str`
+      - param `size: int`
+      - param `*`
+      - param `fill_color: str | None=None`
+    - method `_view_rail_icon`
+      - param `self: 'DataEngineWindow'`
+      - param `view_name: str`
+    - method `_action_bar_icon`
+      - param `self: 'DataEngineWindow'`
+      - param `action_name: str`
+    - method `_log_icon`
+      - param `self: 'DataEngineWindow'`
+      - param `icon_name: str`
+      - param `size: int=16`
+    - method `_render_group_icon_pixmap`
+      - param `self: 'DataEngineWindow'`
+      - param `group_name: str`
+      - param `size: int`
+    - method `_build_group_row_widget`
+      - param `self: 'DataEngineWindow'`
+      - param `group_name: str`
+      - param `entries: list['QtFlowCard']`
+    - method `_build_flow_row_widget`
+      - param `self: 'DataEngineWindow'`
+      - param `card: 'QtFlowCard'`
+    - method `_build_log_run_widget`
+      - param `self: 'DataEngineWindow'`
+      - param `run_group`
+    - method `_refresh_sidebar_selection`
+      - param `self: 'DataEngineWindow'`
+    - method `_refresh_sidebar_state_views`
+      - param `self: 'DataEngineWindow'`
+      - param `changed_flow_names: set[str]`
+    - method `_set_hovered`
+      - param `self: 'DataEngineWindow'`
+      - param `widget: QFrame`
+      - param `hovered: bool`
+    - method `_repolish_widget_tree`
+      - param `self: 'DataEngineWindow'`
+      - param `widget: QWidget`
+    - method `_flow_icon`
+      - param `self: 'DataEngineWindow'`
+      - param `card: 'QtFlowCard'`
+    - method `_toggle_theme`
+      - param `self: 'DataEngineWindow'`
+    - method `_sync_theme_to_system`
+      - param `self: 'DataEngineWindow'`
+      - param `*args`
+    - method `_apply_theme`
+      - param `self: 'DataEngineWindow'`
+    - method `_is_inspectable_operation`
+      - param `self: 'DataEngineWindow'`
+      - param `operation_name: str`
+    - method `_artifact_key_for_operation`
+      - param `self: 'DataEngineWindow'`
+      - param `operation_name: str`
+    - method `_capture_step_outputs`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_name: str`
+      - param `results: object`
+    - method `_rehydrate_step_outputs_from_ledger`
+      - param `self: 'DataEngineWindow'`
+    - method `_refresh_operation_buttons`
+      - param `self: 'DataEngineWindow'`
+      - param `flow_name: str`
+    - method `_inspect_step_output`
+      - param `self: 'DataEngineWindow'`
+      - param `operation_name: str`
+    - method `_show_output_preview`
+      - param `self: 'DataEngineWindow'`
+      - param `operation_name: str`
+      - param `output_path: Path`
+    - method `_show_config_preview`
+      - param `self: 'DataEngineWindow'`
+- module `data_engine.ui.gui.rendering`
+  - attribute `__all__`
+- module `data_engine.ui.gui.rendering.artifacts`
+  - attribute `__all__`
+  - function `populate_output_preview`
+    - param `layout: QVBoxLayout`
+    - param `output_path: Path`
+    - param `preview_spec: ArtifactPreviewSpec | None=None`
+  - function `_add_tabular_preview`
+    - param `layout: QVBoxLayout`
+    - param `frame: pl.DataFrame`
+    - param `heading: str`
+  - function `_add_text_preview`
+    - param `layout: QVBoxLayout`
+    - param `output_path: Path`
+    - param `heading: str`
+  - function `_add_placeholder_preview`
+    - param `layout: QVBoxLayout`
+    - param `*`
+    - param `heading: str`
+    - param `message: str`
+    - param `output_path: Path`
+- module `data_engine.ui.gui.rendering.icons`
+  - attribute `__all__`
+  - function `theme_svg_paths`
+    - param `svg_text: str`
+    - param `fill: str`
+  - function `render_svg_icon_pixmap`
+    - param `*`
+    - param `icon_name: str`
+    - param `size: int`
+    - param `device_pixel_ratio: float`
+    - param `fill_color: str | None=None`
+    - param `default_fill_color: QColor | str`
+- module `data_engine.ui.gui.runtime`
+  - attribute `__all__`
+  - class `QueueLogHandler`
+    - instance attribute `queue`
+    - method `__init__`
+      - param `self`
+      - param `queue: Queue[FlowLogEntry]`
+    - method `emit`
+      - param `self`
+      - param `record: logging.LogRecord`
+  - class `UiSignals`
+    - attribute `run_finished`
+    - attribute `runtime_finished`
+    - attribute `docs_build_finished`
+    - attribute `daemon_startup_finished`
+- module `data_engine.ui.gui.state_support`
+  - attribute `__all__`
+  - class `GuiStateMixin`
+    - instance attribute `_operator_session_state`
+    - instance attribute `flow_catalog_state`
+    - instance attribute `_daemon_status`
+    - instance attribute `_docs_build_running`
+    - instance attribute `_docs_root_dir`
+    - instance attribute `workspace_session_state`
+    - method `runtime_ledger`
+      - param `self: 'DataEngineWindow'`
+    - method `log_store`
+      - param `self: 'DataEngineWindow'`
+    - method `_daemon_manager`
+      - param `self: 'DataEngineWindow'`
+    - method `runtime_session`
+      - param `self: 'DataEngineWindow'`
+    - method `runtime_session`
+      - param `self: 'DataEngineWindow'`
+      - param `value: RuntimeSessionState`
+    - method `flow_catalog_state`
+      - param `self: 'DataEngineWindow'`
+    - method `flow_catalog_state`
+      - param `self: 'DataEngineWindow'`
+      - param `value: FlowCatalogState`
+    - method `flow_cards`
+      - param `self: 'DataEngineWindow'`
+    - method `flow_cards`
+      - param `self: 'DataEngineWindow'`
+      - param `value: dict[str, QtFlowCard] | tuple[QtFlowCard, ...]`
+    - method `flow_states`
+      - param `self: 'DataEngineWindow'`
+    - method `flow_states`
+      - param `self: 'DataEngineWindow'`
+      - param `value: dict[str, str]`
+    - method `selected_flow_name`
+      - param `self: 'DataEngineWindow'`
+    - method `selected_flow_name`
+      - param `self: 'DataEngineWindow'`
+      - param `value: str | None`
+    - method `empty_flow_message`
+      - param `self: 'DataEngineWindow'`
+    - method `empty_flow_message`
+      - param `self: 'DataEngineWindow'`
+      - param `value: str`
+    - method `daemon_status`
+      - param `self: 'DataEngineWindow'`
+    - method `daemon_status`
+      - param `self: 'DataEngineWindow'`
+      - param `value: DaemonStatusState`
+    - method `workspace_control_state`
+      - param `self: 'DataEngineWindow'`
+    - method `workspace_control_state`
+      - param `self: 'DataEngineWindow'`
+      - param `value: WorkspaceControlState`
+    - method `workspace_session_state`
+      - param `self: 'DataEngineWindow'`
+    - method `workspace_session_state`
+      - param `self: 'DataEngineWindow'`
+      - param `value: WorkspaceSessionState`
+    - method `operator_session_state`
+      - param `self: 'DataEngineWindow'`
+    - method `operation_tracker`
+      - param `self: 'DataEngineWindow'`
+    - method `operation_tracker`
+      - param `self: 'DataEngineWindow'`
+      - param `value: OperationSessionState`
+    - method `docs_build_running`
+      - param `self: 'DataEngineWindow'`
+    - method `docs_build_running`
+      - param `self: 'DataEngineWindow'`
+      - param `value: bool`
+    - method `docs_root_dir`
+      - param `self: 'DataEngineWindow'`
+    - method `docs_root_dir`
+      - param `self: 'DataEngineWindow'`
+      - param `value: Path | None`
+    - method `workspace_collection_root_override`
+      - param `self: 'DataEngineWindow'`
+    - method `workspace_collection_root_override`
+      - param `self: 'DataEngineWindow'`
+      - param `value: Path | None`
+    - method `discovered_workspace_ids`
+      - param `self: 'DataEngineWindow'`
+    - method `discovered_workspace_ids`
+      - param `self: 'DataEngineWindow'`
+      - param `value: tuple[str, ...]`
+    - method `_log_matches_selection`
+      - param `self: 'DataEngineWindow'`
+      - param `entry: FlowLogEntry`
+    - method `_append_log_entry`
+      - param `self: 'DataEngineWindow'`
+      - param `entry: FlowLogEntry`
+    - method `_schedule_ui_refresh`
+      - param `self: 'DataEngineWindow'`
+      - param `*`
+      - param `log_view: bool=False`
+      - param `action_buttons: bool=False`
+    - method `_flush_deferred_ui_updates`
+      - param `self: 'DataEngineWindow'`
+    - method `_append_log_line`
+      - param `self: 'DataEngineWindow'`
+      - param `line: str`
+      - param `*`
+      - param `flow_name: str | None=None`
+- module `data_engine.ui.gui.support`
+  - class `GuiWindowSupportMixin`
+    - method `_resolve_workspace_paths`
+      - param `self: 'DataEngineWindow'`
+      - param `*`
+      - param `workspace_id: str | None=None`
+      - param `workspace_collection_root: Path | None | object=...`
+    - method `_daemon_request`
+      - param `self: 'DataEngineWindow'`
+      - param `paths`
+      - param `payload`
+      - param `*`
+      - param `timeout: float=0.0`
+    - method `_is_daemon_live`
+      - param `self: 'DataEngineWindow'`
+      - param `paths`
+    - method `_daemon_client_error_type`
+      - param `self: 'DataEngineWindow'`
+    - method `_unregister_client_session_and_check_for_shutdown`
+      - param `self: 'DataEngineWindow'`
+      - param `*`
+      - param `purge_process_ui_sessions: bool`
+    - method `_is_last_process_ui_window`
+      - param `self: 'DataEngineWindow'`
+    - method `_shutdown_daemon_on_close`
+      - param `self: 'DataEngineWindow'`
+    - method `_wait_for_worker_threads`
+      - param `self: 'DataEngineWindow'`
+      - param `*`
+      - param `timeout_seconds: float`
+    - method `_register_worker_thread`
+      - param `self: 'DataEngineWindow'`
+      - param `thread`
+    - method `_discard_worker_thread`
+      - param `self: 'DataEngineWindow'`
+      - param `thread`
+    - method `_worker_threads_snapshot`
+      - param `self: 'DataEngineWindow'`
+    - method `_switch_view`
+      - param `self: 'DataEngineWindow'`
+      - param `index: int`
+    - method `_monotonic`
+      - param `self: 'DataEngineWindow'`
+    - method `_structured_error_content`
+      - param `self: 'DataEngineWindow'`
+      - param `text: str`
+    - method `_show_message_box`
+      - param `self: 'DataEngineWindow'`
+      - param `*`
+      - param `title: str`
+      - param `text: str`
+      - param `tone: str`
+    - method `_show_message_box_later`
+      - param `self: 'DataEngineWindow'`
+      - param `*`
+      - param `title: str`
+      - param `text: str`
+      - param `tone: str`
+    - method `_docs_source_dir`
+      - param `self: 'DataEngineWindow'`
+    - method `_docs_build_dir`
+      - param `self: 'DataEngineWindow'`
+    - method `_refresh_workspace_root_controls`
+      - param `self: 'DataEngineWindow'`
+    - method `_rebind_workspace_context`
+      - param `self: 'DataEngineWindow'`
+      - param `*`
+      - param `workspace_id: str | None=None`
+    - method `_save_workspace_collection_root_override`
+      - param `self: 'DataEngineWindow'`
+    - method `_reset_workspace_collection_root_override`
+      - param `self: 'DataEngineWindow'`
+    - method `_browse_workspace_collection_root_override`
+      - param `self: 'DataEngineWindow'`
+    - method `_provision_selected_workspace`
+      - param `self: 'DataEngineWindow'`
+    - method `_force_shutdown_daemon`
+      - param `self: 'DataEngineWindow'`
+    - method `_refresh_workspace_visibility_panel`
+      - param `self: 'DataEngineWindow'`
+    - method `_create_docs_browser`
+      - param `self: 'DataEngineWindow'`
+    - method `_initialize_docs_view`
+      - param `self: 'DataEngineWindow'`
+    - method `_start_docs_build`
+      - param `self: 'DataEngineWindow'`
+    - method `_run_docs_build_worker`
+      - param `self: 'DataEngineWindow'`
+    - method `_finish_docs_build`
+      - param `self: 'DataEngineWindow'`
+      - param `succeeded: bool`
+      - param `message: str`
+    - method `_load_docs_page`
+      - param `self: 'DataEngineWindow'`
+      - param `file_name: str`
+    - method `_config_summary`
+      - param `self: 'DataEngineWindow'`
+      - param `card: 'QtFlowCard | None'`
+    - method `_has_authored_workspace`
+      - param `self: 'DataEngineWindow'`
+    - method `_is_bootstrap_ready_error`
+      - param `self: 'DataEngineWindow'`
+      - param `message: str`
+    - method `_empty_flow_message_for_error`
+      - param `self: 'DataEngineWindow'`
+      - param `message: str`
+- module `data_engine.ui.gui.surface`
+  - attribute `__all__`
+  - function `build_default_gui_services`
+    - param `theme_name: str`
+  - function `handle_show_event`
+    - param `window: 'DataEngineWindow'`
+    - param `event: 'QShowEvent'`
+  - function `handle_close_event`
+    - param `window: 'DataEngineWindow'`
+    - param `event: 'QCloseEvent'`
+  - function `show_message_box_later`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `title: str`
+    - param `text: str`
+    - param `tone: str`
+  - function `log_matches_selection`
+    - param `window: 'DataEngineWindow'`
+    - param `entry: 'FlowLogEntry'`
+  - function `append_log_entry`
+    - param `window: 'DataEngineWindow'`
+    - param `entry: 'FlowLogEntry'`
+  - function `schedule_ui_refresh`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `log_view: bool=False`
+    - param `action_buttons: bool=False`
+  - function `flush_deferred_ui_updates`
+    - param `window: 'DataEngineWindow'`
+  - function `append_log_line`
+    - param `window: 'DataEngineWindow'`
+    - param `line: str`
+    - param `*`
+    - param `flow_name: str | None=None`
+  - function `poll_log_queue`
+    - param `window: 'DataEngineWindow'`
+  - function `safe_emit_run_finished`
+    - param `window: 'DataEngineWindow'`
+    - param `flow_name: str`
+    - param `results: object`
+    - param `error: object`
+  - function `safe_emit_runtime_finished`
+    - param `window: 'DataEngineWindow'`
+    - param `flow_names: tuple[str, ...]`
+    - param `results: object`
+    - param `error: object`
+- module `data_engine.ui.gui.theme`
+  - attribute `__all__`
+  - function `stylesheet`
+    - param `theme_name: str=DEFAULT_THEME`
+- module `data_engine.ui.gui.widgets`
+  - attribute `__all__`
+- module `data_engine.ui.gui.widgets.config`
+  - attribute `__all__`
+  - function `make_label_selectable`
+    - param `label: QLabel`
+  - function `build_config_value`
+    - param `layout: QVBoxLayout`
+    - param `label: str`
+- module `data_engine.ui.gui.widgets.logs`
+  - attribute `__all__`
+  - function `build_log_run_widget`
+    - param `window: 'DataEngineWindow'`
+    - param `run_group: 'FlowRunState'`
+- module `data_engine.ui.gui.widgets.panels`
+  - attribute `__all__`
+  - function `build_operator_view`
+    - param `window: 'DataEngineWindow'`
+  - function `build_nav_rail`
+    - param `window: 'DataEngineWindow'`
+  - function `_nav_button`
+    - param `window: 'DataEngineWindow'`
+    - param `icon_name: str`
+    - param `tooltip: str`
+  - function `build_docs_view`
+    - param `window: 'DataEngineWindow'`
+  - function `build_settings_view`
+    - param `window: 'DataEngineWindow'`
+  - function `_build_workspace_settings_panel`
+    - param `window: 'DataEngineWindow'`
+  - function `_build_bootstrap_settings_panel`
+    - param `window: 'DataEngineWindow'`
+  - function `_build_settings_fact_row`
+    - param `label_text: str`
+    - param `value_attr: str`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `selectable: bool=False`
+  - function `build_action_bar`
+    - param `window: 'DataEngineWindow'`
+  - function `build_sidebar`
+    - param `window: 'DataEngineWindow'`
+  - function `build_center_panel`
+    - param `window: 'DataEngineWindow'`
+  - function `build_right_panel`
+    - param `window: 'DataEngineWindow'`
+- module `data_engine.ui.gui.widgets.sidebar`
+  - attribute `__all__`
+  - function `group_secondary_text`
+    - param `window: 'DataEngineWindow'`
+    - param `group_name: str`
+    - param `entries: list['QtFlowCard']`
+  - function `flow_secondary_text`
+    - param `window: 'DataEngineWindow'`
+    - param `card: 'QtFlowCard'`
+  - function `flow_primary_text`
+    - param `card: 'QtFlowCard'`
+  - function `status_color_name`
+    - param `state: str`
+  - function `icon_label`
+    - param `icon: QIcon`
+    - param `size: int=18`
+  - function `build_group_row_widget`
+    - param `window: 'DataEngineWindow'`
+    - param `group_name: str`
+    - param `entries: list['QtFlowCard']`
+  - function `build_flow_row_widget`
+    - param `window: 'DataEngineWindow'`
+    - param `card: 'QtFlowCard'`
+  - function `group_label`
+    - param `group_name: str`
+- module `data_engine.ui.gui.widgets.steps`
+  - attribute `__all__`
+  - function `set_operation_cards`
+    - param `window: 'DataEngineWindow'`
+    - param `operation_items: tuple[str, ...]`
+  - function `format_operation_title`
+    - param `operation_name: str`
+- module `data_engine.ui.tui`
+  - attribute `__all__`
+- module `data_engine.ui.tui.app`
+  - attribute `__all__`
+  - function `main`
+  - class `DataEngineTui`
+    - attribute `CSS`
+    - attribute `_ACTIVE_FLOW_STATES`
+    - attribute `BINDINGS`
+    - instance attribute `selected_flow_name`
+    - instance attribute `selected_run_key`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `theme_name: str=DEFAULT_THEME`
+      - param `services: TuiServices | None=None`
+    - method `compose`
+      - param `self`
+    - method `on_mount`
+      - param `self`
+    - method `on_unmount`
+      - param `self`
+    - method `on_list_view_selected`
+      - param `self`
+      - param `event: ListView.Selected`
+    - method `on_button_pressed`
+      - param `self`
+      - param `event: Button.Pressed`
+    - method `on_select_changed`
+      - param `self`
+      - param `event: Select.Changed`
+    - method `action_refresh_flows`
+      - param `self`
+    - method `action_run_selected`
+      - param `self`
+    - method `action_start_engine`
+      - param `self`
+    - method `action_stop_engine`
+      - param `self`
+    - method `action_view_config`
+      - param `self`
+    - method `action_clear_flow_log`
+      - param `self`
+    - method `action_view_log`
+      - param `self`
+    - method `_load_flows`
+      - param `self`
+    - method `_reload_workspace_options`
+      - param `self`
+    - method `_switch_workspace`
+      - param `self`
+      - param `workspace_id: str`
+    - method `_render_selected_flow`
+      - param `self`
+    - method `_selected_run_group`
+      - param `self`
+    - method `_show_run_group_modal`
+      - param `self`
+      - param `run_group: FlowRunState`
+    - method `_poll_ui`
+      - param `self`
+    - method `_refresh_flow_list_items`
+      - param `self`
+    - method `_refresh_buttons`
+      - param `self`
+    - method `_set_status`
+      - param `self`
+      - param `message: str`
+    - method `_sync_daemon_state`
+      - param `self`
+    - method `_ensure_daemon_started`
+      - param `self`
+    - method `_start_daemon_worker`
+      - param `self`
+    - method `_finish_daemon_startup`
+      - param `self`
+      - param `success: bool`
+      - param `error_text: str`
+    - method `_rebuild_runtime_snapshot`
+      - param `self`
+- module `data_engine.ui.tui.bootstrap`
+  - attribute `__all__`
+  - function `default_tui_dependency_factories`
+  - function `default_tui_service_kwargs`
+    - param `theme_name: str`
+  - function `_tui_services_from_kwargs`
+    - param `service_kwargs: dict[str, object]`
+  - function `build_tui_service_kwargs`
+    - param `*`
+    - param `settings_service: SettingsService | None=None`
+    - param `workspace_service: WorkspaceService | None=None`
+    - param `workspace_session_application: WorkspaceSessionApplication | None=None`
+    - param `action_state_application: ActionStateApplication | None=None`
+    - param `detail_application: DetailApplication | None=None`
+    - param `flow_catalog_service: FlowCatalogService | None=None`
+    - param `flow_catalog_application: FlowCatalogApplication | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+    - param `daemon_service: DaemonService | None=None`
+    - param `daemon_state_service: DaemonStateService | None=None`
+    - param `runtime_application: RuntimeApplication | None=None`
+    - param `control_application: OperatorControlApplication | None=None`
+    - param `ledger_service: LedgerService | None=None`
+    - param `log_service: LogService | None=None`
+    - param `runtime_binding_service: WorkspaceRuntimeBindingService | None=None`
+    - param `runtime_history_service: RuntimeHistoryService | None=None`
+    - param `shared_state_service: SharedStateService | None=None`
+    - param `theme_service: ThemeService | None=None`
+    - param `settings_store: LocalSettingsStore | None=None`
+    - param `factories: TuiDependencyFactories | None=None`
+    - param `app_root: Path | None=None`
+    - param `discover_workspaces_func=None`
+    - param `resolve_workspace_paths_func=None`
+    - param `discover_definitions_func=discover_flow_module_definitions`
+    - param `load_flow_func=load_flow`
+    - param `spawn_process_func=spawn_daemon_process`
+    - param `request_func=daemon_request`
+    - param `is_live_func=is_daemon_live`
+    - param `client_error_type: type[Exception]=DaemonClientError`
+    - param `resolve_theme_name_func=resolve_theme_name`
+    - param `system_theme_name_func=system_theme_name`
+    - param `toggle_theme_name_func=toggle_theme_name`
+    - param `theme_button_text_func=theme_button_text`
+    - param `themes=THEMES`
+    - param `default_theme_name: str | None=None`
+  - function `build_default_tui_services`
+    - param `*`
+    - param `settings_service: SettingsService | None=None`
+    - param `workspace_service: WorkspaceService | None=None`
+    - param `workspace_session_application: WorkspaceSessionApplication | None=None`
+    - param `action_state_application: ActionStateApplication | None=None`
+    - param `detail_application: DetailApplication | None=None`
+    - param `flow_catalog_service: FlowCatalogService | None=None`
+    - param `flow_catalog_application: FlowCatalogApplication | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+    - param `daemon_service: DaemonService | None=None`
+    - param `daemon_state_service: DaemonStateService | None=None`
+    - param `runtime_application: RuntimeApplication | None=None`
+    - param `control_application: OperatorControlApplication | None=None`
+    - param `ledger_service: LedgerService | None=None`
+    - param `log_service: LogService | None=None`
+    - param `runtime_binding_service: WorkspaceRuntimeBindingService | None=None`
+    - param `runtime_history_service: RuntimeHistoryService | None=None`
+    - param `shared_state_service: SharedStateService | None=None`
+    - param `theme_service: ThemeService | None=None`
+    - param `settings_store: LocalSettingsStore | None=None`
+    - param `factories: TuiDependencyFactories | None=None`
+    - param `app_root: Path | None=None`
+    - param `discover_workspaces_func=None`
+    - param `resolve_workspace_paths_func=None`
+    - param `discover_definitions_func=None`
+    - param `load_flow_func=None`
+    - param `spawn_process_func=None`
+    - param `request_func=None`
+    - param `is_live_func=None`
+    - param `client_error_type: type[Exception]=DaemonClientError`
+    - param `resolve_theme_name_func=None`
+    - param `system_theme_name_func=None`
+    - param `toggle_theme_name_func=None`
+    - param `theme_button_text_func=None`
+    - param `themes=None`
+    - param `default_theme_name: str | None=None`
+  - function `build_tui_services`
+    - param `*`
+    - param `settings_service: SettingsService | None=None`
+    - param `workspace_service: WorkspaceService | None=None`
+    - param `workspace_session_application: WorkspaceSessionApplication | None=None`
+    - param `action_state_application: ActionStateApplication | None=None`
+    - param `detail_application: DetailApplication | None=None`
+    - param `flow_catalog_service: FlowCatalogService | None=None`
+    - param `flow_catalog_application: FlowCatalogApplication | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+    - param `daemon_service: DaemonService | None=None`
+    - param `daemon_state_service: DaemonStateService | None=None`
+    - param `runtime_application: RuntimeApplication | None=None`
+    - param `control_application: OperatorControlApplication | None=None`
+    - param `ledger_service: LedgerService | None=None`
+    - param `log_service: LogService | None=None`
+    - param `runtime_history_service: RuntimeHistoryService | None=None`
+    - param `shared_state_service: SharedStateService | None=None`
+    - param `theme_service: ThemeService | None=None`
+    - param `settings_store: LocalSettingsStore | None=None`
+    - param `factories: TuiDependencyFactories | None=None`
+    - param `app_root: Path | None=None`
+    - param `discover_workspaces_func=None`
+    - param `resolve_workspace_paths_func=None`
+    - param `discover_definitions_func=None`
+    - param `load_flow_func=None`
+    - param `spawn_process_func=None`
+    - param `request_func=None`
+    - param `is_live_func=None`
+    - param `client_error_type: type[Exception]=DaemonClientError`
+    - param `resolve_theme_name_func=None`
+    - param `system_theme_name_func=None`
+    - param `toggle_theme_name_func=None`
+    - param `theme_button_text_func=None`
+    - param `themes=None`
+    - param `default_theme_name: str | None=None`
+  - class `TuiServices`
+    - attribute `settings_service`
+    - attribute `workspace_service`
+    - attribute `workspace_session_application`
+    - attribute `action_state_application`
+    - attribute `detail_application`
+    - attribute `flow_catalog_service`
+    - attribute `flow_catalog_application`
+    - attribute `flow_execution_service`
+    - attribute `daemon_service`
+    - attribute `daemon_state_service`
+    - attribute `runtime_application`
+    - attribute `control_application`
+    - attribute `ledger_service`
+    - attribute `log_service`
+    - attribute `runtime_binding_service`
+    - attribute `runtime_history_service`
+    - attribute `shared_state_service`
+    - attribute `theme_service`
+  - class `TuiDependencyFactories`
+    - attribute `settings_store_factory`
+    - attribute `settings_service_factory`
+    - attribute `workspace_service_factory`
+    - attribute `workspace_session_application_factory`
+    - attribute `action_state_application_factory`
+    - attribute `detail_application_factory`
+    - attribute `flow_catalog_service_factory`
+    - attribute `flow_catalog_application_factory`
+    - attribute `flow_execution_service_factory`
+    - attribute `daemon_service_factory`
+    - attribute `daemon_state_service_factory`
+    - attribute `ledger_service_factory`
+    - attribute `log_service_factory`
+    - attribute `runtime_binding_service_factory`
+    - attribute `runtime_history_service_factory`
+    - attribute `shared_state_service_factory`
+    - attribute `runtime_application_factory`
+    - attribute `control_application_factory`
+    - attribute `theme_service_factory`
+- module `data_engine.ui.tui.bootstrapper`
+  - attribute `__all__`
+  - function `resolve_initial_tui_workspace_collection_root_override`
+    - param `settings_service`
+  - function `build_initial_tui_app_state`
+    - param `*`
+    - param `workspace_service`
+    - param `workspace_session_application`
+    - param `runtime_binding_service`
+    - param `settings_service`
+  - function `bootstrap_tui_app`
+    - param `app: 'DataEngineTui'`
+    - param `*`
+    - param `theme_name: str`
+    - param `services: TuiServices | None=None`
+- module `data_engine.ui.tui.controllers`
+  - attribute `__all__`
+- module `data_engine.ui.tui.controllers.flows`
+  - attribute `__all__`
+  - class `TuiFlowController`
+    - instance attribute `workspace`
+    - instance attribute `presentation`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `workspace_session_application: WorkspaceSessionApplication`
+      - param `flow_catalog_application: FlowCatalogApplication`
+      - param `control_application: OperatorControlApplication`
+      - param `log_service: LogService`
+    - method `action_refresh_flows`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_run_selected`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_start_engine`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_stop_engine`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_view_config`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_clear_flow_log`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_view_log`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `load_flows`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `reload_workspace_options`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `switch_workspace`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+      - param `workspace_id: str`
+    - method `render_selected_flow`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `selected_run_group`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+  - class `_TuiWorkspaceCatalogController`
+    - instance attribute `workspace_session_application`
+    - instance attribute `flow_catalog_application`
+    - instance attribute `control_application`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `workspace_session_application: WorkspaceSessionApplication`
+      - param `flow_catalog_application: FlowCatalogApplication`
+      - param `control_application: OperatorControlApplication`
+    - method `action_refresh_flows`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+      - param `presentation: '_TuiFlowPresentationController'`
+    - method `load_flows`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+      - param `presentation_controller: '_TuiFlowPresentationController'`
+    - method `reload_workspace_options`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `switch_workspace`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+      - param `workspace_id: str`
+      - param `presentation: '_TuiFlowPresentationController'`
+  - class `_TuiFlowPresentationController`
+    - instance attribute `control_application`
+    - instance attribute `log_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `control_application: OperatorControlApplication`
+      - param `log_service: LogService`
+    - method `action_run_selected`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_start_engine`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_stop_engine`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_view_config`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_clear_flow_log`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `action_view_log`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `render_selected_flow`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `selected_run_group`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+- module `data_engine.ui.tui.controllers.runtime`
+  - attribute `__all__`
+  - class `TuiRuntimeController`
+    - instance attribute `runtime_application`
+    - instance attribute `daemon_service`
+    - instance attribute `log_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `runtime_application: RuntimeApplication`
+      - param `daemon_service: DaemonService`
+      - param `log_service: LogService`
+    - method `refresh_flow_list_items`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `refresh_buttons`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `sync_daemon_state`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `ensure_daemon_started`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `start_daemon_worker`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `finish_daemon_startup`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+      - param `success: bool`
+      - param `error_text: str`
+    - method `rebuild_runtime_snapshot`
+      - param `self`
+      - param `window: 'DataEngineTui'`
+- module `data_engine.ui.tui.runtime`
+  - attribute `__all__`
+  - class `QueueLogHandler`
+    - instance attribute `queue`
+    - method `__init__`
+      - param `self`
+      - param `queue: Queue[FlowLogEntry]`
+    - method `emit`
+      - param `self`
+      - param `record: logging.LogRecord`
+- module `data_engine.ui.tui.state_support`
+  - attribute `__all__`
+  - class `TuiStateMixin`
+    - instance attribute `_operator_session_state`
+    - instance attribute `flow_catalog_state`
+    - instance attribute `workspace_session_state`
+    - method `runtime_ledger`
+      - param `self: 'DataEngineTui'`
+    - method `log_store`
+      - param `self: 'DataEngineTui'`
+    - method `_daemon_manager`
+      - param `self: 'DataEngineTui'`
+    - method `runtime_session`
+      - param `self: 'DataEngineTui'`
+    - method `runtime_session`
+      - param `self: 'DataEngineTui'`
+      - param `value: RuntimeSessionState`
+    - method `flow_catalog_state`
+      - param `self: 'DataEngineTui'`
+    - method `flow_catalog_state`
+      - param `self: 'DataEngineTui'`
+      - param `value: FlowCatalogState`
+    - method `flow_cards`
+      - param `self: 'DataEngineTui'`
+    - method `flow_cards`
+      - param `self: 'DataEngineTui'`
+      - param `value: tuple[QtFlowCard, ...]`
+    - method `flow_states`
+      - param `self: 'DataEngineTui'`
+    - method `flow_states`
+      - param `self: 'DataEngineTui'`
+      - param `value: dict[str, str]`
+    - method `selected_flow_name`
+      - param `self: 'DataEngineTui'`
+    - method `selected_flow_name`
+      - param `self: 'DataEngineTui'`
+      - param `value: str | None`
+    - method `workspace_control_state`
+      - param `self: 'DataEngineTui'`
+    - method `workspace_control_state`
+      - param `self: 'DataEngineTui'`
+      - param `value: WorkspaceControlState`
+    - method `workspace_session_state`
+      - param `self: 'DataEngineTui'`
+    - method `workspace_session_state`
+      - param `self: 'DataEngineTui'`
+      - param `value: WorkspaceSessionState`
+    - method `operator_session_state`
+      - param `self: 'DataEngineTui'`
+    - method `operation_tracker`
+      - param `self: 'DataEngineTui'`
+    - method `operation_tracker`
+      - param `self: 'DataEngineTui'`
+      - param `value: OperationSessionState`
+    - method `workspace_collection_root_override`
+      - param `self: 'DataEngineTui'`
+    - method `workspace_collection_root_override`
+      - param `self: 'DataEngineTui'`
+      - param `value: Path | None`
+    - method `discovered_workspace_ids`
+      - param `self: 'DataEngineTui'`
+    - method `discovered_workspace_ids`
+      - param `self: 'DataEngineTui'`
+      - param `value: tuple[str, ...]`
+    - method `_selected_card`
+      - param `self: 'DataEngineTui'`
+- module `data_engine.ui.tui.support`
+  - attribute `__all__`
+  - class `TuiWindowSupportMixin`
+    - method `_has_authored_workspace`
+      - param `self: 'DataEngineTui'`
+    - method `_daemon_request`
+      - param `self: 'DataEngineTui'`
+      - param `paths`
+      - param `payload`
+      - param `*`
+      - param `timeout: float=0.0`
+    - method `_is_daemon_live`
+      - param `self: 'DataEngineTui'`
+      - param `paths`
+    - method `_resolve_workspace_paths`
+      - param `self: 'DataEngineTui'`
+      - param `*`
+      - param `workspace_id: str | None=None`
+    - method `_monotonic`
+      - param `self: 'DataEngineTui'`
+    - method `_register_client_session`
+      - param `self: 'DataEngineTui'`
+    - method `_unregister_client_session_and_check_for_shutdown`
+      - param `self: 'DataEngineTui'`
+    - method `_shutdown_daemon_on_close`
+      - param `self: 'DataEngineTui'`
+- module `data_engine.ui.tui.theme`
+  - attribute `TUI_CSS`
+  - attribute `__all__`
+  - function `stylesheet`
+    - param `theme_name: str=DEFAULT_THEME`
+- module `data_engine.ui.tui.widgets`
+  - attribute `__all__`
+  - class `FlowListItem`
+    - instance attribute `card`
+    - instance attribute `card_state`
+    - instance attribute `label`
+    - method `__init__`
+      - param `self`
+      - param `card: QtFlowCard`
+      - param `state: str`
+    - method `refresh_view`
+      - param `self`
+      - param `state: str`
+    - method `_render_text`
+      - param `self`
+      - param `state: str`
+  - class `GroupHeaderListItem`
+    - instance attribute `group_name`
+    - instance attribute `label`
+    - method `__init__`
+      - param `self`
+      - param `group_name: str`
+      - param `count: int`
+  - class `RunGroupListItem`
+    - instance attribute `run_group`
+    - instance attribute `label`
+    - method `__init__`
+      - param `self`
+      - param `run_group: FlowRunState`
+    - method `refresh_view`
+      - param `self`
+      - param `run_group: FlowRunState | None=None`
+  - class `InfoModal`
+    - attribute `CSS`
+    - attribute `BINDINGS`
+    - instance attribute `title`
+    - instance attribute `body`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `title: str`
+      - param `body: str`
+    - method `compose`
+      - param `self`
+    - method `on_button_pressed`
+      - param `self`
+      - param `event: Button.Pressed`
+    - method `action_dismiss`
+      - param `self`
+- module `data_engine.views`
+  - attribute `__all__`
+- module `data_engine.views.actions`
+  - attribute `__all__`
+  - class `GuiActionState`
+    - attribute `flow_run_label`
+    - attribute `flow_run_enabled`
+    - attribute `flow_config_enabled`
+    - attribute `engine_enabled`
+    - attribute `engine_label`
+    - attribute `engine_state`
+    - attribute `refresh_enabled`
+    - attribute `clear_flow_log_enabled`
+    - attribute `request_control_visible`
+    - attribute `request_control_enabled`
+    - method `from_context`
+      - param `cls`
+      - param `context: OperatorActionContext`
+  - class `TuiActionState`
+    - attribute `refresh_disabled`
+    - attribute `run_once_disabled`
+    - attribute `start_engine_disabled`
+    - attribute `stop_engine_disabled`
+    - attribute `view_config_disabled`
+    - attribute `view_log_disabled`
+    - attribute `clear_flow_log_disabled`
+    - attribute `workspace_select_disabled`
+    - method `from_context`
+      - param `cls`
+      - param `context: OperatorActionContext`
+- module `data_engine.views.artifacts`
+  - attribute `__all__`
+  - function `classify_artifact_preview`
+    - param `path: Path`
+  - function `is_text_artifact`
+    - param `path: Path`
+  - class `ArtifactPreviewSpec`
+    - attribute `kind`
+    - attribute `label`
+    - attribute `previewable`
+    - attribute `placeholder_message`
+- module `data_engine.views.flow_display`
+  - attribute `__all__`
+  - class `FlowRowDisplay`
+    - attribute `primary`
+    - attribute `secondary`
+    - attribute `state_color`
+    - attribute `dot`
+    - attribute `tooltip`
+    - method `from_card`
+      - param `cls`
+      - param `card: QtFlowCard`
+      - param `state: str`
+      - param `*`
+      - param `primary: str='title'`
+  - class `GroupRowDisplay`
+    - attribute `title`
+    - attribute `secondary`
+    - attribute `uppercase_title`
+    - method `from_group`
+      - param `cls`
+      - param `group_name: str`
+      - param `entries: list[QtFlowCard] | tuple[QtFlowCard, ...]`
+      - param `flow_states: dict[str, str]`
+    - method `from_bucket`
+      - param `cls`
+      - param `bucket: FlowGroupBucket`
+      - param `flow_states: dict[str, str]`
+- module `data_engine.views.logs`
+  - attribute `CollapsedLogKey`
+  - attribute `__all__`
+  - class `FlowLogStore`
+    - instance attribute `_entries`
+    - method `__init__`
+      - param `self`
+      - param `entries: tuple[FlowLogEntry, ...]=()`
+    - method `append_entry`
+      - param `self`
+      - param `entry: FlowLogEntry`
+    - method `append_line`
+      - param `self`
+      - param `line: str`
+      - param `*`
+      - param `kind: LogKind`
+      - param `flow_name: str | None=None`
+    - method `clear`
+      - param `self`
+    - method `clear_flow`
+      - param `self`
+      - param `flow_name: str | None`
+    - method `entries_for_flow`
+      - param `self`
+      - param `flow_name: str | None`
+    - method `runs_for_flow`
+      - param `self`
+      - param `flow_name: str | None`
+- module `data_engine.views.models`
+  - attribute `__all__`
+  - function `qt_flow_card_from_entry`
+    - param `entry: FlowCatalogEntry`
+  - function `flow_catalog_entry_from_qt_card`
+    - param `card: QtFlowCard`
+  - function `qt_flow_cards_from_entries`
+    - param `entries: tuple[FlowCatalogEntry, ...] | list[FlowCatalogEntry]`
+  - function `load_qt_flow_cards`
+    - param `flow_catalog_service: 'FlowCatalogService'`
+    - param `*`
+    - param `workspace_root: Path | None=None`
+  - class `QtFlowCard`
+    - attribute `name`
+    - attribute `group`
+    - attribute `title`
+    - attribute `description`
+    - attribute `source_root`
+    - attribute `target_root`
+    - attribute `mode`
+    - attribute `interval`
+    - attribute `operations`
+    - attribute `operation_items`
+    - attribute `state`
+    - attribute `valid`
+    - attribute `category`
+    - attribute `error`
+- module `data_engine.views.presentation`
+  - attribute `__all__`
+  - function `flow_group_name`
+    - param `card: FlowCatalogLike`
+  - function `group_label`
+    - param `group_name: str`
+  - function `group_cards`
+    - param `cards: tuple[FlowCatalogLike, ...] | list[FlowCatalogLike]`
+  - function `flow_secondary_text`
+    - param `mode: str`
+    - param `state: str`
+  - function `group_secondary_text`
+    - param `entries: list[FlowCatalogLike]`
+    - param `flow_states: dict[str, str]`
+  - function `status_color_name`
+    - param `state: str`
+  - function `state_dot`
+    - param `state: str`
+  - function `operation_marker`
+    - param `status: str`
+  - function `format_seconds`
+    - param `seconds: float`
+  - class `FlowGroupBucket`
+    - attribute `group_name`
+    - attribute `entries`
+    - method `title`
+      - param `self`
+- module `data_engine.views.runs`
+  - attribute `__all__`
+  - function `format_raw_log_message`
+    - param `entry: FlowLogEntry`
+  - function `_status_visual_state`
+    - param `status: str`
+  - class `RunGroupDisplay`
+    - attribute `primary_label`
+    - attribute `source_label`
+    - attribute `status_text`
+    - attribute `status_visual_state`
+    - attribute `duration_text`
+    - method `from_run`
+      - param `cls`
+      - param `run_state: FlowRunState`
+- module `data_engine.views.state`
+  - attribute `OperationDisplayState`
+  - attribute `__all__`
+  - function `build_flow_summary`
+    - param `card: QtFlowCard | None`
+    - param `flow_states: dict[str, str]`
+  - function `is_inspectable_operation`
+    - param `operation_name: str`
+  - function `artifact_key_for_operation`
+    - param `operation_name: str`
+  - function `capture_step_outputs`
+    - param `flow_card: QtFlowCard`
+    - param `existing: dict[str, 'Path']`
+    - param `results: object`
+- module `data_engine.views.status`
+  - attribute `WORKSPACE_UNAVAILABLE_TEXT`
+  - attribute `__all__`
+  - function `surface_control_status_text`
+    - param `control_status_text: str | None`
+    - param `*`
+    - param `empty_flow_message: str=''`
+- module `data_engine.views.text`
+  - attribute `__all__`
+  - function `pad`
+    - param `value: str`
+    - param `width: int`
+  - function `short_datetime`
+    - param `text: str`
+  - function `format_optional_seconds`
+    - param `seconds: float | None`
+  - function `run_group_row_text`
+    - param `run_state: FlowRunState`
+  - function `render_run_group_lines`
+    - param `run_state: FlowRunState`
+  - function `render_operation_lines`
+    - param `card: QtFlowCard`
+    - param `tracker: OperationSessionState`
+  - function `render_selected_flow_lines`
+    - param `card: QtFlowCard`
+    - param `tracker: OperationSessionState`
+

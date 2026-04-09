@@ -1,0 +1,84 @@
+"""Listener loop and host serving helpers for the daemon process."""
+
+from __future__ import annotations
+
+from multiprocessing import AuthenticationError
+from multiprocessing.connection import Listener
+from pathlib import Path
+import threading
+import traceback
+from typing import TYPE_CHECKING, Any
+
+from data_engine.domain import DaemonLifecyclePolicy
+from data_engine.hosts.daemon.client import (
+    _decode_message,
+    _encode_message,
+    _remove_stale_unix_endpoint,
+    daemon_authkey,
+    endpoint_address,
+    endpoint_family,
+)
+from data_engine.services import WorkspaceService
+
+if TYPE_CHECKING:
+    from data_engine.hosts.daemon.app import DataEngineDaemonService
+
+
+def serve_forever(service: "DataEngineDaemonService") -> None:
+    """Run the workspace daemon listener loop until shutdown."""
+    try:
+        service.initialize()
+        service.state.checkpoint_thread = threading.Thread(target=service._checkpoint_loop, daemon=True)
+        service.state.checkpoint_thread.start()
+        _remove_stale_unix_endpoint(service.paths)
+        listener = Listener(
+            endpoint_address(service.paths),
+            family=endpoint_family(service.paths),
+            authkey=daemon_authkey(service.paths),
+        )
+        service.host.listener = listener
+        service._debug_log(f"listener ready endpoint={service.paths.daemon_endpoint_path}")
+        while not service.host.shutdown_event.is_set():
+            try:
+                connection = listener.accept()
+            except (AuthenticationError, OSError, EOFError):
+                if service.host.shutdown_event.is_set():
+                    break
+                service._debug_log("listener accept failed but daemon remains alive")
+                continue
+            with connection:
+                try:
+                    payload = _decode_message(connection.recv_bytes())
+                    response = service._handle_command(payload)
+                except Exception as exc:  # pragma: no cover - defensive daemon boundary
+                    service._debug_log(f"command handling error: {exc!r}")
+                    response = {"ok": False, "error": str(exc)}
+                connection.send_bytes(_encode_message(response))
+    except Exception as exc:
+        service._debug_log(f"serve_forever fatal error: {exc!r}")
+        service._debug_log(traceback.format_exc().rstrip())
+        raise
+    finally:
+        service._shutdown()
+
+
+def serve_workspace_daemon(
+    service_type: type["DataEngineDaemonService"],
+    *,
+    workspace_root: Path | None = None,
+    workspace_id: str | None = None,
+    lifecycle_policy: DaemonLifecyclePolicy = DaemonLifecyclePolicy.PERSISTENT,
+    workspace_service: WorkspaceService | None = None,
+    resolve_paths_func=None,
+) -> int:
+    """Start serving one workspace daemon in the current process."""
+    if resolve_paths_func is None:
+        workspace_service = workspace_service or WorkspaceService()
+        resolve_paths_func = workspace_service.resolve_paths
+    paths = resolve_paths_func(workspace_root=workspace_root, workspace_id=workspace_id)
+    service = service_type(paths, lifecycle_policy=lifecycle_policy)
+    service.serve_forever()
+    return 0
+
+
+__all__ = ["serve_forever", "serve_workspace_daemon"]

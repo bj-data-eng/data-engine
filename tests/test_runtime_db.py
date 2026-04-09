@@ -1,0 +1,307 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+
+from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
+from data_engine.runtime.ledger_models import PersistedFileState, PersistedLogEntry, PersistedRun, PersistedStepRun
+from data_engine.runtime.runtime_db import RuntimeLedger, utcnow_text
+
+
+resolve_workspace_paths = RuntimeLayoutPolicy().resolve_paths
+
+
+def test_runtime_ledger_initializes_schema_and_workspace_path(tmp_path):
+    db_path = tmp_path / "runtime_state" / "runtime_ledger.sqlite"
+
+    ledger = RuntimeLedger(db_path)
+
+    assert db_path.exists()
+    table_names = {
+        row[0]
+        for row in ledger._connection().execute(  # noqa: SLF001 - targeted schema verification
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    assert {"runs", "step_runs", "file_state", "logs", "daemon_state"} <= table_names
+
+
+def test_runtime_ledger_open_default_ignores_blank_env_override(tmp_path, monkeypatch):
+    workspace = tmp_path / "collection" / "default"
+    monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(tmp_path / "data_engine"))
+    monkeypatch.setenv("DATA_ENGINE_RUNTIME_DB_PATH", "   ")
+
+    ledger = RuntimeLedger.open_default(data_root=workspace)
+    expected = resolve_workspace_paths(workspace_root=workspace).runtime_db_path
+
+    assert ledger.db_path == expected
+
+
+def test_runtime_ledger_poll_staleness_uses_signature_and_last_status(tmp_path):
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    source = tmp_path / "input.xlsx"
+    source.write_text("claims", encoding="utf-8")
+
+    signature = ledger.source_signature_for_path(source)
+
+    assert signature is not None
+    assert ledger.is_poll_source_stale("claims_poll", signature) is True
+
+    ledger.upsert_file_state(flow_name="claims_poll", signature=signature, status="success", run_id="run-1", finished_at_utc=utcnow_text())
+    assert ledger.is_poll_source_stale("claims_poll", signature) is False
+
+    ledger.upsert_file_state(flow_name="claims_poll", signature=signature, status="failed", error_text="boom")
+    assert ledger.is_poll_source_stale("claims_poll", signature) is True
+
+
+def test_runtime_ledger_persists_run_step_and_log_history(tmp_path):
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    started_at = utcnow_text()
+    ledger.record_run_started(
+        run_id="run-1",
+        flow_name="claims_poll",
+        group_name="Claims",
+        source_path="/tmp/input.xlsx",
+        started_at_utc=started_at,
+    )
+    step_run_id = ledger.record_step_started(
+        run_id="run-1",
+        flow_name="claims_poll",
+        step_label="Read Excel",
+        started_at_utc=started_at,
+    )
+    finished_at = utcnow_text()
+    ledger.record_step_finished(
+        step_run_id=step_run_id,
+        status="success",
+        finished_at_utc=finished_at,
+        elapsed_ms=125,
+        output_path="/tmp/output.parquet",
+    )
+    ledger.record_run_finished(
+        run_id="run-1",
+        status="success",
+        finished_at_utc=finished_at,
+    )
+    ledger.append_log(
+        level="INFO",
+        message="run=run-1 flow=claims_poll source=/tmp/input.xlsx status=success elapsed=0.125000",
+        created_at_utc=finished_at,
+        run_id="run-1",
+        flow_name="claims_poll",
+    )
+
+    runs = ledger.list_runs(flow_name="claims_poll")
+    step_runs = ledger.list_step_runs("run-1")
+    logs = ledger.list_logs(flow_name="claims_poll")
+
+    assert len(runs) == 1
+    assert runs[0].status == "success"
+    assert runs[0].elapsed_seconds is not None
+    assert len(step_runs) == 1
+    assert step_runs[0].status == "success"
+    assert step_runs[0].elapsed_ms == 125
+    assert step_runs[0].output_path == "/tmp/output.parquet"
+    assert len(logs) == 1
+    assert logs[0].run_id == "run-1"
+
+
+def test_runtime_ledger_prunes_history_older_than_30_days(tmp_path):
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    old_started = (datetime.now(UTC) - timedelta(days=31)).isoformat()
+    old_finished = (datetime.now(UTC) - timedelta(days=31, seconds=-1)).isoformat()
+    new_started = utcnow_text()
+
+    ledger.record_run_started(
+        run_id="old-run",
+        flow_name="claims_poll",
+        group_name="Claims",
+        source_path="/tmp/old.xlsx",
+        started_at_utc=old_started,
+    )
+    old_step_id = ledger.record_step_started(
+        run_id="old-run",
+        flow_name="claims_poll",
+        step_label="Read Excel",
+        started_at_utc=old_started,
+    )
+    ledger.record_step_finished(
+        step_run_id=old_step_id,
+        status="success",
+        finished_at_utc=old_finished,
+        elapsed_ms=10,
+    )
+    ledger.append_log(
+        level="INFO",
+        message="old log",
+        created_at_utc=old_finished,
+        run_id="old-run",
+        flow_name="claims_poll",
+    )
+    ledger.record_run_started(
+        run_id="new-run",
+        flow_name="claims_poll",
+        group_name="Claims",
+        source_path="/tmp/new.xlsx",
+        started_at_utc=new_started,
+    )
+    new_step_id = ledger.record_step_started(
+        run_id="new-run",
+        flow_name="claims_poll",
+        step_label="Read Excel",
+        started_at_utc=new_started,
+    )
+    ledger.record_step_finished(
+        step_run_id=new_step_id,
+        status="success",
+        finished_at_utc=new_started,
+        elapsed_ms=10,
+    )
+    ledger.append_log(
+        level="INFO",
+        message="new log",
+        created_at_utc=new_started,
+        run_id="new-run",
+        flow_name="claims_poll",
+    )
+
+    ledger.record_run_finished(
+        run_id="old-run",
+        status="success",
+        finished_at_utc=old_finished,
+    )
+    ledger.record_run_finished(
+        run_id="new-run",
+        status="success",
+        finished_at_utc=new_started,
+    )
+
+    runs = ledger.list_runs(flow_name="claims_poll")
+    logs = ledger.list_logs(flow_name="claims_poll")
+
+    assert [run.run_id for run in runs] == ["new-run"]
+    assert [entry.run_id for entry in logs] == ["new-run"]
+    assert ledger.list_step_runs("old-run") == ()
+
+
+def test_runtime_ledger_prunes_missing_file_state_rows(tmp_path):
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    source_a = tmp_path / "a.xlsx"
+    source_b = tmp_path / "b.xlsx"
+    source_a.write_text("a", encoding="utf-8")
+    source_b.write_text("b", encoding="utf-8")
+
+    signature_a = ledger.source_signature_for_path(source_a)
+    signature_b = ledger.source_signature_for_path(source_b)
+
+    assert signature_a is not None
+    assert signature_b is not None
+
+    ledger.upsert_file_state(flow_name="claims_poll", signature=signature_a, status="success", run_id="run-a", finished_at_utc=utcnow_text())
+    ledger.upsert_file_state(flow_name="claims_poll", signature=signature_b, status="success", run_id="run-b", finished_at_utc=utcnow_text())
+
+    ledger.prune_missing_file_state(flow_name="claims_poll", current_source_paths={signature_a.source_path})
+
+    states = ledger.list_file_states(flow_name="claims_poll")
+
+    assert [state.source_path for state in states] == [signature_a.source_path]
+
+
+def test_runtime_ledger_persists_daemon_state(tmp_path):
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+
+    ledger.upsert_daemon_state(
+        workspace_id="default",
+        pid=123,
+        endpoint_kind="unix",
+        endpoint_path="/tmp/data_engine.sock",
+        started_at_utc=utcnow_text(),
+        last_checkpoint_at_utc=utcnow_text(),
+        status="idle",
+        app_root="/tmp/app",
+        workspace_root="/tmp/workspace/default",
+        version_text="0.1.0",
+    )
+
+    state = ledger.get_daemon_state("default")
+
+    assert state is not None
+    assert state.workspace_id == "default"
+    assert state.pid == 123
+    assert state.status == "idle"
+
+
+def test_replace_runtime_snapshot_begins_immediate_transaction(tmp_path, monkeypatch):
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    statements: list[str] = []
+
+    class _ConnectionProbe:
+        def execute(self, sql: str, *args, **kwargs):
+            statements.append(sql.strip())
+            return self
+
+        def executemany(self, sql: str, params):
+            statements.append(sql.strip())
+            return self
+
+        def commit(self) -> None:
+            statements.append("COMMIT")
+
+        def rollback(self) -> None:
+            statements.append("ROLLBACK")
+
+    monkeypatch.setattr(ledger, "_connection", lambda: _ConnectionProbe())  # noqa: SLF001 - targeted transaction test
+
+    ledger.replace_runtime_snapshot(
+        runs=(
+            PersistedRun(
+                run_id="run-1",
+                flow_name="demo",
+                group_name="Demo",
+                source_path=None,
+                status="success",
+                started_at_utc="2026-04-06T00:00:00+00:00",
+                finished_at_utc="2026-04-06T00:00:01+00:00",
+                error_text=None,
+            ),
+        ),
+        step_runs=(
+            PersistedStepRun(
+                id=1,
+                run_id="run-1",
+                flow_name="demo",
+                step_label="Step 1",
+                status="success",
+                started_at_utc="2026-04-06T00:00:00+00:00",
+                finished_at_utc="2026-04-06T00:00:01+00:00",
+                elapsed_ms=1,
+                error_text=None,
+                output_path=None,
+            ),
+        ),
+        logs=(
+            PersistedLogEntry(
+                id=1,
+                run_id="run-1",
+                flow_name="demo",
+                step_label=None,
+                level="INFO",
+                message="done",
+                created_at_utc="2026-04-06T00:00:01+00:00",
+            ),
+        ),
+        file_states=(
+            PersistedFileState(
+                flow_name="demo",
+                source_path="/tmp/demo.xlsx",
+                mtime_ns=1,
+                size_bytes=1,
+                last_success_run_id="run-1",
+                last_success_at_utc="2026-04-06T00:00:01+00:00",
+                last_status="success",
+                last_error_text=None,
+            ),
+        ),
+    )
+
+    assert statements[0] == "BEGIN IMMEDIATE"
+    assert statements[-1] == "COMMIT"

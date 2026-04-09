@@ -1,0 +1,13 @@
+body,
+.wy-body-for-nav,
+.wy-grid-for-nav,
+.wy-nav-content-wrap,
+.rst-content,
+.document {
+  background: #ffffff;
+}
+
+.wy-nav-content {
+  background: #ffffff;
+  max-width: none;
+}
