@@ -31,6 +31,11 @@ dependencies = [
   "xlsxwriter>=3.2.9",
 ]
 
+[project.urls]
+Homepage = "https://github.com/bj-data-eng/data-engine"
+Repository = "https://github.com/bj-data-eng/data-engine"
+Issues = "https://github.com/bj-data-eng/data-engine/issues"
+
 [project.scripts]
 data-engine = "data_engine.ui.cli.app:main"
 
