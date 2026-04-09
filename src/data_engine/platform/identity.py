@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 APP_INTERNAL_ID: Final[str] = "data_engine"
-APP_DISTRIBUTION_NAME: Final[str] = "data-engine"
+APP_DISTRIBUTION_NAME: Final[str] = "py-data-engine"
 APP_DISPLAY_NAME: Final[str] = "Data Engine"
 APP_ENV_PREFIX: Final[str] = "DATA_ENGINE"
 APP_CACHE_DIR_NAME: Final[str] = "data_engine"

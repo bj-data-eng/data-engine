@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "data-engine"
+name = "py-data-engine"
 version = "0.1.0"
 description = "Workbook-driven workflow jobs with strict filename parsing and DuckDB-backed processing."
 readme = "README.md"

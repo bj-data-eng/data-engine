@@ -15,7 +15,7 @@ from data_engine.platform.identity import (
 
 def test_platform_identity_constants_are_stable():
     assert APP_INTERNAL_ID == "data_engine"
-    assert APP_DISTRIBUTION_NAME == "data-engine"
+    assert APP_DISTRIBUTION_NAME == "py-data-engine"
     assert APP_DISPLAY_NAME == "Data Engine"
     assert APP_ENV_PREFIX == "DATA_ENGINE"
     assert APP_RUNTIME_NAMESPACE == "data_engine"
