@@ -103,20 +103,24 @@ def force_shutdown_daemon(window: "DataEngineWindow") -> None:
 
 def refresh_workspace_provisioning_controls(window: "DataEngineWindow") -> None:
     if not window.workspace_paths.workspace_configured:
-        window.workspace_target_label.setText("Selected workspace: choose a workspace folder first.")
+        window.workspace_target_label.setText(
+            "Selected workspace: choose a workspace folder first, then choose a workspace to provision."
+        )
         window.provision_workspace_button.setEnabled(False)
         if not window.workspace_provision_status_label.text().strip():
             window.workspace_provision_status_label.setText(
-                "Provisioning creates a workspace folder, flow_modules, and VS Code settings without overwriting existing files."
+                "Provisioning creates a workspace folder, flow_modules, and VS Code settings for the workspace selected above without overwriting existing files."
             )
         return
     workspace_root = window.workspace_paths.workspace_root
     workspace_ready = window.workspace_paths.flow_modules_dir.is_dir()
-    window.workspace_target_label.setText(f"Selected workspace: {workspace_root}")
+    window.workspace_target_label.setText(
+        f"Selected workspace: {window.workspace_paths.workspace_id} ({workspace_root})"
+    )
     window.provision_workspace_button.setEnabled(True)
     if workspace_ready:
         window.workspace_provision_status_label.setText(
-            "Workspace already has flow modules. Provisioning will only add missing folders or VS Code settings."
+            "Workspace already has flow modules. Provisioning the selected workspace will only add missing folders or VS Code settings."
         )
     else:
         window.workspace_provision_status_label.setText(

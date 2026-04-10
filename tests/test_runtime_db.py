@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
+import data_engine.runtime.runtime_db as runtime_db_module
 from data_engine.runtime.ledger_models import PersistedFileState, PersistedLogEntry, PersistedRun, PersistedStepRun
 from data_engine.runtime.runtime_db import RuntimeControlLedger, RuntimeLedger, utcnow_text
 
@@ -239,6 +241,41 @@ def test_runtime_ledger_persists_daemon_state(tmp_path):
     assert state.workspace_id == "default"
     assert state.pid == 123
     assert state.status == "idle"
+
+
+def test_runtime_control_ledger_counts_live_windows_client_sessions(tmp_path, monkeypatch):
+    ledger = RuntimeControlLedger(tmp_path / "runtime_state" / "runtime_control.sqlite")
+    monkeypatch.setattr(runtime_db_module.os, "name", "nt")
+
+    class _Kernel32:
+        def OpenProcess(self, _access, _inherit, pid):
+            return 111 if pid == 4321 else 0
+
+        def GetExitCodeProcess(self, _handle, exit_code_ptr):
+            exit_code_ptr._obj.value = runtime_db_module._WINDOWS_STILL_ACTIVE
+            return 1
+
+        def CloseHandle(self, _handle):
+            return 1
+
+    monkeypatch.setattr(runtime_db_module.ctypes, "windll", SimpleNamespace(kernel32=_Kernel32()))
+
+    ledger.upsert_client_session(
+        client_id="live-ui",
+        workspace_id="claims2",
+        client_kind="ui",
+        pid=4321,
+    )
+    ledger.upsert_client_session(
+        client_id="dead-ui",
+        workspace_id="claims2",
+        client_kind="ui",
+        pid=9876,
+    )
+
+    assert ledger.count_live_client_sessions("claims2") == 1
+    remaining = ledger._connection().execute("SELECT client_id FROM client_sessions ORDER BY client_id").fetchall()  # noqa: SLF001
+    assert [row[0] for row in remaining] == ["live-ui"]
 
 
 def test_replace_runtime_snapshot_begins_immediate_transaction(tmp_path, monkeypatch):

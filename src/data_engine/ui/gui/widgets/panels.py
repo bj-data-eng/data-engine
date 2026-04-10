@@ -201,18 +201,31 @@ def _build_workspace_settings_panel(window: "DataEngineWindow") -> QWidget:
     workspace_layout.addWidget(provision_title)
 
     provision_intro = QLabel(
-        "Create the selected workspace folder shape for this workstation without overwriting existing authored files."
+        "Choose the workspace to provision here. Provisioning creates the folder shape for the currently selected workspace without overwriting existing authored files."
     )
     provision_intro.setWordWrap(True)
     provision_intro.setObjectName("bodyText")
     workspace_layout.addWidget(provision_intro)
+
+    provision_selector_intro = QLabel(
+        "Workspace to provision"
+    )
+    provision_selector_intro.setObjectName("fieldLabel")
+    workspace_layout.addWidget(provision_selector_intro)
+
+    window.workspace_settings_selector = QComboBox()
+    window.workspace_settings_selector.setObjectName("workspaceSettingsSelector")
+    window.workspace_settings_selector.setMinimumWidth(200)
+    window.workspace_settings_selector.setFixedHeight(36)
+    window.workspace_settings_selector.currentIndexChanged.connect(window._workspace_selection_changed)
+    workspace_layout.addWidget(window.workspace_settings_selector, 0, Qt.AlignmentFlag.AlignLeft)
 
     window.workspace_target_label = QLabel("")
     window.workspace_target_label.setWordWrap(True)
     window.workspace_target_label.setObjectName("sectionMeta")
     workspace_layout.addWidget(window.workspace_target_label)
 
-    window.provision_workspace_button = QPushButton("Provision Workspace")
+    window.provision_workspace_button = QPushButton("Provision Selected Workspace")
     window.provision_workspace_button.clicked.connect(window._provision_selected_workspace)
     workspace_layout.addWidget(window.provision_workspace_button, 0, Qt.AlignmentFlag.AlignLeft)
 

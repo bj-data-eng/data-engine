@@ -558,6 +558,7 @@ def test_provision_workspace_button_creates_missing_workspace_assets(qapp, tmp_p
     assert provisioning_service.requested_paths is not None
     assert provisioning_service.requested_paths.workspace_root == selected_paths.workspace_root
     assert (selected_paths.workspace_root / "flow_modules").is_dir()
+    assert selected_paths.workspace_id in window.workspace_target_label.text()
     assert f"Provisioned {selected_paths.workspace_root.name}" in window.workspace_provision_status_label.text()
 
 
@@ -926,6 +927,7 @@ def test_workspace_switch_remains_available_while_current_workspace_runtime_is_a
     try:
         assert window.workspace_paths.workspace_id == "claims"
         assert window.workspace_selector.count() == 2
+        assert window.workspace_settings_selector.count() == 2
 
         window.runtime_session = replace(window.runtime_session, runtime_active=True)
         window._refresh_action_buttons()
@@ -938,6 +940,7 @@ def test_workspace_switch_remains_available_while_current_workspace_runtime_is_a
 
         assert window.workspace_paths.workspace_id == "claims2"
         assert window.workspace_selector.currentData() == "claims2"
+        assert window.workspace_settings_selector.currentData() == "claims2"
     finally:
         _dispose_window(qapp, window)
 
@@ -1002,6 +1005,7 @@ def test_switching_workspaces_hides_selector_popup_before_rebind(qapp, monkeypat
     )
     popup_hide_calls: list[str] = []
     monkeypatch.setattr(window.workspace_selector, "hidePopup", lambda: popup_hide_calls.append("selector"))
+    monkeypatch.setattr(window.workspace_settings_selector, "hidePopup", lambda: popup_hide_calls.append("settings"))
     try:
         target_index = window.workspace_selector.findData("claims2")
         assert target_index >= 0
@@ -1009,7 +1013,7 @@ def test_switching_workspaces_hides_selector_popup_before_rebind(qapp, monkeypat
         window.workspace_selector.setCurrentIndex(target_index)
         qapp.processEvents()
 
-        assert popup_hide_calls == ["selector"]
+        assert popup_hide_calls == ["selector", "settings"]
     finally:
         _dispose_window(qapp, window)
 
@@ -1666,9 +1670,47 @@ def test_workspace_selector_shows_placeholder_when_no_workspaces_are_discovered(
         assert window.workspace_selector.count() == 1
         assert window.workspace_selector.currentText() == "(no workspace)"
         assert window.workspace_selector.isEnabled() is False
+        assert window.workspace_settings_selector.count() == 1
+        assert window.workspace_settings_selector.currentText() == "(no workspace)"
+        assert window.workspace_settings_selector.isEnabled() is False
         assert placeholder_root.exists() is False
         assert window.workspace_paths.runtime_cache_db_path.exists() is False
         assert window.workspace_paths.runtime_control_db_path.exists() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_settings_workspace_selector_can_switch_the_provisioning_target(qapp, monkeypatch, tmp_path):
+    workspace_collection_root = tmp_path / "claims_workspaces"
+    claims_root = workspace_collection_root / "claims"
+    claims2_root = workspace_collection_root / "claims2"
+    (claims_root / "flow_modules").mkdir(parents=True)
+    (claims2_root / "flow_modules").mkdir(parents=True)
+
+    discovered = (
+        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
+        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+    )
+
+    def _resolve(workspace_id=None):
+        target = claims_root if workspace_id in (None, "claims") else claims2_root
+        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
+
+    window = _make_window(
+        discover_workspaces_func=lambda app_root=None, workspace_collection_root=None: discovered,
+        resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
+    )
+    try:
+        target_index = window.workspace_settings_selector.findData("claims2")
+        assert target_index >= 0
+
+        window.workspace_settings_selector.setCurrentIndex(target_index)
+        window._flush_deferred_ui_updates()
+
+        assert window.workspace_paths.workspace_id == "claims2"
+        assert window.workspace_selector.currentData() == "claims2"
+        assert "claims2" in window.workspace_target_label.text()
     finally:
         _dispose_window(qapp, window)
 

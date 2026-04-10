@@ -106,7 +106,7 @@ def test_cli_create_workspace_scaffolds_directories_vscode_and_default_selection
     )
     assert vscode_settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
     assert vscode_settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
-    assert vscode_settings["python.defaultInterpreterPath"] == "${workspaceFolder}/.venv"
+    assert vscode_settings["python.defaultInterpreterPath"] == sys.executable
     store = LocalSettingsStore.open_default(app_root=app_root)
     assert store.default_workspace_id() == "claims"
     assert store.workspace_collection_root() == workspace_root.parent.resolve()
@@ -401,6 +401,86 @@ def test_cli_doctor_daemons_treats_windows_status_as_non_defunct(monkeypatch, tm
     assert "claims: lease_pid=111 state=live local" in output
 
 
+def test_cli_doctor_daemons_collapses_windows_launcher_parent_processes(monkeypatch, tmp_path, capsys):
+    app_root = tmp_path / "data_engine"
+    (app_root / "config").mkdir(parents=True)
+    workspace_root = tmp_path / "shared_workspaces" / "claims"
+    (workspace_root / "flow_modules").mkdir(parents=True)
+    settings = type(
+        "_Settings",
+        (object,),
+        {
+            "app_root": app_root,
+            "settings_path": app_root.parent / "app_local" / "data_engine" / "settings" / "app_settings.sqlite",
+            "state_root": app_root.parent / "app_local" / "data_engine",
+            "runtime_root": app_root.parent / "app_local" / "data_engine" / "artifacts",
+            "workspace_collection_root": workspace_root.parent,
+        },
+    )()
+
+    class _WorkspaceService:
+        def discover(self, **kwargs):
+            del kwargs
+            return (type("DW", (), {"workspace_id": "claims", "workspace_root": workspace_root})(),)
+
+        def resolve_paths(self, **kwargs):
+            del kwargs
+            return RuntimeLayoutPolicy().resolve_paths(workspace_root=workspace_root, workspace_id="claims")
+
+    class _SharedStateService:
+        def read_lease_metadata(self, paths):
+            del paths
+            return {"machine_id": "test-host", "pid": 320, "last_checkpoint_at_utc": "2999-01-01T00:00:00+00:00"}
+
+        def lease_is_stale(self, paths, *, stale_after_seconds):
+            del paths, stale_after_seconds
+            return False
+
+    monkeypatch.setattr("data_engine.ui.cli.commands_doctor.os.name", "nt")
+    monkeypatch.setattr("data_engine.domain.diagnostics.os.name", "nt")
+
+    result = commands_doctor.doctor_daemons(
+        settings=settings,
+        workspace_service=_WorkspaceService(),
+        process_rows=[
+            ProcessInfo(
+                pid=20280,
+                ppid=22240,
+                status="Running",
+                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -m data_engine.hosts.daemon.app --workspace C:\\repo\\workspaces\\claims",
+            ),
+            ProcessInfo(
+                pid=320,
+                ppid=20280,
+                status="Running",
+                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -m data_engine.hosts.daemon.app --workspace C:\\repo\\workspaces\\claims",
+            ),
+            ProcessInfo(
+                pid=20288,
+                ppid=11988,
+                status="Running",
+                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -m data_engine.ui.gui.launcher",
+            ),
+            ProcessInfo(
+                pid=17436,
+                ppid=20288,
+                status="Running",
+                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -m data_engine.ui.gui.launcher",
+            ),
+        ],
+        read_lease_metadata_func=_SharedStateService().read_lease_metadata,
+        lease_is_stale_func=_SharedStateService().lease_is_stale,
+        machine_id_text_func=lambda: "test-host",
+    )
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "Live daemons: 1" in output
+    assert "Related UI processes: 1" in output
+    assert "daemon pid=320 ppid=20280 status=Running" in output
+    assert "gui pid=17436 ppid=20288 status=Running" in output
+
+
 def test_cli_main_accepts_injected_dependencies_for_doctor(capsys, tmp_path):
     app_root = tmp_path / "data_engine"
     app_local_root = tmp_path / "app_local" / "data_engine"
@@ -469,7 +549,7 @@ def test_workspace_vscode_settings_only_adds_checkout_specific_entries_when_pres
 
     settings = _workspace_vscode_settings(workspace_root, app_root=app_root)
 
-    assert settings["python.defaultInterpreterPath"] == "${workspaceFolder}/.venv"
+    assert settings["python.defaultInterpreterPath"] == sys.executable
     assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ROOT"] == str(workspace_root)
     assert "python.analysis.extraPaths" not in settings
     assert "python.testing.pytestEnabled" not in settings

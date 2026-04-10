@@ -55,11 +55,14 @@ def test_workspace_vscode_settings_use_current_interpreter_and_terminal_env(monk
     app_root = tmp_path / "data_engine"
     (app_root / "src").mkdir(parents=True)
     workspace_root = tmp_path / "workspaces" / "claims"
+    interpreter_path = tmp_path / ".venv" / "bin" / "python"
+    interpreter_path.parent.mkdir(parents=True)
+    interpreter_path.write_text("", encoding="utf-8")
 
     monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
-    settings = workspace_vscode_settings(workspace_root, app_root=app_root, interpreter_path=Path("/tmp/python"))
+    settings = workspace_vscode_settings(workspace_root, app_root=app_root, interpreter_path=interpreter_path)
 
-    assert settings["python.defaultInterpreterPath"] == "${workspaceFolder}/.venv"
+    assert settings["python.defaultInterpreterPath"] == str(interpreter_path.resolve())
     assert settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_ROOT"] == str(workspace_root)
     assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ROOT"] == str(workspace_root)
     assert settings["terminal.integrated.env.windows"] == settings["terminal.integrated.env.osx"]
@@ -68,11 +71,14 @@ def test_workspace_vscode_settings_use_current_interpreter_and_terminal_env(monk
 def test_collection_vscode_settings_use_collection_root_terminal_env(monkeypatch, tmp_path):
     app_root = tmp_path / "data_engine"
     collection_root = tmp_path / "workspaces"
+    interpreter_path = tmp_path / ".venv" / "bin" / "python"
+    interpreter_path.parent.mkdir(parents=True)
+    interpreter_path.write_text("", encoding="utf-8")
 
     monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
-    settings = collection_vscode_settings(collection_root, app_root=app_root, interpreter_path=Path("/tmp/python"))
+    settings = collection_vscode_settings(collection_root, app_root=app_root, interpreter_path=interpreter_path)
 
-    assert settings["python.defaultInterpreterPath"] == "${workspaceFolder}/.venv"
+    assert settings["python.defaultInterpreterPath"] == str(interpreter_path.resolve())
     assert settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(collection_root)
     assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(collection_root)
     assert "DATA_ENGINE_WORKSPACE_ROOT" not in settings["terminal.integrated.env.osx"]

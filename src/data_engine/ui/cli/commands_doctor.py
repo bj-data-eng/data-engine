@@ -129,6 +129,26 @@ def classify_process_kind(command: str) -> str | None:
     return None
 
 
+def _collapse_windows_launcher_processes(rows: list[ClassifiedProcessInfo]) -> list[ClassifiedProcessInfo]:
+    """Prefer the real child interpreter over a Windows venv launcher parent."""
+    if os.name != "nt":
+        return rows
+    child_by_parent: dict[int, list[ClassifiedProcessInfo]] = {}
+    for row in rows:
+        child_by_parent.setdefault(row.ppid, []).append(row)
+    hidden_parent_pids: set[int] = set()
+    for row in rows:
+        children = child_by_parent.get(row.pid, ())
+        matching_children = [
+            child
+            for child in children
+            if child.kind == row.kind and child.command == row.command
+        ]
+        if len(matching_children) == 1:
+            hidden_parent_pids.add(row.pid)
+    return [row for row in rows if row.pid not in hidden_parent_pids]
+
+
 def doctor_daemons(
     *,
     settings: Any,
@@ -153,6 +173,7 @@ def doctor_daemons(
         for kind in (classify_process_kind_func(str(row.command)),)
         if kind is not None
     ]
+    relevant = _collapse_windows_launcher_processes(relevant)
     daemons = [row for row in relevant if row.kind == "daemon"]
     surfaces = [row for row in relevant if row.kind in {"gui", "tui"}]
     defunct = [row for row in daemons if row.is_defunct]

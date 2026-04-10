@@ -26,17 +26,18 @@ def _close_workspace_scoped_dialogs(window: "DataEngineWindow") -> None:
 
 
 def _sync_workspace_selector(window: "DataEngineWindow") -> None:
-    selector = getattr(window, "workspace_selector", None)
-    if selector is None:
-        return
-    target_index = selector.findData(window.workspace_paths.workspace_id)
-    if target_index < 0:
-        return
-    selector.blockSignals(True)
-    try:
-        selector.setCurrentIndex(target_index)
-    finally:
-        selector.blockSignals(False)
+    for attr_name in ("workspace_selector", "workspace_settings_selector"):
+        selector = getattr(window, attr_name, None)
+        if selector is None:
+            continue
+        target_index = selector.findData(window.workspace_paths.workspace_id)
+        if target_index < 0:
+            continue
+        selector.blockSignals(True)
+        try:
+            selector.setCurrentIndex(target_index)
+        finally:
+            selector.blockSignals(False)
 
 
 def rebind_workspace_context(

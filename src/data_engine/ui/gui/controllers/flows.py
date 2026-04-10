@@ -110,37 +110,44 @@ class _GuiWorkspaceCatalogController:
         )
         current_id = window.workspace_session_state.current_workspace_id
         workspace_ids = window.workspace_session_state.discovered_workspace_ids
-        window.workspace_selector.blockSignals(True)
-        try:
-            window.workspace_selector.clear()
-            if not workspace_ids:
-                window.workspace_selector.addItem("(no workspace)", "")
-                window.workspace_selector.setCurrentIndex(0)
-                window.workspace_selector.setEnabled(False)
-            else:
-                for workspace_id in workspace_ids:
-                    window.workspace_selector.addItem(workspace_id, workspace_id)
-                selected_index = window.workspace_selector.findData(current_id)
-                if selected_index < 0:
-                    selected_index = 0
-                window.workspace_selector.setCurrentIndex(selected_index)
-                window.workspace_selector.setEnabled(True)
-        finally:
-            window.workspace_selector.blockSignals(False)
+        for selector in self._workspace_selectors(window):
+            selector.blockSignals(True)
+            try:
+                selector.clear()
+                if not workspace_ids:
+                    selector.addItem("(no workspace)", "")
+                    selector.setCurrentIndex(0)
+                    selector.setEnabled(False)
+                else:
+                    for workspace_id in workspace_ids:
+                        selector.addItem(workspace_id, workspace_id)
+                    selected_index = selector.findData(current_id)
+                    if selected_index < 0:
+                        selected_index = 0
+                    selector.setCurrentIndex(selected_index)
+                    selector.setEnabled(True)
+            finally:
+                selector.blockSignals(False)
 
     def workspace_selection_changed(self, window: "DataEngineWindow", index: int) -> None:
         if index < 0:
             return
-        workspace_id = str(window.workspace_selector.itemData(index) or "").strip()
+        workspace_id = ""
+        sender = window.sender()
+        if sender is not None and hasattr(sender, "itemData"):
+            workspace_id = str(sender.itemData(index) or "").strip()
+        if not workspace_id and window.workspace_selector.count() > index:
+            workspace_id = str(window.workspace_selector.itemData(index) or "").strip()
         if not workspace_id or workspace_id == window.workspace_paths.workspace_id:
             return
         self.switch_workspace(window, workspace_id)
 
     def switch_workspace(self, window: "DataEngineWindow", workspace_id: str) -> None:
-        try:
-            window.workspace_selector.hidePopup()
-        except Exception:
-            pass
+        for selector in self._workspace_selectors(window):
+            try:
+                selector.hidePopup()
+            except Exception:
+                pass
         if window.ui_closing or workspace_id == window.workspace_paths.workspace_id:
             return
         window._pending_workspace_switch_id = workspace_id
@@ -185,6 +192,15 @@ class _GuiWorkspaceCatalogController:
                     text=f"Refreshed local flow definitions, but daemon refresh failed.\n\n{result.warning_text}",
                     tone="error",
                 )
+
+    @staticmethod
+    def _workspace_selectors(window: "DataEngineWindow") -> tuple[object, ...]:
+        selectors: list[object] = []
+        for attr_name in ("workspace_selector", "workspace_settings_selector"):
+            selector = getattr(window, attr_name, None)
+            if selector is not None:
+                selectors.append(selector)
+        return tuple(selectors)
 
 
 class _GuiFlowPresentationController:
@@ -264,8 +280,9 @@ class _GuiFlowPresentationController:
         window.clear_flow_log_button.setEnabled(action_state.clear_flow_log_enabled)
         window.request_control_button.setVisible(action_state.request_control_visible)
         window.request_control_button.setEnabled(action_state.request_control_enabled)
-        if window.workspace_selector.count() > 0:
-            window.workspace_selector.setEnabled(bool(window.workspace_session_state.discovered_workspace_ids))
+        for selector in _GuiWorkspaceCatalogController._workspace_selectors(window):
+            if selector.count() > 0:
+                selector.setEnabled(bool(window.workspace_session_state.discovered_workspace_ids))
         style = window.engine_button.style()
         style.unpolish(window.engine_button)
         style.polish(window.engine_button)

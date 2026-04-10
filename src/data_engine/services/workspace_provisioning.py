@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,20 @@ def checkout_tests_dir(app_root: Path) -> Path | None:
     return tests_dir if tests_dir.is_dir() else None
 
 
+def _vscode_interpreter_path(*, settings_root: Path, app_root: Path, interpreter_path: Path | None = None) -> str:
+    """Return the interpreter executable path backing the running Data Engine environment."""
+    del settings_root, app_root
+    candidate = Path(interpreter_path or sys.executable).expanduser()
+    if candidate.name.lower() == "pythonw.exe":
+        sibling = candidate.with_name("python.exe")
+        if sibling.exists():
+            candidate = sibling
+    try:
+        return str(candidate.resolve())
+    except Exception:
+        return str(candidate)
+
+
 def workspace_vscode_settings(
     workspace_root: Path,
     *,
@@ -33,7 +48,6 @@ def workspace_vscode_settings(
     interpreter_path: Path | None = None,
 ) -> dict[str, object]:
     """Return VS Code settings for one workspace root."""
-    del interpreter_path
     workspace_id = validate_workspace_id(workspace_root.name)
     terminal_env = {
         "DATA_ENGINE_APP_ROOT": str(app_root),
@@ -41,7 +55,11 @@ def workspace_vscode_settings(
         "DATA_ENGINE_WORKSPACE_ID": workspace_id,
     }
     settings: dict[str, object] = {
-        "python.defaultInterpreterPath": "${workspaceFolder}/.venv",
+        "python.defaultInterpreterPath": _vscode_interpreter_path(
+            settings_root=workspace_root,
+            app_root=app_root,
+            interpreter_path=interpreter_path,
+        ),
         "files.exclude": {".workspace_state": True},
         "search.exclude": {".workspace_state": True},
         "terminal.integrated.env.linux": terminal_env,
@@ -65,13 +83,16 @@ def collection_vscode_settings(
     interpreter_path: Path | None = None,
 ) -> dict[str, object]:
     """Return VS Code settings for one workspace collection root."""
-    del interpreter_path
     terminal_env = {
         "DATA_ENGINE_APP_ROOT": str(app_root),
         DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR: str(collection_root),
     }
     settings: dict[str, object] = {
-        "python.defaultInterpreterPath": "${workspaceFolder}/.venv",
+        "python.defaultInterpreterPath": _vscode_interpreter_path(
+            settings_root=collection_root,
+            app_root=app_root,
+            interpreter_path=interpreter_path,
+        ),
         "files.exclude": {"**/.workspace_state": True},
         "search.exclude": {"**/.workspace_state": True},
         "terminal.integrated.env.linux": terminal_env,
@@ -215,6 +236,7 @@ class WorkspaceProvisioningService:
 __all__ = [
     "WorkspaceProvisioningResult",
     "WorkspaceProvisioningService",
+    "_vscode_interpreter_path",
     "collection_vscode_settings",
     "checkout_source_dir",
     "checkout_tests_dir",

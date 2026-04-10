@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 from datetime import UTC, datetime, timedelta
 import os
 from pathlib import Path
@@ -26,6 +27,9 @@ from data_engine.runtime.ledger_models import (
     PersistedStepRun,
     elapsed_seconds,
 )
+
+_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_WINDOWS_STILL_ACTIVE = 259
 
 
 class _RuntimeSqliteStore:
@@ -385,6 +389,18 @@ class RuntimeControlLedger(_RuntimeSqliteStore):
         """Return whether the OS still reports the given PID as alive."""
         if pid <= 0:
             return False
+        if os.name == "nt":
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return False
+            try:
+                exit_code = ctypes.c_ulong()
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return False
+                return exit_code.value == _WINDOWS_STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
