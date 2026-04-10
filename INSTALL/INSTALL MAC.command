@@ -48,7 +48,7 @@ echo "Upgrading pip..."
 
 echo
 echo "Installing Data Engine with dev extras..."
-"$VENV_PYTHON" -m pip install -e "${PROJECT_ROOT}[dev,polars]"
+"$VENV_PYTHON" -m pip install -e "${PROJECT_ROOT}[dev]"
 
 echo
 echo "Install complete."

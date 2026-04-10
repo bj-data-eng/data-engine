@@ -66,7 +66,7 @@ if errorlevel 1 (
 
 echo.
 echo Installing Data Engine with dev extras...
-"%VENV_PYTHON%" -m pip install -e "%PROJECT_ROOT%[dev,polars]"
+"%VENV_PYTHON%" -m pip install -e "%PROJECT_ROOT%[dev]"
 if errorlevel 1 (
   echo.
   echo Installation failed.

@@ -18,20 +18,14 @@ Use the installer that matches your environment:
 - Windows: [INSTALL/INSTALL WINDOWS.bat](INSTALL/INSTALL%20WINDOWS.bat)
 - Windows VM / CPU-safe Polars test path: [INSTALL/INSTALL WINDOWS_VM.bat](INSTALL/INSTALL%20WINDOWS_VM.bat)
 
-The macOS and standard Windows installers install the regular Polars package. The Windows VM installer installs the `polars-lts-cpu` variant instead.
+The macOS and standard Windows installers install the normal base runtime, which now includes Polars directly.
 
 ### Manual install
 
-Data Engine now uses explicit Polars extras so you can choose the runtime package:
+Polars is now part of the regular install:
 
 ```bash
-python -m pip install -e ".[dev,polars]"
-```
-
-For the CPU-safe LTS variant:
-
-```bash
-python -m pip install -e ".[dev,polars-lts]"
+python -m pip install -e ".[dev]"
 ```
 
 Launch the GUI with:
