@@ -15,6 +15,7 @@ from data_engine.ui.gui.bootstrap import (
     build_gui_services,
     default_gui_service_kwargs,
 )
+from data_engine.ui.gui.bootstrapper import initial_window_size_for_screen
 from data_engine.ui.tui.bootstrap import (
     TuiDependencyFactories,
     TuiServices,
@@ -418,3 +419,35 @@ def test_build_gui_and_tui_services_wrap_the_separate_default_roots():
     assert isinstance(tui_services, TuiServices)
     assert gui_services.theme_service.default_theme_name == "dark"
     assert tui_services.theme_service.default_theme_name == "light"
+
+
+class _FakeGeometry:
+    def __init__(self, width: int, height: int) -> None:
+        self._width = width
+        self._height = height
+
+    def width(self) -> int:
+        return self._width
+
+    def height(self) -> int:
+        return self._height
+
+
+class _FakeScreen:
+    def __init__(self, width: int, height: int) -> None:
+        self._geometry = _FakeGeometry(width, height)
+
+    def availableGeometry(self) -> _FakeGeometry:
+        return self._geometry
+
+
+def test_initial_window_size_for_screen_uses_screen_percentages():
+    assert initial_window_size_for_screen(_FakeScreen(1920, 1080)) == (1497, 907)
+
+
+def test_initial_window_size_for_screen_clamps_to_screen_bounds():
+    assert initial_window_size_for_screen(_FakeScreen(1280, 800)) == (1180, 760)
+
+
+def test_initial_window_size_for_screen_falls_back_without_geometry():
+    assert initial_window_size_for_screen(None) == (1480, 920)

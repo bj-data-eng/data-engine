@@ -10,7 +10,7 @@ from queue import Queue
 from uuid import uuid4
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QGuiApplication
 
 from data_engine.domain import DaemonStatusState, FlowLogEntry, OperationSessionState, OperatorSessionState, StepOutputIndex
@@ -26,11 +26,36 @@ if TYPE_CHECKING:
     from data_engine.ui.gui.app import DataEngineWindow
 
 
+_DEFAULT_WINDOW_SIZE = (1480, 920)
+_MINIMUM_WINDOW_SIZE = (1180, 760)
+_STARTUP_SCREEN_WIDTH_RATIO = 0.78
+_STARTUP_SCREEN_HEIGHT_RATIO = 0.84
+
+
+def initial_window_size_for_screen(screen: object | None) -> tuple[int, int]:
+    """Return the startup window size from the available screen geometry."""
+    if screen is None or not hasattr(screen, "availableGeometry"):
+        return _DEFAULT_WINDOW_SIZE
+    geometry = screen.availableGeometry()
+    width = getattr(geometry, "width", lambda: 0)()
+    height = getattr(geometry, "height", lambda: 0)()
+    if width <= 0 or height <= 0:
+        return _DEFAULT_WINDOW_SIZE
+    minimum_width, minimum_height = _MINIMUM_WINDOW_SIZE
+    target_width = int(width * _STARTUP_SCREEN_WIDTH_RATIO)
+    target_height = int(height * _STARTUP_SCREEN_HEIGHT_RATIO)
+    return (
+        min(width, max(minimum_width, target_width)),
+        min(height, max(minimum_height, target_height)),
+    )
+
+
 def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, services: GuiServices | None = None) -> None:
     """Bind one GUI window to its services, runtime state, and timers."""
     window.setWindowTitle(APP_DISPLAY_NAME)
-    window.resize(1480, 920)
-    window.setMinimumSize(1180, 760)
+    window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+    window.resize(*initial_window_size_for_screen(QGuiApplication.primaryScreen()))
+    window.setMinimumSize(*_MINIMUM_WINDOW_SIZE)
     window.services = services or build_default_gui_services(theme_name)
     window.workspace_service = window.services.workspace_service
     window.action_state_application = window.services.action_state_application
@@ -114,13 +139,16 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window._message_box_generation = 0
     window._pending_workspace_switch_id = None
     window._workspace_switch_scheduled = False
+    window._color_scheme_changed_slot = None
 
     window._build_window()
     window._reload_workspace_options()
     window._load_flows()
     style_hints = QGuiApplication.styleHints()
-    if hasattr(style_hints, "colorSchemeChanged"):
-        style_hints.colorSchemeChanged.connect(window._sync_theme_to_system)
+    window._style_hints = style_hints
+    if os.environ.get("QT_QPA_PLATFORM") != "offscreen" and hasattr(style_hints, "colorSchemeChanged"):
+        window._color_scheme_changed_slot = window._sync_theme_to_system
+        style_hints.colorSchemeChanged.connect(window._color_scheme_changed_slot)
 
     window.log_timer = QTimer(window)
     window.log_timer.timeout.connect(window._poll_log_queue)
@@ -136,4 +164,4 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.daemon_timer.start(500)
 
 
-__all__ = ["bootstrap_gui_window"]
+__all__ = ["bootstrap_gui_window", "initial_window_size_for_screen"]

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import threading
 import time
-from time import monotonic
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QApplication
@@ -56,16 +55,19 @@ def unregister_client_session_and_check_for_shutdown(
 
 def shutdown_daemon_on_close(window: "DataEngineWindow") -> None:
     """Best-effort local daemon shutdown when the last local client closes."""
-    client_error_type = window._daemon_client_error_type
+    client_error_type = Exception
+    resolve_client_error_type = getattr(window, "_daemon_client_error_type", None)
+    if callable(resolve_client_error_type):
+        try:
+            candidate = resolve_client_error_type()
+        except Exception:
+            candidate = None
+        if isinstance(candidate, type) and issubclass(candidate, BaseException):
+            client_error_type = candidate
     try:
         if not window._is_daemon_live(window.workspace_paths):
             return
         window._daemon_request(window.workspace_paths, {"command": "shutdown_daemon"}, timeout=1.5)
-        deadline = monotonic() + 2.0
-        while monotonic() < deadline:
-            if not window._is_daemon_live(window.workspace_paths):
-                break
-            time.sleep(0.05)
     except client_error_type:
         pass
     except Exception:

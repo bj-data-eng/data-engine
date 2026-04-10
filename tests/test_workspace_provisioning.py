@@ -61,6 +61,8 @@ def test_workspace_vscode_settings_use_current_interpreter_and_terminal_env(monk
 
     assert settings["python.defaultInterpreterPath"] == "${workspaceFolder}/.venv"
     assert settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_ROOT"] == str(workspace_root)
+    assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ROOT"] == str(workspace_root)
+    assert settings["terminal.integrated.env.windows"] == settings["terminal.integrated.env.osx"]
 
 
 def test_collection_vscode_settings_use_collection_root_terminal_env(monkeypatch, tmp_path):
@@ -72,4 +74,6 @@ def test_collection_vscode_settings_use_collection_root_terminal_env(monkeypatch
 
     assert settings["python.defaultInterpreterPath"] == "${workspaceFolder}/.venv"
     assert settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(collection_root)
+    assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(collection_root)
     assert "DATA_ENGINE_WORKSPACE_ROOT" not in settings["terminal.integrated.env.osx"]
+    assert "DATA_ENGINE_WORKSPACE_ROOT" not in settings["terminal.integrated.env.windows"]

@@ -33,7 +33,7 @@ def test_queue_log_handlers_emit_flow_and_system_entries(handler_cls):
     handler = handler_cls(queue)
 
     flow_record = logging.makeLogRecord(
-        {"msg": "run=abc flow=claims_poll step=Write Parquet source=/tmp/input.xlsx status=success elapsed=1.25"}
+        {"msg": "run=abc flow=claims_poll step=Write Parquet source=C:/input.xlsx status=success elapsed=1.25"}
     )
     system_record = logging.makeLogRecord({"msg": "daemon started at /tmp/data_engine.log"})
 

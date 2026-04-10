@@ -19,13 +19,13 @@ def test_short_source_label_collapses_empty_and_path_values():
     assert short_source_label(None) == "-"
     assert short_source_label("") == "-"
     assert short_source_label("None") == "-"
-    assert short_source_label("/tmp/input/claims.xlsx") == "claims.xlsx"
+    assert short_source_label("C:/input/claims.xlsx") == "claims.xlsx"
     assert short_source_label("relative/path/report.parquet") == "report.parquet"
 
 
 def test_format_runtime_message_formats_step_flow_and_fallback_messages():
-    step_message = "run=run-1 flow=poller step=Read Claims source=/tmp/input/claims.xlsx status=success elapsed=0.25"
-    flow_message = "run=run-2 flow=poller source=/tmp/input/report.xlsx status=started"
+    step_message = "run=run-1 flow=poller step=Read Claims source=C:/input/claims.xlsx status=success elapsed=0.25"
+    flow_message = "run=run-2 flow=poller source=C:/input/report.xlsx status=started"
     fallback_message = "see /tmp/input/claims.xlsx and /var/log/app.log"
 
     assert format_runtime_message(step_message) == "poller  Read Claims  success  claims.xlsx"
@@ -47,7 +47,7 @@ def test_format_log_line_uses_record_message():
     ("message", "expected"),
     [
         (
-            "run=run-1 flow=poller step=Read Claims source=/tmp/input/claims.xlsx status=success elapsed=0.25",
+            "run=run-1 flow=poller step=Read Claims source=C:/input/claims.xlsx status=success elapsed=0.25",
             RuntimeStepEvent(
                 run_id="run-1",
                 flow_name="poller",
@@ -58,7 +58,7 @@ def test_format_log_line_uses_record_message():
             ),
         ),
         (
-            "run=run-2 flow=poller source=/tmp/input/report.xlsx status=started",
+            "run=run-2 flow=poller source=C:/input/report.xlsx status=started",
             RuntimeStepEvent(
                 run_id="run-2",
                 flow_name="poller",
@@ -81,7 +81,7 @@ def test_parse_runtime_message_returns_none_for_unstructured_text():
 def test_parse_runtime_event_wraps_log_record():
     record = logging.makeLogRecord(
         {
-            "msg": "run=run-9 flow=poller step=Build Summary source=/tmp/output/summary.xlsx status=failed",
+            "msg": "run=run-9 flow=poller step=Build Summary source=C:/output/summary.xlsx status=failed",
         }
     )
 
@@ -95,7 +95,7 @@ def test_parse_runtime_event_wraps_log_record():
 
 
 def test_flow_log_entry_format_runtime_message_staticmethod_delegates_to_module_helper():
-    message = "run=run-7 flow=poller source=/tmp/output/report.xlsx status=started"
+    message = "run=run-7 flow=poller source=C:/output/report.xlsx status=started"
 
     assert FlowLogEntry.format_runtime_message(message) == "poller  started  report.xlsx"
 

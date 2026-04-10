@@ -789,6 +789,34 @@ def test_grouped_runtime_uses_injected_ledger_service_once(tmp_path):
     assert calls == ["called"]
 
 
+def test_grouped_runtime_does_not_close_injected_shared_ledger(tmp_path):
+    closed = 0
+
+    class _Ledger:
+        def __init__(self):
+            self._inner = RuntimeLedger.open_default(data_root=tmp_path)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def close(self):
+            nonlocal closed
+            closed += 1
+
+    grouped = _GroupedFlowRuntime(
+        (
+            Flow(name="grouped_close_first", group="alpha").step(lambda context: context.current),
+            Flow(name="grouped_close_second", group="beta").step(lambda context: context.current),
+        ),
+        continuous=False,
+        runtime_ledger=_Ledger(),
+    )
+
+    grouped.run()
+
+    assert closed == 0
+
+
 def test_flow_run_once_uses_injected_runtime_execution_service():
     calls: list[Flow] = []
     flow = Flow(name="service_runtime", group="Claims").step(lambda context: context.current)

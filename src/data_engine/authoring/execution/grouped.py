@@ -36,6 +36,7 @@ class _GroupedFlowRuntime:
         self.status_callback = status_callback
         self._runtime_ledger_service = runtime_ledger_service or default_runtime_ledger_service()
         self._runtime_ledger_factory = runtime_ledger_factory or self._runtime_ledger_service.open_runtime_ledger
+        self._owns_runtime_ledger = runtime_ledger is None
         self.runtime_ledger = runtime_ledger or self._runtime_ledger_factory()
 
     def run(self) -> list[FlowContext]:
@@ -75,25 +76,26 @@ class _GroupedFlowRuntime:
                 errors.put((group_name, exc))
                 if not self.continuous:
                     internal_runtime_stop.set()
-            finally:
+        try:
+            for group_name, group_flows in grouped.items():
+                thread = threading.Thread(target=run_group, args=(group_name, group_flows), daemon=True)
+                threads.append(thread)
+                thread.start()
+
+            for thread in threads:
+                thread.join()
+
+            if not self.continuous and not errors.empty():
+                _, exc = errors.get()
+                raise exc
+
+            ordered_results: list[FlowContext] = []
+            for group_name in grouped:
+                ordered_results.extend(results_by_group[group_name])
+            return ordered_results
+        finally:
+            if self._owns_runtime_ledger:
                 self.runtime_ledger.close()
-
-        for group_name, group_flows in grouped.items():
-            thread = threading.Thread(target=run_group, args=(group_name, group_flows), daemon=True)
-            threads.append(thread)
-            thread.start()
-
-        for thread in threads:
-            thread.join()
-
-        if not self.continuous and not errors.empty():
-            _, exc = errors.get()
-            raise exc
-
-        ordered_results: list[FlowContext] = []
-        for group_name in grouped:
-            ordered_results.extend(results_by_group[group_name])
-        return ordered_results
 
     def _grouped_flows(self) -> dict[str, tuple["Flow", ...]]:
         grouped: dict[str, list["Flow"]] = {}

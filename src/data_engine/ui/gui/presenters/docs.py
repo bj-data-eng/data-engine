@@ -40,6 +40,13 @@ def initialize_docs_view(window: "DataEngineWindow") -> None:
         window.docs_status_label.setText("Packaged documentation is not available.")
         window.docs_browser.setHtml("<h2>Documentation unavailable</h2><p>Packaged documentation was not found.</p>")
         return
+    if not window.docs_uses_webengine:
+        target = window.docs_root_dir / window._DOCS_HOME_PAGE
+        window.docs_status_label.setText(target.name)
+        window.docs_browser.setHtml(
+            "<h2>Documentation</h2><p>Packaged documentation is available in GUI mode.</p>"
+        )
+        return
 
     load_docs_page(window, window._DOCS_HOME_PAGE)
 

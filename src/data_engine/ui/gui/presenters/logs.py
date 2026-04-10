@@ -14,11 +14,24 @@ if TYPE_CHECKING:
     from data_engine.ui.gui.app import DataEngineWindow
 
 
+def next_log_scroll_value(
+    *,
+    previous_value: int,
+    previous_maximum: int,
+    current_maximum: int,
+    force_scroll_to_bottom: bool = False,
+) -> int:
+    """Return the target vertical scrollbar value after one log-view refresh."""
+    should_follow_tail = force_scroll_to_bottom or previous_value >= max(previous_maximum - 1, 0)
+    if should_follow_tail:
+        return current_maximum
+    return min(previous_value, current_maximum)
+
+
 def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool = False) -> None:
     scrollbar = window.log_view.verticalScrollBar()
     previous_value = scrollbar.value()
     previous_maximum = scrollbar.maximum()
-    should_follow_tail = force_scroll_to_bottom or previous_value >= max(previous_maximum - 1, 0)
 
     window.log_view.setUpdatesEnabled(False)
     window.log_view.clear()
@@ -37,10 +50,14 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
     window.log_view.setUpdatesEnabled(True)
 
     scrollbar = window.log_view.verticalScrollBar()
-    if should_follow_tail:
-        scrollbar.setValue(scrollbar.maximum())
-    else:
-        scrollbar.setValue(min(previous_value, scrollbar.maximum()))
+    scrollbar.setValue(
+        next_log_scroll_value(
+            previous_value=previous_value,
+            previous_maximum=previous_maximum,
+            current_maximum=scrollbar.maximum(),
+            force_scroll_to_bottom=force_scroll_to_bottom,
+        )
+    )
 
 
 def add_log_run_item(window: "DataEngineWindow", run_group: "FlowRunState") -> None:
@@ -55,4 +72,4 @@ def format_raw_log_message(entry: "FlowLogEntry") -> str:
     return shared_format_raw_log_message(entry)
 
 
-__all__ = ["add_log_run_item", "format_raw_log_message", "refresh_log_view"]
+__all__ = ["add_log_run_item", "format_raw_log_message", "next_log_scroll_value", "refresh_log_view"]

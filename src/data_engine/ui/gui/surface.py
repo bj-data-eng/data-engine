@@ -33,6 +33,13 @@ def handle_show_event(window: "DataEngineWindow", event: "QShowEvent") -> None:
 def handle_close_event(window: "DataEngineWindow", event: "QCloseEvent") -> None:
     """Run the GUI close-event shutdown path."""
     window.ui_closing = True
+    style_hints = getattr(window, "_style_hints", None)
+    color_scheme_changed_slot = getattr(window, "_color_scheme_changed_slot", None)
+    if style_hints is not None and hasattr(style_hints, "colorSchemeChanged") and color_scheme_changed_slot is not None:
+        try:
+            style_hints.colorSchemeChanged.disconnect(color_scheme_changed_slot)
+        except (RuntimeError, TypeError):
+            pass
     log_handler = getattr(window, "log_handler", None)
     if log_handler is not None:
         logging.getLogger("data_engine").removeHandler(log_handler)

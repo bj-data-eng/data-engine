@@ -10,10 +10,10 @@ from typing import Callable
 
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
-from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger
 from data_engine.services.flow_catalog import FlowCatalogService
 from data_engine.services.flow_execution import FlowExecutionService
-from data_engine.services.ledger import LedgerService
+from data_engine.services.ledger import RuntimeControlLedgerService
 from data_engine.services.runtime_execution import RuntimeExecutionService
 
 
@@ -41,25 +41,32 @@ def default_daemon_host_dependency_factories() -> DaemonHostDependencyFactories:
 class DaemonHostDependencies:
     """Concrete collaborators used by one daemon host instance."""
 
-    runtime_ledger: RuntimeLedger
+    runtime_cache_ledger: RuntimeCacheLedger
+    runtime_control_ledger: RuntimeControlLedger
     flow_catalog_service: FlowCatalogService
     flow_execution_service: FlowExecutionService
     runtime_execution_service: RuntimeExecutionService
     shared_state_adapter: DaemonSharedStateAdapter
+
+    @property
+    def runtime_ledger(self) -> RuntimeCacheLedger:
+        """Compatibility alias for cache-backed runtime history."""
+        return self.runtime_cache_ledger
 
     @classmethod
     def build_default(
         cls,
         paths: WorkspacePaths,
         *,
-        ledger_service: LedgerService | None = None,
+        ledger_service: RuntimeControlLedgerService | None = None,
         factories: DaemonHostDependencyFactories | None = None,
     ) -> "DaemonHostDependencies":
         """Build the default dependency bundle for one workspace host."""
-        ledger_service = ledger_service or LedgerService()
+        ledger_service = ledger_service or RuntimeControlLedgerService()
         factories = factories or default_daemon_host_dependency_factories()
         return cls(
-            runtime_ledger=ledger_service.open_for_workspace(paths.workspace_root),
+            runtime_cache_ledger=RuntimeCacheLedger(paths.runtime_cache_db_path),
+            runtime_control_ledger=ledger_service.open_for_workspace(paths.workspace_root),
             flow_catalog_service=factories.flow_catalog_service_factory(),
             flow_execution_service=factories.flow_execution_service_factory(),
             runtime_execution_service=factories.runtime_execution_service_factory(),

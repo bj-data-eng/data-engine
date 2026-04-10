@@ -37,6 +37,8 @@ from data_engine.platform.workspace_models import (
     WORKSPACE_STATE_DIR_NAME,
     WorkspacePaths,
     WorkspaceSettings,
+    _stable_workspace_path,
+    local_workspace_namespace as workspace_local_namespace,
     normalized_path_text,
     validate_workspace_id,
 )
@@ -48,10 +50,10 @@ class AppStatePolicy:
     def effective_app_root(self, *, app_root: Path | None = None) -> Path:
         """Resolve the effective project/app root from an explicit argument or env."""
         if app_root is not None:
-            return app_root.resolve()
+            return _stable_workspace_path(app_root)
         env_value = os.environ.get(DATA_ENGINE_APP_ROOT_ENV_VAR)
         if env_value and env_value.strip():
-            return Path(env_value).expanduser().resolve()
+            return _stable_workspace_path(env_value)
         return APP_ROOT_PATH
 
     def settings_path(self, *, app_root: Path | None = None) -> Path:
@@ -68,26 +70,30 @@ class AppStatePolicy:
         env_workspace_root = os.environ.get(DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR)
         env_runtime_root = os.environ.get(DATA_ENGINE_RUNTIME_ROOT_ENV_VAR)
         runtime_root = (
-            Path(env_runtime_root).expanduser().resolve()
+            _stable_workspace_path(env_runtime_root)
             if env_runtime_root and env_runtime_root.strip()
             else store.runtime_root() or state_root / APP_ARTIFACTS_DIR_NAME
         )
+        stored_collection_root = store.workspace_collection_root()
+        stored_default_selected = store.default_workspace_id()
         if env_collection and env_collection.strip():
-            collection_root = Path(env_collection).expanduser().resolve()
-            default_selected = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or store.default_workspace_id()
+            collection_root = _stable_workspace_path(env_collection)
+            if stored_collection_root is not None:
+                collection_root = stored_collection_root
+            default_selected = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or stored_default_selected
             return WorkspaceSettings(root, settings_path, state_root, runtime_root, collection_root, default_selected)
         if env_workspace_root and env_workspace_root.strip():
-            explicit_root = Path(env_workspace_root).expanduser().resolve()
+            explicit_root = _stable_workspace_path(env_workspace_root)
             collection_root = explicit_root.parent
-            default_selected = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or explicit_root.name or store.default_workspace_id()
+            default_selected = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or explicit_root.name or stored_default_selected
             return WorkspaceSettings(root, settings_path, state_root, runtime_root, collection_root, default_selected)
         return WorkspaceSettings(
             app_root=root,
             settings_path=settings_path,
             state_root=state_root,
             runtime_root=runtime_root,
-            workspace_collection_root=store.workspace_collection_root(),
-            default_selected=store.default_workspace_id(),
+            workspace_collection_root=stored_collection_root,
+            default_selected=stored_default_selected,
         )
 
     def write_settings(self, settings: WorkspaceSettings) -> None:
@@ -137,13 +143,13 @@ class WorkspaceDiscoveryPolicy:
     ) -> tuple[DiscoveredWorkspace, ...]:
         """Discover valid workspaces beneath the collection root."""
         if explicit_workspace_root is not None:
-            root = Path(explicit_workspace_root).expanduser().resolve()
+            root = _stable_workspace_path(explicit_workspace_root)
             workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or root.name or "default"
             return (DiscoveredWorkspace(workspace_id=workspace_id, workspace_root=root),)
 
         settings = self.app_state_policy.load_settings(app_root=app_root)
         collection_root = (
-            Path(workspace_collection_root).expanduser().resolve()
+            _stable_workspace_path(workspace_collection_root)
             if workspace_collection_root is not None
             else settings.workspace_collection_root
         )
@@ -153,11 +159,11 @@ class WorkspaceDiscoveryPolicy:
             return ()
         if (collection_root / WORKSPACE_FLOW_MODULES_DIR_NAME).is_dir():
             workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or "default"
-            return (DiscoveredWorkspace(workspace_id=workspace_id, workspace_root=collection_root.resolve()),)
+            return (DiscoveredWorkspace(workspace_id=workspace_id, workspace_root=collection_root),)
         discovered: list[DiscoveredWorkspace] = []
         for candidate in sorted(path for path in collection_root.iterdir() if path.is_dir()):
             if (candidate / WORKSPACE_FLOW_MODULES_DIR_NAME).is_dir():
-                discovered.append(DiscoveredWorkspace(workspace_id=candidate.name, workspace_root=candidate.resolve()))
+                discovered.append(DiscoveredWorkspace(workspace_id=candidate.name, workspace_root=candidate))
         return tuple(discovered)
 
     def select_workspace(
@@ -173,17 +179,17 @@ class WorkspaceDiscoveryPolicy:
         explicit_root = workspace_root if workspace_root is not None else data_root
         env_workspace_root = os.environ.get(DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR)
         if explicit_root is not None:
-            discovered_root = Path(explicit_root).expanduser().resolve()
+            discovered_root = _stable_workspace_path(explicit_root)
             fallback_id = self.PLACEHOLDER_WORKSPACE_ID if discovered_root.name == self.PLACEHOLDER_WORKSPACE_ROOT_NAME else (discovered_root.name or "default")
             selected_id = self._normalize_workspace_id(workspace_id) if workspace_id is not None else fallback_id
             collection_root = (
-                Path(workspace_collection_root).expanduser().resolve()
+                _stable_workspace_path(workspace_collection_root)
                 if workspace_collection_root is not None
                 else discovered_root.parent
             )
             return DiscoveredWorkspace(workspace_id=selected_id, workspace_root=discovered_root), collection_root, True
         if env_workspace_root and env_workspace_root.strip():
-            discovered_root = Path(env_workspace_root).expanduser().resolve()
+            discovered_root = _stable_workspace_path(env_workspace_root)
             env_workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR)
             if workspace_id is not None:
                 selected_id = self._normalize_workspace_id(workspace_id)
@@ -193,7 +199,7 @@ class WorkspaceDiscoveryPolicy:
                 fallback_id = self.PLACEHOLDER_WORKSPACE_ID if discovered_root.name == self.PLACEHOLDER_WORKSPACE_ROOT_NAME else (discovered_root.name or "default")
                 selected_id = fallback_id
             collection_root = (
-                Path(workspace_collection_root).expanduser().resolve()
+                _stable_workspace_path(workspace_collection_root)
                 if workspace_collection_root is not None
                 else discovered_root.parent
             )
@@ -201,7 +207,7 @@ class WorkspaceDiscoveryPolicy:
 
         settings = self.app_state_policy.load_settings(app_root=app_root)
         collection_root = (
-            Path(workspace_collection_root).expanduser().resolve()
+            _stable_workspace_path(workspace_collection_root)
             if workspace_collection_root is not None
             else settings.workspace_collection_root
         )
@@ -222,9 +228,9 @@ class WorkspaceDiscoveryPolicy:
                     selected_id = (
                         self._normalize_workspace_id(settings.default_selected, fallback=self.PLACEHOLDER_WORKSPACE_ID)
                         if settings.default_selected is not None
-                        else self.PLACEHOLDER_WORKSPACE_ID
-                    )
-            discovered = DiscoveredWorkspace(workspace_id=selected_id, workspace_root=(collection_root / selected_id).resolve())
+                else self.PLACEHOLDER_WORKSPACE_ID
+            )
+            discovered = DiscoveredWorkspace(workspace_id=selected_id, workspace_root=collection_root / selected_id)
             return discovered, collection_root, True
 
         if workspace_id is not None:
@@ -273,6 +279,8 @@ class RuntimeLayoutPolicy:
         artifacts_dir = settings.runtime_root
         workspace_cache_dir = artifacts_dir / WORKSPACE_CACHE_DIR_NAME / local_namespace
         runtime_state_dir = artifacts_dir / RUNTIME_STATE_DIR_NAME / local_namespace
+        runtime_cache_db_path = runtime_state_dir / "runtime_cache.sqlite"
+        runtime_control_db_path = runtime_state_dir / "runtime_control.sqlite"
         daemon_endpoint_kind, daemon_endpoint_path = self.daemon_endpoint(
             runtime_state_dir=runtime_state_dir,
             workspace_id=discovered.workspace_id,
@@ -302,19 +310,21 @@ class RuntimeLayoutPolicy:
             workspace_cache_dir=workspace_cache_dir,
             compiled_flow_modules_dir=workspace_cache_dir / "compiled_flow_modules",
             runtime_state_dir=runtime_state_dir,
-            runtime_db_path=runtime_state_dir / "runtime_ledger.sqlite",
+            runtime_db_path=runtime_cache_db_path,
             daemon_log_path=runtime_state_dir / "daemon.log",
             documentation_dir=artifacts_dir / "documentation",
             daemon_endpoint_kind=daemon_endpoint_kind,
             daemon_endpoint_path=daemon_endpoint_path,
             sphinx_source_dir=resolved_app_root / "src" / "data_engine" / "docs" / "sphinx_source",
             workspace_configured=workspace_configured,
+            runtime_cache_db_path=runtime_cache_db_path,
+            runtime_control_db_path=runtime_control_db_path,
         )
 
     @staticmethod
     def local_workspace_namespace(workspace_root: Path | str, workspace_id: str) -> str:
         """Return the machine-local namespace for one workspace root."""
-        return f"{validate_workspace_id(workspace_id)}_{hashlib.sha1(normalized_path_text(Path(workspace_root).expanduser().resolve()).encode('utf-8')).hexdigest()[:12]}"
+        return workspace_local_namespace(workspace_root, workspace_id)
 
     @staticmethod
     def daemon_endpoint(*, runtime_state_dir: Path, workspace_id: str) -> tuple[str, str]:

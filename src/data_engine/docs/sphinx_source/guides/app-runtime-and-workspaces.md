@@ -319,8 +319,8 @@ That makes the settings portable across workstations as long as each workstation
 
 The generated settings also:
 
-- hide `.workspace_state` from Explorer and search
-- set terminal environment variables for Data Engine paths
+- hide `.workspace_state` from VS Code Explorer and search
+- set terminal environment variables for Data Engine paths on Linux, macOS, and Windows
 - add `src/` to `python.analysis.extraPaths` when running from a checkout
 - enable pytest configuration when a checkout-local `tests/` folder exists
 

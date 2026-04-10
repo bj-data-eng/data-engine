@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,26 @@ def test_workspace_path_helpers_are_stable(monkeypatch):
     assert workspace_settings_path(app_root=APP_ROOT_PATH).name == "app_settings.sqlite"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows path identity")
+def test_local_workspace_namespace_does_not_require_path_resolve(tmp_path, monkeypatch):
+    def _resolve(*args, **kwargs):  # pragma: no cover - defensive test hook
+        raise AssertionError("local_workspace_namespace should not resolve paths")
+
+    monkeypatch.setattr(Path, "resolve", _resolve)
+
+    namespace = local_workspace_namespace(tmp_path / "workspace" / ".." / "workspace", "claims")
+
+    assert namespace.startswith("claims_")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path normalization")
+def test_local_workspace_namespace_is_case_insensitive_on_windows():
+    left = local_workspace_namespace(Path("C:/Workspace/Claims"), "claims")
+    right = local_workspace_namespace(Path("c:/workspace/claims"), "claims")
+
+    assert left == right
+
+
 def test_resolve_workspace_paths_prefers_explicit_workspace_root(tmp_path, monkeypatch):
     workspace = tmp_path / "collection" / "default"
     app_root = tmp_path / "data_engine"
@@ -64,7 +85,9 @@ def test_resolve_workspace_paths_prefers_explicit_workspace_root(tmp_path, monke
     assert resolved.artifacts_dir == state_root / "artifacts"
     assert resolved.workspace_cache_dir == state_root / "artifacts" / "workspace_cache" / local_namespace
     assert resolved.compiled_flow_modules_dir == state_root / "artifacts" / "workspace_cache" / local_namespace / "compiled_flow_modules"
-    assert resolved.runtime_db_path == state_root / "artifacts" / "runtime_state" / local_namespace / "runtime_ledger.sqlite"
+    assert resolved.runtime_db_path == state_root / "artifacts" / "runtime_state" / local_namespace / "runtime_cache.sqlite"
+    assert resolved.runtime_cache_db_path == resolved.runtime_db_path
+    assert resolved.runtime_control_db_path == state_root / "artifacts" / "runtime_state" / local_namespace / "runtime_control.sqlite"
     assert resolved.documentation_dir == state_root / "artifacts" / "documentation"
 
 
@@ -212,6 +235,7 @@ def test_same_named_workspaces_get_distinct_local_runtime_namespaces(tmp_path, m
     assert resolved_a.workspace_cache_dir != resolved_b.workspace_cache_dir
     assert resolved_a.runtime_state_dir != resolved_b.runtime_state_dir
     assert resolved_a.runtime_db_path != resolved_b.runtime_db_path
+    assert resolved_a.runtime_control_db_path != resolved_b.runtime_control_db_path
     assert resolved_a.daemon_endpoint_path != resolved_b.daemon_endpoint_path
 
 

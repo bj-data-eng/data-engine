@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 
 from data_engine.domain import ProcessInfo
+from data_engine.ui.cli import commands_doctor
 from data_engine.ui.cli.app import CliDependencies, main
 from data_engine.ui.cli.commands_workspace import workspace_vscode_settings as _workspace_vscode_settings
 from data_engine.ui.cli.dependencies import CliDependencyFactories, build_default_cli_dependencies
@@ -98,7 +101,11 @@ def test_cli_create_workspace_scaffolds_directories_vscode_and_default_selection
     assert collection_vscode_settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(
         workspace_root.parent.resolve()
     )
+    assert collection_vscode_settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(
+        workspace_root.parent.resolve()
+    )
     assert vscode_settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
+    assert vscode_settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
     assert vscode_settings["python.defaultInterpreterPath"] == "${workspaceFolder}/.venv"
     store = LocalSettingsStore.open_default(app_root=app_root)
     assert store.default_workspace_id() == "claims"
@@ -130,33 +137,35 @@ def test_cli_run_tests_executes_named_slice(monkeypatch, tmp_path):
     app_root = tmp_path / "data_engine"
     (app_root / "tests").mkdir(parents=True)
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
-    recorded: list[list[str]] = []
+    recorded: list[tuple[list[str], dict[str, object]]] = []
     monkeypatch.setattr(
         "data_engine.ui.cli.commands_run.subprocess.run",
-        lambda command, check=False: recorded.append(command) or type("Completed", (), {"returncode": 0})(),
+        lambda command, **kwargs: recorded.append((command, kwargs)) or type("Completed", (), {"returncode": 0})(),
     )
 
     result = main(["run", "tests", "qt"])
 
     assert result == 0
-    assert recorded[0][:4] == [sys.executable, "-m", "pytest", "-q"]
-    assert str(app_root / "tests" / "test_qt_ui.py") in recorded[0]
+    assert recorded[0][0][:4] == [sys.executable, "-m", "pytest", "-q"]
+    assert str(app_root / "tests" / "test_qt_ui.py") in recorded[0][0]
+    if os.name == "nt":
+        assert recorded[0][1]["creationflags"] == getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
 
 def test_cli_run_tests_defaults_to_unit_slice(monkeypatch, tmp_path):
     app_root = tmp_path / "data_engine"
     (app_root / "tests").mkdir(parents=True)
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
-    recorded: list[list[str]] = []
+    recorded: list[tuple[list[str], dict[str, object]]] = []
     monkeypatch.setattr(
         "data_engine.ui.cli.commands_run.subprocess.run",
-        lambda command, check=False: recorded.append(command) or type("Completed", (), {"returncode": 0})(),
+        lambda command, **kwargs: recorded.append((command, kwargs)) or type("Completed", (), {"returncode": 0})(),
     )
 
     result = main(["run", "tests"])
 
     assert result == 0
-    assert any("--ignore=" in arg for arg in recorded[0])
+    assert any("--ignore=" in arg for arg in recorded[0][0])
 
 
 def test_cli_doctor_reports_workspace_health(monkeypatch, tmp_path, capsys):
@@ -188,7 +197,7 @@ def test_cli_doctor_preserves_launch_python_path(monkeypatch, tmp_path, capsys):
     (workspace_root / "flow_modules").mkdir(parents=True)
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     monkeypatch.setenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, "claims")
-    monkeypatch.setattr("data_engine.ui.cli.commands_doctor.sys.executable", "/tmp/venv/bin/python")
+    monkeypatch.setattr("data_engine.ui.cli.commands_doctor.sys.executable", r"C:\venv\Scripts\python.exe")
     store = LocalSettingsStore.open_default(app_root=app_root)
     store.set_default_workspace_id("claims")
     store.set_workspace_collection_root(workspace_root.parent)
@@ -197,7 +206,7 @@ def test_cli_doctor_preserves_launch_python_path(monkeypatch, tmp_path, capsys):
 
     assert result == 0
     output = capsys.readouterr().out
-    assert "[OK] python executable: /tmp/venv/bin/python" in output
+    assert "[OK] python executable: C:/venv/Scripts/python.exe" in output
 
 
 def test_cli_doctor_daemons_reports_filtered_process_and_lease_state(monkeypatch, tmp_path, capsys):
@@ -266,9 +275,129 @@ def test_cli_doctor_daemons_reports_filtered_process_and_lease_state(monkeypatch
 
     assert result == 0
     output = capsys.readouterr().out
-    assert "Live daemons: 1" in output
-    assert "Defunct daemons: 1" in output
+    expected_live = 2 if os.name == "nt" else 1
+    expected_defunct = 0 if os.name == "nt" else 1
+    assert f"Live daemons: {expected_live}" in output
+    assert f"Defunct daemons: {expected_defunct}" in output
     assert "Related UI processes: 1" in output
+    assert "claims: lease_pid=111 state=live local" in output
+
+
+def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
+    recorded: list[tuple[list[str], dict[str, object]]] = []
+
+    class _Completed:
+        returncode = 0
+        stdout = json.dumps(
+            [
+                {
+                    "ProcessId": 111,
+                    "ParentProcessId": 1,
+                    "CommandLine": "python -m data_engine.hosts.daemon.app --workspace C:\\shared\\claims",
+                },
+                {
+                    "ProcessId": 222,
+                    "ParentProcessId": 111,
+                    "CommandLine": "python -m data_engine.ui.gui.launcher",
+                },
+            ]
+        )
+
+    monkeypatch.setattr("data_engine.ui.cli.commands_doctor.os.name", "nt")
+    monkeypatch.setattr(
+        "data_engine.ui.cli.commands_doctor.subprocess.run",
+        lambda command, **kwargs: recorded.append((command, kwargs)) or _Completed(),
+    )
+
+    rows = commands_doctor.run_process_listing()
+
+    assert recorded[0][0][:5] == [
+        "powershell.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+    ]
+    assert rows == [
+        ProcessInfo(
+            pid=111,
+            ppid=1,
+            status="Running",
+            command="python -m data_engine.hosts.daemon.app --workspace C:\\shared\\claims",
+        ),
+        ProcessInfo(
+            pid=222,
+            ppid=111,
+            status="Running",
+            command="python -m data_engine.ui.gui.launcher",
+        ),
+    ]
+
+
+def test_cli_doctor_daemons_treats_windows_status_as_non_defunct(monkeypatch, tmp_path, capsys):
+    app_root = tmp_path / "data_engine"
+    (app_root / "config").mkdir(parents=True)
+    workspace_root = tmp_path / "shared_workspaces" / "claims"
+    (workspace_root / "flow_modules").mkdir(parents=True)
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    monkeypatch.setenv(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR, str(workspace_root.parent))
+    store = LocalSettingsStore.open_default(app_root=app_root)
+    store.set_default_workspace_id("claims")
+    store.set_workspace_collection_root(workspace_root.parent)
+    settings = type(
+        "_Settings",
+        (object,),
+        {
+            "app_root": app_root,
+            "settings_path": app_root.parent / "app_local" / "data_engine" / "settings" / "app_settings.sqlite",
+            "state_root": app_root.parent / "app_local" / "data_engine",
+            "runtime_root": app_root.parent / "app_local" / "data_engine" / "artifacts",
+            "workspace_collection_root": workspace_root.parent,
+        },
+    )()
+
+    class _WorkspaceService:
+        def discover(self, **kwargs):
+            del kwargs
+            return (type("DW", (), {"workspace_id": "claims", "workspace_root": workspace_root})(),)
+
+        def resolve_paths(self, **kwargs):
+            del kwargs
+            return RuntimeLayoutPolicy().resolve_paths(workspace_root=workspace_root, workspace_id="claims")
+
+    class _SharedStateService:
+        def read_lease_metadata(self, paths):
+            del paths
+            return {"machine_id": "test-host", "pid": 111, "last_checkpoint_at_utc": "2999-01-01T00:00:00+00:00"}
+
+        def lease_is_stale(self, paths, *, stale_after_seconds):
+            del paths, stale_after_seconds
+            return False
+
+    monkeypatch.setattr("data_engine.domain.diagnostics.os.name", "nt")
+
+    result = commands_doctor.doctor_daemons(
+        settings=settings,
+        workspace_service=_WorkspaceService(),
+        process_rows=[
+            ProcessInfo(
+                pid=111,
+                ppid=1,
+                status="Z",
+                command="python -m data_engine.hosts.daemon.app --workspace C:\\shared\\claims",
+            ),
+            ProcessInfo(pid=222, ppid=111, status="Running", command="python -m data_engine.ui.gui.launcher"),
+        ],
+        read_lease_metadata_func=_SharedStateService().read_lease_metadata,
+        lease_is_stale_func=_SharedStateService().lease_is_stale,
+        machine_id_text_func=lambda: "test-host",
+    )
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "Live daemons: 1" in output
+    assert "Defunct daemons: 0" in output
+    assert "orphaned" not in output
     assert "claims: lease_pid=111 state=live local" in output
 
 
@@ -331,7 +460,7 @@ def test_cli_main_accepts_injected_dependencies_for_doctor(capsys, tmp_path):
 
     assert result == 0
     output = capsys.readouterr().out
-    assert f"app root: {app_root}" in output
+    assert f"app root: {str(app_root).replace('\\', '/')}" in output
 
 
 def test_workspace_vscode_settings_only_adds_checkout_specific_entries_when_present(tmp_path, monkeypatch):
@@ -341,6 +470,7 @@ def test_workspace_vscode_settings_only_adds_checkout_specific_entries_when_pres
     settings = _workspace_vscode_settings(workspace_root, app_root=app_root)
 
     assert settings["python.defaultInterpreterPath"] == "${workspaceFolder}/.venv"
+    assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ROOT"] == str(workspace_root)
     assert "python.analysis.extraPaths" not in settings
     assert "python.testing.pytestEnabled" not in settings
     assert "python.testing.pytestArgs" not in settings

@@ -5,9 +5,11 @@ from pathlib import Path
 import os
 import subprocess
 import threading
+from types import SimpleNamespace
 
 import pytest
 
+import data_engine.hosts.daemon.client as daemon_client
 from data_engine.authoring.builder import Flow
 from data_engine.domain import DaemonLifecyclePolicy
 from data_engine.hosts.daemon.app import (
@@ -40,7 +42,7 @@ from data_engine.hosts.daemon.runtime_control import stop_active_work
 from data_engine.hosts.daemon.server import serve_forever, serve_workspace_daemon
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR, machine_id_text
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
-from data_engine.runtime.runtime_db import RuntimeLedger, utcnow_text
+from data_engine.runtime.runtime_db import RuntimeControlLedger, RuntimeLedger, utcnow_text
 from data_engine.runtime.shared_state import (
     checkpoint_workspace_state,
     claim_workspace,
@@ -136,15 +138,18 @@ def test_daemon_host_dependencies_build_default_opens_workspace_runtime_ledger(t
 
     dependencies = DaemonHostDependencies.build_default(paths)
     try:
-        assert dependencies.runtime_ledger.db_path.name == "runtime_ledger.sqlite"
-        assert dependencies.runtime_ledger.db_path.parent.parent.name == "runtime_state"
-        assert dependencies.runtime_ledger.db_path.exists() is True
+        assert dependencies.runtime_cache_ledger.db_path.name == "runtime_cache.sqlite"
+        assert dependencies.runtime_control_ledger.db_path.name == "runtime_control.sqlite"
+        assert dependencies.runtime_cache_ledger.db_path.parent.parent.name == "runtime_state"
+        assert dependencies.runtime_cache_ledger.db_path.exists() is True
+        assert dependencies.runtime_control_ledger.db_path.exists() is True
         assert dependencies.flow_catalog_service.__class__.__name__ == "FlowCatalogService"
         assert dependencies.flow_execution_service.__class__.__name__ == "FlowExecutionService"
         assert dependencies.runtime_execution_service.__class__.__name__ == "RuntimeExecutionService"
         assert dependencies.shared_state_adapter.__class__.__name__ == "DaemonSharedStateAdapter"
     finally:
-        dependencies.runtime_ledger.close()
+        dependencies.runtime_cache_ledger.close()
+        dependencies.runtime_control_ledger.close()
 
 
 def test_daemon_host_dependencies_build_default_uses_injected_ledger_service(tmp_path, monkeypatch):
@@ -154,16 +159,16 @@ def test_daemon_host_dependencies_build_default_uses_injected_ledger_service(tmp
     _write_demo_flow(workspace_root)
     paths = resolve_workspace_paths(workspace_root=workspace_root)
     calls: list[Path] = []
-    ledger = RuntimeLedger(tmp_path / "custom" / "ledger.sqlite")
+    ledger = RuntimeControlLedger(tmp_path / "custom" / "runtime_control.sqlite")
 
     class _LedgerService:
-        def open_for_workspace(self, workspace_root_arg: Path) -> RuntimeLedger:
+        def open_for_workspace(self, workspace_root_arg: Path) -> RuntimeControlLedger:
             calls.append(workspace_root_arg)
             return ledger
 
     dependencies = DaemonHostDependencies.build_default(paths, ledger_service=_LedgerService())
     try:
-        assert dependencies.runtime_ledger is ledger
+        assert dependencies.runtime_control_ledger is ledger
         assert calls == [paths.workspace_root]
     finally:
         ledger.close()
@@ -203,7 +208,8 @@ def test_daemon_host_dependencies_build_default_uses_injected_factories(tmp_path
         assert dependencies.flow_execution_service.__class__.__name__ == "_FlowExecutionService"
         assert dependencies.runtime_execution_service.__class__.__name__ == "_RuntimeExecutionService"
     finally:
-        dependencies.runtime_ledger.close()
+        dependencies.runtime_cache_ledger.close()
+        dependencies.runtime_control_ledger.close()
 
 
 def test_daemon_host_identity_current_process_uses_current_pid():
@@ -715,26 +721,25 @@ def test_workspace_daemon_manager_auto_recovers_dead_same_machine_lease(tmp_path
     assert snapshot.leased_by_machine_id is None
 
 
-def test_lease_pid_is_live_treats_zombie_process_as_dead(monkeypatch):
+def test_lease_pid_is_live_delegates_to_pid_helper(monkeypatch):
     metadata = {"pid": 123}
 
-    monkeypatch.setattr("data_engine.hosts.daemon.manager.os.kill", lambda pid, sig: None)
-    monkeypatch.setattr(
-        "data_engine.hosts.daemon.manager.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="Z\n", stderr=""),
-    )
+    monkeypatch.setattr("data_engine.hosts.daemon.manager._pid_is_live", lambda pid: pid == 123)
 
-    assert _lease_pid_is_live(metadata) is False
+    assert _lease_pid_is_live(metadata) is True
+    assert _lease_pid_is_live({"pid": 456}) is False
 
 
-def test_pid_is_live_treats_zombie_process_as_dead(monkeypatch):
-    monkeypatch.setattr("data_engine.hosts.daemon.client.os.kill", lambda pid, sig: None)
+def test_pid_is_live_uses_windows_helper_without_ps(monkeypatch):
+    monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "nt")
+    monkeypatch.setattr("data_engine.hosts.daemon.client._windows_pid_is_live", lambda pid: pid == 123)
     monkeypatch.setattr(
         "data_engine.hosts.daemon.client.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="Z+\n", stderr=""),
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Windows PID checks should not use ps")),
     )
 
-    assert _pid_is_live(123) is False
+    assert _pid_is_live(123) is True
+    assert _pid_is_live(456) is False
 
 
 def test_force_shutdown_daemon_process_kills_local_pid_and_cleans_up_lease(tmp_path, monkeypatch):
@@ -759,8 +764,9 @@ def test_force_shutdown_daemon_process_kills_local_pid_and_cleans_up_lease(tmp_p
         app_version="0.1.0",
     )
     endpoint_path = Path(paths.daemon_endpoint_path)
-    endpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    endpoint_path.write_text("", encoding="utf-8")
+    if paths.daemon_endpoint_kind == "unix":
+        endpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        endpoint_path.write_text("", encoding="utf-8")
     killed_pids: list[int] = []
     pid_live = {"value": True}
 
@@ -782,7 +788,44 @@ def test_force_shutdown_daemon_process_kills_local_pid_and_cleans_up_lease(tmp_p
 
     assert killed_pids == [321]
     assert read_lease_metadata(paths) is None
-    assert endpoint_path.exists() is False
+    if paths.daemon_endpoint_kind == "unix":
+        assert endpoint_path.exists() is False
+
+
+def test_checkpoint_once_raises_when_local_daemon_state_write_fails(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        calls: list[str] = []
+
+        def _checkpoint_workspace_state(*args, **kwargs):
+            del args, kwargs
+            calls.append("shared")
+
+        monkeypatch.setattr(
+            service.shared_state_adapter,
+            "checkpoint_workspace_state",
+            _checkpoint_workspace_state,
+        )
+        monkeypatch.setattr(
+            service.runtime_control_ledger,
+            "upsert_daemon_state",
+            lambda **kwargs: (_ for _ in ()).throw(PermissionError("db locked")),
+        )
+
+        with pytest.raises(PermissionError, match="db locked"):
+            service._checkpoint_once(status="idle")  # noqa: SLF001 - ownership-critical checkpointing must fail hard
+
+        assert calls == ["shared"]
+        assert service.host.workspace_owned is True
+    finally:
+        service._shutdown()  # noqa: SLF001 - direct daemon lifecycle test
 
 
 def test_force_shutdown_daemon_process_returns_when_nothing_is_running(tmp_path, monkeypatch):
@@ -902,6 +945,37 @@ def test_spawn_daemon_process_does_not_launch_duplicate_local_owner(tmp_path, mo
     assert "already owns this workspace" in str(excinfo.value)
 
 
+def test_spawn_daemon_process_uses_windows_creation_flags(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "nt")
+    monkeypatch.setattr("data_engine.hosts.daemon.client.is_daemon_live", lambda paths: False)
+    monkeypatch.setattr("data_engine.hosts.daemon.client._wait_for_fresh_local_daemon", lambda paths: False)
+    monkeypatch.setattr("data_engine.hosts.daemon.client._same_machine_live_lease_process", lambda paths: None)
+    monkeypatch.setattr("data_engine.hosts.daemon.client._should_force_recover_local_lease", lambda paths: False)
+    monkeypatch.setattr("data_engine.hosts.daemon.client._same_machine_unreachable_lease_metadata", lambda paths: None)
+    monkeypatch.setattr("data_engine.hosts.daemon.client._acquire_startup_lock", lambda paths: True)
+    monkeypatch.setattr("data_engine.hosts.daemon.client._wait_for_daemon_live", lambda paths, timeout_seconds: True)
+
+    captured: dict[str, object] = {}
+
+    def _fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr("data_engine.hosts.daemon.client.subprocess.Popen", _fake_popen)
+
+    assert spawn_daemon_process(paths) == 0
+    assert captured["command"][1:3] == ["-m", "data_engine.hosts.daemon.app"]
+    assert "creationflags" in captured["kwargs"]
+    assert captured["kwargs"]["creationflags"] != 0
+    assert "start_new_session" not in captured["kwargs"]
+
+
 def test_remove_stale_unix_endpoint_deletes_dead_socket_file(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
@@ -932,6 +1006,21 @@ def test_daemon_authkey_is_stable_per_workspace(tmp_path, monkeypatch):
 
     assert first == second
     assert len(first) == 32
+
+
+def test_daemon_authkey_hardens_created_file(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    hardened: list[Path] = []
+    monkeypatch.setattr("data_engine.hosts.daemon.client._harden_private_file_permissions", lambda path: hardened.append(path))
+
+    authkey = daemon_authkey(paths)
+
+    assert len(authkey) == 32
+    assert hardened == [paths.runtime_state_dir / daemon_client.DAEMON_AUTHKEY_FILE_NAME]
 
 
 def test_daemon_message_encoding_requires_json_object():
@@ -1535,6 +1624,7 @@ def test_checkpoint_failures_release_workspace_and_request_shutdown(tmp_path, mo
     assert service.host.workspace_owned is False
     assert service.host.status == "failed"
     assert service.host.runtime_active is False
+    assert service.state.consecutive_checkpoint_failures == 3
     assert read_lease_metadata(paths) is None
     assert (paths.available_markers_dir / paths.workspace_id).exists() is True
     assert (paths.leased_markers_dir / paths.workspace_id).exists() is False
@@ -1647,7 +1737,7 @@ def test_ephemeral_daemon_stays_alive_when_no_live_clients_remain_during_active_
             self._set = True
 
     service.host.shutdown_event = _SequenceEvent()  # type: ignore[assignment]
-    monkeypatch.setattr(service.runtime_ledger, "count_live_client_sessions", lambda workspace_id: 0)
+    monkeypatch.setattr(service.runtime_control_ledger, "count_live_client_sessions", lambda workspace_id: 0)
 
     service._checkpoint_loop()  # noqa: SLF001 - direct lifecycle ephemeral policy test
 
@@ -1686,7 +1776,7 @@ def test_ephemeral_idle_daemon_requests_shutdown_when_no_live_clients_remain(tmp
             self._set = True
 
     service.host.shutdown_event = _SequenceEvent()  # type: ignore[assignment]
-    monkeypatch.setattr(service.runtime_ledger, "count_live_client_sessions", lambda workspace_id: 0)
+    monkeypatch.setattr(service.runtime_control_ledger, "count_live_client_sessions", lambda workspace_id: 0)
 
     service._checkpoint_loop()  # noqa: SLF001 - direct lifecycle ephemeral policy test
 
@@ -1726,7 +1816,7 @@ def test_persistent_daemon_stays_alive_when_no_live_clients_remain(tmp_path, mon
             self._set = True
 
     service.host.shutdown_event = _SequenceEvent()  # type: ignore[assignment]
-    monkeypatch.setattr(service.runtime_ledger, "count_live_client_sessions", lambda workspace_id: 0)
+    monkeypatch.setattr(service.runtime_control_ledger, "count_live_client_sessions", lambda workspace_id: 0)
 
     service._checkpoint_loop()  # noqa: SLF001 - direct lifecycle persistent policy test
 
@@ -1744,6 +1834,7 @@ def test_spawn_daemon_process_waits_on_existing_startup_lock(tmp_path, monkeypat
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     _write_demo_flow(workspace_root)
     paths = resolve_workspace_paths(workspace_root=workspace_root)
+    monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "posix")
     paths.runtime_state_dir.mkdir(parents=True, exist_ok=True)
     (paths.runtime_state_dir / ".daemon-start.lock").write_text("123", encoding="utf-8")
 
@@ -1757,3 +1848,46 @@ def test_spawn_daemon_process_waits_on_existing_startup_lock(tmp_path, monkeypat
     monkeypatch.setattr("data_engine.hosts.daemon.client.subprocess.Popen", _fail_popen)
 
     assert spawn_daemon_process(paths) == 0
+
+
+def test_windows_startup_lock_uses_named_mutex_without_lock_file(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "nt")
+
+    handles: list[int] = []
+    released: list[int] = []
+    closed: list[int] = []
+    state = {"last_error": 0}
+
+    class _Kernel32:
+        def CreateMutexW(self, _security, _initial_owner, _name):
+            handle = 1234
+            handles.append(handle)
+            state["last_error"] = 0 if len(handles) == 1 else daemon_client._WINDOWS_ERROR_ALREADY_EXISTS
+            return handle
+
+        def GetLastError(self):
+            return state["last_error"]
+
+        def ReleaseMutex(self, handle):
+            released.append(handle)
+            return 1
+
+        def CloseHandle(self, handle):
+            closed.append(handle)
+            return 1
+
+    monkeypatch.setattr(daemon_client.ctypes, "windll", SimpleNamespace(kernel32=_Kernel32()))
+
+    assert daemon_client._acquire_startup_lock(paths) is True
+    assert (paths.runtime_state_dir / ".daemon-start.lock").exists() is False
+    assert daemon_client._acquire_startup_lock(paths) is False
+
+    daemon_client._release_startup_lock(paths)
+
+    assert released == [1234]
+    assert closed == [1234, 1234]

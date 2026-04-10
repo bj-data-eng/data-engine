@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterable, Protocol, runtime_checkable
 
 from data_engine.authoring.model import FlowValidationError
 from data_engine.platform.workspace_models import normalized_path_text
-
-
-def _normalize_path(value: Path) -> Path:
-    """Normalize a path for stable comparisons across filesystems."""
-    return Path(normalized_path_text(value))
 
 
 def _normalized_name(value: str) -> str:
@@ -21,7 +17,7 @@ def _normalized_name(value: str) -> str:
 
 def _queue_key(path: Path) -> str:
     """Return a stable sort key for a filesystem path."""
-    return _normalize_path(path).as_posix().casefold()
+    return os.path.normcase(os.path.normpath(os.fspath(path)))
 
 
 def _normalize_extensions(extensions: tuple[str, ...] | None) -> tuple[str, ...] | None:

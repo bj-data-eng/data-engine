@@ -83,6 +83,8 @@ def test_workspace_vscode_settings_point_back_to_shared_app_root(tmp_path, monke
     assert settings["python.analysis.extraPaths"] == [str(app_root / "src")]
     assert settings["python.testing.pytestArgs"] == [str(app_root / "tests")]
     assert settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
+    assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
+    assert settings["terminal.integrated.env.windows"] == settings["terminal.integrated.env.osx"]
 
 
 def test_collection_vscode_settings_point_back_to_shared_app_root(tmp_path, monkeypatch):
@@ -96,6 +98,8 @@ def test_collection_vscode_settings_point_back_to_shared_app_root(tmp_path, monk
     assert settings["python.analysis.extraPaths"] == [str(app_root / "src")]
     assert settings["python.testing.pytestArgs"] == [str(app_root / "tests")]
     assert settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(collection_root)
+    assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(collection_root)
+    assert settings["terminal.integrated.env.windows"] == settings["terminal.integrated.env.osx"]
 
 
 def test_test_slice_args_cover_named_human_slices(tmp_path):

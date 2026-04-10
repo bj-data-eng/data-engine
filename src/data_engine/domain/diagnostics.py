@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 
@@ -36,12 +37,24 @@ class ClassifiedProcessInfo:
     @property
     def is_defunct(self) -> bool:
         """Return whether this process row represents a zombie/defunct process."""
-        return self.status.startswith("Z")
+        return is_defunct_process_status(self.status)
 
     @property
     def is_orphaned(self) -> bool:
         """Return whether this process row is now parented by init/launchd."""
+        if os.name == "nt":
+            return False
         return self.ppid == 1
+
+
+def is_defunct_process_status(status: str) -> bool:
+    """Return whether a process status text indicates a defunct process."""
+    normalized = status.strip().lower()
+    if normalized == "defunct":
+        return True
+    if os.name == "nt":
+        return False
+    return normalized.startswith("z")
 
 
 @dataclass(frozen=True)

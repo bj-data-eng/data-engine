@@ -36,7 +36,7 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
 
                 raise WorkspaceLeaseError(f"Workspace {service.paths.workspace_id!r} is already leased locally.")
             release_workspace_claim(service, leased_by_machine_id=owner, status="leased")
-            shared_state.hydrate_local_runtime(service.paths, service.runtime_ledger)
+            shared_state.hydrate_local_runtime(service.paths, service.runtime_cache_ledger)
             service._update_daemon_state(status="leased")
             service._debug_log(f"initialize observer mode owner={owner}")
             return
@@ -57,7 +57,7 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
         last_checkpoint_at_utc=service.state.last_checkpoint_at_utc,
         app_version=APP_VERSION,
     )
-    shared_state.hydrate_local_runtime(service.paths, service.runtime_ledger)
+    shared_state.hydrate_local_runtime(service.paths, service.runtime_cache_ledger)
     service._update_daemon_state(status="starting")
     service._checkpoint_once(status="idle")
     with service._state_lock:

@@ -15,6 +15,7 @@ from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_models import DiscoveredWorkspace
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.platform.theme import GITHUB_DARK, GITHUB_LIGHT
+import data_engine.runtime.file_watch as file_watch
 from data_engine.runtime.file_watch import PollingWatcher, is_temporary_file_path, iter_candidate_paths
 from data_engine.services.daemon import DaemonService
 from data_engine.services.daemon_state import DaemonStateService
@@ -69,6 +70,22 @@ def test_iter_candidate_paths_raises_for_missing_root(tmp_path):
 
 def test_iter_candidate_paths_can_tolerate_missing_root_when_requested(tmp_path):
     assert list(iter_candidate_paths(tmp_path / "missing", allow_missing=True)) == []
+
+
+def test_iter_candidate_paths_does_not_round_trip_through_path_constructor(tmp_path, monkeypatch):
+    left = tmp_path / "alpha" / "claims.xlsx"
+    right = tmp_path / "beta" / "claims.xlsx"
+    left.parent.mkdir(parents=True)
+    right.parent.mkdir(parents=True)
+    left.write_text("x", encoding="utf-8")
+    right.write_text("x", encoding="utf-8")
+
+    def _boom(*args, **kwargs):  # pragma: no cover - defensive test hook
+        raise AssertionError("Path constructor should not be used while sorting candidate paths")
+
+    monkeypatch.setattr(file_watch, "Path", _boom)
+
+    assert list(iter_candidate_paths(tmp_path, extensions=(".xlsx",))) == [left, right]
 
 
 def test_temporary_file_helper_covers_common_transient_patterns():
@@ -287,7 +304,7 @@ def test_ledger_service_opens_workspace_ledgers_through_injected_collaborator(tm
 
 def test_ledger_service_default_open_uses_runtime_layout_policy(tmp_path):
     workspace_root = tmp_path / "workspace"
-    expected_db_path = tmp_path / "runtime" / "runtime_ledger.sqlite"
+    expected_db_path = tmp_path / "runtime" / "runtime_control.sqlite"
 
     class _Policy:
         def resolve_paths(self, *, data_root=None, **kwargs):
@@ -296,6 +313,7 @@ def test_ledger_service_default_open_uses_runtime_layout_policy(tmp_path):
 
             class _Paths:
                 runtime_db_path = expected_db_path
+                runtime_control_db_path = expected_db_path
 
             return _Paths()
 

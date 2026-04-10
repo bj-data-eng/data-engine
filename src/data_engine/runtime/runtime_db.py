@@ -10,7 +10,12 @@ import threading
 
 from data_engine.domain.source_state import SourceSignature
 from data_engine.domain.time import parse_utc_text, utcnow_text
-from data_engine.platform.workspace_models import DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR, normalized_path_text
+from data_engine.platform.workspace_models import (
+    DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR,
+    DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR,
+    DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR,
+    normalized_path_text,
+)
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.ledger_models import (
     PersistedClientSession,
@@ -23,8 +28,8 @@ from data_engine.runtime.ledger_models import (
 )
 
 
-class RuntimeLedger:
-    """Own the SQLite runtime ledger and expose narrow read/write helpers."""
+class _RuntimeSqliteStore:
+    """Own one SQLite-backed runtime store and expose narrow read/write helpers."""
 
     HISTORY_RETENTION_DAYS = 30
 
@@ -34,14 +39,6 @@ class RuntimeLedger:
         self._connections_lock = threading.RLock()
         self._ensure_parent_dir()
         self._initialize_schema()
-
-    @classmethod
-    def open_default(cls, *, data_root: Path | None = None) -> "RuntimeLedger":
-        """Open the default workspace runtime ledger."""
-        env_override_raw = os.environ.get(DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR)
-        if env_override_raw is not None and env_override_raw.strip():
-            return cls(Path(env_override_raw).expanduser().resolve())
-        return cls(RuntimeLayoutPolicy().resolve_paths(data_root=data_root).runtime_db_path)
 
     def _ensure_parent_dir(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,6 +57,8 @@ class RuntimeLedger:
                 connection.row_factory = sqlite3.Row
                 connection.execute("PRAGMA foreign_keys = ON")
                 connection.execute("PRAGMA busy_timeout = 5000")
+                connection.execute("PRAGMA journal_mode = WAL")
+                connection.execute("PRAGMA wal_autocheckpoint = 100")
                 self._connections[thread_id] = connection
             return connection
 
@@ -79,8 +78,32 @@ class RuntimeLedger:
             pass
 
     def _initialize_schema(self) -> None:
+        raise NotImplementedError
+
+    def _checkpoint_wal(self, *, passive: bool = False) -> None:
+        """Best-effort WAL checkpointing to avoid indefinite growth on long-lived sessions."""
+        mode = "PASSIVE" if passive else "TRUNCATE"
+        try:
+            self._connection().execute(f"PRAGMA wal_checkpoint({mode})")
+        except sqlite3.Error:
+            pass
+
+
+class RuntimeCacheLedger(_RuntimeSqliteStore):
+    """Own the cache/runtime-history SQLite store for runs, logs, and file state."""
+
+    @classmethod
+    def open_default(cls, *, data_root: Path | None = None) -> "RuntimeCacheLedger":
+        """Open the default workspace runtime cache ledger."""
+        env_override_raw = os.environ.get(DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR)
+        if env_override_raw is None or not env_override_raw.strip():
+            env_override_raw = os.environ.get(DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR)
+        if env_override_raw is not None and env_override_raw.strip():
+            return cls(Path(env_override_raw).expanduser().resolve())
+        return cls(RuntimeLayoutPolicy().resolve_paths(data_root=data_root).runtime_cache_db_path)
+
+    def _initialize_schema(self) -> None:
         connection = self._connection()
-        connection.execute("PRAGMA journal_mode = WAL")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS runs (
@@ -117,34 +140,6 @@ class RuntimeLedger:
             connection.execute("ALTER TABLE step_runs ADD COLUMN output_path TEXT")
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS daemon_state (
-                workspace_id TEXT PRIMARY KEY,
-                pid INTEGER NOT NULL,
-                endpoint_kind TEXT NOT NULL,
-                endpoint_path TEXT NOT NULL,
-                started_at_utc TEXT NOT NULL,
-                last_checkpoint_at_utc TEXT NOT NULL,
-                status TEXT NOT NULL,
-                app_root TEXT NOT NULL,
-                workspace_root TEXT NOT NULL,
-                version_text TEXT
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS client_sessions (
-                client_id TEXT PRIMARY KEY,
-                workspace_id TEXT NOT NULL,
-                client_kind TEXT NOT NULL,
-                pid INTEGER NOT NULL,
-                started_at_utc TEXT NOT NULL,
-                updated_at_utc TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            """
             CREATE TABLE IF NOT EXISTS file_state (
                 flow_name TEXT NOT NULL,
                 source_path TEXT NOT NULL,
@@ -175,7 +170,52 @@ class RuntimeLedger:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_step_runs_run ON step_runs(run_id, id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_logs_flow_created ON logs(flow_name, created_at_utc, id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_logs_run_created ON logs(run_id, created_at_utc, id)")
+        self._checkpoint_wal(passive=True)
+
+
+class RuntimeControlLedger(_RuntimeSqliteStore):
+    """Own the control SQLite store for daemon ownership and client sessions."""
+
+    @classmethod
+    def open_default(cls, *, data_root: Path | None = None) -> "RuntimeControlLedger":
+        """Open the default workspace runtime control ledger."""
+        env_override_raw = os.environ.get(DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR)
+        if env_override_raw is not None and env_override_raw.strip():
+            return cls(Path(env_override_raw).expanduser().resolve())
+        return cls(RuntimeLayoutPolicy().resolve_paths(data_root=data_root).runtime_control_db_path)
+
+    def _initialize_schema(self) -> None:
+        connection = self._connection()
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daemon_state (
+                workspace_id TEXT PRIMARY KEY,
+                pid INTEGER NOT NULL,
+                endpoint_kind TEXT NOT NULL,
+                endpoint_path TEXT NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                last_checkpoint_at_utc TEXT NOT NULL,
+                status TEXT NOT NULL,
+                app_root TEXT NOT NULL,
+                workspace_root TEXT NOT NULL,
+                version_text TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS client_sessions (
+                client_id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                client_kind TEXT NOT NULL,
+                pid INTEGER NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL
+            )
+            """
+        )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_client_sessions_workspace ON client_sessions(workspace_id, updated_at_utc DESC)")
+        self._checkpoint_wal(passive=True)
 
     def upsert_daemon_state(
         self,
@@ -931,7 +971,96 @@ class RuntimeLedger:
             connection.commit()
 
 
+class RuntimeCacheLedger(RuntimeControlLedger):
+    """Own the cache/runtime-history SQLite store for runs, logs, and file state."""
+
+    @classmethod
+    def open_default(cls, *, data_root: Path | None = None) -> "RuntimeCacheLedger":
+        """Open the default workspace runtime cache ledger."""
+        env_override_raw = os.environ.get(DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR)
+        if env_override_raw is None or not env_override_raw.strip():
+            env_override_raw = os.environ.get(DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR)
+        if env_override_raw is not None and env_override_raw.strip():
+            return cls(Path(env_override_raw).expanduser().resolve())
+        return cls(RuntimeLayoutPolicy().resolve_paths(data_root=data_root).runtime_cache_db_path)
+
+    def _initialize_schema(self) -> None:
+        connection = self._connection()
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY,
+                flow_name TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                source_path TEXT,
+                status TEXT NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                finished_at_utc TEXT,
+                error_text TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS step_runs (
+                id INTEGER PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                flow_name TEXT NOT NULL,
+                step_label TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                finished_at_utc TEXT,
+                elapsed_ms INTEGER,
+                error_text TEXT,
+                output_path TEXT,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id)
+            )
+            """
+        )
+        columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(step_runs)").fetchall()}
+        if "output_path" not in columns:
+            connection.execute("ALTER TABLE step_runs ADD COLUMN output_path TEXT")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS file_state (
+                flow_name TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                mtime_ns INTEGER NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                last_success_run_id TEXT,
+                last_success_at_utc TEXT,
+                last_status TEXT NOT NULL,
+                last_error_text TEXT,
+                PRIMARY KEY (flow_name, source_path)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY,
+                run_id TEXT,
+                flow_name TEXT,
+                step_label TEXT,
+                level TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_flow_started ON runs(flow_name, started_at_utc DESC)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_step_runs_run ON step_runs(run_id, id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_logs_flow_created ON logs(flow_name, created_at_utc, id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_logs_run_created ON logs(run_id, created_at_utc, id)")
+        self._checkpoint_wal(passive=True)
+
+
+RuntimeLedger = RuntimeCacheLedger
+
+
 __all__ = [
+    "RuntimeCacheLedger",
+    "RuntimeControlLedger",
     "RuntimeLedger",
     "parse_utc_text",
     "utcnow_text",

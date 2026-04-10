@@ -34,8 +34,14 @@ from data_engine.hosts.daemon.app import (
 )
 from data_engine.platform.workspace_models import (
     DATA_ENGINE_APP_ROOT_ENV_VAR,
+    DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR,
+    DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR,
+    DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR,
     DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR,
+    DATA_ENGINE_WORKSPACE_ID_ENV_VAR,
+    DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR,
 )
+from data_engine.platform.local_settings import DATA_ENGINE_STATE_ROOT_ENV_VAR
 from data_engine.platform.workspace_policy import AppStatePolicy, RuntimeLayoutPolicy, WorkspaceDiscoveryPolicy
 from data_engine.views.models import qt_flow_cards_from_entries
 from data_engine.runtime.shared_state import read_lease_metadata, recover_stale_workspace
@@ -105,8 +111,15 @@ def main(argv: list[str] | None = None) -> int:
     temp_root = Path(tempfile.mkdtemp(prefix="data_engine_live_suite_"))
     temp_app_root = temp_root / "app_root"
     temp_collection_root = temp_root / "workspaces"
+    temp_state_root = temp_root / "app_local" / "data_engine"
     previous_app_root = os.environ.get(DATA_ENGINE_APP_ROOT_ENV_VAR)
     previous_collection_root = os.environ.get(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR)
+    previous_workspace_root = os.environ.get(DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR)
+    previous_workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR)
+    previous_runtime_cache_db = os.environ.get(DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR)
+    previous_runtime_control_db = os.environ.get(DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR)
+    previous_runtime_db = os.environ.get(DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR)
+    previous_state_root = os.environ.get(DATA_ENGINE_STATE_ROOT_ENV_VAR)
     workspace_paths: list[Any] = []
     workspace_ids: list[str] = []
     try:
@@ -115,6 +128,12 @@ def main(argv: list[str] | None = None) -> int:
         build_temp_smoke_environment(temp_root=temp_root, workspace_ids=workspace_ids)
         os.environ[DATA_ENGINE_APP_ROOT_ENV_VAR] = str(temp_app_root)
         os.environ[DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR] = str(temp_collection_root)
+        os.environ[DATA_ENGINE_STATE_ROOT_ENV_VAR] = str(temp_state_root)
+        os.environ.pop(DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR, None)
+        os.environ.pop(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, None)
+        os.environ.pop(DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR, None)
+        os.environ.pop(DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR, None)
+        os.environ.pop(DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR, None)
 
         settings = _APP_STATE_POLICY.load_settings(app_root=temp_app_root)
         discovered = _WORKSPACE_DISCOVERY_POLICY.discover(app_root=temp_app_root)
@@ -307,6 +326,30 @@ def main(argv: list[str] | None = None) -> int:
             os.environ.pop(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR, None)
         else:
             os.environ[DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR] = previous_collection_root
+        if previous_workspace_root is None:
+            os.environ.pop(DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR, None)
+        else:
+            os.environ[DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR] = previous_workspace_root
+        if previous_workspace_id is None:
+            os.environ.pop(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, None)
+        else:
+            os.environ[DATA_ENGINE_WORKSPACE_ID_ENV_VAR] = previous_workspace_id
+        if previous_runtime_cache_db is None:
+            os.environ.pop(DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR, None)
+        else:
+            os.environ[DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR] = previous_runtime_cache_db
+        if previous_runtime_control_db is None:
+            os.environ.pop(DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR, None)
+        else:
+            os.environ[DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR] = previous_runtime_control_db
+        if previous_runtime_db is None:
+            os.environ.pop(DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR, None)
+        else:
+            os.environ[DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR] = previous_runtime_db
+        if previous_state_root is None:
+            os.environ.pop(DATA_ENGINE_STATE_ROOT_ENV_VAR, None)
+        else:
+            os.environ[DATA_ENGINE_STATE_ROOT_ENV_VAR] = previous_state_root
         if args.keep_temp:
             print_section("Temp Environment")
             print_kv("kept_temp_root", temp_root)

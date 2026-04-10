@@ -78,7 +78,8 @@ class DataEngineDaemonService:
         self.state = DaemonHostState.build(started_at_utc=self.started_at_utc)
         self.host = DaemonHostFacade(self.state)
 
-        self.runtime_ledger = dependencies.runtime_ledger
+        self.runtime_cache_ledger = dependencies.runtime_cache_ledger
+        self.runtime_control_ledger = dependencies.runtime_control_ledger
         self.flow_catalog_service = dependencies.flow_catalog_service
         self.flow_execution_service = dependencies.flow_execution_service
         self.runtime_execution_service = dependencies.runtime_execution_service
@@ -88,6 +89,11 @@ class DataEngineDaemonService:
         self.pid = daemon_identity.pid
         self._state_lock = threading.RLock()
         self.command_handler = DaemonCommandHandler(self)
+
+    @property
+    def runtime_ledger(self):
+        """Compatibility alias for cache-backed runtime history."""
+        return self.runtime_cache_ledger
 
     def _workspace_root_is_available(self) -> bool:
         """Return whether the authored workspace still exists at the configured root."""

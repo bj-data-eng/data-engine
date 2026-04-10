@@ -7,7 +7,7 @@ from threading import Event
 from typing import TYPE_CHECKING
 
 from data_engine.authoring.execution import _FlowRuntime, _GroupedFlowRuntime
-from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.runtime_db import RuntimeCacheLedger
 
 if TYPE_CHECKING:
     from data_engine.authoring.flow import Flow
@@ -29,7 +29,7 @@ class RuntimeExecutionService:
         self,
         flow: "Flow",
         *,
-        runtime_ledger: RuntimeLedger | None = None,
+        runtime_ledger: RuntimeCacheLedger | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:
         """Run one flow as a one-shot execution."""
@@ -46,7 +46,7 @@ class RuntimeExecutionService:
         flow: "Flow",
         *,
         use: str | None = None,
-        runtime_ledger: RuntimeLedger | None = None,
+        runtime_ledger: RuntimeCacheLedger | None = None,
     ) -> object:
         """Preview one flow through the one-shot runtime path."""
         runtime = self._flow_runtime_type(
@@ -60,7 +60,7 @@ class RuntimeExecutionService:
         self,
         flow: "Flow",
         *,
-        runtime_ledger: RuntimeLedger,
+        runtime_ledger: RuntimeCacheLedger,
         flow_stop_event: Event,
     ) -> object:
         """Run one flow as a manual one-shot execution."""
@@ -74,7 +74,7 @@ class RuntimeExecutionService:
         self,
         flow: "Flow",
         *,
-        runtime_ledger: RuntimeLedger | None = None,
+        runtime_ledger: RuntimeCacheLedger | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:
         """Run one flow continuously."""
@@ -90,7 +90,7 @@ class RuntimeExecutionService:
         self,
         flows: tuple["Flow", ...],
         *,
-        runtime_ledger: RuntimeLedger,
+        runtime_ledger: RuntimeCacheLedger,
         runtime_stop_event: Event,
         flow_stop_event: Event,
     ) -> object:
@@ -108,7 +108,7 @@ class RuntimeExecutionService:
         self,
         flows: tuple["Flow", ...],
         *,
-        runtime_ledger: RuntimeLedger | None = None,
+        runtime_ledger: RuntimeCacheLedger | None = None,
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:

@@ -19,10 +19,7 @@ from data_engine.runtime.ledger_models import (
     PersistedRun,
     PersistedStepRun,
 )
-from data_engine.runtime.runtime_db import (
-    RuntimeLedger,
-    parse_utc_text,
-)
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, parse_utc_text
 
 
 _LEASE_METADATA_SCHEMA: dict[str, pl.DataType] = {
@@ -197,7 +194,7 @@ def recover_stale_workspace(
 
 def checkpoint_workspace_state(
     paths: WorkspacePaths,
-    ledger: RuntimeLedger,
+    ledger: RuntimeCacheLedger,
     *,
     workspace_id: str,
     machine_id: str,
@@ -264,7 +261,7 @@ def write_lease_metadata(
     )
 
 
-def hydrate_local_runtime_state(paths: WorkspacePaths, ledger: RuntimeLedger) -> None:
+def hydrate_local_runtime_state(paths: WorkspacePaths, ledger: RuntimeCacheLedger) -> None:
     """Replace local SQLite runtime tables from shared parquet snapshots when present."""
     snapshot = _read_consistent_runtime_snapshot(paths)
     if snapshot is None:

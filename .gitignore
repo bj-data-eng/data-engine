@@ -22,3 +22,5 @@ artifacts/documentation/_build_review/
 data/Output/
 config/data/Output/
 documentation/_build/
+data/
+workspaces/

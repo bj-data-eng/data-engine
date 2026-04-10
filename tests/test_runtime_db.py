@@ -4,14 +4,14 @@ from datetime import UTC, datetime, timedelta
 
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.ledger_models import PersistedFileState, PersistedLogEntry, PersistedRun, PersistedStepRun
-from data_engine.runtime.runtime_db import RuntimeLedger, utcnow_text
+from data_engine.runtime.runtime_db import RuntimeControlLedger, RuntimeLedger, utcnow_text
 
 
 resolve_workspace_paths = RuntimeLayoutPolicy().resolve_paths
 
 
 def test_runtime_ledger_initializes_schema_and_workspace_path(tmp_path):
-    db_path = tmp_path / "runtime_state" / "runtime_ledger.sqlite"
+    db_path = tmp_path / "runtime_state" / "runtime_cache.sqlite"
 
     ledger = RuntimeLedger(db_path)
 
@@ -22,12 +22,23 @@ def test_runtime_ledger_initializes_schema_and_workspace_path(tmp_path):
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()
     }
-    assert {"runs", "step_runs", "file_state", "logs", "daemon_state"} <= table_names
+    assert {"runs", "step_runs", "file_state", "logs"} <= table_names
+
+    control = RuntimeControlLedger(tmp_path / "runtime_state" / "runtime_control.sqlite")
+    control_table_names = {
+        row[0]
+        for row in control._connection().execute(  # noqa: SLF001 - targeted schema verification
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    assert {"daemon_state", "client_sessions"} <= control_table_names
 
 
 def test_runtime_ledger_open_default_ignores_blank_env_override(tmp_path, monkeypatch):
     workspace = tmp_path / "collection" / "default"
     monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(tmp_path / "data_engine"))
+    monkeypatch.delenv("DATA_ENGINE_RUNTIME_CACHE_DB_PATH", raising=False)
+    monkeypatch.delenv("DATA_ENGINE_RUNTIME_CONTROL_DB_PATH", raising=False)
     monkeypatch.setenv("DATA_ENGINE_RUNTIME_DB_PATH", "   ")
 
     ledger = RuntimeLedger.open_default(data_root=workspace)
@@ -37,7 +48,7 @@ def test_runtime_ledger_open_default_ignores_blank_env_override(tmp_path, monkey
 
 
 def test_runtime_ledger_poll_staleness_uses_signature_and_last_status(tmp_path):
-    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
     source = tmp_path / "input.xlsx"
     source.write_text("claims", encoding="utf-8")
 
@@ -54,7 +65,7 @@ def test_runtime_ledger_poll_staleness_uses_signature_and_last_status(tmp_path):
 
 
 def test_runtime_ledger_persists_run_step_and_log_history(tmp_path):
-    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
     started_at = utcnow_text()
     ledger.record_run_started(
         run_id="run-1",
@@ -106,7 +117,7 @@ def test_runtime_ledger_persists_run_step_and_log_history(tmp_path):
 
 
 def test_runtime_ledger_prunes_history_older_than_30_days(tmp_path):
-    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
     old_started = (datetime.now(UTC) - timedelta(days=31)).isoformat()
     old_finished = (datetime.now(UTC) - timedelta(days=31, seconds=-1)).isoformat()
     new_started = utcnow_text()
@@ -184,7 +195,7 @@ def test_runtime_ledger_prunes_history_older_than_30_days(tmp_path):
 
 
 def test_runtime_ledger_prunes_missing_file_state_rows(tmp_path):
-    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
     source_a = tmp_path / "a.xlsx"
     source_b = tmp_path / "b.xlsx"
     source_a.write_text("a", encoding="utf-8")
@@ -207,7 +218,7 @@ def test_runtime_ledger_prunes_missing_file_state_rows(tmp_path):
 
 
 def test_runtime_ledger_persists_daemon_state(tmp_path):
-    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    ledger = RuntimeControlLedger(tmp_path / "runtime_state" / "runtime_control.sqlite")
 
     ledger.upsert_daemon_state(
         workspace_id="default",
@@ -231,7 +242,7 @@ def test_runtime_ledger_persists_daemon_state(tmp_path):
 
 
 def test_replace_runtime_snapshot_begins_immediate_transaction(tmp_path, monkeypatch):
-    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
     statements: list[str] = []
 
     class _ConnectionProbe:

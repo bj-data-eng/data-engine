@@ -12,9 +12,11 @@ import polars as pl
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget, QTextEdit
+from shiboken6 import delete as shiboken_delete
+from shiboken6 import isValid as shiboken_is_valid
 
 from data_engine.authoring.model import FlowValidationError
-from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
+from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot
 from data_engine.domain import FlowCatalogEntry, FlowRunState, RuntimeSessionState, WorkspaceControlState
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.platform.local_settings import LocalSettingsStore
@@ -32,6 +34,7 @@ from data_engine.domain import FlowLogEntry
 from data_engine.domain import RuntimeStepEvent, parse_runtime_event
 from data_engine.views.models import QtFlowCard
 from data_engine.views.logs import FlowLogStore
+from data_engine.ui.gui.presenters.logs import next_log_scroll_value
 from data_engine.ui.gui.theme import stylesheet, theme_button_text, toggle_theme_name
 
 
@@ -40,11 +43,34 @@ resolve_workspace_paths = RuntimeLayoutPolicy().resolve_paths
 
 @pytest.fixture
 def qapp():
-    app = QApplication.instance() or QApplication([])
+    existing = QApplication.instance()
+    app = existing if existing is not None and shiboken_is_valid(existing) else QApplication([])
     yield app
     for widget in list(app.topLevelWidgets()):
-        widget.close()
-        widget.deleteLater()
+        if not shiboken_is_valid(widget):
+            continue
+        if hasattr(widget, "ui_closing"):
+            widget.ui_closing = True
+        if hasattr(widget, "_auto_daemon_enabled"):
+            widget._auto_daemon_enabled = False
+        if hasattr(widget, "_shutdown_daemon_on_close"):
+            widget._shutdown_daemon_on_close = lambda: None
+        if hasattr(widget, "_unregister_client_session_and_check_for_shutdown"):
+            widget._unregister_client_session_and_check_for_shutdown = lambda **kwargs: False
+        if hasattr(widget, "_wait_for_worker_threads"):
+            widget._wait_for_worker_threads = lambda *, timeout_seconds: None
+        for timer_name in ("log_timer", "ui_refresh_timer", "operation_timer", "daemon_timer"):
+            timer = getattr(widget, timer_name, None)
+            if timer is not None:
+                timer.stop()
+        runtime_stop_event = getattr(widget, "engine_runtime_stop_event", None)
+        if runtime_stop_event is not None:
+            runtime_stop_event.set()
+        flow_stop_event = getattr(widget, "engine_flow_stop_event", None)
+        if flow_stop_event is not None:
+            flow_stop_event.set()
+        if shiboken_is_valid(widget):
+            shiboken_delete(widget)
     app.processEvents()
 
 
@@ -412,6 +438,12 @@ def _click_flow_row(window: DataEngineWindow, flow_name: str) -> None:
     QTest.mouseClick(widget, Qt.MouseButton.LeftButton)
 
 
+def _dispose_window(qapp, window: DataEngineWindow) -> None:
+    if shiboken_is_valid(window):
+        window.close()
+    qapp.processEvents()
+
+
 def _visible_log_run_primary_labels(window: DataEngineWindow) -> list[str]:
     labels: list[str] = []
     for index in range(window.log_view.count()):
@@ -566,7 +598,7 @@ def test_structured_error_content_parses_step_failure(qapp, monkeypatch):
         )
         assert parsed.detail == "ValueError: boom"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_structured_error_content_parses_build_failure(qapp, monkeypatch):
@@ -586,7 +618,7 @@ def test_structured_error_content_parses_build_failure(qapp, monkeypatch):
         )
         assert parsed.detail == "RuntimeError: build boom"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_structured_error_content_parses_missing_flow_module_error(qapp, monkeypatch):
@@ -607,7 +639,7 @@ def test_structured_error_content_parses_missing_flow_module_error(qapp, monkeyp
         )
         assert "broken_step" in parsed.detail
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_rehydrate_step_outputs_from_ledger_enables_inspect_button(qapp, monkeypatch, tmp_path):
@@ -648,7 +680,7 @@ def test_rehydrate_step_outputs_from_ledger_enables_inspect_button(qapp, monkeyp
         inspect_buttons = [button for button in window.findChildren(QPushButton) if button.objectName() == "inspectOutputButton"]
         assert any(button.isEnabled() for button in inspect_buttons)
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_show_output_preview_renders_excel_as_table(qapp, monkeypatch, tmp_path):
@@ -678,7 +710,7 @@ def test_show_output_preview_renders_excel_as_table(qapp, monkeypatch, tmp_path)
     finally:
         if window.output_preview_dialog is not None:
             window.output_preview_dialog.close()
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_show_output_preview_pdf_uses_placeholder_message(qapp, monkeypatch, tmp_path):
@@ -703,7 +735,7 @@ def test_show_output_preview_pdf_uses_placeholder_message(qapp, monkeypatch, tmp
     finally:
         if window.output_preview_dialog is not None:
             window.output_preview_dialog.close()
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_format_seconds_truncates_and_changes_units(qapp, monkeypatch):
@@ -716,7 +748,7 @@ def test_format_seconds_truncates_and_changes_units(qapp, monkeypatch):
         assert window._format_seconds(61.239) == "1.0m"
         assert window._format_seconds(3665.9) == "1.0h"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_rebuild_runtime_snapshot_preserves_running_step_elapsed_time(qapp, monkeypatch):
@@ -744,7 +776,7 @@ def test_rebuild_runtime_snapshot_preserves_running_step_elapsed_time(qapp, monk
 
         assert window._duration_text("poller", "Read Excel") == "1.2s"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_data_engine_window_instantiates_and_loads_flow_cards(qapp, monkeypatch):
@@ -761,7 +793,7 @@ def test_data_engine_window_instantiates_and_loads_flow_cards(qapp, monkeypatch)
         _click_flow_row(window, "manual_review")
         assert window.selected_flow_name == "manual_review"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_data_engine_window_nav_buttons_switch_views(qapp, monkeypatch):
@@ -779,7 +811,7 @@ def test_data_engine_window_nav_buttons_switch_views(qapp, monkeypatch):
         window.home_button.click()
         assert window.view_stack.currentIndex() == 0
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_refresh_button_reloads_flows(qapp, monkeypatch, tmp_path):
@@ -817,7 +849,7 @@ def test_refresh_button_reloads_flows(qapp, monkeypatch, tmp_path):
         assert len(sync_calls) == 1
         assert any(entry.line == "Reloaded flow definitions." for entry in window.log_store._entries)
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_refresh_button_still_reloads_locally_when_daemon_refresh_fails(qapp, monkeypatch):
@@ -835,7 +867,7 @@ def test_refresh_button_still_reloads_locally_when_daemon_refresh_fails(qapp, mo
         assert len(capture.shown_later_messages) == 1
         assert "Refreshed local flow definitions" in capture.shown_later_messages[0][1]
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_refresh_button_clears_flows_without_spawning_daemon_when_workspace_has_no_flow_modules(qapp, monkeypatch, tmp_path):
@@ -867,7 +899,7 @@ def test_refresh_button_clears_flows_without_spawning_daemon_when_workspace_has_
         assert len(sync_calls) == 1
         assert "No discoverable flows were found yet" in window.empty_flow_message
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_workspace_switch_remains_available_while_current_workspace_runtime_is_active(qapp, monkeypatch, tmp_path):
@@ -907,7 +939,7 @@ def test_workspace_switch_remains_available_while_current_workspace_runtime_is_a
         assert window.workspace_paths.workspace_id == "claims2"
         assert window.workspace_selector.currentData() == "claims2"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_switching_workspace_immediately_syncs_daemon_state_for_selected_workspace(qapp, monkeypatch, tmp_path):
@@ -944,7 +976,7 @@ def test_switching_workspace_immediately_syncs_daemon_state_for_selected_workspa
         assert window.workspace_paths.workspace_id == "claims2"
         assert len(sync_calls) == 1
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_switching_workspaces_hides_selector_popup_before_rebind(qapp, monkeypatch, tmp_path):
@@ -979,7 +1011,7 @@ def test_switching_workspaces_hides_selector_popup_before_rebind(qapp, monkeypat
 
         assert popup_hide_calls == ["selector"]
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_sync_from_daemon_immediately_clears_ui_when_current_workspace_disappears(qapp, monkeypatch, tmp_path):
@@ -1022,7 +1054,7 @@ def test_sync_from_daemon_immediately_clears_ui_when_current_workspace_disappear
         assert window.workspace_selector.isEnabled() is False
         assert window.flow_catalog_state.empty_message == "No discoverable flows were found yet in this workspace folder."
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_switching_workspaces_reloads_visible_log_runs_from_new_workspace(qapp, monkeypatch, tmp_path):
@@ -1114,7 +1146,7 @@ def test_switching_workspaces_reloads_visible_log_runs_from_new_workspace(qapp, 
         assert [group.source_label for group in window.log_store.runs_for_flow(flow_name)] == ["claims2_a.xlsx", "claims2_b.xlsx"]
         assert _visible_log_run_primary_labels(window) == ["claims2_a.xlsx", "claims2_b.xlsx"]
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_switching_workspaces_closes_preview_dialogs(qapp, monkeypatch, tmp_path):
@@ -1166,7 +1198,7 @@ def test_switching_workspaces_closes_preview_dialogs(qapp, monkeypatch, tmp_path
         assert window.config_preview_dialog is None
         assert window.run_log_preview_dialog is None
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_settings_can_save_local_workspace_collection_root_override(qapp, monkeypatch, tmp_path):
@@ -1191,7 +1223,7 @@ def test_settings_can_save_local_workspace_collection_root_override(qapp, monkey
         assert window.workspace_selector.isEnabled() is True
         assert window.workspace_selector.currentData() == "example_workspace"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_settings_can_rebind_workspace_root_while_runtime_is_active(qapp, monkeypatch, tmp_path):
@@ -1216,7 +1248,7 @@ def test_settings_can_rebind_workspace_root_while_runtime_is_active(qapp, monkey
         assert window.workspace_paths.workspace_collection_root == override_root.resolve()
         assert window.workspace_collection_root_override == override_root.resolve()
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_saving_workspace_collection_root_override_reloads_visible_log_runs(qapp, monkeypatch, tmp_path):
@@ -1299,7 +1331,7 @@ def test_saving_workspace_collection_root_override_reloads_visible_log_runs(qapp
         assert [group.source_label for group in window.log_store.runs_for_flow(flow_name)] == ["override_a.xlsx", "override_b.xlsx"]
         assert _visible_log_run_primary_labels(window) == ["override_a.xlsx", "override_b.xlsx"]
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_settings_browse_workspace_collection_root_updates_binding_immediately(qapp, monkeypatch, tmp_path):
@@ -1321,7 +1353,7 @@ def test_settings_browse_workspace_collection_root_updates_binding_immediately(q
         assert window.workspace_collection_root_override == selected_root.resolve()
         assert window.workspace_paths.workspace_collection_root == selected_root.resolve()
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_lease_status_shows_countdown_and_disables_run_controls(qapp, monkeypatch):
@@ -1352,7 +1384,7 @@ def test_lease_status_shows_countdown_and_disables_run_controls(qapp, monkeypatc
         assert window.engine_button.isEnabled() is False
         assert window.request_control_button.isHidden() is False
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_lease_status_shows_overdue_for_local_checkpoint_when_daemon_is_down(qapp, monkeypatch):
@@ -1375,7 +1407,7 @@ def test_lease_status_shows_overdue_for_local_checkpoint_when_daemon_is_down(qap
 
         assert window.lease_status_label.text() == "Local engine is not responding"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_lease_status_shows_refresh_due_instead_of_zero_seconds(qapp, monkeypatch):
@@ -1398,7 +1430,7 @@ def test_lease_status_shows_refresh_due_instead_of_zero_seconds(qapp, monkeypatc
 
         assert window.lease_status_label.text() == "This Workstation has control"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_gui_tolerates_brief_daemon_sync_miss_without_flipping_to_lease_view(qapp, monkeypatch):
@@ -1433,7 +1465,7 @@ def test_gui_tolerates_brief_daemon_sync_miss_without_flipping_to_lease_view(qap
         assert window.runtime_session.workspace_owned is True
         assert window._daemon_manager._sync_misses >= 1
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_gui_sync_from_daemon_skips_liveness_when_workspace_root_is_missing(qapp, monkeypatch, tmp_path):
@@ -1452,7 +1484,7 @@ def test_gui_sync_from_daemon_skips_liveness_when_workspace_root_is_missing(qapp
         assert window.runtime_session == RuntimeSessionState.empty()
         assert window.workspace_control_state == WorkspaceControlState.empty()
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_gui_hydrates_shared_runtime_logs_when_observing_lease(qapp, monkeypatch):
@@ -1479,7 +1511,7 @@ def test_gui_hydrates_shared_runtime_logs_when_observing_lease(qapp, monkeypatch
         assert shared_state_service.hydrated[0][0] == window.workspace_paths
         assert shared_state_service.hydrated[0][1] is window.runtime_ledger
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_request_control_button_records_request_and_logs_result(qapp, monkeypatch):
@@ -1513,7 +1545,7 @@ def test_request_control_button_records_request_and_logs_result(qapp, monkeypatc
         assert len(daemon_bootstrap_requests) == 1
         assert len(sync_calls) == 1
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_request_control_button_preserves_verbose_error_text(qapp, monkeypatch):
@@ -1550,38 +1582,35 @@ def test_request_control_button_preserves_verbose_error_text(qapp, monkeypatch):
             )
         ]
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
-def test_request_control_does_not_recover_live_local_owner(qapp, monkeypatch):
-    services = build_gui_services(flow_catalog_service=_FakeFlowCatalogService())
-    window = DataEngineWindow(services=services)
-    try:
-        monkeypatch.setattr(
-            "data_engine.hosts.daemon.manager.read_lease_metadata",
-            lambda paths: {
-                "machine_id": machine_id_text(),
-                "pid": os.getpid(),
-                "last_checkpoint_at_utc": datetime.now(UTC).isoformat(),
-            },
-        )
-        recovered_calls: list[bool] = []
-        written_requests: list[str] = []
-        monkeypatch.setattr("data_engine.hosts.daemon.manager.recover_stale_workspace", lambda *args, **kwargs: recovered_calls.append(True) or False)
-        monkeypatch.setattr("data_engine.hosts.daemon.manager.write_control_request", lambda paths, **kwargs: written_requests.append("written"))
+def test_request_control_does_not_recover_live_local_owner(monkeypatch):
+    manager = WorkspaceDaemonManager(resolve_workspace_paths())
+    monkeypatch.setattr(
+        "data_engine.hosts.daemon.manager.read_lease_metadata",
+        lambda paths: {
+            "machine_id": machine_id_text(),
+            "pid": os.getpid(),
+            "last_checkpoint_at_utc": datetime.now(UTC).isoformat(),
+        },
+    )
+    recovered_calls: list[bool] = []
+    written_requests: list[str] = []
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.recover_stale_workspace", lambda *args, **kwargs: recovered_calls.append(True) or False)
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.write_control_request", lambda paths, **kwargs: written_requests.append("written"))
 
-        message = window._daemon_manager.request_control()
+    message = manager.request_control()
 
-        assert message == "Control request sent."
-        assert recovered_calls == []
-        assert written_requests == ["written"]
-    finally:
-        window.close()
+    assert message == "Control request sent."
+    assert recovered_calls == []
+    assert written_requests == ["written"]
 
 
 def test_close_event_requests_stop_waits_for_workers_and_closes_ledger(qapp, monkeypatch):
     window = _make_window()
     closed = False
+    join_calls: list[float | None] = []
 
     def mark_closed():
         nonlocal closed
@@ -1589,18 +1618,28 @@ def test_close_event_requests_stop_waits_for_workers_and_closes_ledger(qapp, mon
 
     monkeypatch.setattr(window.runtime_ledger, "close", mark_closed)
 
-    def worker():
-        window.engine_runtime_stop_event.wait(timeout=1.0)
+    class _FakeWorker:
+        def __init__(self) -> None:
+            self._alive = True
 
-    thread = threading.Thread(target=worker, daemon=True)
+        def is_alive(self) -> bool:
+            return self._alive
+
+        def join(self, timeout: float | None = None) -> None:
+            join_calls.append(timeout)
+            # The close path should set the stop event before waiting on workers.
+            assert window.engine_runtime_stop_event.is_set() is True
+            self._alive = False
+
+    thread = _FakeWorker()
     window._register_worker_thread(thread)
-    thread.start()
 
     try:
-        window.close()
+        _dispose_window(qapp, window)
         qapp.processEvents()
 
         assert closed is True
+        assert join_calls
         assert thread.is_alive() is False
     finally:
         if thread.is_alive():
@@ -1609,25 +1648,29 @@ def test_close_event_requests_stop_waits_for_workers_and_closes_ledger(qapp, mon
 
 
 def test_workspace_selector_shows_placeholder_when_no_workspaces_are_discovered(qapp, monkeypatch, tmp_path):
-    def _raise_no_flows():
-        raise FlowValidationError("No flow modules discovered.")
-
     app_root = tmp_path / "data_engine"
+    placeholder_root = app_root / ".workspace_unconfigured"
 
     monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
-    monkeypatch.setenv("DATA_ENGINE_WORKSPACE_COLLECTION_ROOT", str(tmp_path / "empty_workspaces"))
     monkeypatch.delenv("DATA_ENGINE_WORKSPACE_ROOT", raising=False)
     monkeypatch.delenv("DATA_ENGINE_WORKSPACE_ID", raising=False)
+    monkeypatch.delenv("DATA_ENGINE_WORKSPACE_COLLECTION_ROOT", raising=False)
+    LocalSettingsStore.open_default(app_root=app_root).set_workspace_collection_root(None)
 
-    services = build_gui_services(flow_catalog_service=_RaisingFlowCatalogService("No flow modules discovered."))
+    services = build_gui_services(
+        flow_catalog_service=_RaisingFlowCatalogService("No flow modules discovered."),
+    )
     window = DataEngineWindow(services=services)
     try:
+        assert window.workspace_paths.workspace_configured is False
         assert window.workspace_selector.count() == 1
-        assert window.workspace_selector.currentData() == ""
         assert window.workspace_selector.currentText() == "(no workspace)"
         assert window.workspace_selector.isEnabled() is False
+        assert placeholder_root.exists() is False
+        assert window.workspace_paths.runtime_cache_db_path.exists() is False
+        assert window.workspace_paths.runtime_control_db_path.exists() is False
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_load_flows_clears_visible_log_runs_when_reload_fails(qapp, monkeypatch):
@@ -1674,7 +1717,7 @@ def test_load_flows_clears_visible_log_runs_when_reload_fails(qapp, monkeypatch)
         assert window.log_view.count() == 0
         assert capture.shown_messages == [(APP_DISPLAY_NAME, "Failed to load flows.\n\nboom", "error")]
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_load_flows_clears_visible_log_runs_when_workspace_has_no_flows(qapp, monkeypatch, tmp_path):
@@ -1721,7 +1764,7 @@ def test_load_flows_clears_visible_log_runs_when_workspace_has_no_flows(qapp, mo
         assert window.log_view.count() == 0
         assert "No discoverable flows were found yet" in window.empty_flow_message
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_start_runtime_reuses_loaded_flow_cards(qapp, monkeypatch, tmp_path):
@@ -1767,7 +1810,7 @@ def test_start_runtime_reuses_loaded_flow_cards(qapp, monkeypatch, tmp_path):
         assert window.runtime_session.active_runtime_flow_names == ("poller",)
         assert len(control_application.start_engine_calls) == 1
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_finish_runtime_treats_stop_requested_error_as_normal_stop(qapp, monkeypatch):
@@ -1784,7 +1827,7 @@ def test_finish_runtime_treats_stop_requested_error_as_normal_stop(qapp, monkeyp
         assert window.flow_states["poller"] == "poll ready"
         assert capture.shown_later_messages == []
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_stop_runtime_enters_stopping_transition_and_disables_engine_button(qapp, monkeypatch):
@@ -1815,7 +1858,7 @@ def test_stop_runtime_enters_stopping_transition_and_disables_engine_button(qapp
         assert window.engine_button.text() == "Stopping..."
         assert window.engine_button.isEnabled() is False
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_start_runtime_is_blocked_while_stop_transition_is_in_progress(qapp, monkeypatch):
@@ -1832,7 +1875,7 @@ def test_start_runtime_is_blocked_while_stop_transition_is_in_progress(qapp, mon
         assert daemon_commands == []
         assert window.runtime_session.runtime_active is False
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_apply_runtime_event_marks_failed_automated_flow_in_summary_state(qapp, monkeypatch):
@@ -1866,7 +1909,7 @@ def test_apply_runtime_event_marks_failed_automated_flow_in_summary_state(qapp, 
 
         assert window.flow_states["poller"] == "polling"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_close_event_requests_daemon_shutdown(qapp, monkeypatch):
@@ -1881,9 +1924,12 @@ def test_close_event_requests_daemon_shutdown(qapp, monkeypatch):
         request_func=lambda paths, payload, timeout=0: shutdown_calls.append({"payload": payload, "timeout": timeout}) or {"ok": True},
         ledger_service=ledger_service,
     )
-    window.close()
+    try:
+        _dispose_window(qapp, window)
 
-    assert shutdown_calls == [{"payload": {"command": "shutdown_daemon"}, "timeout": 1.5}]
+        assert shutdown_calls == [{"payload": {"command": "shutdown_daemon"}, "timeout": 1.5}]
+    finally:
+        _dispose_window(qapp, window)
 
 
 def test_close_event_does_not_request_daemon_shutdown_when_other_local_client_exists(qapp, monkeypatch):
@@ -1897,9 +1943,12 @@ def test_close_event_does_not_request_daemon_shutdown_when_other_local_client_ex
         request_func=lambda paths, payload, timeout=0: shutdown_calls.append({"payload": payload, "timeout": timeout}) or {"ok": True},
         ledger_service=ledger_service,
     )
-    window.close()
+    try:
+        _dispose_window(qapp, window)
 
-    assert shutdown_calls == []
+        assert shutdown_calls == []
+    finally:
+        _dispose_window(qapp, window)
 
 
 def test_last_window_close_purges_same_process_ui_sessions_before_shutdown_check(qapp, monkeypatch):
@@ -1935,10 +1984,8 @@ def test_last_window_close_purges_same_process_ui_sessions_before_shutdown_check
         ]
         assert shutdown_calls == [{"payload": {"command": "shutdown_daemon"}, "timeout": 1.5}]
     finally:
-        if first.isVisible():
-            first.close()
-        if second.isVisible():
-            second.close()
+        _dispose_window(qapp, first)
+        _dispose_window(qapp, second)
 
 
 def test_worker_thread_snapshot_tolerates_partially_bootstrapped_window(qapp):
@@ -1962,7 +2009,7 @@ def test_force_shutdown_daemon_button_calls_force_stop_path(qapp, monkeypatch):
         assert force_shutdown_calls == [{"workspace": window.workspace_paths.workspace_root, "timeout": 0.5}]
         assert "force-stopped" in window.force_shutdown_daemon_status_label.text().lower()
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_finish_run_does_not_show_modal_for_automated_flow_failure(qapp, monkeypatch):
@@ -1978,7 +2025,7 @@ def test_finish_run_does_not_show_modal_for_automated_flow_failure(qapp, monkeyp
         assert window.flow_states["poller"] == "failed"
         assert capture.shown_later_messages == []
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_show_run_error_details_uses_verbose_fallback_when_persisted_error_is_blank(qapp, monkeypatch):
@@ -2023,7 +2070,7 @@ def test_show_run_error_details_uses_verbose_fallback_when_persisted_error_is_bl
             )
         ]
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_show_message_box_later_coalesces_same_tick_modal_requests(qapp, monkeypatch):
@@ -2046,7 +2093,7 @@ def test_show_message_box_later_coalesces_same_tick_modal_requests(qapp, monkeyp
 
         assert capture.shown_messages == [("Data Engine", "second", "error")]
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_switching_workspaces_invalidates_stale_deferred_modal_callbacks(qapp, monkeypatch, tmp_path):
@@ -2099,7 +2146,7 @@ def test_switching_workspaces_invalidates_stale_deferred_modal_callbacks(qapp, m
         new_callback()
         assert capture.shown_messages == [("Data Engine", "new workspace", "error")]
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_show_run_error_details_uses_persisted_run_error_for_flow_level_failure(qapp, monkeypatch):
@@ -2138,152 +2185,27 @@ def test_show_run_error_details_uses_persisted_run_error_for_flow_level_failure(
 
         assert capture.shown_messages == [("Run Error", "Source path not found: /tmp/input", "error")]
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_live_log_refresh_preserves_scroll_position_when_not_at_bottom(qapp, monkeypatch):
-    del monkeypatch
-    window = _make_window()
-    try:
-        window.resize(900, 520)
-        window.show()
-        qapp.processEvents()
-        window.daemon_timer.stop()
-        window.log_view.setFixedHeight(120)
-        qapp.processEvents()
+    del qapp, monkeypatch
 
-        for index in range(120):
-            run_id = f"run-{index}"
-            window.log_store.append_entry(
-                FlowLogEntry(
-                    line=f"poller started {index}",
-                    kind="flow",
-                    flow_name="poller",
-                    event=RuntimeStepEvent(
-                        run_id=run_id,
-                        flow_name="poller",
-                        step_name=None,
-                        source_label=f"input-{index}.xlsx",
-                        status="started",
-                    ),
-                )
-            )
-            window.log_store.append_entry(
-                FlowLogEntry(
-                    line=f"poller success {index}",
-                    kind="flow",
-                    flow_name="poller",
-                    event=RuntimeStepEvent(
-                        run_id=run_id,
-                        flow_name="poller",
-                        step_name=None,
-                        source_label=f"input-{index}.xlsx",
-                        status="success",
-                    ),
-                )
-            )
-
-        window._select_flow("poller")
-        qapp.processEvents()
-
-        scrollbar = window.log_view.verticalScrollBar()
-        assert scrollbar.maximum() > 0
-
-        target_value = max(scrollbar.maximum() // 2, 1)
-        scrollbar.setValue(target_value)
-        qapp.processEvents()
-
-        window._append_log_entry(
-            FlowLogEntry(
-                line="poller started newest",
-                kind="flow",
-                flow_name="poller",
-                event=RuntimeStepEvent(
-                    run_id="run-new",
-                    flow_name="poller",
-                    step_name=None,
-                    source_label="input-new.xlsx",
-                    status="started",
-                ),
-            )
-        )
-        qapp.processEvents()
-
-        assert window.log_view.verticalScrollBar().value() < window.log_view.verticalScrollBar().maximum()
-    finally:
-        window.close()
+    assert next_log_scroll_value(
+        previous_value=40,
+        previous_maximum=100,
+        current_maximum=120,
+    ) == 40
 
 
 def test_live_log_refresh_does_not_snap_when_near_bottom_but_not_at_end(qapp, monkeypatch):
-    del monkeypatch
-    window = _make_window()
-    try:
-        window.resize(900, 520)
-        window.show()
-        qapp.processEvents()
-        window.daemon_timer.stop()
-        window.log_view.setFixedHeight(120)
-        qapp.processEvents()
+    del qapp, monkeypatch
 
-        for index in range(120):
-            run_id = f"run-{index}"
-            window.log_store.append_entry(
-                FlowLogEntry(
-                    line=f"poller started {index}",
-                    kind="flow",
-                    flow_name="poller",
-                    event=RuntimeStepEvent(
-                        run_id=run_id,
-                        flow_name="poller",
-                        step_name=None,
-                        source_label=f"input-{index}.xlsx",
-                        status="started",
-                    ),
-                )
-            )
-            window.log_store.append_entry(
-                FlowLogEntry(
-                    line=f"poller success {index}",
-                    kind="flow",
-                    flow_name="poller",
-                    event=RuntimeStepEvent(
-                        run_id=run_id,
-                        flow_name="poller",
-                        step_name=None,
-                        source_label=f"input-{index}.xlsx",
-                        status="success",
-                    ),
-                )
-            )
-
-        window._select_flow("poller")
-        qapp.processEvents()
-
-        scrollbar = window.log_view.verticalScrollBar()
-        assert scrollbar.maximum() > 2
-
-        scrollbar.setValue(scrollbar.maximum() - 2)
-        qapp.processEvents()
-
-        window._append_log_entry(
-            FlowLogEntry(
-                line="poller started newest",
-                kind="flow",
-                flow_name="poller",
-                event=RuntimeStepEvent(
-                    run_id="run-new",
-                    flow_name="poller",
-                    step_name=None,
-                    source_label="input-new.xlsx",
-                    status="started",
-                ),
-            )
-        )
-        qapp.processEvents()
-
-        assert window.log_view.verticalScrollBar().value() < window.log_view.verticalScrollBar().maximum()
-    finally:
-        window.close()
+    assert next_log_scroll_value(
+        previous_value=98,
+        previous_maximum=100,
+        current_maximum=120,
+    ) == 98
 
 
 def test_set_flow_states_skips_sidebar_rebuild_when_state_is_unchanged(qapp, monkeypatch):
@@ -2303,7 +2225,7 @@ def test_set_flow_states_skips_sidebar_rebuild_when_state_is_unchanged(qapp, mon
 
         assert rebuild_calls == 0
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_stop_runtime_updates_sidebar_in_place_without_rebuild(qapp, monkeypatch):
@@ -2333,7 +2255,7 @@ def test_stop_runtime_updates_sidebar_in_place_without_rebuild(qapp, monkeypatch
         assert rebuild_calls == 0
         assert window.flow_states["poller"] == "stopping runtime"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_poll_log_queue_batches_selected_flow_refresh(qapp, monkeypatch):
@@ -2372,7 +2294,7 @@ def test_poll_log_queue_batches_selected_flow_refresh(qapp, monkeypatch):
 
         assert refresh_calls == 1
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_run_log_preview_omits_placeholder_source_separator(qapp, monkeypatch):
@@ -2397,7 +2319,7 @@ def test_run_log_preview_omits_placeholder_source_separator(qapp, monkeypatch):
         assert "claims_summary &gt; &gt;" not in rendered
         assert rendered == "claims_summary &gt; <b>Collect Claim Files</b> - <i>started</i>"
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_poll_log_queue_yields_when_backlog_exceeds_tick_limit(qapp, monkeypatch):
@@ -2431,7 +2353,7 @@ def test_poll_log_queue_yields_when_backlog_exceeds_tick_limit(qapp, monkeypatch
 
         assert window.log_queue.empty()
     finally:
-        window.close()
+        _dispose_window(qapp, window)
 
 
 def test_log_view_limits_visible_run_history_for_busy_flow(qapp, monkeypatch):
@@ -2473,4 +2395,5 @@ def test_log_view_limits_visible_run_history_for_busy_flow(qapp, monkeypatch):
 
         assert window.log_view.count() == window._MAX_VISIBLE_LOG_RUNS
     finally:
-        window.close()
+        _dispose_window(qapp, window)
+

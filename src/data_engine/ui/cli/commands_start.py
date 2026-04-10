@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from pathlib import Path, WindowsPath
 import subprocess
 import sys
 import tempfile
 import time
 
 from data_engine.authoring.model import FlowValidationError
+from data_engine.platform.workspace_models import path_display
 
 
 def start_surface(surface: str) -> int:
@@ -26,19 +27,29 @@ def preferred_gui_python_executable() -> Path:
     # Preserve the active interpreter path instead of resolving symlinks.
     # On macOS, resolving a venv python can collapse back to the base framework
     # interpreter, which loses the installed package context for child launches.
-    executable = Path(sys.executable).expanduser()
+    executable = _host_concrete_path(sys.executable).expanduser()
     if os.name == "nt":
         candidate = executable.with_name("pythonw.exe")
         return candidate if candidate.exists() else executable
     if sys.platform == "darwin":
-        candidate = executable.with_name("pythonw")
+        try:
+            candidate = executable.with_name("pythonw")
+        except Exception:
+            return executable
         return candidate if candidate.exists() else executable
     return executable
 
 
+def _host_concrete_path(value: str) -> Path:
+    """Build a host-supported concrete path even if os.name is monkeypatched."""
+    if "\\" in value or (len(value) >= 2 and value[1] == ":"):
+        return WindowsPath(value)
+    return Path(value)
+
+
 def start_gui_subprocess() -> int:
     """Spawn the desktop GUI in a detached process."""
-    command = [str(preferred_gui_python_executable()), "-m", "data_engine.ui.gui.launcher"]
+    command = [path_display(preferred_gui_python_executable(), empty=""), "-m", "data_engine.ui.gui.launcher"]
     log_fd, log_path_text = tempfile.mkstemp(prefix="data-engine-gui-start-", suffix=".log")
     os.close(log_fd)
     log_path = Path(log_path_text)

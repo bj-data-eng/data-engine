@@ -87,7 +87,6 @@ class _GuiWorkspaceCatalogController:
             item = window.sidebar_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
-                widget.setParent(None)
                 widget.deleteLater()
         for group_name, entries in presentation.grouped_cards:
             group_widget = window._build_group_row_widget(group_name, list(entries))

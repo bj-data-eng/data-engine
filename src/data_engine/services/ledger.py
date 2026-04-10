@@ -1,4 +1,4 @@
-"""Runtime ledger services."""
+"""Runtime control-ledger services."""
 
 from __future__ import annotations
 
@@ -6,36 +6,37 @@ from pathlib import Path
 from typing import Callable
 
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
-from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.runtime_db import RuntimeControlLedger
 
 
-class LedgerService:
-    """Own workspace-local runtime ledger access and client session bookkeeping."""
+class RuntimeControlLedgerService:
+    """Own workspace-local runtime control-ledger access and client-session bookkeeping."""
 
     def __init__(
         self,
-        open_ledger_func: Callable[[Path], RuntimeLedger] | None = None,
+        open_ledger_func: Callable[[Path], RuntimeControlLedger] | None = None,
         *,
         runtime_layout_policy: RuntimeLayoutPolicy | None = None,
     ) -> None:
         self.runtime_layout_policy = runtime_layout_policy or RuntimeLayoutPolicy()
         self._open_ledger_func = open_ledger_func or self._open_default_ledger
 
-    def _open_default_ledger(self, workspace_root: Path) -> RuntimeLedger:
+    def _open_default_ledger(self, workspace_root: Path) -> RuntimeControlLedger:
         paths = self.runtime_layout_policy.resolve_paths(data_root=workspace_root)
-        return RuntimeLedger(paths.runtime_db_path)
+        db_path = getattr(paths, "runtime_control_db_path", None) or paths.runtime_db_path
+        return RuntimeControlLedger(db_path)
 
-    def open_for_workspace(self, workspace_root: Path) -> RuntimeLedger:
-        """Open the configured runtime ledger for one workspace root."""
+    def open_for_workspace(self, workspace_root: Path) -> RuntimeControlLedger:
+        """Open the configured runtime control ledger for one workspace root."""
         return self._open_ledger_func(Path(workspace_root).expanduser().resolve())
 
-    def close(self, ledger: RuntimeLedger) -> None:
-        """Close one runtime ledger connection."""
+    def close(self, ledger: RuntimeControlLedger) -> None:
+        """Close one runtime control-ledger connection."""
         ledger.close()
 
     def register_client_session(
         self,
-        ledger: RuntimeLedger,
+        ledger: RuntimeControlLedger,
         *,
         client_id: str,
         workspace_id: str,
@@ -50,13 +51,13 @@ class LedgerService:
             pid=pid,
         )
 
-    def remove_client_session(self, ledger: RuntimeLedger, client_id: str) -> None:
+    def remove_client_session(self, ledger: RuntimeControlLedger, client_id: str) -> None:
         """Remove one active local client session row."""
         ledger.remove_client_session(client_id)
 
     def purge_process_client_sessions(
         self,
-        ledger: RuntimeLedger,
+        ledger: RuntimeControlLedger,
         *,
         workspace_id: str,
         client_kind: str,
@@ -71,7 +72,7 @@ class LedgerService:
 
     def count_live_client_sessions(
         self,
-        ledger: RuntimeLedger,
+        ledger: RuntimeControlLedger,
         workspace_id: str,
         *,
         exclude_client_id: str | None = None,
@@ -82,4 +83,7 @@ class LedgerService:
         return ledger.count_live_client_sessions(workspace_id, exclude_client_id=exclude_client_id)
 
 
-__all__ = ["LedgerService"]
+LedgerService = RuntimeControlLedgerService
+
+
+__all__ = ["LedgerService", "RuntimeControlLedgerService"]

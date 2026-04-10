@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ctypes
 from datetime import UTC, datetime
+import getpass
+import hashlib
 import json
 import os
 from multiprocessing import AuthenticationError
@@ -36,6 +39,10 @@ class WorkspaceLeaseError(RuntimeError):
 
 DAEMON_AUTHKEY_FILE_NAME = ".daemon-authkey"
 _SHARED_STATE_ADAPTER = DaemonSharedStateAdapter()
+_STILL_ACTIVE = 259
+_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_WINDOWS_ERROR_ALREADY_EXISTS = 183
+_WINDOWS_STARTUP_MUTEXES: dict[str, int] = {}
 
 
 def endpoint_address(paths: WorkspacePaths) -> str:
@@ -68,6 +75,7 @@ def daemon_authkey(paths: WorkspacePaths) -> bytes:
                 continue
             with os.fdopen(fd, "w", encoding="ascii") as handle:
                 handle.write(authkey.hex())
+            _harden_private_file_permissions(authkey_path)
             return authkey
         if not token:
             try:
@@ -144,10 +152,57 @@ def _kill_pid(pid: int) -> None:
     os.kill(pid, signal.SIGKILL)
 
 
+def _windows_pid_is_live(pid: int) -> bool:
+    """Return whether one Windows process id currently exists and is active."""
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    kernel32.GetExitCodeProcess.restype = ctypes.c_int
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = ctypes.c_int
+    handle = kernel32.OpenProcess(_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return False
+        return exit_code.value == _STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _harden_private_file_permissions(path: Path) -> None:
+    """Best-effort hardening for one private local file."""
+    if os.name != "nt":
+        return
+    username = os.environ.get("USERNAME") or getpass.getuser()
+    if not username.strip():
+        return
+    try:
+        subprocess.run(
+            [
+                "icacls",
+                str(path),
+                "/inheritance:r",
+                "/grant:r",
+                f"{username}:(F)",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return
+
+
 def _pid_is_live(pid: int | None) -> bool:
     """Return whether one OS process id currently exists."""
     if pid is None or pid <= 0:
         return False
+    if os.name == "nt":
+        return _windows_pid_is_live(pid)
     try:
         os.kill(pid, 0)
     except OSError:
@@ -304,8 +359,40 @@ def _startup_lock_path(paths: WorkspacePaths) -> Path:
     return paths.runtime_state_dir / ".daemon-start.lock"
 
 
+def _windows_startup_mutex_name(paths: WorkspacePaths) -> str:
+    """Return the per-workspace Windows startup mutex name."""
+    digest = hashlib.sha1(endpoint_address(paths).encode("utf-8")).hexdigest()[:12]
+    return f"Local\\data_engine_startup_{paths.workspace_id}_{digest}"
+
+
+def _configure_ctypes_function(func: Any, *, argtypes: list[Any], restype: Any) -> None:
+    """Best-effort ctypes metadata setup for real Win32 callables and simple test doubles."""
+    try:
+        func.argtypes = argtypes
+        func.restype = restype
+    except AttributeError:
+        pass
+
+
 def _acquire_startup_lock(paths: WorkspacePaths) -> bool:
     """Try to acquire the per-workspace daemon startup lock."""
+    if os.name == "nt":
+        mutex_name = _windows_startup_mutex_name(paths)
+        kernel32 = ctypes.windll.kernel32
+        _configure_ctypes_function(
+            kernel32.CreateMutexW,
+            argtypes=[ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p],
+            restype=ctypes.c_void_p,
+        )
+        _configure_ctypes_function(kernel32.GetLastError, argtypes=[], restype=ctypes.c_ulong)
+        handle = kernel32.CreateMutexW(None, False, mutex_name)
+        if not handle:
+            return False
+        if kernel32.GetLastError() == _WINDOWS_ERROR_ALREADY_EXISTS:
+            kernel32.CloseHandle(handle)
+            return False
+        _WINDOWS_STARTUP_MUTEXES[mutex_name] = handle
+        return True
     lock_path = _startup_lock_path(paths)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
@@ -331,6 +418,19 @@ def _acquire_startup_lock(paths: WorkspacePaths) -> bool:
 
 def _release_startup_lock(paths: WorkspacePaths) -> None:
     """Release the per-workspace daemon startup lock when held."""
+    if os.name == "nt":
+        mutex_name = _windows_startup_mutex_name(paths)
+        handle = _WINDOWS_STARTUP_MUTEXES.pop(mutex_name, None)
+        if handle is None:
+            return
+        kernel32 = ctypes.windll.kernel32
+        _configure_ctypes_function(kernel32.ReleaseMutex, argtypes=[ctypes.c_void_p], restype=ctypes.c_int)
+        _configure_ctypes_function(kernel32.CloseHandle, argtypes=[ctypes.c_void_p], restype=ctypes.c_int)
+        try:
+            kernel32.ReleaseMutex(handle)
+        finally:
+            kernel32.CloseHandle(handle)
+        return
     try:
         _startup_lock_path(paths).unlink()
     except FileNotFoundError:
@@ -391,7 +491,17 @@ def spawn_daemon_process(
         "stdin": subprocess.DEVNULL,
         "close_fds": True,
     }
-    if os.name != "nt":
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(
+            subprocess,
+            "CREATE_NEW_PROCESS_GROUP",
+            0,
+        ) | getattr(
+            subprocess,
+            "CREATE_NO_WINDOW",
+            0,
+        )
+    else:
         kwargs["start_new_session"] = True
     try:
         subprocess.Popen(command, **kwargs)

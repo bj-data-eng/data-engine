@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import os
 from pathlib import Path
 import socket
 import sys
@@ -25,6 +26,8 @@ DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR: str = env_var("workspace_root")
 DATA_ENGINE_WORKSPACE_ID_ENV_VAR: str = env_var("workspace_id")
 DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR: str = env_var("workspace_collection_root")
 DATA_ENGINE_RUNTIME_ROOT_ENV_VAR: str = env_var("runtime_root")
+DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR: str = env_var("runtime_cache_db_path")
+DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR: str = env_var("runtime_control_db_path")
 DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR: str = env_var("runtime_db_path")
 WORKSPACE_CONFIG_DIR_NAME: str = "config"
 WORKSPACE_FLOW_MODULES_DIR_NAME: str = "flow_modules"
@@ -46,6 +49,20 @@ WORKSPACE_SHARED_FILE_STATE_DIR_NAME: str = "file_state"
 def normalized_path_text(value: Path | str) -> str:
     """Return a stable forward-slash path string for display and comparisons."""
     return unicodedata.normalize("NFC", str(value).replace("\\", "/"))
+
+
+def _stable_workspace_path(value: Path | str) -> Path:
+    """Return an absolute workspace path without dereferencing Windows reparse points."""
+    path = Path(value).expanduser()
+    if os.name == "nt":
+        return Path(os.path.abspath(os.fspath(path)))
+    return path.resolve()
+
+
+def _stable_workspace_identity_text(value: Path | str) -> str:
+    """Return normalized path text suitable for workspace identity hashing."""
+    text = normalized_path_text(_stable_workspace_path(value))
+    return text.casefold() if os.name == "nt" else text
 
 
 def path_display(value: Path | str | None, *, empty: str = "(not set)") -> str:
@@ -81,7 +98,7 @@ def validate_workspace_id(workspace_id: str) -> str:
 def local_workspace_namespace(workspace_root: Path | str, workspace_id: str) -> str:
     """Return the machine-local namespace for one workspace root."""
     workspace_id = validate_workspace_id(workspace_id)
-    digest = hashlib.sha1(normalized_path_text(Path(workspace_root).expanduser().resolve()).encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1(_stable_workspace_identity_text(workspace_root).encode("utf-8")).hexdigest()[:12]
     return f"{workspace_id}_{digest}"
 
 
@@ -140,6 +157,15 @@ class WorkspacePaths:
     daemon_endpoint_path: str
     sphinx_source_dir: Path
     workspace_configured: bool = True
+    runtime_cache_db_path: Path | None = None
+    runtime_control_db_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        """Populate split runtime-ledger paths while preserving the legacy cache alias."""
+        runtime_cache_db_path = self.runtime_cache_db_path or self.runtime_db_path
+        runtime_control_db_path = self.runtime_control_db_path or runtime_cache_db_path.with_name("runtime_control.sqlite")
+        object.__setattr__(self, "runtime_cache_db_path", runtime_cache_db_path)
+        object.__setattr__(self, "runtime_control_db_path", runtime_control_db_path)
 
 
 def authored_workspace_is_available(paths: WorkspacePaths) -> bool:
@@ -156,6 +182,8 @@ __all__ = [
     "APP_INTERNAL_ID",
     "APP_ROOT_PATH",
     "DATA_ENGINE_APP_ROOT_ENV_VAR",
+    "DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR",
+    "DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR",
     "DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR",
     "DATA_ENGINE_RUNTIME_ROOT_ENV_VAR",
     "DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR",

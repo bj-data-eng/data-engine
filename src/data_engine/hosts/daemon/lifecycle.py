@@ -68,6 +68,8 @@ def checkpoint_loop(service: "DataEngineDaemonService") -> None:
                 service._update_daemon_state(status="degraded")
                 service._debug_log("daemon marked degraded after repeated checkpoint failures")
             if failure_count >= 3:
+                with service._state_lock:
+                    service.state.status = "failed"
                 service._debug_log("relinquishing workspace after repeated checkpoint failures")
                 relinquish_workspace_after_checkpoint_failures(service)
                 next_checkpoint_at = time.monotonic() + CHECKPOINT_INTERVAL_SECONDS
@@ -130,7 +132,7 @@ def _should_shutdown_for_missing_clients(service: "DataEngineDaemonService") -> 
         if service.state.manual_run_threads:
             return False
     try:
-        return service.runtime_ledger.count_live_client_sessions(service.paths.workspace_id) == 0
+        return service.runtime_control_ledger.count_live_client_sessions(service.paths.workspace_id) == 0
     except Exception:
         return False
 
@@ -164,10 +166,11 @@ def shutdown(service: "DataEngineDaemonService") -> None:
             pass
     release_workspace_claim(service)
     try:
-        service.runtime_ledger.clear_daemon_state(service.paths.workspace_id)
+        service.runtime_control_ledger.clear_daemon_state(service.paths.workspace_id)
     except Exception:
         pass
-    service.runtime_ledger.close()
+    service.runtime_cache_ledger.close()
+    service.runtime_control_ledger.close()
     if service.host.listener is not None:
         try:
             service.host.listener.close()

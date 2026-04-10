@@ -78,14 +78,14 @@ class DaemonRuntimeCommandHandler:
             try:
                 service.runtime_execution_service.run_manual(
                     flow,
-                    runtime_ledger=service.runtime_ledger,
+                    runtime_ledger=service.runtime_cache_ledger,
                     flow_stop_event=stop_event,
                 )
                 service._debug_log(f"manual flow completed name={name}")
             except Exception as exc:
                 service._debug_log(f"manual flow crashed name={name} error={exc!r}")
                 service._debug_log(traceback.format_exc().rstrip())
-                service.runtime_ledger.append_log(
+                service.runtime_cache_ledger.append_log(
                     level="ERROR",
                     message=str(exc),
                     created_at_utc=utcnow_text(),
@@ -134,7 +134,7 @@ class DaemonRuntimeCommandHandler:
             try:
                 service.runtime_execution_service.run_grouped(
                     flows,
-                    runtime_ledger=service.runtime_ledger,
+                    runtime_ledger=service.runtime_cache_ledger,
                     runtime_stop_event=runtime_stop_event,
                     flow_stop_event=flow_stop_event,
                 )

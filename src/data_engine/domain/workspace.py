@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
+from data_engine.platform.workspace_models import path_display
 
 if TYPE_CHECKING:
     from data_engine.platform.workspace_models import WorkspacePaths
@@ -43,14 +44,16 @@ class WorkspaceRootState:
         """Return the text that should populate workspace-root controls."""
         if self.override_root is not None:
             return str(self.override_root)
-        return str(self.effective_root) if self.effective_root is not None else ""
+        return path_display(self.effective_root, empty="")
 
     @property
     def status_text(self) -> str:
         """Return plain-language root-source status text for operator surfaces."""
         if not self.configured:
             return "Workspace folder is not configured."
-        return f"Workspace folder: {self.override_root or self.effective_root}"
+        if self.override_root is not None:
+            return f"Workspace folder: {self.override_root}"
+        return f"Workspace folder: {path_display(self.effective_root, empty='')}"
 
     def with_override_root(self, override_root: Path | None) -> "WorkspaceRootState":
         """Return a copy with the override root replaced."""

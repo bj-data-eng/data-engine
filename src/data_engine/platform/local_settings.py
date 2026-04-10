@@ -19,12 +19,13 @@ def default_state_root(*, app_root: Path | None = None) -> Path:
     if env_value and env_value.strip():
         return Path(env_value).expanduser().resolve()
 
+    if sys_platform() == "darwin":
+        home = Path(os.environ.get("HOME") or Path.home())
+        return home / "Library" / "Application Support" / APP_CACHE_DIR_NAME
     home = Path.home()
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local")
         return base / APP_CACHE_DIR_NAME
-    if sys_platform() == "darwin":
-        return home / "Library" / "Application Support" / APP_CACHE_DIR_NAME
     xdg_state = os.environ.get("XDG_STATE_HOME")
     if xdg_state and xdg_state.strip():
         return Path(xdg_state).expanduser().resolve() / APP_CACHE_DIR_NAME
@@ -79,19 +80,23 @@ class LocalSettingsStore:
         )
 
     def _initialize(self) -> None:
-        with self._connection():
-            pass
+        connection = self._connection()
+        connection.close()
 
     def get(self, key: str) -> str | None:
-        with self._connection() as connection:
+        connection = self._connection()
+        try:
             row = connection.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        finally:
+            connection.close()
         if row is None:
             return None
         value = row["value"]
         return str(value) if value is not None else None
 
     def set(self, key: str, value: str | None) -> None:
-        with self._connection() as connection:
+        connection = self._connection()
+        try:
             if value is None or not str(value).strip():
                 connection.execute("DELETE FROM settings WHERE key = ?", (key,))
             else:
@@ -103,6 +108,9 @@ class LocalSettingsStore:
                     """,
                     (key, str(value)),
                 )
+            connection.commit()
+        finally:
+            connection.close()
 
     def workspace_collection_root(self) -> Path | None:
         value = self.get("workspace_collection_root")

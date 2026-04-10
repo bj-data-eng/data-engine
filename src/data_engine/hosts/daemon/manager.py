@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
-import subprocess
 
 from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.app import DaemonClientError, daemon_request, is_daemon_live
+from data_engine.hosts.daemon.client import _pid_is_live
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.domain import WorkspaceControlState
 from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
@@ -46,32 +46,7 @@ def _lease_pid_is_live(metadata: dict[str, object] | None) -> bool:
         return False
     if pid <= 0:
         return False
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    try:
-        # Refine the basic PID-exists check by rejecting zombies when process
-        # status inspection is available. If the host blocks `ps` (for example
-        # in a restricted sandbox), keep the conservative answer from os.kill:
-        # treat the PID as live so we don't incorrectly reclaim a genuinely
-        # running local owner.
-        result = subprocess.run(
-            ["ps", "-o", "stat=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return True
-    if result.returncode != 0:
-        return False
-    status_text = result.stdout.strip()
-    if not status_text:
-        return False
-    if status_text.split()[0].startswith("Z"):
-        return False
-    return True
+    return _pid_is_live(pid)
 
 
 @dataclass(frozen=True)

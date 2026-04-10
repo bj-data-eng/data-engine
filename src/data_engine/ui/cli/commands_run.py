@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -77,4 +78,9 @@ def run_tests(*, slice_name: str, list_slices: bool, app_root: Path) -> int:
     checkout_tests_dir(app_root)
     raise_open_file_limit()
     command = [sys.executable, "-m", "pytest", "-q", *test_slice_args(slice_name, app_root=app_root)]
-    return subprocess.run(command, check=False).returncode
+    kwargs: dict[str, object] = {"check": False}
+    if os.name == "nt":
+        create_new_process_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if create_new_process_group:
+            kwargs["creationflags"] = create_new_process_group
+    return subprocess.run(command, **kwargs).returncode

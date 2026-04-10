@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -9,7 +11,9 @@ from typing import Any, Callable
 
 from data_engine.authoring.model import FlowValidationError
 from data_engine.domain import ClassifiedProcessInfo, DoctorCheck, ProcessInfo, WorkspaceLeaseDiagnostic
+from data_engine.domain.diagnostics import is_defunct_process_status
 from data_engine.platform.workspace_models import authored_workspace_is_available, machine_id_text
+from data_engine.platform.workspace_models import path_display
 
 
 def doctor(*, settings: Any, paths: Any) -> int:
@@ -18,26 +22,26 @@ def doctor(*, settings: Any, paths: Any) -> int:
     def add(status: str, message: str) -> None:
         checks.append(DoctorCheck(status=status, message=message))
 
-    add("OK", f"app root: {settings.app_root}")
-    add("OK", f"python executable: {Path(sys.executable).expanduser()}")
-    add("OK" if settings.settings_path.is_file() else "WARN", f"workspace settings: {settings.settings_path}")
-    add("OK" if settings.state_root.exists() else "WARN", f"state root: {settings.state_root}")
-    add("OK" if settings.runtime_root.exists() else "WARN", f"runtime root: {settings.runtime_root}")
+    add("OK", f"app root: {path_display(settings.app_root)}")
+    add("OK", f"python executable: {path_display(sys.executable)}")
+    add("OK" if settings.settings_path.is_file() else "WARN", f"workspace settings: {path_display(settings.settings_path)}")
+    add("OK" if settings.state_root.exists() else "WARN", f"state root: {path_display(settings.state_root)}")
+    add("OK" if settings.runtime_root.exists() else "WARN", f"runtime root: {path_display(settings.runtime_root)}")
     if settings.workspace_collection_root is None:
         add("WARN", "workspace collection root: not configured")
     else:
-        add("OK" if settings.workspace_collection_root.is_dir() else "WARN", f"workspace collection root: {settings.workspace_collection_root}")
+        add("OK" if settings.workspace_collection_root.is_dir() else "WARN", f"workspace collection root: {path_display(settings.workspace_collection_root)}")
     if paths.workspace_configured:
-        add("OK" if paths.workspace_root.is_dir() else "WARN", f"workspace root: {paths.workspace_root}")
-        add("OK" if paths.flow_modules_dir.is_dir() else "WARN", f"flow modules dir: {paths.flow_modules_dir}")
-        add("OK" if (paths.workspace_root / ".vscode" / "settings.json").is_file() else "WARN", f"VS Code settings: {paths.workspace_root / '.vscode' / 'settings.json'}")
-        add("OK" if authored_workspace_is_available(paths) else "WARN", f"authored workspace ready: {paths.workspace_root}")
+        add("OK" if paths.workspace_root.is_dir() else "WARN", f"workspace root: {path_display(paths.workspace_root)}")
+        add("OK" if paths.flow_modules_dir.is_dir() else "WARN", f"flow modules dir: {path_display(paths.flow_modules_dir)}")
+        add("OK" if (paths.workspace_root / ".vscode" / "settings.json").is_file() else "WARN", f"VS Code settings: {path_display(paths.workspace_root / '.vscode' / 'settings.json')}")
+        add("OK" if authored_workspace_is_available(paths) else "WARN", f"authored workspace ready: {path_display(paths.workspace_root)}")
     else:
         add("WARN", "workspace root: not configured")
         add("WARN", "flow modules dir: not configured")
         add("WARN", "VS Code settings: not configured")
         add("WARN", "authored workspace ready: workspace collection root not configured")
-    add("OK" if paths.artifacts_dir.exists() else "WARN", f"artifacts dir: {paths.artifacts_dir}")
+    add("OK" if paths.artifacts_dir.exists() else "WARN", f"artifacts dir: {path_display(paths.artifacts_dir)}")
 
     failures = 0
     for check in checks:
@@ -48,6 +52,8 @@ def doctor(*, settings: Any, paths: Any) -> int:
 
 
 def run_process_listing() -> list[ProcessInfo]:
+    if os.name == "nt":
+        return _run_windows_process_listing()
     result = subprocess.run(
         ["ps", "-ax", "-o", "pid=", "-o", "ppid=", "-o", "stat=", "-o", "command="],
         capture_output=True,
@@ -68,6 +74,48 @@ def run_process_listing() -> list[ProcessInfo]:
         except ValueError:
             continue
         rows.append(ProcessInfo(pid=pid, ppid=ppid, status=status, command=command))
+    return rows
+
+
+def _run_windows_process_listing() -> list[ProcessInfo]:
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$processes = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, CommandLine; "
+            "if ($null -eq $processes) { '[]' } else { $processes | ConvertTo-Json -Compress -Depth 3 }",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise FlowValidationError("Unable to inspect the local process table.")
+    payload = result.stdout.strip()
+    if not payload:
+        return []
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise FlowValidationError("Unable to inspect the local process table.") from exc
+    if isinstance(parsed, dict):
+        items: list[dict[str, Any]] = [parsed]
+    elif isinstance(parsed, list):
+        items = [item for item in parsed if isinstance(item, dict)]
+    else:
+        return []
+    rows: list[ProcessInfo] = []
+    for item in items:
+        try:
+            pid = int(item["ProcessId"])
+            ppid = int(item["ParentProcessId"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        command = str(item.get("CommandLine") or "")
+        rows.append(ProcessInfo(pid=pid, ppid=ppid, status="Running", command=command))
     return rows
 
 
@@ -156,7 +204,7 @@ def doctor_daemons(
         owner = metadata.get("machine_id")
         if matching is None:
             status = "missing"
-        elif matching.status.startswith("Z"):
+        elif is_defunct_process_status(matching.status):
             status = "defunct"
         else:
             status = "live"

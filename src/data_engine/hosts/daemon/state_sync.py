@@ -52,7 +52,7 @@ class DaemonStateSyncHandler:
         checkpoint_time = utcnow_text()
         service.shared_state_adapter.checkpoint_workspace_state(
             service.paths,
-            service.runtime_ledger,
+            service.runtime_cache_ledger,
             workspace_id=service.paths.workspace_id,
             machine_id=service.machine_id,
             daemon_id=service.daemon_id,
@@ -68,7 +68,7 @@ class DaemonStateSyncHandler:
 
     def refresh_observer_snapshot(self) -> None:
         service = self.service
-        service.shared_state_adapter.hydrate_local_runtime(service.paths, service.runtime_ledger)
+        service.shared_state_adapter.hydrate_local_runtime(service.paths, service.runtime_cache_ledger)
         metadata = service.shared_state_adapter.read_lease_metadata(service.paths)
         with service._state_lock:
             service.state.set_leased_by_machine_id(
@@ -84,7 +84,7 @@ class DaemonStateSyncHandler:
 
     def update_daemon_state(self, *, status: str) -> None:
         service = self.service
-        service.runtime_ledger.upsert_daemon_state(
+        service.runtime_control_ledger.upsert_daemon_state(
             workspace_id=service.paths.workspace_id,
             pid=service.pid,
             endpoint_kind=service.paths.daemon_endpoint_kind,

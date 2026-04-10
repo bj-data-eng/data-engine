@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from data_engine.platform.workspace_models import WorkspacePaths
-from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.shared_state import (
     checkpoint_workspace_state as checkpoint_runtime_workspace_state,
     claim_workspace as claim_runtime_workspace,
@@ -53,13 +53,13 @@ class DaemonSharedStateAdapter:
     def lease_is_stale(self, paths: WorkspacePaths, *, stale_after_seconds: float) -> bool:
         return lease_is_stale(paths, stale_after_seconds=stale_after_seconds)
 
-    def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeLedger) -> None:
+    def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeCacheLedger) -> None:
         hydrate_local_runtime_state(paths, ledger)
 
     def checkpoint_workspace_state(
         self,
         paths: WorkspacePaths,
-        ledger: RuntimeLedger,
+        ledger: RuntimeCacheLedger,
         *,
         workspace_id: str,
         machine_id: str,
