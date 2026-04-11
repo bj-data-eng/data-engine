@@ -16,7 +16,7 @@ from data_engine.core.primitives import Batch
 from data_engine.flow_modules.flow_module_loader import discover_flow_module_definitions, load_flow_module_definition
 from data_engine.hosts.scheduler import SchedulerHost
 from data_engine.runtime.engine import RuntimeEngine
-from data_engine.runtime.execution import _FlowRuntime, _GroupedFlowRuntime
+from data_engine.runtime.execution import FlowRuntime, GroupedFlowRuntime
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services import FlowCatalogService, FlowExecutionService
 from data_engine.views.models import qt_flow_cards_from_entries
@@ -152,7 +152,7 @@ def test_loaded_flow_exposes_workspace_toml_config_in_context(tmp_path):
     )
 
     flow = load_flow_module_definition("claims_config", data_root=workspace_root).build()
-    result = _FlowRuntime((flow,), continuous=False).run()[0]
+    result = FlowRuntime((flow,), continuous=False).run()[0]
 
     assert result.current == 7000
 
@@ -224,7 +224,7 @@ def test_grouped_runtime_keeps_groups_sequential_and_independent():
 
         return _inner
 
-    runtime = _GroupedFlowRuntime(
+    runtime = GroupedFlowRuntime(
         (
             Flow(name="a1", group="alpha").step(mark("a1")),
             Flow(name="a2", group="alpha").step(mark("a2")),
@@ -360,7 +360,7 @@ def test_directory_poll_staleness_uses_runtime_ledger_not_output_timestamps(tmp_
         extensions=[".xlsx"],
     ).mirror(root=target_dir).step(lambda context: context.current)
 
-    runtime = _FlowRuntime((flow,), continuous=True)
+    runtime = FlowRuntime((flow,), continuous=True)
     signature = runtime.runtime_ledger.source_signatures.signature_for_path(source)
 
     assert signature is not None
@@ -487,7 +487,7 @@ def test_single_file_poll_missing_source_is_treated_as_stale(tmp_path):
         .step(lambda context: context.current)
     )
 
-    runtime = _FlowRuntime((flow,), continuous=True)
+    runtime = FlowRuntime((flow,), continuous=True)
 
     assert runtime._is_poll_source_stale(flow, missing_source) is True  # noqa: SLF001 - targeted runtime behavior
 
@@ -568,7 +568,7 @@ def test_long_running_step_can_be_canceled_cooperatively():
         ran_next.append("next")
         return context.current
 
-    runtime = _FlowRuntime(
+    runtime = FlowRuntime(
         (
             Flow(name="slow_flow", group="Claims")
             .step(slow_step, save_as="first")
@@ -613,7 +613,7 @@ def test_groups_run_in_parallel_but_keep_context_objects_isolated():
         alpha_started.wait(timeout=1.0)
         return "beta"
 
-    runtime = _GroupedFlowRuntime(
+    runtime = GroupedFlowRuntime(
         (
             Flow(name="alpha_flow", group="alpha").step(alpha_step, save_as="shared"),
             Flow(name="beta_flow", group="beta").step(beta_step, save_as="shared"),

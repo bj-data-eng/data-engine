@@ -1,4 +1,4 @@
-"""Shared workspace lease and checkpoint helpers."""
+"""Workspace coordination and runtime snapshot helpers."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import shutil
 from uuid import uuid4
-from typing import Any
+from typing import Any, Protocol
 
 import polars as pl
 
@@ -19,7 +19,44 @@ from data_engine.runtime.ledger_models import (
     PersistedRun,
     PersistedStepRun,
 )
-from data_engine.runtime.runtime_db import RuntimeCacheLedger, parse_utc_text
+from data_engine.runtime.runtime_db import parse_utc_text
+
+
+class _RunRepository(Protocol):
+    def list(self) -> tuple[PersistedRun, ...]: ...
+
+
+class _StepOutputRepository(Protocol):
+    def list_for_run(self, run_id: str) -> tuple[PersistedStepRun, ...]: ...
+
+
+class _LogRepository(Protocol):
+    def list(self) -> tuple[PersistedLogEntry, ...]: ...
+
+
+class _SourceSignatureRepository(Protocol):
+    def list_file_states(self) -> tuple[PersistedFileState, ...]: ...
+
+
+class _SnapshotRepository(Protocol):
+    def replace(
+        self,
+        *,
+        runs: tuple[PersistedRun, ...],
+        step_runs: tuple[PersistedStepRun, ...],
+        logs: tuple[PersistedLogEntry, ...],
+        file_states: tuple[PersistedFileState, ...],
+    ) -> None: ...
+
+
+class RuntimeSnapshotStore(Protocol):
+    """Minimal runtime snapshot surface used by workspace coordination."""
+
+    runs: _RunRepository
+    step_outputs: _StepOutputRepository
+    logs: _LogRepository
+    source_signatures: _SourceSignatureRepository
+    snapshots: _SnapshotRepository
 
 
 _LEASE_METADATA_SCHEMA: dict[str, pl.DataType] = {
@@ -194,7 +231,7 @@ def recover_stale_workspace(
 
 def checkpoint_workspace_state(
     paths: WorkspacePaths,
-    ledger: RuntimeCacheLedger,
+    ledger: RuntimeSnapshotStore,
     *,
     workspace_id: str,
     machine_id: str,
@@ -205,15 +242,10 @@ def checkpoint_workspace_state(
     last_checkpoint_at_utc: str,
     app_version: str | None,
 ) -> None:
-    """Write shared workspace snapshots and lease metadata."""
+    """Write shared runtime snapshots and workspace lease metadata."""
     initialize_workspace_state(paths)
     snapshot_generation_id = uuid4().hex
-    runs = ledger.runs.list()
-    _write_runs(paths.shared_runs_path, runs, snapshot_generation_id=snapshot_generation_id)
-    step_runs = tuple(step for run in runs for step in ledger.step_outputs.list_for_run(run.run_id))
-    _write_step_runs(paths.shared_step_runs_path, step_runs, snapshot_generation_id=snapshot_generation_id)
-    _write_logs(paths.shared_logs_path, ledger.logs.list(), snapshot_generation_id=snapshot_generation_id)
-    _write_file_states(paths.shared_file_state_path, ledger.source_signatures.list_file_states(), snapshot_generation_id=snapshot_generation_id)
+    _write_shared_runtime_snapshot(paths, ledger, snapshot_generation_id=snapshot_generation_id)
     _write_lease_metadata(
         paths.lease_metadata_path,
         {
@@ -262,7 +294,7 @@ def write_lease_metadata(
     )
 
 
-def hydrate_local_runtime_state(paths: WorkspacePaths, ledger: RuntimeCacheLedger) -> None:
+def hydrate_local_runtime_state(paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> None:
     """Replace local SQLite runtime tables from shared parquet snapshots when present."""
     snapshot = _read_consistent_runtime_snapshot(paths)
     if snapshot is None:
@@ -315,6 +347,24 @@ def write_control_request(
             ],
             _CONTROL_REQUEST_SCHEMA,
         ),
+    )
+
+
+def _write_shared_runtime_snapshot(
+    paths: WorkspacePaths,
+    ledger: RuntimeSnapshotStore,
+    *,
+    snapshot_generation_id: str,
+) -> None:
+    runs = ledger.runs.list()
+    _write_runs(paths.shared_runs_path, runs, snapshot_generation_id=snapshot_generation_id)
+    step_runs = tuple(step for run in runs for step in ledger.step_outputs.list_for_run(run.run_id))
+    _write_step_runs(paths.shared_step_runs_path, step_runs, snapshot_generation_id=snapshot_generation_id)
+    _write_logs(paths.shared_logs_path, ledger.logs.list(), snapshot_generation_id=snapshot_generation_id)
+    _write_file_states(
+        paths.shared_file_state_path,
+        ledger.source_signatures.list_file_states(),
+        snapshot_generation_id=snapshot_generation_id,
     )
 
 
@@ -516,6 +566,7 @@ __all__ = [
     "remove_control_request",
     "release_workspace",
     "remove_lease_metadata",
+    "RuntimeSnapshotStore",
     "write_control_request",
     "write_lease_metadata",
 ]

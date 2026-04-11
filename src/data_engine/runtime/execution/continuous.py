@@ -6,25 +6,25 @@ from collections import deque
 from time import monotonic, sleep
 from typing import TYPE_CHECKING
 
-from data_engine.runtime.execution.context import _QueuedJob
+from data_engine.runtime.execution.context import QueuedRunJob
 from data_engine.core.model import FlowStoppedError
 from data_engine.core.primitives import WatchSpec
 from data_engine.runtime.file_watch import PollingWatcher
 
 if TYPE_CHECKING:
-    from data_engine.runtime.execution.single import _FlowRuntime
+    from data_engine.runtime.execution.single import FlowRuntime
     from data_engine.core.primitives import FlowContext
 
 
 class ContinuousRuntimeLoop:
     """Own the polling loop for one sequential runtime."""
 
-    def __init__(self, runtime: "_FlowRuntime") -> None:
+    def __init__(self, runtime: "FlowRuntime") -> None:
         self.runtime = runtime
 
     def run(self) -> list["FlowContext"]:
         results: list["FlowContext"] = []
-        queue: deque[_QueuedJob] = deque()
+        queue: deque[QueuedRunJob] = deque()
         queued_keys: set[tuple[str, str | None]] = set()
         watch_entries: list[dict[str, object]] = []
         now = monotonic()
@@ -87,7 +87,7 @@ class ContinuousRuntimeLoop:
     def _poll_watch_entries(
         self,
         watch_entries: list[dict[str, object]],
-        queue: deque[_QueuedJob],
+        queue: deque[QueuedRunJob],
         queued_keys: set[tuple[str, str | None]],
         now: float,
     ) -> None:

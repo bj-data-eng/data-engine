@@ -1,18 +1,17 @@
-"""Shared workspace snapshot and hydration services."""
+"""Shared workspace lease metadata and runtime snapshot services."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from data_engine.platform.workspace_models import WorkspacePaths
-from data_engine.runtime.runtime_db import RuntimeCacheLedger
-from data_engine.runtime.shared_state import hydrate_local_runtime_state, lease_is_stale, read_lease_metadata
+from data_engine.runtime.shared_state import RuntimeSnapshotStore, hydrate_local_runtime_state, lease_is_stale, read_lease_metadata
 
 
 class SharedStateService:
     """Own lease-based shared snapshot hydration for operator surfaces."""
 
-    def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeCacheLedger) -> None:
+    def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> None:
         """Replace one local runtime ledger from the shared workspace snapshots."""
         hydrate_local_runtime_state(paths, ledger)
 

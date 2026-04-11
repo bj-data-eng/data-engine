@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
-import data_engine.runtime.runtime_db as runtime_db_module
+import data_engine.runtime.runtime_control_store as runtime_control_store_module
 from data_engine.runtime.ledger_models import PersistedFileState, PersistedLogEntry, PersistedRun, PersistedStepRun
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger, utcnow_text
 
@@ -82,7 +82,7 @@ def test_runtime_state_store_exposes_explicit_repositories(tmp_path):
 
 def test_runtime_control_store_exposes_explicit_repositories(tmp_path, monkeypatch):
     ledger = RuntimeControlLedger(tmp_path / "runtime_state" / "runtime_control.sqlite")
-    monkeypatch.setattr(runtime_db_module, "process_is_running", lambda pid, *, treat_defunct_as_dead: pid == 123)
+    monkeypatch.setattr(runtime_control_store_module, "process_is_running", lambda pid, *, treat_defunct_as_dead: pid == 123)
     now = utcnow_text()
 
     ledger.daemon_state.upsert(
@@ -311,9 +311,9 @@ def test_runtime_ledger_persists_daemon_state(tmp_path):
 
 def test_runtime_control_ledger_counts_live_windows_client_sessions(tmp_path, monkeypatch):
     ledger = RuntimeControlLedger(tmp_path / "runtime_state" / "runtime_control.sqlite")
-    monkeypatch.setattr(runtime_db_module.os, "name", "nt")
+    monkeypatch.setattr(runtime_control_store_module.os, "name", "nt")
     monkeypatch.setattr(
-        runtime_db_module,
+        runtime_control_store_module,
         "process_is_running",
         lambda pid, *, treat_defunct_as_dead: pid == 4321 and treat_defunct_as_dead is False,
     )

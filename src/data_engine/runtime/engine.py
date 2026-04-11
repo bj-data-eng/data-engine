@@ -7,7 +7,7 @@ from threading import Event
 from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.primitives import FlowContext
-from data_engine.runtime.execution import _FlowRuntime, _GroupedFlowRuntime
+from data_engine.runtime.execution import FlowRuntime, GroupedFlowRuntime
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
 
@@ -31,8 +31,8 @@ class RuntimeEngine:
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
         status_callback: Callable[[str], None] | None = None,
-        flow_runtime_type: type[_FlowRuntime] = _FlowRuntime,
-        grouped_runtime_type: type[_GroupedFlowRuntime] = _GroupedFlowRuntime,
+        flow_runtime_type: type[FlowRuntime] = FlowRuntime,
+        grouped_runtime_type: type[GroupedFlowRuntime] = GroupedFlowRuntime,
         run_stop_controller: RuntimeStopController | None = None,
     ) -> None:
         self.runtime_ledger = runtime_ledger
@@ -86,7 +86,7 @@ class RuntimeEngine:
         """Request that the active runtime stop a run by id."""
         self.run_stop_controller.request_stop(run_id)
 
-    def _flow_runtime(self, flows: tuple["CoreFlow", ...], *, continuous: bool) -> _FlowRuntime:
+    def _flow_runtime(self, flows: tuple["CoreFlow", ...], *, continuous: bool) -> FlowRuntime:
         return self.flow_runtime_type(
             flows,
             continuous=continuous,

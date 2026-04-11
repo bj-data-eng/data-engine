@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.primitives import WatchSpec
 from data_engine.hosts.scheduler import SchedulerHost
-from data_engine.runtime.execution import _FlowRuntime, _GroupedFlowRuntime
+from data_engine.runtime.execution import FlowRuntime, GroupedFlowRuntime
 from data_engine.runtime.engine import RuntimeEngine
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
@@ -22,8 +22,8 @@ class RuntimeExecutionService:
     def __init__(
         self,
         *,
-        flow_runtime_type: type[_FlowRuntime] = _FlowRuntime,
-        grouped_runtime_type: type[_GroupedFlowRuntime] = _GroupedFlowRuntime,
+        flow_runtime_type: type[FlowRuntime] = FlowRuntime,
+        grouped_runtime_type: type[GroupedFlowRuntime] = GroupedFlowRuntime,
         runtime_engine_type: type[RuntimeEngine] = RuntimeEngine,
         scheduler_host_factory: Callable[..., SchedulerHost] = SchedulerHost,
         run_stop_controller: RuntimeStopController | None = None,

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class _QueuedJob:
+class QueuedRunJob:
     """One queued runtime job for a flow and an optional concrete source file."""
 
     flow: "Flow"
@@ -83,4 +83,4 @@ class RuntimeContextBuilder:
         return context
 
 
-__all__ = ["RuntimeContextBuilder", "_QueuedJob"]
+__all__ = ["QueuedRunJob", "RuntimeContextBuilder"]

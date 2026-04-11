@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
-from data_engine.services.flow_execution import FlowExecutionService
-from data_engine.services.runtime_execution import RuntimeExecutionService
+if TYPE_CHECKING:
+    from data_engine.services.flow_execution import FlowExecutionService
+    from data_engine.services.runtime_execution import RuntimeExecutionService
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,9 @@ def build_authoring_services(
     flow_execution_service: FlowExecutionService | None = None,
 ) -> AuthoringServices:
     """Build one authoring collaborator bundle with optional overrides."""
+    from data_engine.services.flow_execution import FlowExecutionService
+    from data_engine.services.runtime_execution import RuntimeExecutionService
+
     return AuthoringServices(
         runtime_execution_service=runtime_execution_service or RuntimeExecutionService(),
         flow_execution_service=flow_execution_service or FlowExecutionService(),

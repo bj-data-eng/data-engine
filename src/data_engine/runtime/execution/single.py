@@ -43,7 +43,7 @@ def default_runtime_cache_ledger_service() -> RuntimeCacheLedgerService:
     return RuntimeCacheLedgerService(open_runtime_cache_ledger_func=_open_default_runtime_cache_ledger)
 
 
-class _FlowRuntime:
+class FlowRuntime:
     """Sequential runtime that executes one or more configured flows."""
 
     def __init__(
@@ -208,4 +208,4 @@ class _FlowRuntime:
             self.status_callback(message)
 
 
-__all__ = ["RuntimeCacheLedgerService", "_FlowRuntime", "default_runtime_cache_ledger_service"]
+__all__ = ["FlowRuntime", "RuntimeCacheLedgerService", "default_runtime_cache_ledger_service"]

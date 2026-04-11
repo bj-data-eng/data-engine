@@ -33,12 +33,12 @@ class GuiStateMixin:
 
     @property
     def log_store(self: "DataEngineWindow"):
-        """Compatibility facade over the current runtime binding log store."""
+        """Expose the current runtime binding log store."""
         return self.runtime_binding.log_store
 
     @property
     def _daemon_manager(self: "DataEngineWindow"):
-        """Compatibility facade over the current runtime binding daemon manager."""
+        """Expose the current runtime binding daemon manager."""
         return self.runtime_binding.daemon_manager
 
     @property

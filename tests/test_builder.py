@@ -11,7 +11,7 @@ from data_engine.authoring.flow import Flow, discover_flows, load_flow, run
 from data_engine.core.model import FlowStoppedError, FlowValidationError
 from data_engine.core.primitives import Batch, FileRef, MirrorContext, SourceContext
 from data_engine.flow_modules.flow_module_loader import compiled_flow_module_context
-from data_engine.runtime.execution import _FlowRuntime, _GroupedFlowRuntime
+from data_engine.runtime.execution import FlowRuntime, GroupedFlowRuntime
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
 
@@ -38,7 +38,7 @@ def test_runtime_uniqueness_remains_based_on_internal_flow_name_not_label():
     first = Flow(name="name_name", group="Claims")
     second = Flow(name="NameName", group="Claims")
 
-    runtime = _FlowRuntime((first.step(lambda context: context.current), second.step(lambda context: context.current)), continuous=False)
+    runtime = FlowRuntime((first.step(lambda context: context.current), second.step(lambda context: context.current)), continuous=False)
 
     assert runtime._validate() is None
 
@@ -587,7 +587,7 @@ def test_schedule_missing_source_file_records_failed_run_and_log(tmp_path):
         .step(lambda context: {"ok": True})
     )
 
-    runtime = _FlowRuntime((flow,), continuous=False, runtime_ledger=ledger)
+    runtime = FlowRuntime((flow,), continuous=False, runtime_ledger=ledger)
 
     with pytest.raises(FlowValidationError, match="Source path not found"):
         runtime.run()
@@ -615,7 +615,7 @@ def test_flow_context_config_supports_get_require_names_and_all(tmp_path):
         encoding="utf-8",
     )
     flow = Flow(name="claims", group="Claims")._clone(_workspace_root=workspace_root)
-    context = _FlowRuntime((flow.step(lambda current_context: current_context.config),), continuous=False).run()[0]
+    context = FlowRuntime((flow.step(lambda current_context: current_context.config),), continuous=False).run()[0]
     cfg = context.current
 
     assert cfg.names() == ("claims",)
@@ -631,7 +631,7 @@ def test_flow_context_config_require_raises_for_missing_config(tmp_path):
     flow = Flow(name="claims", group="Claims")._clone(_workspace_root=workspace_root)
 
     with pytest.raises(FlowValidationError, match="Required config file was not found"):
-        _FlowRuntime((flow.step(lambda context: context.config.require("claims")),), continuous=False).run()
+        FlowRuntime((flow.step(lambda context: context.config.require("claims")),), continuous=False).run()
 
 
 def test_flow_context_database_returns_write_ready_workspace_database_path(tmp_path):
@@ -639,7 +639,7 @@ def test_flow_context_database_returns_write_ready_workspace_database_path(tmp_p
     (workspace_root / "databases").mkdir(parents=True)
     flow = Flow(name="claims", group="Claims")._clone(_workspace_root=workspace_root)
 
-    context = _FlowRuntime((flow.step(lambda current_context: current_context.database("claims/db.duckdb")),), continuous=False).run()[0]
+    context = FlowRuntime((flow.step(lambda current_context: current_context.database("claims/db.duckdb")),), continuous=False).run()[0]
 
     assert context.current == (workspace_root / "databases" / "claims" / "db.duckdb").resolve()
     assert context.current.parent.is_dir()
@@ -650,7 +650,7 @@ def test_flow_context_database_rejects_absolute_paths(tmp_path):
     flow = Flow(name="claims", group="Claims")._clone(_workspace_root=workspace_root)
 
     with pytest.raises(FlowValidationError, match="name must be relative"):
-        _FlowRuntime((flow.step(lambda context: context.database(tmp_path / "outside.duckdb")),), continuous=False).run()
+        FlowRuntime((flow.step(lambda context: context.database(tmp_path / "outside.duckdb")),), continuous=False).run()
 
 
 def test_poll_missing_source_dir_records_failed_run_and_log(tmp_path):
@@ -661,7 +661,7 @@ def test_poll_missing_source_dir_records_failed_run_and_log(tmp_path):
         .step(lambda context: {"ok": True})
     )
 
-    runtime = _FlowRuntime((flow,), continuous=False, runtime_ledger=ledger)
+    runtime = FlowRuntime((flow,), continuous=False, runtime_ledger=ledger)
 
     with pytest.raises(FlowValidationError, match="Source path not found"):
         runtime.run()
@@ -690,7 +690,7 @@ def test_batch_poll_marks_all_stale_source_files_success_in_ledger(tmp_path):
         .step(lambda context: {"root": context.source.root, "path": context.source.path})
     )
 
-    runtime = _FlowRuntime((flow,), continuous=False, runtime_ledger=ledger)
+    runtime = FlowRuntime((flow,), continuous=False, runtime_ledger=ledger)
     results = runtime.run()
 
     assert len(results) == 1
@@ -714,7 +714,7 @@ def test_runtime_uses_injected_ledger_factory_once(tmp_path):
 
     flow = Flow(name="factory_runtime", group="Claims").step(lambda context: context.current)
 
-    runtime = _FlowRuntime((flow,), continuous=False, runtime_ledger_factory=open_ledger)
+    runtime = FlowRuntime((flow,), continuous=False, runtime_ledger_factory=open_ledger)
     runtime.run()
 
     assert calls == ["called"]
@@ -730,7 +730,7 @@ def test_runtime_uses_injected_ledger_service_once(tmp_path):
 
     flow = Flow(name="service_runtime", group="Claims").step(lambda context: context.current)
 
-    runtime = _FlowRuntime((flow,), continuous=False, runtime_ledger_service=_Service())
+    runtime = FlowRuntime((flow,), continuous=False, runtime_ledger_service=_Service())
     runtime.run()
 
     assert calls == ["called"]
@@ -743,7 +743,7 @@ def test_grouped_runtime_uses_injected_ledger_factory_once(tmp_path):
         calls.append("called")
         return RuntimeCacheLedger.open_default(data_root=tmp_path)
 
-    grouped = _GroupedFlowRuntime(
+    grouped = GroupedFlowRuntime(
         (
             Flow(name="grouped_factory_first", group="shared").step(lambda context: context.current),
             Flow(name="grouped_factory_second", group="shared").step(lambda context: context.current),
@@ -765,7 +765,7 @@ def test_grouped_runtime_uses_injected_ledger_service_once(tmp_path):
             calls.append("called")
             return RuntimeCacheLedger.open_default(data_root=tmp_path)
 
-    grouped = _GroupedFlowRuntime(
+    grouped = GroupedFlowRuntime(
         (
             Flow(name="grouped_service_first", group="shared").step(lambda context: context.current),
             Flow(name="grouped_service_second", group="shared").step(lambda context: context.current),
@@ -793,7 +793,7 @@ def test_grouped_runtime_does_not_close_injected_shared_ledger(tmp_path):
             nonlocal closed
             closed += 1
 
-    grouped = _GroupedFlowRuntime(
+    grouped = GroupedFlowRuntime(
         (
             Flow(name="grouped_close_first", group="alpha").step(lambda context: context.current),
             Flow(name="grouped_close_second", group="beta").step(lambda context: context.current),
@@ -895,7 +895,7 @@ def test_flow_public_entrypoints_accept_injected_services():
 
 def test_runtime_requires_all_flows_to_have_steps():
     with pytest.raises(FlowValidationError, match="must define at least one step"):
-        _FlowRuntime((Flow(name="empty", group="Claims"),), continuous=False).run()
+        FlowRuntime((Flow(name="empty", group="Claims"),), continuous=False).run()
 
 
 def test_runtime_requires_unique_flow_names():
@@ -903,7 +903,7 @@ def test_runtime_requires_unique_flow_names():
     second = Flow(name="duplicate", group="Reports").step(lambda context: context.current)
 
     with pytest.raises(FlowValidationError, match="unique"):
-        _FlowRuntime((first, second), continuous=False).run()
+        FlowRuntime((first, second), continuous=False).run()
 
 
 def test_runtime_raises_when_step_uses_missing_saved_object():
@@ -923,7 +923,7 @@ def test_runtime_stops_when_flow_stop_event_is_set():
     flow = Flow(name="stopped", group="Claims").step(lambda context: context.current)
 
     with pytest.raises(Exception, match="stop requested"):
-        _FlowRuntime((flow,), continuous=False, flow_stop_event=stop_event).run()
+        FlowRuntime((flow,), continuous=False, flow_stop_event=stop_event).run()
 
 
 def test_runtime_stops_specific_run_id_between_steps():
@@ -939,7 +939,7 @@ def test_runtime_stops_specific_run_id_between_steps():
     flow = Flow(name="run_id_stopped", group="Claims").step(request_stop).step(should_not_run)
 
     with pytest.raises(FlowStoppedError, match="Run stop requested"):
-        _FlowRuntime((flow,), continuous=False, run_stop_controller=controller).run()
+        FlowRuntime((flow,), continuous=False, run_stop_controller=controller).run()
 
 
 def test_poll_rejects_negative_settle(tmp_path):
@@ -1011,7 +1011,7 @@ def test_grouped_runtime_keeps_order_within_group():
 
         return _inner
 
-    grouped = _GroupedFlowRuntime(
+    grouped = GroupedFlowRuntime(
         (
             Flow(name="first", group="shared").step(mark("first")),
             Flow(name="second", group="shared").step(mark("second")),

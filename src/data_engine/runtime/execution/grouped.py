@@ -7,7 +7,7 @@ import threading
 from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.primitives import FlowContext
-from data_engine.runtime.execution.single import _FlowRuntime, RuntimeCacheLedgerService, default_runtime_cache_ledger_service
+from data_engine.runtime.execution.single import FlowRuntime, RuntimeCacheLedgerService, default_runtime_cache_ledger_service
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from data_engine.core.flow import Flow
 
 
-class _GroupedFlowRuntime:
+class GroupedFlowRuntime:
     """Grouped orchestrator: sequential within a group, parallel across groups."""
 
     def __init__(
@@ -46,7 +46,7 @@ class _GroupedFlowRuntime:
         grouped = self._grouped_flows()
         if len(grouped) <= 1:
             only = next(iter(grouped.values()), ())
-            return _FlowRuntime(
+            return FlowRuntime(
                 tuple(only),
                 continuous=self.continuous,
                 runtime_stop_event=self.runtime_stop_event,
@@ -65,7 +65,7 @@ class _GroupedFlowRuntime:
 
         def run_group(group_name: str, group_flows: tuple["Flow", ...]) -> None:
             try:
-                runtime = _FlowRuntime(
+                runtime = FlowRuntime(
                     group_flows,
                     continuous=self.continuous,
                     runtime_stop_event=internal_runtime_stop,
@@ -110,4 +110,4 @@ class _GroupedFlowRuntime:
         return {name: tuple(group_flows) for name, group_flows in grouped.items()}
 
 
-__all__ = ["_GroupedFlowRuntime"]
+__all__ = ["GroupedFlowRuntime"]

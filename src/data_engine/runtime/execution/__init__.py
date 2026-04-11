@@ -1,6 +1,6 @@
 """Runtime execution internals for authored flows."""
 
-from data_engine.runtime.execution.app import _GroupedFlowRuntime
-from data_engine.runtime.execution.app import _FlowRuntime
+from data_engine.runtime.execution.app import FlowRuntime
+from data_engine.runtime.execution.app import GroupedFlowRuntime
 
-__all__ = ["_FlowRuntime", "_GroupedFlowRuntime"]
+__all__ = ["FlowRuntime", "GroupedFlowRuntime"]

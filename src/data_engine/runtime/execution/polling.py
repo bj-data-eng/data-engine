@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from data_engine.core.primitives import WatchSpec
-from data_engine.runtime.execution.context import _QueuedJob
+from data_engine.runtime.execution.context import QueuedRunJob
 from data_engine.domain.source_state import SourceSignature
 from data_engine.runtime.file_watch import PollingWatcher, iter_candidate_paths
 
@@ -61,7 +61,7 @@ class RuntimePollingSupport:
 
     def enqueue_job(
         self,
-        queue: deque[_QueuedJob],
+        queue: deque[QueuedRunJob],
         queued_keys: set[tuple[str, str | None]],
         flow: "Flow",
         source_path: Path | None,
@@ -77,14 +77,14 @@ class RuntimePollingSupport:
                     merged = {signature.source_path: signature for signature in job.batch_signatures}
                     for signature in batch_signatures:
                         merged[signature.source_path] = signature
-                    queue[index] = _QueuedJob(
+                    queue[index] = QueuedRunJob(
                         flow=job.flow,
                         source_path=job.source_path,
                         batch_signatures=tuple(merged[path] for path in sorted(merged)),
                     )
                     break
             return
-        queue.append(_QueuedJob(flow, source_path, batch_signatures))
+        queue.append(QueuedRunJob(flow, source_path, batch_signatures))
         queued_keys.add(key)
 
     def job_key(self, flow: "Flow", source_path: Path | None) -> tuple[str, str | None]:

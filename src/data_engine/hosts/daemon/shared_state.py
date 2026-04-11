@@ -1,11 +1,10 @@
-"""Host-owned adapter over shared workspace lease and snapshot operations."""
+"""Host-owned adapter over workspace coordination and runtime snapshot operations."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from data_engine.platform.workspace_models import WorkspacePaths
-from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.shared_state import (
     checkpoint_workspace_state as checkpoint_runtime_workspace_state,
     claim_workspace as claim_runtime_workspace,
@@ -18,6 +17,7 @@ from data_engine.runtime.shared_state import (
     release_workspace,
     remove_control_request,
     remove_lease_metadata,
+    RuntimeSnapshotStore,
     write_control_request,
     write_lease_metadata,
 )
@@ -42,7 +42,7 @@ class DaemonSharedStateAdapter:
         machine_id: str,
         stale_after_seconds: float,
         reclaim: bool = True,
-        ) -> bool:
+    ) -> bool:
         return recover_stale_workspace(
             paths,
             machine_id=machine_id,
@@ -53,13 +53,13 @@ class DaemonSharedStateAdapter:
     def lease_is_stale(self, paths: WorkspacePaths, *, stale_after_seconds: float) -> bool:
         return lease_is_stale(paths, stale_after_seconds=stale_after_seconds)
 
-    def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeCacheLedger) -> None:
+    def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> None:
         hydrate_local_runtime_state(paths, ledger)
 
     def checkpoint_workspace_state(
         self,
         paths: WorkspacePaths,
-        ledger: RuntimeCacheLedger,
+        ledger: RuntimeSnapshotStore,
         *,
         workspace_id: str,
         machine_id: str,

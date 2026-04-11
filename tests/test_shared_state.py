@@ -94,6 +94,60 @@ def test_checkpoint_and_hydrate_workspace_state(tmp_path, monkeypatch):
     assert [entry.run_id for entry in target_ledger.logs.list(flow_name="demo")] == ["run-1"]
 
 
+def test_shared_state_helpers_accept_protocol_shaped_snapshot_store(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+    claim_workspace(paths)
+
+    source_ledger = RuntimeCacheLedger(paths.runtime_db_path)
+    started = utcnow_text()
+    source_ledger.runs.record_started(
+        run_id="run-1",
+        flow_name="demo",
+        group_name="Demo",
+        source_path=None,
+        started_at_utc=started,
+    )
+    source_ledger.runs.record_finished(run_id="run-1", status="success", finished_at_utc=started)
+    source_ledger.logs.append(
+        level="INFO",
+        message="run=run-1 flow=demo source=None status=success elapsed=0.001000",
+        created_at_utc=started,
+        run_id="run-1",
+        flow_name="demo",
+    )
+
+    class SnapshotStore:
+        def __init__(self, ledger):
+            self.runs = ledger.runs
+            self.step_outputs = ledger.step_outputs
+            self.logs = ledger.logs
+            self.source_signatures = ledger.source_signatures
+            self.snapshots = ledger.snapshots
+
+    checkpoint_workspace_state(
+        paths,
+        SnapshotStore(source_ledger),
+        workspace_id="default",
+        machine_id="machine-a",
+        daemon_id="daemon-a",
+        pid=101,
+        status="idle",
+        started_at_utc=started,
+        last_checkpoint_at_utc=started,
+        app_version="0.1.0",
+    )
+
+    target_path = app_root / "artifacts" / "workspaces" / "default" / "runtime_state" / "second.sqlite"
+    target_ledger = RuntimeCacheLedger(target_path)
+    hydrate_local_runtime_state(paths, SnapshotStore(target_ledger))
+
+    assert [run.run_id for run in target_ledger.runs.list()] == ["run-1"]
+
+
 def test_checkpoint_workspace_state_handles_late_string_values_after_many_nulls(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
