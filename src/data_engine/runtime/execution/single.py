@@ -15,32 +15,32 @@ from data_engine.runtime.execution.logging import RuntimeLogEmitter
 from data_engine.runtime.execution.polling import RuntimePollingSupport
 from data_engine.runtime.execution.runner import FlowRunExecutionPorts, FlowRunExecutor
 from data_engine.runtime.file_watch import PollingWatcher
-from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow
 
 
-def _open_default_runtime_ledger() -> RuntimeLedger:
+def _open_default_runtime_cache_ledger() -> RuntimeCacheLedger:
     """Open the default runtime ledger for authored flow execution."""
-    return RuntimeLedger.open_default()
+    return RuntimeCacheLedger.open_default()
 
 
 @dataclass(frozen=True)
-class RuntimeLedgerService:
+class RuntimeCacheLedgerService:
     """Own how authored flow execution opens its runtime ledger."""
 
-    open_runtime_ledger_func: Callable[[], RuntimeLedger]
+    open_runtime_cache_ledger_func: Callable[[], RuntimeCacheLedger]
 
-    def open_runtime_ledger(self) -> RuntimeLedger:
+    def open_runtime_cache_ledger(self) -> RuntimeCacheLedger:
         """Open one runtime ledger for authored flow execution."""
-        return self.open_runtime_ledger_func()
+        return self.open_runtime_cache_ledger_func()
 
 
-def default_runtime_ledger_service() -> RuntimeLedgerService:
+def default_runtime_cache_ledger_service() -> RuntimeCacheLedgerService:
     """Build the default runtime-ledger service for authored flows."""
-    return RuntimeLedgerService(open_runtime_ledger_func=_open_default_runtime_ledger)
+    return RuntimeCacheLedgerService(open_runtime_cache_ledger_func=_open_default_runtime_cache_ledger)
 
 
 class _FlowRuntime:
@@ -54,9 +54,9 @@ class _FlowRuntime:
         runtime_stop_event: threading.Event | None = None,
         flow_stop_event: threading.Event | None = None,
         status_callback: Callable[[str], None] | None = None,
-        runtime_ledger: RuntimeLedger | None = None,
-        runtime_ledger_service: RuntimeLedgerService | None = None,
-        runtime_ledger_factory: Callable[[], RuntimeLedger] | None = None,
+        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger_service: RuntimeCacheLedgerService | None = None,
+        runtime_ledger_factory: Callable[[], RuntimeCacheLedger] | None = None,
         run_stop_controller: RuntimeStopController | None = None,
     ) -> None:
         self.flows = tuple(flows)
@@ -65,18 +65,18 @@ class _FlowRuntime:
         self.flow_stop_event = flow_stop_event
         self.run_stop_controller = run_stop_controller or RuntimeStopController()
         self.status_callback = status_callback
-        runtime_ledger_service = runtime_ledger_service or default_runtime_ledger_service()
-        self._runtime_ledger_factory = runtime_ledger_factory or runtime_ledger_service.open_runtime_ledger
+        runtime_ledger_service = runtime_ledger_service or default_runtime_cache_ledger_service()
+        self._runtime_ledger_factory = runtime_ledger_factory or runtime_ledger_service.open_runtime_cache_ledger
         self._owns_runtime_ledger = runtime_ledger is None
         self.runtime_ledger = runtime_ledger or self._runtime_ledger_factory()
         self.context_builder = RuntimeContextBuilder()
-        self.log_emitter = RuntimeLogEmitter(self.runtime_ledger)
-        self.polling = RuntimePollingSupport(self.runtime_ledger)
+        self.log_emitter = RuntimeLogEmitter(self.runtime_ledger.logs)
+        self.polling = RuntimePollingSupport(self.runtime_ledger.source_signatures)
         self.run_executor = FlowRunExecutor(
             FlowRunExecutionPorts(
                 context_builder=self.context_builder,
                 polling=self.polling,
-                runtime_ledger=self.runtime_ledger,
+                state_writer=self.runtime_ledger.execution_state,
                 log_emitter=self.log_emitter,
                 stop_controller=self,
             )
@@ -208,4 +208,4 @@ class _FlowRuntime:
             self.status_callback(message)
 
 
-__all__ = ["RuntimeLedgerService", "_FlowRuntime", "default_runtime_ledger_service"]
+__all__ = ["RuntimeCacheLedgerService", "_FlowRuntime", "default_runtime_cache_ledger_service"]

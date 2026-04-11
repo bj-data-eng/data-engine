@@ -7,8 +7,8 @@ import threading
 from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.primitives import FlowContext
-from data_engine.runtime.execution.single import _FlowRuntime, RuntimeLedgerService, default_runtime_ledger_service
-from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.execution.single import _FlowRuntime, RuntimeCacheLedgerService, default_runtime_cache_ledger_service
+from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
 
 if TYPE_CHECKING:
@@ -26,9 +26,9 @@ class _GroupedFlowRuntime:
         runtime_stop_event: threading.Event | None = None,
         flow_stop_event: threading.Event | None = None,
         status_callback: Callable[[str], None] | None = None,
-        runtime_ledger: RuntimeLedger | None = None,
-        runtime_ledger_service: RuntimeLedgerService | None = None,
-        runtime_ledger_factory: Callable[[], RuntimeLedger] | None = None,
+        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger_service: RuntimeCacheLedgerService | None = None,
+        runtime_ledger_factory: Callable[[], RuntimeCacheLedger] | None = None,
         run_stop_controller: RuntimeStopController | None = None,
     ) -> None:
         self.flows = tuple(flows)
@@ -37,8 +37,8 @@ class _GroupedFlowRuntime:
         self.flow_stop_event = flow_stop_event
         self.run_stop_controller = run_stop_controller or RuntimeStopController()
         self.status_callback = status_callback
-        self._runtime_ledger_service = runtime_ledger_service or default_runtime_ledger_service()
-        self._runtime_ledger_factory = runtime_ledger_factory or self._runtime_ledger_service.open_runtime_ledger
+        self._runtime_ledger_service = runtime_ledger_service or default_runtime_cache_ledger_service()
+        self._runtime_ledger_factory = runtime_ledger_factory or self._runtime_ledger_service.open_runtime_cache_ledger
         self._owns_runtime_ledger = runtime_ledger is None
         self.runtime_ledger = runtime_ledger or self._runtime_ledger_factory()
 

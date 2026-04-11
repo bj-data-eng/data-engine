@@ -158,7 +158,7 @@ class FlowRunExecutionPorts:
 
     context_builder: FlowContextBuilderPort
     polling: RuntimeSourceStatePort
-    runtime_ledger: RuntimeStateWriterPort
+    state_writer: RuntimeStateWriterPort
     log_emitter: RuntimeEventWriterPort
     stop_controller: RuntimeStopPort
 
@@ -192,7 +192,7 @@ class FlowRunExecutor:
         effective_signatures = batch_signatures or ((signature,) if signature is not None else ())
         started_at_utc = str(context.metadata["started_at_utc"])
         normalized_source_path = signature.source_path if signature is not None else self.ports.polling.normalized_source_path(source_path)
-        self.ports.runtime_ledger.record_run_started(
+        self.ports.state_writer.record_run_started(
             run_id=run_id,
             flow_name=context.flow_name,
             group_name=context.group,
@@ -200,7 +200,7 @@ class FlowRunExecutor:
             started_at_utc=started_at_utc,
         )
         for effective_signature in effective_signatures:
-            self.ports.runtime_ledger.upsert_file_state(flow_name=context.flow_name, signature=effective_signature, status="started")
+            self.ports.state_writer.upsert_file_state(flow_name=context.flow_name, signature=effective_signature, status="started")
         self.ports.log_emitter.log_flow_event(run_id, context.flow_name, source_path, status="started")
         try:
             self._ensure_runtime_sources_available(flow, context, source_path)
@@ -209,7 +209,7 @@ class FlowRunExecutor:
                 self._load_current_for_step(context, step)
                 step_started = monotonic()
                 step_started_at_utc = utcnow_text()
-                step_run_id = self.ports.runtime_ledger.record_step_started(
+                step_run_id = self.ports.state_writer.record_step_started(
                     run_id=run_id,
                     flow_name=context.flow_name,
                     step_label=step.label,
@@ -230,7 +230,7 @@ class FlowRunExecutor:
                         detail=f"{type(exc).__name__}: {exc}",
                     )
                     elapsed_ms = max(int((monotonic() - step_started) * 1000), 0)
-                    self.ports.runtime_ledger.record_step_finished(
+                    self.ports.state_writer.record_step_finished(
                         step_run_id=step_run_id,
                         status="failed",
                         finished_at_utc=utcnow_text(),
@@ -254,7 +254,7 @@ class FlowRunExecutor:
                         step_outputs[step.label] = result
                 elapsed = monotonic() - step_started
                 elapsed_ms = max(int(elapsed * 1000), 0)
-                self.ports.runtime_ledger.record_step_finished(
+                self.ports.state_writer.record_step_finished(
                     step_run_id=step_run_id,
                     status="success",
                     finished_at_utc=utcnow_text(),
@@ -264,9 +264,9 @@ class FlowRunExecutor:
                 self.ports.log_emitter.log_step_event(run_id, context.flow_name, step.label, source_path, status="success", elapsed=elapsed)
         except FlowStoppedError as exc:
             finished_at_utc = utcnow_text()
-            self.ports.runtime_ledger.record_run_finished(run_id=run_id, status="stopped", finished_at_utc=finished_at_utc, error_text=str(exc))
+            self.ports.state_writer.record_run_finished(run_id=run_id, status="stopped", finished_at_utc=finished_at_utc, error_text=str(exc))
             for effective_signature in effective_signatures:
-                self.ports.runtime_ledger.upsert_file_state(
+                self.ports.state_writer.upsert_file_state(
                     flow_name=context.flow_name,
                     signature=effective_signature,
                     status="stopped",
@@ -279,9 +279,9 @@ class FlowRunExecutor:
             finished_at_utc = utcnow_text()
             failed_step = step.label if "step" in locals() else None
             failure_text = str(exc)
-            self.ports.runtime_ledger.record_run_finished(run_id=run_id, status="failed", finished_at_utc=finished_at_utc, error_text=failure_text)
+            self.ports.state_writer.record_run_finished(run_id=run_id, status="failed", finished_at_utc=finished_at_utc, error_text=failure_text)
             for effective_signature in effective_signatures:
-                self.ports.runtime_ledger.upsert_file_state(
+                self.ports.state_writer.upsert_file_state(
                     flow_name=context.flow_name,
                     signature=effective_signature,
                     status="failed",
@@ -305,9 +305,9 @@ class FlowRunExecutor:
             raise
         total = monotonic() - run_started
         finished_at_utc = utcnow_text()
-        self.ports.runtime_ledger.record_run_finished(run_id=run_id, status="success", finished_at_utc=finished_at_utc)
+        self.ports.state_writer.record_run_finished(run_id=run_id, status="success", finished_at_utc=finished_at_utc)
         for effective_signature in effective_signatures:
-            self.ports.runtime_ledger.upsert_file_state(
+            self.ports.state_writer.upsert_file_state(
                 flow_name=context.flow_name,
                 signature=effective_signature,
                 status="success",

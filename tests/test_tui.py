@@ -22,7 +22,7 @@ from data_engine.ui.tui.app import RunGroupListItem
 from data_engine.ui.tui.app import DataEngineTui
 from data_engine.domain import FlowLogEntry
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
-from data_engine.runtime.runtime_db import RuntimeLedger, utcnow_text
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.domain import RuntimeStepEvent
 from data_engine.views.models import QtFlowCard
 from data_engine.views.logs import FlowLogStore
@@ -81,12 +81,12 @@ def _sample_qt_flow_cards() -> tuple[QtFlowCard, ...]:
 
 
 def _append_persisted_run_log(workspace_root, *, run_id: str, flow_name: str, source_path: str, status: str, elapsed: float | None = None) -> None:
-    ledger = RuntimeLedger.open_default(data_root=workspace_root)
+    ledger = RuntimeCacheLedger.open_default(data_root=workspace_root)
     try:
         message = f"run={run_id} flow={flow_name} source={source_path} status={status}"
         if elapsed is not None:
             message += f" elapsed={elapsed}"
-        ledger.append_log(
+        ledger.logs.append(
             level="INFO",
             message=message,
             created_at_utc=utcnow_text(),
@@ -403,7 +403,7 @@ async def test_tui_hydrates_shared_runtime_logs_when_observing_lease():
 
         assert shared_state_service.hydrated
         assert shared_state_service.hydrated[-1][0] == app.workspace_paths
-        assert shared_state_service.hydrated[-1][1] is app.runtime_ledger
+        assert shared_state_service.hydrated[-1][1] is app.runtime_binding.runtime_cache_ledger
 
 
 @pytest.mark.anyio
@@ -420,7 +420,7 @@ async def test_tui_uses_local_workspace_collection_root_override(monkeypatch, tm
         assert app.workspace_collection_root_override == override_root.resolve()
         assert app.workspace_paths.workspace_collection_root == override_root.resolve()
     finally:
-        app.runtime_ledger.close()
+        app.runtime_binding.runtime_cache_ledger.close()
 
 
 @pytest.mark.anyio

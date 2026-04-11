@@ -22,7 +22,7 @@ from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_models import DiscoveredWorkspace, machine_id_text
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
-from data_engine.runtime.runtime_db import RuntimeLedger, utcnow_text
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services import DaemonService
 from data_engine.services.workspace_provisioning import WorkspaceProvisioningResult
 from data_engine.ui.gui.bootstrap import build_gui_services
@@ -159,12 +159,12 @@ def _sample_multi_active_qt_flow_cards() -> tuple[QtFlowCard, ...]:
 
 
 def _append_persisted_run_log(workspace_root, *, run_id: str, flow_name: str, source_path: str, status: str, elapsed: float | None = None) -> None:
-    ledger = RuntimeLedger.open_default(data_root=workspace_root)
+    ledger = RuntimeCacheLedger.open_default(data_root=workspace_root)
     try:
         message = f"run={run_id} flow={flow_name} source={source_path} status={status}"
         if elapsed is not None:
             message += f" elapsed={elapsed}"
-        ledger.append_log(
+        ledger.logs.append(
             level="INFO",
             message=message,
             created_at_utc=utcnow_text(),
@@ -249,7 +249,7 @@ class _FakeLedgerService:
         self.closed_ledgers: list[object] = []
 
     def open_for_workspace(self, workspace_root):
-        return RuntimeLedger.open_default(data_root=workspace_root)
+        return RuntimeCacheLedger.open_default(data_root=workspace_root)
 
     def register_client_session(self, ledger, *, client_id: str, workspace_id: str, client_kind: str, pid: int) -> None:
         del ledger, client_id, workspace_id, client_kind, pid
@@ -509,14 +509,14 @@ def test_settings_visibility_panel_reports_workspace_stats(qapp):
     recent_started = datetime.now(UTC).isoformat()
     old_started = (datetime.now(UTC) - timedelta(days=45)).isoformat()
 
-    window.runtime_binding.runtime_ledger.record_run_started(
+    window.runtime_binding.runtime_cache_ledger.runs.record_started(
         run_id="run-recent",
         flow_name="poller_a",
         group_name="Imports",
         source_path="/tmp/input-a.xlsx",
         started_at_utc=recent_started,
     )
-    window.runtime_binding.runtime_ledger.record_run_started(
+    window.runtime_binding.runtime_cache_ledger.runs.record_started(
         run_id="run-old",
         flow_name="poller_b",
         group_name="Imports",
@@ -653,27 +653,27 @@ def test_rehydrate_step_outputs_from_ledger_enables_inspect_button(qapp, monkeyp
     window = _make_window()
     try:
         started_at = utcnow_text()
-        window.runtime_ledger.record_run_started(
+        window.runtime_binding.runtime_cache_ledger.runs.record_started(
             run_id="run-1",
             flow_name="poller",
             group_name="Imports",
             source_path="/tmp/input.xlsx",
             started_at_utc=started_at,
         )
-        step_id = window.runtime_ledger.record_step_started(
+        step_id = window.runtime_binding.runtime_cache_ledger.step_outputs.record_started(
             run_id="run-1",
             flow_name="poller",
             step_label="Write Parquet",
             started_at_utc=started_at,
         )
-        window.runtime_ledger.record_step_finished(
+        window.runtime_binding.runtime_cache_ledger.step_outputs.record_finished(
             step_run_id=step_id,
             status="success",
             finished_at_utc=started_at,
             elapsed_ms=5,
             output_path=str(output_path),
         )
-        window.runtime_ledger.record_run_finished(run_id="run-1", status="success", finished_at_utc=started_at)
+        window.runtime_binding.runtime_cache_ledger.runs.record_finished(run_id="run-1", status="success", finished_at_utc=started_at)
 
         window._rebuild_runtime_snapshot()
         window._select_flow("poller")
@@ -1513,7 +1513,7 @@ def test_gui_hydrates_shared_runtime_logs_when_observing_lease(qapp, monkeypatch
 
         assert len(shared_state_service.hydrated) == 1
         assert shared_state_service.hydrated[0][0] == window.workspace_paths
-        assert shared_state_service.hydrated[0][1] is window.runtime_ledger
+        assert shared_state_service.hydrated[0][1] is window.runtime_binding.runtime_cache_ledger
     finally:
         _dispose_window(qapp, window)
 
@@ -1620,7 +1620,7 @@ def test_close_event_requests_stop_waits_for_workers_and_closes_ledger(qapp, mon
         nonlocal closed
         closed = True
 
-    monkeypatch.setattr(window.runtime_ledger, "close", mark_closed)
+    monkeypatch.setattr(window.runtime_binding.runtime_cache_ledger, "close", mark_closed)
 
     class _FakeWorker:
         def __init__(self) -> None:

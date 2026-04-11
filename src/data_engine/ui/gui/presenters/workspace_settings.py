@@ -164,7 +164,7 @@ def _recent_workspace_run_count(window: "DataEngineWindow", *, days: int) -> int
     cutoff = datetime.now(UTC) - timedelta(days=days)
     count = 0
     try:
-        runs = window.runtime_binding.runtime_cache_ledger.list_runs()
+        runs = window.runtime_binding.runtime_cache_ledger.runs.list()
     except Exception:
         return 0
     for run in runs:

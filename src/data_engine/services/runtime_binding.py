@@ -17,34 +17,61 @@ from data_engine.views.logs import FlowLogStore
 class _NullRuntimeCacheLedger:
     """In-memory no-op runtime cache ledger for an unconfigured workspace selection."""
 
-    def list_logs(self) -> tuple[object, ...]:
-        return ()
-
-    def list_runs(self) -> tuple[object, ...]:
-        return ()
+    def __init__(self) -> None:
+        self.runs = _NullRuntimeRunRepository()
+        self.logs = _NullRuntimeLogRepository()
 
     def close(self) -> None:
         return
+
+
+class _NullRuntimeRunRepository:
+    """No-op runtime run repository for an unconfigured workspace selection."""
+
+    def list(self, *, flow_name: str | None = None) -> tuple[object, ...]:
+        """Return no runs for an unconfigured workspace selection."""
+        del flow_name
+        return ()
+
+
+class _NullRuntimeLogRepository:
+    """No-op runtime log repository for an unconfigured workspace selection."""
+
+    def list(self, *, flow_name: str | None = None, run_id: str | None = None) -> tuple[object, ...]:
+        """Return no logs for an unconfigured workspace selection."""
+        del flow_name, run_id
+        return ()
+
+
+class _NullClientSessionRepository:
+    """No-op client-session repository for an unconfigured workspace selection."""
+
+    def upsert(self, **kwargs: object) -> None:
+        """Ignore client-session registration for an unconfigured workspace selection."""
+        del kwargs
+
+    def remove(self, client_id: str) -> None:
+        """Ignore client-session removal for an unconfigured workspace selection."""
+        del client_id
+
+    def remove_for_process(self, *, workspace_id: str, client_kind: str, pid: int) -> None:
+        """Ignore process-session removal for an unconfigured workspace selection."""
+        del workspace_id, client_kind, pid
+
+    def count_live(self, workspace_id: str, *, exclude_client_id: str | None = None) -> int:
+        """Return zero live sessions for an unconfigured workspace selection."""
+        del workspace_id, exclude_client_id
+        return 0
 
 
 class _NullRuntimeControlLedger:
     """No-op runtime control ledger for an unconfigured workspace selection."""
 
+    def __init__(self) -> None:
+        self.client_sessions = _NullClientSessionRepository()
+
     def close(self) -> None:
         return
-
-    def upsert_client_session(self, **kwargs: object) -> None:
-        del kwargs
-
-    def remove_client_session(self, client_id: str) -> None:
-        del client_id
-
-    def remove_client_sessions_for_process(self, *, workspace_id: str, client_kind: str, pid: int) -> None:
-        del workspace_id, client_kind, pid
-
-    def count_live_client_sessions(self, workspace_id: str, *, exclude_client_id: str | None = None) -> int:
-        del workspace_id, exclude_client_id
-        return 0
 
 
 @dataclass(frozen=True)
@@ -56,11 +83,6 @@ class WorkspaceRuntimeBinding:
     runtime_control_ledger: RuntimeControlLedger
     log_store: FlowLogStore
     daemon_manager: WorkspaceDaemonManager
-
-    @property
-    def runtime_ledger(self) -> RuntimeCacheLedger:
-        """Compatibility alias while UI surfaces move to explicit cache terminology."""
-        return self.runtime_cache_ledger
 
 
 class WorkspaceRuntimeBindingService:

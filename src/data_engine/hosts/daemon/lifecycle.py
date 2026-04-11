@@ -132,7 +132,7 @@ def _should_shutdown_for_missing_clients(service: "DataEngineDaemonService") -> 
         if service.state.manual_run_threads:
             return False
     try:
-        return service.runtime_control_ledger.count_live_client_sessions(service.paths.workspace_id) == 0
+        return service.runtime_control_ledger.client_sessions.count_live(service.paths.workspace_id) == 0
     except Exception:
         return False
 
@@ -166,7 +166,7 @@ def shutdown(service: "DataEngineDaemonService") -> None:
             pass
     release_workspace_claim(service)
     try:
-        service.runtime_control_ledger.clear_daemon_state(service.paths.workspace_id)
+        service.runtime_control_ledger.daemon_state.clear(service.paths.workspace_id)
     except Exception:
         pass
     service.runtime_cache_ledger.close()

@@ -88,11 +88,6 @@ class DataEngineDaemonService:
         self._state_lock = threading.RLock()
         self.command_handler = DaemonCommandHandler(self)
 
-    @property
-    def runtime_ledger(self):
-        """Compatibility alias for cache-backed runtime history."""
-        return self.runtime_cache_ledger
-
     def _workspace_root_is_available(self) -> bool:
         """Return whether the authored workspace still exists at the configured root."""
         return authored_workspace_is_available(self.paths)

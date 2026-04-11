@@ -68,6 +68,7 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 - Machine-local runtime state lives under the local app data runtime artifacts directory.
 - The GUI must not create real runtime SQLite bindings for the synthetic unconfigured workspace placeholder.
 - Prefer explicit `runtime_cache_ledger` and `runtime_control_ledger` names in new internal code. Keep the public `RuntimeLedger` and `runtime_ledger` aliases only where needed for API/test compatibility.
+- Do not add internal compatibility shims just to preserve old project-internal call shapes during refactors. Update the affected internal callers to the new boundary instead. Preserve stability for the author-facing surface: flows, flow context, and `data_engine.helpers`.
 - Client-session tracking is important for ephemeral daemon lifetime. If the UI flickers between "has control" and disconnected, inspect the selected workspace control DB and daemon log before changing UI code.
 - Workspace provisioning is target-workspace specific. The Settings view has its own workspace selector and should make the provisioning target explicit.
 

@@ -58,7 +58,7 @@ class LogService:
                 flow_name=entry.flow_name,
                 created_at_utc=datetime.fromisoformat(entry.created_at_utc),
             )
-            for entry in runtime_cache_ledger.list_logs()
+            for entry in runtime_cache_ledger.logs.list()
         )
 
 

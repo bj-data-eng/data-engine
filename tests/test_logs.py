@@ -1,5 +1,5 @@
 from data_engine.domain import FlowLogEntry
-from data_engine.runtime.runtime_db import RuntimeLedger, utcnow_text
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services.logs import LogService
 from data_engine.views.logs import FlowLogStore
 from data_engine.domain import RuntimeStepEvent
@@ -228,9 +228,9 @@ def test_flow_log_store_uses_latest_summary_status_unless_failed_or_stopped():
 
 
 def test_flow_log_store_hydrates_persisted_runtime_logs(tmp_path):
-    ledger = RuntimeLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
     created_at = utcnow_text()
-    ledger.append_log(
+    ledger.logs.append(
         level="INFO",
         message="run=run-1 flow=poller source=/tmp/input.xlsx status=success elapsed=0.250000",
         created_at_utc=created_at,

@@ -20,8 +20,8 @@ class RuntimeHistoryService:
         rebuilt: dict[str, dict[str, Path]] = {}
         for flow_name, card in flow_cards.items():
             outputs: dict[str, Path] = {}
-            for run in ledger.list_runs(flow_name=flow_name):
-                for step_run in ledger.list_step_runs(run.run_id):
+            for run in ledger.runs.list(flow_name=flow_name):
+                for step_run in ledger.step_outputs.list_for_run(run.run_id):
                     if step_run.status != "success" or not step_run.output_path:
                         continue
                     if step_run.step_label not in card.operation_items or step_run.step_label in outputs:
@@ -46,13 +46,13 @@ class RuntimeHistoryService:
         detail_text: str | None = None
         title = "Run Error"
         if event is not None and event.step_name is not None:
-            for step_run in ledger.list_step_runs(run_id):
+            for step_run in ledger.step_outputs.list_for_run(run_id):
                 if step_run.step_label == event.step_name and step_run.status == "failed":
                     detail_text = step_run.error_text
                     title = f"{event.step_name} Error"
                     break
         if detail_text is None:
-            for run in ledger.list_runs(flow_name=run_group.key[0]):
+            for run in ledger.runs.list(flow_name=run_group.key[0]):
                 if run.run_id == run_id:
                     detail_text = run.error_text
                     break

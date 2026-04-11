@@ -14,7 +14,7 @@ LOGGER = logging.getLogger(__name__)
 class RuntimeLogSink(Protocol):
     """Interface for persisted runtime log writes."""
 
-    def append_log(
+    def append(
         self,
         *,
         level: str,
@@ -44,7 +44,7 @@ class RuntimeLogEmitter:
         exc_info: bool = False,
     ) -> None:
         created_at_utc = utcnow_text()
-        self.log_sink.append_log(
+        self.log_sink.append(
             level=level.upper(),
             message=message,
             created_at_utc=created_at_utc,

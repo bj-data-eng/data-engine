@@ -18,16 +18,16 @@ if TYPE_CHECKING:
 class RuntimeSourceStateStore(Protocol):
     """Interface for source freshness state reads and writes."""
 
-    def normalize_source_path(self, source_path: Path | str) -> str:
+    def normalize_path(self, source_path: Path | str) -> str:
         """Normalize a source path for stable persistence and comparisons."""
 
-    def source_signature_for_path(self, source_path: Path) -> SourceSignature | None:
+    def signature_for_path(self, source_path: Path) -> SourceSignature | None:
         """Return the current source signature when available."""
 
-    def is_poll_source_stale(self, flow_name: str, signature: SourceSignature | None) -> bool:
+    def is_stale(self, flow_name: str, signature: SourceSignature | None) -> bool:
         """Return whether a source signature should be rerun."""
 
-    def prune_missing_file_state(self, *, flow_name: str, current_source_paths: set[str]) -> None:
+    def prune_missing(self, *, flow_name: str, current_source_paths: set[str]) -> None:
         """Delete source state for files that are no longer present."""
 
 
@@ -100,20 +100,20 @@ class RuntimePollingSupport:
             return [None]
         if trigger.run_as == "batch" and trigger.source.is_dir():
             for source_path in iter_candidate_paths(trigger.source, extensions=trigger.extensions, recursive=True, allow_missing=True):
-                current_source_paths.add(self.source_state_store.normalize_source_path(source_path))
+                current_source_paths.add(self.source_state_store.normalize_path(source_path))
                 if self.is_poll_source_stale(flow, source_path):
                     stale.append(None)
                     break
-            self.source_state_store.prune_missing_file_state(flow_name=flow.name, current_source_paths=current_source_paths)
+            self.source_state_store.prune_missing(flow_name=flow.name, current_source_paths=current_source_paths)
             return stale
         for source_path in self.startup_sources(flow, allow_missing=True):
             if source_path is None:
                 stale.append(None)
                 continue
-            current_source_paths.add(self.source_state_store.normalize_source_path(source_path))
+            current_source_paths.add(self.source_state_store.normalize_path(source_path))
             if self.is_poll_source_stale(flow, source_path):
                 stale.append(source_path)
-        self.source_state_store.prune_missing_file_state(flow_name=flow.name, current_source_paths=current_source_paths)
+        self.source_state_store.prune_missing(flow_name=flow.name, current_source_paths=current_source_paths)
         return stale
 
     def stale_batch_poll_signatures(self, flow: "Flow") -> tuple[SourceSignature, ...]:
@@ -138,17 +138,17 @@ class RuntimePollingSupport:
         signature = self.poll_source_signature(flow, source_path)
         if signature is None and trigger.source is not None and trigger.source.exists() and trigger.source.is_file():
             return True
-        return self.source_state_store.is_poll_source_stale(flow.name, signature)
+        return self.source_state_store.is_stale(flow.name, signature)
 
     def poll_source_signature(self, flow: "Flow", source_path: Path | None) -> SourceSignature | None:
         if source_path is None or not isinstance(flow.trigger, WatchSpec) or flow.trigger.mode != "poll":
             return None
-        return self.source_state_store.source_signature_for_path(source_path)
+        return self.source_state_store.signature_for_path(source_path)
 
     def normalized_source_path(self, source_path: Path | None) -> str | None:
         if source_path is None:
             return None
-        return self.source_state_store.normalize_source_path(source_path)
+        return self.source_state_store.normalize_path(source_path)
 
 
 __all__ = ["RuntimePollingSupport", "RuntimeSourceStateStore"]

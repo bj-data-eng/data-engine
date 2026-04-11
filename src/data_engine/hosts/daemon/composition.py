@@ -48,11 +48,6 @@ class DaemonHostDependencies:
     runtime_execution_service: RuntimeExecutionService
     shared_state_adapter: DaemonSharedStateAdapter
 
-    @property
-    def runtime_ledger(self) -> RuntimeCacheLedger:
-        """Compatibility alias for cache-backed runtime history."""
-        return self.runtime_cache_ledger
-
     @classmethod
     def build_default(
         cls,
@@ -312,6 +307,3 @@ __all__ = [
     "DaemonHostState",
     "default_daemon_host_dependency_factories",
 ]
-
-# Backward-compatible alias while the daemon host moves to a single grouped state object.
-DaemonHostInitialState = DaemonHostState

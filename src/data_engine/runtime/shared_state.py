@@ -208,11 +208,12 @@ def checkpoint_workspace_state(
     """Write shared workspace snapshots and lease metadata."""
     initialize_workspace_state(paths)
     snapshot_generation_id = uuid4().hex
-    _write_runs(paths.shared_runs_path, ledger.list_runs(), snapshot_generation_id=snapshot_generation_id)
-    step_runs = tuple(step for run in ledger.list_runs() for step in ledger.list_step_runs(run.run_id))
+    runs = ledger.runs.list()
+    _write_runs(paths.shared_runs_path, runs, snapshot_generation_id=snapshot_generation_id)
+    step_runs = tuple(step for run in runs for step in ledger.step_outputs.list_for_run(run.run_id))
     _write_step_runs(paths.shared_step_runs_path, step_runs, snapshot_generation_id=snapshot_generation_id)
-    _write_logs(paths.shared_logs_path, ledger.list_logs(), snapshot_generation_id=snapshot_generation_id)
-    _write_file_states(paths.shared_file_state_path, ledger.list_file_states(), snapshot_generation_id=snapshot_generation_id)
+    _write_logs(paths.shared_logs_path, ledger.logs.list(), snapshot_generation_id=snapshot_generation_id)
+    _write_file_states(paths.shared_file_state_path, ledger.source_signatures.list_file_states(), snapshot_generation_id=snapshot_generation_id)
     _write_lease_metadata(
         paths.lease_metadata_path,
         {
@@ -267,7 +268,7 @@ def hydrate_local_runtime_state(paths: WorkspacePaths, ledger: RuntimeCacheLedge
     if snapshot is None:
         return
     runs, step_runs, logs, file_states = snapshot
-    ledger.replace_runtime_snapshot(runs=runs, step_runs=step_runs, logs=logs, file_states=file_states)
+    ledger.snapshots.replace(runs=runs, step_runs=step_runs, logs=logs, file_states=file_states)
 
 
 def read_lease_metadata(paths: WorkspacePaths) -> dict[str, Any] | None:

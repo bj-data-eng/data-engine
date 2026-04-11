@@ -84,7 +84,7 @@ class DaemonStateSyncHandler:
 
     def update_daemon_state(self, *, status: str) -> None:
         service = self.service
-        service.runtime_control_ledger.upsert_daemon_state(
+        service.runtime_control_ledger.daemon_state.upsert(
             workspace_id=service.paths.workspace_id,
             pid=service.pid,
             endpoint_kind=service.paths.daemon_endpoint_kind,

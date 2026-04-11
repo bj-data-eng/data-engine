@@ -44,7 +44,7 @@ class RuntimeControlLedgerService:
         pid: int,
     ) -> None:
         """Register or refresh one active local client session."""
-        ledger.upsert_client_session(
+        ledger.client_sessions.upsert(
             client_id=client_id,
             workspace_id=workspace_id,
             client_kind=client_kind,
@@ -53,7 +53,7 @@ class RuntimeControlLedgerService:
 
     def remove_client_session(self, ledger: RuntimeControlLedger, client_id: str) -> None:
         """Remove one active local client session row."""
-        ledger.remove_client_session(client_id)
+        ledger.client_sessions.remove(client_id)
 
     def purge_process_client_sessions(
         self,
@@ -64,7 +64,7 @@ class RuntimeControlLedgerService:
         pid: int,
     ) -> None:
         """Remove all client sessions for one workspace/client-kind/process tuple."""
-        ledger.remove_client_sessions_for_process(
+        ledger.client_sessions.remove_for_process(
             workspace_id=workspace_id,
             client_kind=client_kind,
             pid=pid,
@@ -79,8 +79,8 @@ class RuntimeControlLedgerService:
     ) -> int:
         """Return the number of currently live client sessions for one workspace."""
         if exclude_client_id is None:
-            return ledger.count_live_client_sessions(workspace_id)
-        return ledger.count_live_client_sessions(workspace_id, exclude_client_id=exclude_client_id)
+            return ledger.client_sessions.count_live(workspace_id)
+        return ledger.client_sessions.count_live(workspace_id, exclude_client_id=exclude_client_id)
 
 
 LedgerService = RuntimeControlLedgerService

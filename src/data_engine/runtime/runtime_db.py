@@ -172,8 +172,190 @@ class _RuntimeCacheSchema(_RuntimeSqliteStore):
         self._checkpoint_wal(passive=True)
 
 
+class DaemonStateRepository:
+    """Repository for persisted daemon ownership metadata."""
+
+    def __init__(self, store: _RuntimeSqliteStore) -> None:
+        self._store = store
+
+    def upsert(
+        self,
+        *,
+        workspace_id: str,
+        pid: int,
+        endpoint_kind: str,
+        endpoint_path: str,
+        started_at_utc: str,
+        last_checkpoint_at_utc: str,
+        status: str,
+        app_root: str,
+        workspace_root: str,
+        version_text: str | None = None,
+    ) -> None:
+        """Insert or replace one daemon metadata row."""
+        self._store._connection().execute(
+            """
+            INSERT INTO daemon_state(
+                workspace_id,
+                pid,
+                endpoint_kind,
+                endpoint_path,
+                started_at_utc,
+                last_checkpoint_at_utc,
+                status,
+                app_root,
+                workspace_root,
+                version_text
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(workspace_id) DO UPDATE SET
+                pid = excluded.pid,
+                endpoint_kind = excluded.endpoint_kind,
+                endpoint_path = excluded.endpoint_path,
+                started_at_utc = excluded.started_at_utc,
+                last_checkpoint_at_utc = excluded.last_checkpoint_at_utc,
+                status = excluded.status,
+                app_root = excluded.app_root,
+                workspace_root = excluded.workspace_root,
+                version_text = excluded.version_text
+            """,
+            (
+                workspace_id,
+                pid,
+                endpoint_kind,
+                endpoint_path,
+                started_at_utc,
+                last_checkpoint_at_utc,
+                status,
+                app_root,
+                workspace_root,
+                version_text,
+            ),
+        )
+
+    def get(self, workspace_id: str) -> PersistedDaemonState | None:
+        """Return daemon metadata for one workspace when present."""
+        row = self._store._connection().execute(
+            """
+            SELECT workspace_id, pid, endpoint_kind, endpoint_path, started_at_utc, last_checkpoint_at_utc, status, app_root, workspace_root, version_text
+            FROM daemon_state
+            WHERE workspace_id = ?
+            """,
+            (workspace_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return PersistedDaemonState(
+            workspace_id=str(row["workspace_id"]),
+            pid=int(row["pid"]),
+            endpoint_kind=str(row["endpoint_kind"]),
+            endpoint_path=str(row["endpoint_path"]),
+            started_at_utc=str(row["started_at_utc"]),
+            last_checkpoint_at_utc=str(row["last_checkpoint_at_utc"]),
+            status=str(row["status"]),
+            app_root=str(row["app_root"]),
+            workspace_root=str(row["workspace_root"]),
+            version_text=row["version_text"],
+        )
+
+    def clear(self, workspace_id: str) -> None:
+        """Delete daemon metadata for one workspace."""
+        self._store._connection().execute("DELETE FROM daemon_state WHERE workspace_id = ?", (workspace_id,))
+
+
+class ClientSessionRepository:
+    """Repository for persisted local UI/client sessions."""
+
+    def __init__(self, store: _RuntimeSqliteStore) -> None:
+        self._store = store
+
+    def upsert(
+        self,
+        *,
+        client_id: str,
+        workspace_id: str,
+        client_kind: str,
+        pid: int,
+    ) -> None:
+        """Insert or refresh one local client session row."""
+        row = self._store._connection().execute(
+            "SELECT started_at_utc FROM client_sessions WHERE client_id = ?",
+            (client_id,),
+        ).fetchone()
+        started_at_utc = str(row["started_at_utc"]) if row is not None and row["started_at_utc"] else utcnow_text()
+        updated_at_utc = utcnow_text()
+        self._store._connection().execute(
+            """
+            INSERT INTO client_sessions(
+                client_id,
+                workspace_id,
+                client_kind,
+                pid,
+                started_at_utc,
+                updated_at_utc
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(client_id) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
+                client_kind = excluded.client_kind,
+                pid = excluded.pid,
+                updated_at_utc = excluded.updated_at_utc
+            """,
+            (client_id, workspace_id, client_kind, pid, started_at_utc, updated_at_utc),
+        )
+
+    def remove(self, client_id: str) -> None:
+        """Delete one local client session row."""
+        self._store._connection().execute("DELETE FROM client_sessions WHERE client_id = ?", (client_id,))
+
+    def remove_for_process(self, *, workspace_id: str, client_kind: str, pid: int) -> None:
+        """Delete all client session rows for one workspace/client-kind/process tuple."""
+        self._store._connection().execute(
+            """
+            DELETE FROM client_sessions
+            WHERE workspace_id = ?
+              AND client_kind = ?
+              AND pid = ?
+            """,
+            (workspace_id, client_kind, pid),
+        )
+
+    def count_live(self, workspace_id: str, *, exclude_client_id: str | None = None) -> int:
+        """Return the number of live client sessions for one workspace."""
+        rows = self._store._connection().execute(
+            """
+            SELECT client_id, pid
+            FROM client_sessions
+            WHERE workspace_id = ?
+            """,
+            (workspace_id,),
+        ).fetchall()
+        live_count = 0
+        stale_client_ids: list[str] = []
+        for row in rows:
+            client_id = str(row["client_id"])
+            if exclude_client_id is not None and client_id == exclude_client_id:
+                continue
+            pid = int(row["pid"])
+            if process_is_running(pid, treat_defunct_as_dead=False):
+                live_count += 1
+            else:
+                stale_client_ids.append(client_id)
+        if stale_client_ids:
+            self._store._connection().executemany(
+                "DELETE FROM client_sessions WHERE client_id = ?",
+                ((client_id,) for client_id in stale_client_ids),
+            )
+        return live_count
+
+
 class RuntimeControlLedger(_RuntimeSqliteStore):
     """Own the control SQLite store for daemon ownership and client sessions."""
+
+    def __init__(self, db_path: Path) -> None:
+        super().__init__(db_path)
+        self.daemon_state = DaemonStateRepository(self)
+        self.client_sessions = ClientSessionRepository(self)
 
     @classmethod
     def open_default(cls, *, data_root: Path | None = None) -> "RuntimeControlLedger":
@@ -216,175 +398,6 @@ class RuntimeControlLedger(_RuntimeSqliteStore):
         connection.execute("CREATE INDEX IF NOT EXISTS idx_client_sessions_workspace ON client_sessions(workspace_id, updated_at_utc DESC)")
         self._checkpoint_wal(passive=True)
 
-    def upsert_daemon_state(
-        self,
-        *,
-        workspace_id: str,
-        pid: int,
-        endpoint_kind: str,
-        endpoint_path: str,
-        started_at_utc: str,
-        last_checkpoint_at_utc: str,
-        status: str,
-        app_root: str,
-        workspace_root: str,
-        version_text: str | None = None,
-    ) -> None:
-        """Insert or replace one daemon metadata row."""
-        self._connection().execute(
-            """
-            INSERT INTO daemon_state(
-                workspace_id,
-                pid,
-                endpoint_kind,
-                endpoint_path,
-                started_at_utc,
-                last_checkpoint_at_utc,
-                status,
-                app_root,
-                workspace_root,
-                version_text
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(workspace_id) DO UPDATE SET
-                pid = excluded.pid,
-                endpoint_kind = excluded.endpoint_kind,
-                endpoint_path = excluded.endpoint_path,
-                started_at_utc = excluded.started_at_utc,
-                last_checkpoint_at_utc = excluded.last_checkpoint_at_utc,
-                status = excluded.status,
-                app_root = excluded.app_root,
-                workspace_root = excluded.workspace_root,
-                version_text = excluded.version_text
-            """,
-            (
-                workspace_id,
-                pid,
-                endpoint_kind,
-                endpoint_path,
-                started_at_utc,
-                last_checkpoint_at_utc,
-                status,
-                app_root,
-                workspace_root,
-                version_text,
-            ),
-        )
-
-    def get_daemon_state(self, workspace_id: str) -> PersistedDaemonState | None:
-        """Return daemon metadata for one workspace when present."""
-        row = self._connection().execute(
-            """
-            SELECT workspace_id, pid, endpoint_kind, endpoint_path, started_at_utc, last_checkpoint_at_utc, status, app_root, workspace_root, version_text
-            FROM daemon_state
-            WHERE workspace_id = ?
-            """,
-            (workspace_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        return PersistedDaemonState(
-            workspace_id=str(row["workspace_id"]),
-            pid=int(row["pid"]),
-            endpoint_kind=str(row["endpoint_kind"]),
-            endpoint_path=str(row["endpoint_path"]),
-            started_at_utc=str(row["started_at_utc"]),
-            last_checkpoint_at_utc=str(row["last_checkpoint_at_utc"]),
-            status=str(row["status"]),
-            app_root=str(row["app_root"]),
-            workspace_root=str(row["workspace_root"]),
-            version_text=row["version_text"],
-        )
-
-    def clear_daemon_state(self, workspace_id: str) -> None:
-        """Delete daemon metadata for one workspace."""
-        self._connection().execute("DELETE FROM daemon_state WHERE workspace_id = ?", (workspace_id,))
-
-    def upsert_client_session(
-        self,
-        *,
-        client_id: str,
-        workspace_id: str,
-        client_kind: str,
-        pid: int,
-    ) -> None:
-        """Insert or refresh one local client session row."""
-        row = self._connection().execute(
-            "SELECT started_at_utc FROM client_sessions WHERE client_id = ?",
-            (client_id,),
-        ).fetchone()
-        started_at_utc = str(row["started_at_utc"]) if row is not None and row["started_at_utc"] else utcnow_text()
-        updated_at_utc = utcnow_text()
-        self._connection().execute(
-            """
-            INSERT INTO client_sessions(
-                client_id,
-                workspace_id,
-                client_kind,
-                pid,
-                started_at_utc,
-                updated_at_utc
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(client_id) DO UPDATE SET
-                workspace_id = excluded.workspace_id,
-                client_kind = excluded.client_kind,
-                pid = excluded.pid,
-                updated_at_utc = excluded.updated_at_utc
-            """,
-            (client_id, workspace_id, client_kind, pid, started_at_utc, updated_at_utc),
-        )
-
-    def remove_client_session(self, client_id: str) -> None:
-        """Delete one local client session row."""
-        self._connection().execute("DELETE FROM client_sessions WHERE client_id = ?", (client_id,))
-
-    def remove_client_sessions_for_process(self, *, workspace_id: str, client_kind: str, pid: int) -> None:
-        """Delete all client session rows for one workspace/client-kind/process tuple."""
-        self._connection().execute(
-            """
-            DELETE FROM client_sessions
-            WHERE workspace_id = ?
-              AND client_kind = ?
-              AND pid = ?
-            """,
-            (workspace_id, client_kind, pid),
-        )
-
-    def count_live_client_sessions(self, workspace_id: str, *, exclude_client_id: str | None = None) -> int:
-        """Return the number of live client sessions for one workspace."""
-        rows = self._connection().execute(
-            """
-            SELECT client_id, pid
-            FROM client_sessions
-            WHERE workspace_id = ?
-            """,
-            (workspace_id,),
-        ).fetchall()
-        live_count = 0
-        stale_client_ids: list[str] = []
-        for row in rows:
-            client_id = str(row["client_id"])
-            if exclude_client_id is not None and client_id == exclude_client_id:
-                continue
-            pid = int(row["pid"])
-            if self._pid_is_running(pid):
-                live_count += 1
-            else:
-                stale_client_ids.append(client_id)
-        if stale_client_ids:
-            self._connection().executemany(
-                "DELETE FROM client_sessions WHERE client_id = ?",
-                ((client_id,) for client_id in stale_client_ids),
-            )
-        return live_count
-
-    @staticmethod
-    def _pid_is_running(pid: int) -> bool:
-        """Return whether the OS still reports the given PID as alive."""
-        return process_is_running(pid, treat_defunct_as_dead=False)
-
-
 class _RuntimeCacheOperations:
     """Runtime history operations mixed into the cache ledger only."""
 
@@ -399,7 +412,7 @@ class _RuntimeCacheOperations:
         except FileNotFoundError:
             return None
         return SourceSignature(
-            source_path=self.normalize_source_path(source_path),
+            source_path=_RuntimeCacheOperations.normalize_source_path(self, source_path),
             mtime_ns=stat.st_mtime_ns,
             size_bytes=stat.st_size,
         )
@@ -457,7 +470,7 @@ class _RuntimeCacheOperations:
             """,
             (status, finished_at_utc, error_text, run_id),
         )
-        self.prune_history(retention_days=self.HISTORY_RETENTION_DAYS)
+        _RuntimeCacheOperations.prune_history(self, retention_days=self.HISTORY_RETENTION_DAYS)
 
     def record_step_started(
         self,
@@ -964,17 +977,352 @@ class _RuntimeCacheOperations:
             connection.commit()
 
 
-class RuntimeCacheLedger(_RuntimeCacheOperations, _RuntimeCacheSchema):
+class RuntimeRunRepository:
+    """Repository for persisted flow run lifecycle rows."""
+
+    def __init__(self, store: _RuntimeCacheSchema) -> None:
+        self._store = store
+
+    def record_started(
+        self,
+        *,
+        run_id: str,
+        flow_name: str,
+        group_name: str,
+        source_path: str | None,
+        started_at_utc: str,
+    ) -> None:
+        """Insert one started run row."""
+        _RuntimeCacheOperations.record_run_started(
+            self._store,
+            run_id=run_id,
+            flow_name=flow_name,
+            group_name=group_name,
+            source_path=source_path,
+            started_at_utc=started_at_utc,
+        )
+
+    def record_finished(
+        self,
+        *,
+        run_id: str,
+        status: str,
+        finished_at_utc: str,
+        error_text: str | None = None,
+    ) -> None:
+        """Finalize one persisted run row."""
+        _RuntimeCacheOperations.record_run_finished(
+            self._store,
+            run_id=run_id,
+            status=status,
+            finished_at_utc=finished_at_utc,
+            error_text=error_text,
+        )
+
+    def list(self, *, flow_name: str | None = None) -> tuple[PersistedRun, ...]:
+        """Return persisted runs, newest first."""
+        return _RuntimeCacheOperations.list_runs(self._store, flow_name=flow_name)
+
+    def replace(self, rows: tuple[PersistedRun, ...]) -> None:
+        """Replace all persisted run rows with one snapshot."""
+        _RuntimeCacheOperations.replace_runs(self._store, rows)
+
+    def prune_history(self, *, retention_days: int) -> None:
+        """Delete run, step, and log history older than the retention window."""
+        _RuntimeCacheOperations.prune_history(self._store, retention_days=retention_days)
+
+
+class RuntimeStepOutputRepository:
+    """Repository for persisted step execution and output rows."""
+
+    def __init__(self, store: _RuntimeCacheSchema) -> None:
+        self._store = store
+
+    def record_started(
+        self,
+        *,
+        run_id: str,
+        flow_name: str,
+        step_label: str,
+        started_at_utc: str,
+    ) -> int:
+        """Insert one started step row and return its surrogate key."""
+        return _RuntimeCacheOperations.record_step_started(
+            self._store,
+            run_id=run_id,
+            flow_name=flow_name,
+            step_label=step_label,
+            started_at_utc=started_at_utc,
+        )
+
+    def record_finished(
+        self,
+        *,
+        step_run_id: int,
+        status: str,
+        finished_at_utc: str,
+        elapsed_ms: int | None,
+        error_text: str | None = None,
+        output_path: str | None = None,
+    ) -> None:
+        """Finalize one persisted step row."""
+        _RuntimeCacheOperations.record_step_finished(
+            self._store,
+            step_run_id=step_run_id,
+            status=status,
+            finished_at_utc=finished_at_utc,
+            elapsed_ms=elapsed_ms,
+            error_text=error_text,
+            output_path=output_path,
+        )
+
+    def list_for_run(self, run_id: str) -> tuple[PersistedStepRun, ...]:
+        """Return persisted step runs for one run id."""
+        return _RuntimeCacheOperations.list_step_runs(self._store, run_id)
+
+    def replace(self, rows: tuple[PersistedStepRun, ...]) -> None:
+        """Replace all persisted step rows with one snapshot."""
+        _RuntimeCacheOperations.replace_step_runs(self._store, rows)
+
+
+class SourceSignatureRepository:
+    """Repository for source signatures and poll freshness rows."""
+
+    def __init__(self, store: _RuntimeCacheSchema) -> None:
+        self._store = store
+
+    def normalize_path(self, source_path: Path | str) -> str:
+        """Normalize a source path for stable persistence and comparisons."""
+        return _RuntimeCacheOperations.normalize_source_path(self._store, source_path)
+
+    def signature_for_path(self, source_path: Path) -> SourceSignature | None:
+        """Return the current source signature when the file exists."""
+        return _RuntimeCacheOperations.source_signature_for_path(self._store, source_path)
+
+    def is_stale(self, flow_name: str, signature: SourceSignature | None) -> bool:
+        """Return whether a concrete source signature should be rerun."""
+        return _RuntimeCacheOperations.is_poll_source_stale(self._store, flow_name, signature)
+
+    def upsert_file_state(
+        self,
+        *,
+        flow_name: str,
+        signature: SourceSignature,
+        status: str,
+        run_id: str | None = None,
+        finished_at_utc: str | None = None,
+        error_text: str | None = None,
+    ) -> None:
+        """Upsert one file-state row for a polled source file."""
+        _RuntimeCacheOperations.upsert_file_state(
+            self._store,
+            flow_name=flow_name,
+            signature=signature,
+            status=status,
+            run_id=run_id,
+            finished_at_utc=finished_at_utc,
+            error_text=error_text,
+        )
+
+    def prune_missing(self, *, flow_name: str, current_source_paths: set[str]) -> None:
+        """Delete file-state rows for one flow when the source file no longer exists."""
+        _RuntimeCacheOperations.prune_missing_file_state(
+            self._store,
+            flow_name=flow_name,
+            current_source_paths=current_source_paths,
+        )
+
+    def list_file_states(self, *, flow_name: str | None = None) -> tuple[PersistedFileState, ...]:
+        """Return current persisted file-state rows."""
+        return _RuntimeCacheOperations.list_file_states(self._store, flow_name=flow_name)
+
+    def replace_file_states(self, rows: tuple[PersistedFileState, ...]) -> None:
+        """Replace all persisted file-state rows with one snapshot."""
+        _RuntimeCacheOperations.replace_file_states(self._store, rows)
+
+
+class RuntimeLogRepository:
+    """Repository for persisted runtime log rows."""
+
+    def __init__(self, store: _RuntimeCacheSchema) -> None:
+        self._store = store
+
+    def append(
+        self,
+        *,
+        level: str,
+        message: str,
+        created_at_utc: str,
+        run_id: str | None = None,
+        flow_name: str | None = None,
+        step_label: str | None = None,
+    ) -> None:
+        """Persist one runtime log line."""
+        _RuntimeCacheOperations.append_log(
+            self._store,
+            level=level,
+            message=message,
+            created_at_utc=created_at_utc,
+            run_id=run_id,
+            flow_name=flow_name,
+            step_label=step_label,
+        )
+
+    def list(self, *, flow_name: str | None = None, run_id: str | None = None) -> tuple[PersistedLogEntry, ...]:
+        """Return persisted runtime logs in creation order."""
+        return _RuntimeCacheOperations.list_logs(self._store, flow_name=flow_name, run_id=run_id)
+
+    def replace(self, rows: tuple[PersistedLogEntry, ...]) -> None:
+        """Replace all persisted log rows with one snapshot."""
+        _RuntimeCacheOperations.replace_logs(self._store, rows)
+
+
+class RuntimeSnapshotRepository:
+    """Repository for atomic runtime snapshot replacement."""
+
+    def __init__(self, store: _RuntimeCacheSchema) -> None:
+        self._store = store
+
+    def replace(
+        self,
+        *,
+        runs: tuple[PersistedRun, ...],
+        step_runs: tuple[PersistedStepRun, ...],
+        logs: tuple[PersistedLogEntry, ...],
+        file_states: tuple[PersistedFileState, ...],
+    ) -> None:
+        """Replace the runtime snapshot tables in foreign-key-safe order."""
+        _RuntimeCacheOperations.replace_runtime_snapshot(
+            self._store,
+            runs=runs,
+            step_runs=step_runs,
+            logs=logs,
+            file_states=file_states,
+        )
+
+
+class RuntimeExecutionStateRepository:
+    """Repository facade for the state writes needed during one flow execution."""
+
+    def __init__(
+        self,
+        *,
+        runs: RuntimeRunRepository,
+        step_outputs: RuntimeStepOutputRepository,
+        source_signatures: SourceSignatureRepository,
+    ) -> None:
+        self.runs = runs
+        self.step_outputs = step_outputs
+        self.source_signatures = source_signatures
+
+    def record_run_started(
+        self,
+        *,
+        run_id: str,
+        flow_name: str,
+        group_name: str,
+        source_path: str | None,
+        started_at_utc: str,
+    ) -> None:
+        """Record that one flow run started."""
+        self.runs.record_started(
+            run_id=run_id,
+            flow_name=flow_name,
+            group_name=group_name,
+            source_path=source_path,
+            started_at_utc=started_at_utc,
+        )
+
+    def record_run_finished(
+        self,
+        *,
+        run_id: str,
+        status: str,
+        finished_at_utc: str,
+        error_text: str | None = None,
+    ) -> None:
+        """Record that one flow run finished."""
+        self.runs.record_finished(run_id=run_id, status=status, finished_at_utc=finished_at_utc, error_text=error_text)
+
+    def record_step_started(
+        self,
+        *,
+        run_id: str,
+        flow_name: str,
+        step_label: str,
+        started_at_utc: str,
+    ) -> int:
+        """Record that one step started and return the persisted step id."""
+        return self.step_outputs.record_started(run_id=run_id, flow_name=flow_name, step_label=step_label, started_at_utc=started_at_utc)
+
+    def record_step_finished(
+        self,
+        *,
+        step_run_id: int,
+        status: str,
+        finished_at_utc: str,
+        elapsed_ms: int | None,
+        error_text: str | None = None,
+        output_path: str | None = None,
+    ) -> None:
+        """Record that one step finished."""
+        self.step_outputs.record_finished(
+            step_run_id=step_run_id,
+            status=status,
+            finished_at_utc=finished_at_utc,
+            elapsed_ms=elapsed_ms,
+            error_text=error_text,
+            output_path=output_path,
+        )
+
+    def upsert_file_state(
+        self,
+        *,
+        flow_name: str,
+        signature: SourceSignature,
+        status: str,
+        run_id: str | None = None,
+        finished_at_utc: str | None = None,
+        error_text: str | None = None,
+    ) -> None:
+        """Write source freshness state for one polled file."""
+        self.source_signatures.upsert_file_state(
+            flow_name=flow_name,
+            signature=signature,
+            status=status,
+            run_id=run_id,
+            finished_at_utc=finished_at_utc,
+            error_text=error_text,
+        )
+
+
+class RuntimeCacheLedger(_RuntimeCacheSchema):
     """Own the cache/runtime-history SQLite store for runs, logs, and file state."""
 
-
-RuntimeLedger = RuntimeCacheLedger
-
+    def __init__(self, db_path: Path) -> None:
+        super().__init__(db_path)
+        self.runs = RuntimeRunRepository(self)
+        self.step_outputs = RuntimeStepOutputRepository(self)
+        self.source_signatures = SourceSignatureRepository(self)
+        self.logs = RuntimeLogRepository(self)
+        self.snapshots = RuntimeSnapshotRepository(self)
+        self.execution_state = RuntimeExecutionStateRepository(
+            runs=self.runs,
+            step_outputs=self.step_outputs,
+            source_signatures=self.source_signatures,
+        )
 
 __all__ = [
+    "ClientSessionRepository",
+    "DaemonStateRepository",
     "RuntimeCacheLedger",
     "RuntimeControlLedger",
-    "RuntimeLedger",
+    "RuntimeExecutionStateRepository",
+    "RuntimeLogRepository",
+    "RuntimeRunRepository",
+    "RuntimeSnapshotRepository",
+    "RuntimeStepOutputRepository",
+    "SourceSignatureRepository",
     "parse_utc_text",
     "utcnow_text",
 ]

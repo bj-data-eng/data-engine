@@ -12,7 +12,7 @@ from data_engine.core.model import FlowStoppedError, FlowValidationError
 from data_engine.core.primitives import Batch, FileRef, MirrorContext, SourceContext
 from data_engine.flow_modules.flow_module_loader import compiled_flow_module_context
 from data_engine.runtime.execution import _FlowRuntime, _GroupedFlowRuntime
-from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
 
 
@@ -182,7 +182,7 @@ def test_failed_step_records_step_label_and_function_name(tmp_path):
     with pytest.raises(FlowValidationError, match='Flow "claims_poll" failed in step "Explode Claims"'):
         flow.run_once()
 
-    run = RuntimeLedger.open_default().list_runs(flow_name="claims_poll")[0]
+    run = RuntimeCacheLedger.open_default().runs.list(flow_name="claims_poll")[0]
     assert 'function explode_claims' in str(run.error_text)
 
 
@@ -580,7 +580,7 @@ def test_schedule_exposes_bound_paths_in_context(tmp_path):
 
 
 def test_schedule_missing_source_file_records_failed_run_and_log(tmp_path):
-    ledger = RuntimeLedger.open_default(data_root=tmp_path)
+    ledger = RuntimeCacheLedger.open_default(data_root=tmp_path)
     flow = (
         Flow(name="scheduled_missing_file", group="Claims")
         .watch(mode="schedule", run_as="batch", interval="10m", source=tmp_path / "missing.xlsx")
@@ -592,7 +592,7 @@ def test_schedule_missing_source_file_records_failed_run_and_log(tmp_path):
     with pytest.raises(FlowValidationError, match="Source path not found"):
         runtime.run()
 
-    runs = ledger.list_runs(flow_name="scheduled_missing_file")
+    runs = ledger.runs.list(flow_name="scheduled_missing_file")
 
     assert len(runs) == 1
     assert runs[0].status == "failed"
@@ -654,7 +654,7 @@ def test_flow_context_database_rejects_absolute_paths(tmp_path):
 
 
 def test_poll_missing_source_dir_records_failed_run_and_log(tmp_path):
-    ledger = RuntimeLedger.open_default(data_root=tmp_path)
+    ledger = RuntimeCacheLedger.open_default(data_root=tmp_path)
     flow = (
         Flow(name="poll_missing_dir", group="Claims")
         .watch(mode="poll", source=tmp_path / "missing_input", interval="5s")
@@ -666,8 +666,8 @@ def test_poll_missing_source_dir_records_failed_run_and_log(tmp_path):
     with pytest.raises(FlowValidationError, match="Source path not found"):
         runtime.run()
 
-    runs = ledger.list_runs(flow_name="poll_missing_dir")
-    logs = ledger.list_logs(flow_name="poll_missing_dir")
+    runs = ledger.runs.list(flow_name="poll_missing_dir")
+    logs = ledger.logs.list(flow_name="poll_missing_dir")
 
     assert len(runs) == 1
     assert runs[0].status == "failed"
@@ -676,7 +676,7 @@ def test_poll_missing_source_dir_records_failed_run_and_log(tmp_path):
 
 
 def test_batch_poll_marks_all_stale_source_files_success_in_ledger(tmp_path):
-    ledger = RuntimeLedger.open_default(data_root=tmp_path)
+    ledger = RuntimeCacheLedger.open_default(data_root=tmp_path)
     source_dir = tmp_path / "input"
     source_dir.mkdir()
     first = source_dir / "a.parquet"
@@ -697,7 +697,7 @@ def test_batch_poll_marks_all_stale_source_files_success_in_ledger(tmp_path):
     assert results[0].current["root"] == source_dir.resolve()
     assert results[0].current["path"] is None
 
-    states = {Path(item.source_path).name: item for item in ledger.list_file_states(flow_name="batch_poll")}
+    states = {Path(item.source_path).name: item for item in ledger.source_signatures.list_file_states(flow_name="batch_poll")}
     assert set(states) == {"a.parquet", "b.parquet"}
     assert all(item.last_status == "success" for item in states.values())
     assert all(item.last_success_run_id is not None for item in states.values())
@@ -710,7 +710,7 @@ def test_runtime_uses_injected_ledger_factory_once(tmp_path):
 
     def open_ledger():
         calls.append("called")
-        return RuntimeLedger.open_default(data_root=tmp_path)
+        return RuntimeCacheLedger.open_default(data_root=tmp_path)
 
     flow = Flow(name="factory_runtime", group="Claims").step(lambda context: context.current)
 
@@ -724,9 +724,9 @@ def test_runtime_uses_injected_ledger_service_once(tmp_path):
     calls: list[str] = []
 
     class _Service:
-        def open_runtime_ledger(self):
+        def open_runtime_cache_ledger(self):
             calls.append("called")
-            return RuntimeLedger.open_default(data_root=tmp_path)
+            return RuntimeCacheLedger.open_default(data_root=tmp_path)
 
     flow = Flow(name="service_runtime", group="Claims").step(lambda context: context.current)
 
@@ -741,7 +741,7 @@ def test_grouped_runtime_uses_injected_ledger_factory_once(tmp_path):
 
     def open_ledger():
         calls.append("called")
-        return RuntimeLedger.open_default(data_root=tmp_path)
+        return RuntimeCacheLedger.open_default(data_root=tmp_path)
 
     grouped = _GroupedFlowRuntime(
         (
@@ -761,9 +761,9 @@ def test_grouped_runtime_uses_injected_ledger_service_once(tmp_path):
     calls: list[str] = []
 
     class _Service:
-        def open_runtime_ledger(self):
+        def open_runtime_cache_ledger(self):
             calls.append("called")
-            return RuntimeLedger.open_default(data_root=tmp_path)
+            return RuntimeCacheLedger.open_default(data_root=tmp_path)
 
     grouped = _GroupedFlowRuntime(
         (
@@ -784,7 +784,7 @@ def test_grouped_runtime_does_not_close_injected_shared_ledger(tmp_path):
 
     class _Ledger:
         def __init__(self):
-            self._inner = RuntimeLedger.open_default(data_root=tmp_path)
+            self._inner = RuntimeCacheLedger.open_default(data_root=tmp_path)
 
         def __getattr__(self, name):
             return getattr(self._inner, name)

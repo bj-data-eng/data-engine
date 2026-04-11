@@ -85,7 +85,7 @@ class DaemonRuntimeCommandHandler:
             except Exception as exc:
                 service._debug_log(f"manual flow crashed name={name} error={exc!r}")
                 service._debug_log(traceback.format_exc().rstrip())
-                service.runtime_cache_ledger.append_log(
+                service.runtime_cache_ledger.logs.append(
                     level="ERROR",
                     message=str(exc),
                     created_at_utc=utcnow_text(),

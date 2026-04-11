@@ -4,12 +4,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from data_engine.domain import FlowCatalogEntry, FlowLogEntry, FlowRunState, RuntimeStepEvent
-from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.services.runtime_history import RuntimeHistoryService
 
 
 def _record_run_with_step(
-    ledger: RuntimeLedger,
+    ledger: RuntimeCacheLedger,
     *,
     run_id: str,
     flow_name: str,
@@ -19,20 +19,20 @@ def _record_run_with_step(
     error_text: str | None = None,
 ) -> int:
     started_at = datetime.now(UTC).isoformat()
-    ledger.record_run_started(
+    ledger.runs.record_started(
         run_id=run_id,
         flow_name=flow_name,
         group_name="Claims",
         source_path=None,
         started_at_utc=started_at,
     )
-    step_run_id = ledger.record_step_started(
+    step_run_id = ledger.step_outputs.record_started(
         run_id=run_id,
         flow_name=flow_name,
         step_label=step_label,
         started_at_utc=started_at,
     )
-    ledger.record_step_finished(
+    ledger.step_outputs.record_finished(
         step_run_id=step_run_id,
         status=status,
         finished_at_utc=datetime.now(UTC).isoformat(),
@@ -40,7 +40,7 @@ def _record_run_with_step(
         error_text=error_text,
         output_path=output_path,
     )
-    ledger.record_run_finished(
+    ledger.runs.record_finished(
         run_id=run_id,
         status=status,
         finished_at_utc=datetime.now(UTC).isoformat(),
@@ -51,7 +51,7 @@ def _record_run_with_step(
 
 def test_runtime_history_service_rebuilds_latest_existing_step_outputs(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
-    ledger = RuntimeLedger.open_default(data_root=workspace_root)
+    ledger = RuntimeCacheLedger.open_default(data_root=workspace_root)
     service = RuntimeHistoryService()
     first_output = tmp_path / "old.parquet"
     first_output.write_text("old", encoding="utf-8")
@@ -111,7 +111,7 @@ def test_runtime_history_service_rebuilds_latest_existing_step_outputs(tmp_path:
 
 def test_runtime_history_service_returns_step_error_details_before_run_error(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
-    ledger = RuntimeLedger.open_default(data_root=workspace_root)
+    ledger = RuntimeCacheLedger.open_default(data_root=workspace_root)
     service = RuntimeHistoryService()
     run_id = "run-step-error"
     _record_run_with_step(
@@ -153,7 +153,7 @@ def test_runtime_history_service_returns_step_error_details_before_run_error(tmp
 
 def test_runtime_history_service_falls_back_to_run_error_details(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
-    ledger = RuntimeLedger.open_default(data_root=workspace_root)
+    ledger = RuntimeCacheLedger.open_default(data_root=workspace_root)
     service = RuntimeHistoryService()
     run_id = "run-error"
     _record_run_with_step(

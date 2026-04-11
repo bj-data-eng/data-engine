@@ -41,7 +41,7 @@ from data_engine.hosts.daemon.runtime_control import stop_active_work
 from data_engine.hosts.daemon.server import serve_forever, serve_workspace_daemon
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR, machine_id_text
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
-from data_engine.runtime.runtime_db import RuntimeControlLedger, RuntimeLedger, utcnow_text
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger, utcnow_text
 from data_engine.runtime.shared_state import (
     checkpoint_workspace_state,
     claim_workspace,
@@ -314,7 +314,7 @@ def test_initialize_service_enters_observer_mode_for_other_machine_lease(tmp_pat
     started = utcnow_text()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id="machine-a",
         daemon_id="daemon-a",
@@ -592,7 +592,7 @@ def test_daemon_service_can_start_in_observer_mode_when_workspace_is_leased(tmp_
     started = utcnow_text()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id="machine-a",
         daemon_id="daemon-a",
@@ -634,7 +634,7 @@ def test_daemon_service_reclaims_unreachable_same_machine_lease(tmp_path, monkey
     started = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id=machine_id_text(),
         daemon_id="daemon-a",
@@ -700,7 +700,7 @@ def test_workspace_daemon_manager_auto_recovers_dead_same_machine_lease(tmp_path
     started = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id=machine_id_text(),
         daemon_id="daemon-a",
@@ -752,7 +752,7 @@ def test_force_shutdown_daemon_process_kills_local_pid_and_cleans_up_lease(tmp_p
     started = utcnow_text()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id=machine_id_text(),
         daemon_id="daemon-a",
@@ -813,8 +813,8 @@ def test_checkpoint_once_raises_when_local_daemon_state_write_fails(tmp_path, mo
             _checkpoint_workspace_state,
         )
         monkeypatch.setattr(
-            service.runtime_control_ledger,
-            "upsert_daemon_state",
+            service.runtime_control_ledger.daemon_state,
+            "upsert",
             lambda **kwargs: (_ for _ in ()).throw(PermissionError("db locked")),
         )
 
@@ -851,7 +851,7 @@ def test_spawn_daemon_process_waits_for_fresh_same_machine_startup(tmp_path, mon
     started = utcnow_text()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id=machine_id_text(),
         daemon_id="daemon-a",
@@ -885,7 +885,7 @@ def test_spawn_daemon_process_does_not_recover_recent_same_machine_unreachable_l
     started = utcnow_text()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id=machine_id_text(),
         daemon_id="daemon-a",
@@ -920,7 +920,7 @@ def test_spawn_daemon_process_does_not_launch_duplicate_local_owner(tmp_path, mo
     started = (datetime.now(UTC) - timedelta(seconds=30)).isoformat()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id=machine_id_text(),
         daemon_id="daemon-a",
@@ -1042,7 +1042,7 @@ def test_daemon_service_refuses_same_machine_observer_mode(tmp_path, monkeypatch
     started = utcnow_text()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id=machine_id_text(),
         daemon_id="daemon-a",
@@ -1188,7 +1188,7 @@ def test_observer_daemon_claims_workspace_after_local_control_request(tmp_path, 
     started = utcnow_text()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id="machine-a",
         daemon_id="daemon-a",
@@ -1642,7 +1642,7 @@ def test_observer_daemon_requests_shutdown_when_lease_disappears(tmp_path, monke
     started = utcnow_text()
     checkpoint_workspace_state(
         paths,
-        RuntimeLedger(paths.runtime_db_path),
+        RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id="machine-a",
         daemon_id="daemon-a",
@@ -1736,7 +1736,7 @@ def test_ephemeral_daemon_stays_alive_when_no_live_clients_remain_during_active_
             self._set = True
 
     service.host.shutdown_event = _SequenceEvent()  # type: ignore[assignment]
-    monkeypatch.setattr(service.runtime_control_ledger, "count_live_client_sessions", lambda workspace_id: 0)
+    monkeypatch.setattr(service.runtime_control_ledger.client_sessions, "count_live", lambda workspace_id: 0)
 
     service._checkpoint_loop()  # noqa: SLF001 - direct lifecycle ephemeral policy test
 
@@ -1775,7 +1775,7 @@ def test_ephemeral_idle_daemon_requests_shutdown_when_no_live_clients_remain(tmp
             self._set = True
 
     service.host.shutdown_event = _SequenceEvent()  # type: ignore[assignment]
-    monkeypatch.setattr(service.runtime_control_ledger, "count_live_client_sessions", lambda workspace_id: 0)
+    monkeypatch.setattr(service.runtime_control_ledger.client_sessions, "count_live", lambda workspace_id: 0)
 
     service._checkpoint_loop()  # noqa: SLF001 - direct lifecycle ephemeral policy test
 
@@ -1815,7 +1815,7 @@ def test_persistent_daemon_stays_alive_when_no_live_clients_remain(tmp_path, mon
             self._set = True
 
     service.host.shutdown_event = _SequenceEvent()  # type: ignore[assignment]
-    monkeypatch.setattr(service.runtime_control_ledger, "count_live_client_sessions", lambda workspace_id: 0)
+    monkeypatch.setattr(service.runtime_control_ledger.client_sessions, "count_live", lambda workspace_id: 0)
 
     service._checkpoint_loop()  # noqa: SLF001 - direct lifecycle persistent policy test
 

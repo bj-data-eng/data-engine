@@ -17,7 +17,7 @@ from data_engine.flow_modules.flow_module_loader import discover_flow_module_def
 from data_engine.hosts.scheduler import SchedulerHost
 from data_engine.runtime.engine import RuntimeEngine
 from data_engine.runtime.execution import _FlowRuntime, _GroupedFlowRuntime
-from data_engine.runtime.runtime_db import RuntimeLedger, utcnow_text
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services import FlowCatalogService, FlowExecutionService
 from data_engine.views.models import qt_flow_cards_from_entries
 
@@ -361,12 +361,12 @@ def test_directory_poll_staleness_uses_runtime_ledger_not_output_timestamps(tmp_
     ).mirror(root=target_dir).step(lambda context: context.current)
 
     runtime = _FlowRuntime((flow,), continuous=True)
-    signature = runtime.runtime_ledger.source_signature_for_path(source)
+    signature = runtime.runtime_ledger.source_signatures.signature_for_path(source)
 
     assert signature is not None
     assert runtime._stale_poll_sources(flow) == [source]
 
-    runtime.runtime_ledger.upsert_file_state(
+    runtime.runtime_ledger.source_signatures.upsert_file_state(
         flow_name="claims_demo",
         signature=signature,
         status="success",
@@ -400,7 +400,7 @@ def test_directory_poll_assigns_distinct_run_ids_per_source_execution(tmp_path):
         extensions=[".parquet"],
     ).mirror(root=target_dir).step(read_source).step(write_target).run_once()
 
-    runs = RuntimeLedger.open_default().list_runs(flow_name="claims_demo")
+    runs = RuntimeCacheLedger.open_default().runs.list(flow_name="claims_demo")
 
     assert len(runs) == 2
     assert len({run.run_id for run in runs}) == 2
@@ -654,13 +654,13 @@ def test_scheduler_host_keeps_running_when_one_scheduled_flow_fails():
         Flow(name="failing_flow", group="alpha").watch(mode="schedule", run_as="batch", interval="50ms").step(failing_step),
         Flow(name="healthy_flow", group="beta").watch(mode="schedule", run_as="batch", interval="50ms").step(healthy_step),
     )
-    engine = RuntimeEngine(runtime_ledger=RuntimeLedger.open_default())
+    engine = RuntimeEngine(runtime_ledger=RuntimeCacheLedger.open_default())
     scheduler_host = SchedulerHost(runtime_engine=engine)
 
     jobs = scheduler_host.run_until_stopped(flows, runtime_stop)
-    ledger = RuntimeLedger.open_default()
-    failing_runs = ledger.list_runs(flow_name="failing_flow")
-    healthy_runs = ledger.list_runs(flow_name="healthy_flow")
+    ledger = RuntimeCacheLedger.open_default()
+    failing_runs = ledger.runs.list(flow_name="failing_flow")
+    healthy_runs = ledger.runs.list(flow_name="healthy_flow")
 
     assert healthy_count >= 2
     assert len(jobs) == 2

@@ -23,11 +23,6 @@ class TuiStateMixin:
     """Session-state helpers separated from the main TUI shell."""
 
     @property
-    def runtime_ledger(self: "DataEngineTui"):
-        """Compatibility facade over the current runtime binding ledger."""
-        return self.runtime_binding.runtime_cache_ledger
-
-    @property
     def log_store(self: "DataEngineTui"):
         """Compatibility facade over the current runtime binding log store."""
         return self.runtime_binding.log_store

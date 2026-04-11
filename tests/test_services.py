@@ -243,20 +243,21 @@ def test_ledger_service_delegates_to_runtime_ledger(tmp_path):
     class _Ledger:
         def __init__(self):
             self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+            self.client_sessions = self
 
         def close(self):
             self.calls.append(("close", (), {}))
 
-        def upsert_client_session(self, **kwargs):
+        def upsert(self, **kwargs):
             self.calls.append(("upsert", (), kwargs))
 
-        def remove_client_session(self, client_id):
+        def remove(self, client_id):
             self.calls.append(("remove", (client_id,), {}))
 
-        def remove_client_sessions_for_process(self, **kwargs):
+        def remove_for_process(self, **kwargs):
             self.calls.append(("purge", (), kwargs))
 
-        def count_live_client_sessions(self, workspace_id, *, exclude_client_id=None):
+        def count_live(self, workspace_id, *, exclude_client_id=None):
             self.calls.append(("count", (workspace_id,), {"exclude_client_id": exclude_client_id}))
             return 3 if exclude_client_id is None else 2
 
