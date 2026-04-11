@@ -3,7 +3,7 @@
 This page is generated from the current AST map and is intentionally inventory-shaped rather than explanatory.
 
 - package root: `src/data_engine`
-- module count: `173`
+- module count: `178`
 
 - module `data_engine`
   - attribute `__all__`
@@ -635,6 +635,45 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `authoring_services: AuthoringServices | None=None`
     - param `runtime_execution_service: RuntimeExecutionService | None=None`
   - class `Flow`
+    - method `run_once`
+      - param `self`
+      - param `*`
+      - param `authoring_services: AuthoringServices | None=None`
+      - param `runtime_execution_service: RuntimeExecutionService | None=None`
+    - method `preview`
+      - param `self`
+      - param `*`
+      - param `use: str | None=None`
+      - param `authoring_services: AuthoringServices | None=None`
+      - param `runtime_execution_service: RuntimeExecutionService | None=None`
+    - method `show`
+      - param `self`
+    - method `run`
+      - param `self`
+      - param `*`
+      - param `authoring_services: AuthoringServices | None=None`
+      - param `runtime_execution_service: RuntimeExecutionService | None=None`
+- module `data_engine.authoring.helpers`
+  - attribute `__all__`
+- module `data_engine.authoring.model`
+  - attribute `__all__`
+- module `data_engine.authoring.primitives`
+  - attribute `__all__`
+- module `data_engine.authoring.services`
+  - attribute `__all__`
+  - function `build_authoring_services`
+    - param `*`
+    - param `runtime_execution_service: RuntimeExecutionService | None=None`
+    - param `flow_execution_service: FlowExecutionService | None=None`
+  - function `default_authoring_services`
+  - class `AuthoringServices`
+    - attribute `runtime_execution_service`
+    - attribute `flow_execution_service`
+- module `data_engine.core`
+  - attribute `__all__`
+- module `data_engine.core.flow`
+  - attribute `__all__`
+  - class `Flow`
     - attribute `group`
     - attribute `name`
     - attribute `label`
@@ -696,26 +735,11 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `label: str | None=None`
     - method `mode`
       - param `self`
-    - method `run_once`
-      - param `self`
-      - param `*`
-      - param `authoring_services: AuthoringServices | None=None`
-      - param `runtime_execution_service: RuntimeExecutionService | None=None`
-    - method `preview`
-      - param `self`
-      - param `*`
-      - param `use: str | None=None`
-      - param `authoring_services: AuthoringServices | None=None`
-      - param `runtime_execution_service: RuntimeExecutionService | None=None`
-    - method `show`
-      - param `self`
-    - method `run`
-      - param `self`
-      - param `*`
-      - param `authoring_services: AuthoringServices | None=None`
-      - param `runtime_execution_service: RuntimeExecutionService | None=None`
-- module `data_engine.authoring.helpers`
+- module `data_engine.core.helpers`
+  - attribute `_FLOW_PATH_BASE_DIR`
   - attribute `__all__`
+  - function `_flow_path_base_dir`
+    - param `base_dir: Path | None`
   - function `_parse_duration`
     - param `value: str`
   - function `_parse_schedule_at`
@@ -743,7 +767,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `*`
     - param `method_name: str`
     - param `label: str | None`
-- module `data_engine.authoring.model`
+- module `data_engine.core.model`
   - attribute `__all__`
   - class `FlowValidationError`
   - class `FlowStoppedError`
@@ -765,7 +789,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `source_path: Path | str | None=None`
     - method `_render`
       - param `self`
-- module `data_engine.authoring.primitives`
+- module `data_engine.core.primitives`
   - attribute `T`
   - attribute `__all__`
   - function `collect_files`
@@ -912,16 +936,6 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
     - method `paths`
       - param `self`
-- module `data_engine.authoring.services`
-  - attribute `__all__`
-  - function `build_authoring_services`
-    - param `*`
-    - param `runtime_execution_service: RuntimeExecutionService | None=None`
-    - param `flow_execution_service: FlowExecutionService | None=None`
-  - function `default_authoring_services`
-  - class `AuthoringServices`
-    - attribute `runtime_execution_service`
-    - attribute `flow_execution_service`
 - module `data_engine.devtools`
   - attribute `__all__`
 - module `data_engine.devtools.project_ast_map`
@@ -3392,8 +3406,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `__init__`
       - param `self`
       - param `*`
-      - param `load_flow_func: Callable[..., 'Flow']=_default_load_flow`
-      - param `discover_flows_func: Callable[..., tuple['Flow', ...]]=_default_discover_flows`
+      - param `load_flow_func: Callable[..., 'CoreFlow']=_default_load_flow`
+      - param `discover_flows_func: Callable[..., tuple['CoreFlow', ...]]=_default_discover_flows`
     - method `load_flow`
       - param `self`
       - param `name: str`
@@ -3571,38 +3585,38 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `grouped_runtime_type: type[_GroupedFlowRuntime]=_GroupedFlowRuntime`
     - method `run_once`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
       - param `*`
       - param `runtime_ledger: RuntimeCacheLedger | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `preview`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
       - param `*`
       - param `use: str | None=None`
       - param `runtime_ledger: RuntimeCacheLedger | None=None`
     - method `run_manual`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
       - param `*`
       - param `runtime_ledger: RuntimeCacheLedger`
       - param `flow_stop_event: Event`
     - method `run_continuous`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
       - param `*`
       - param `runtime_ledger: RuntimeCacheLedger | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `run_grouped`
       - param `self`
-      - param `flows: tuple['Flow', ...]`
+      - param `flows: tuple['CoreFlow', ...]`
       - param `*`
       - param `runtime_ledger: RuntimeCacheLedger`
       - param `runtime_stop_event: Event`
       - param `flow_stop_event: Event`
     - method `run_grouped_continuous`
       - param `self`
-      - param `flows: tuple['Flow', ...]`
+      - param `flows: tuple['CoreFlow', ...]`
       - param `*`
       - param `runtime_ledger: RuntimeCacheLedger | None=None`
       - param `runtime_stop_event: Event | None=None`

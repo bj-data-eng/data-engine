@@ -18,11 +18,12 @@ These counts are package-level rollups from the current AST snapshot.
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `data_engine` | 1 | 1 | 0 | 0 | 37 |
 | `data_engine.application` | 7 | 5 | 19 | 0 | 1029 |
-| `data_engine.authoring` | 16 | 20 | 24 | 0 | 2343 |
+| `data_engine.authoring` | 16 | 9 | 11 | 0 | 1335 |
+| `data_engine.core` | 5 | 12 | 14 | 0 | 1107 |
 | `data_engine.devtools` | 3 | 39 | 5 | 0 | 1188 |
 | `data_engine.docs` | 2 | 0 | 0 | 0 | 41 |
 | `data_engine.domain` | 16 | 10 | 40 | 0 | 1827 |
-| `data_engine.flow_modules` | 3 | 17 | 2 | 0 | 381 |
+| `data_engine.flow_modules` | 3 | 17 | 2 | 0 | 384 |
 | `data_engine.helpers` | 3 | 30 | 5 | 0 | 1308 |
 | `data_engine.hosts` | 17 | 58 | 14 | 0 | 2450 |
 | `data_engine.platform` | 9 | 35 | 10 | 0 | 1308 |
@@ -39,12 +40,12 @@ These counts are package-level rollups from the current AST snapshot.
 | `data_engine.runtime.runtime_db` | 980 | 0 | 5 |
 | `data_engine.ui.gui.theme` | 736 | 1 | 0 |
 | `data_engine.devtools.project_ast_map` | 596 | 20 | 5 |
-| `data_engine.authoring.flow` | 578 | 4 | 1 |
 | `data_engine.devtools.smoke_data` | 577 | 19 | 0 |
 | `data_engine.hosts.daemon.client` | 520 | 29 | 2 |
 | `data_engine.runtime.shared_state` | 520 | 30 | 0 |
 | `data_engine.ui.gui.widgets.panels` | 498 | 12 | 0 |
 | `data_engine.ui.gui.bootstrap` | 489 | 6 | 2 |
+| `data_engine.ui.tui.bootstrap` | 475 | 6 | 2 |
 
 ## Internal Stitching Points
 
@@ -61,7 +62,7 @@ Modules with higher internal import fan-out tend to be composition or aggregatio
 | `data_engine.platform.workspace_policy` | 38 | 343 |
 | `data_engine.ui.gui.presenters` | 35 | 64 |
 | `data_engine.ui.gui.helpers` | 30 | 62 |
-| `data_engine.authoring.flow` | 29 | 578 |
+| `data_engine.ui.cli.app` | 28 | 160 |
 
 ## Practical Mental Model
 

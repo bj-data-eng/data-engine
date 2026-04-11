@@ -6,12 +6,12 @@ from queue import Queue
 import threading
 from typing import TYPE_CHECKING, Callable
 
-from data_engine.authoring.primitives import FlowContext
+from data_engine.core.primitives import FlowContext
 from data_engine.authoring.execution.single import _FlowRuntime, RuntimeLedgerService, default_runtime_ledger_service
 from data_engine.runtime.runtime_db import RuntimeLedger
 
 if TYPE_CHECKING:
-    from data_engine.authoring.flow import Flow
+    from data_engine.core.flow import Flow
 
 
 class _GroupedFlowRuntime:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.domain import FlowCatalogEntry, FlowCatalogLike, FlowCatalogState
 from data_engine.platform.workspace_models import WorkspacePaths
 from data_engine.services import FlowCatalogService

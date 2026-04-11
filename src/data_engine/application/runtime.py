@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from collections.abc import Iterable
 
-from data_engine.authoring.model import FlowStoppedError
+from data_engine.core.model import FlowStoppedError
 from data_engine.domain import (
     DaemonLifecyclePolicy,
     DaemonStatusState,

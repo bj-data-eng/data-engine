@@ -6,13 +6,13 @@ from data_engine.authoring.flow import Flow
 from data_engine.authoring.flow import discover_flows
 from data_engine.authoring.flow import load_flow
 from data_engine.authoring.flow import run
-from data_engine.authoring.helpers import _title_case_words
-from data_engine.authoring.primitives import Batch
-from data_engine.authoring.primitives import FileRef
-from data_engine.authoring.primitives import FlowContext
-from data_engine.authoring.primitives import MirrorContext
-from data_engine.authoring.primitives import SourceContext
-from data_engine.authoring.primitives import collect_files
+from data_engine.core.helpers import _title_case_words
+from data_engine.core.primitives import Batch
+from data_engine.core.primitives import FileRef
+from data_engine.core.primitives import FlowContext
+from data_engine.core.primitives import MirrorContext
+from data_engine.core.primitives import SourceContext
+from data_engine.core.primitives import collect_files
 
 __all__ = [
     "Batch",

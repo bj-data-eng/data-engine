@@ -11,12 +11,13 @@ from pathlib import Path
 import sys
 from typing import TYPE_CHECKING, Callable
 
-from data_engine.authoring.model import FlowExecutionError, FlowValidationError
+from data_engine.core.helpers import _flow_path_base_dir
+from data_engine.core.model import FlowExecutionError, FlowValidationError
 from data_engine.flow_modules.flow_module_compiler import compile_stale_flow_module_notebooks, resolve_flow_module_paths
 from data_engine.platform.workspace_models import APP_INTERNAL_ID
 
 if TYPE_CHECKING:
-    from data_engine.authoring.flow import Flow
+    from data_engine.core.flow import Flow
 
 
 _COMPILED_FLOW_MODULE_CONTEXT: ContextVar[bool] = ContextVar("compiled_flow_module_context", default=False)
@@ -127,7 +128,7 @@ def load_flow_module_definition(name: str, *, data_root: Path | None = None) -> 
 
     def guarded_build() -> "Flow":
         with compiled_flow_module_context(flow_modules_dir):
-            from data_engine.authoring.flow import Flow
+            from data_engine.core.flow import Flow
 
             try:
                 built = build()
@@ -183,12 +184,14 @@ def current_compiled_flow_module_dir() -> Path | None:
 def compiled_flow_module_context(flow_modules_dir: Path | None = None):
     """Mark the current execution context as a compiled flow-module import/build."""
     token = _COMPILED_FLOW_MODULE_CONTEXT.set(True)
-    dir_token = _COMPILED_FLOW_MODULE_DIR.set(flow_modules_dir.resolve() if flow_modules_dir is not None else None)
-    try:
-        yield
-    finally:
-        _COMPILED_FLOW_MODULE_DIR.reset(dir_token)
-        _COMPILED_FLOW_MODULE_CONTEXT.reset(token)
+    resolved_dir = flow_modules_dir.resolve() if flow_modules_dir is not None else None
+    dir_token = _COMPILED_FLOW_MODULE_DIR.set(resolved_dir)
+    with _flow_path_base_dir(resolved_dir):
+        try:
+            yield
+        finally:
+            _COMPILED_FLOW_MODULE_DIR.reset(dir_token)
+            _COMPILED_FLOW_MODULE_CONTEXT.reset(token)
 
 
 __all__ = [

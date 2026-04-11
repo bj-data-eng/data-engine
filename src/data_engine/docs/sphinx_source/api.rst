@@ -17,18 +17,26 @@ Flow Authoring
    :undoc-members:
    :show-inheritance:
 
-Authoring Primitives
---------------------
+Core Flow Model
+---------------
 
-.. automodule:: data_engine.authoring.primitives
+.. automodule:: data_engine.core.flow
    :members:
    :undoc-members:
    :show-inheritance:
 
-Runtime models
---------------
+Core Primitives
+---------------
 
-.. automodule:: data_engine.authoring.model
+.. automodule:: data_engine.core.primitives
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Core Runtime Models
+-------------------
+
+.. automodule:: data_engine.core.model
    :members:
    :undoc-members:
    :show-inheritance:

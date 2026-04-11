@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import shutil
 
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.platform.workspace_models import WORKSPACE_FLOW_HELPERS_DIR_NAME
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 

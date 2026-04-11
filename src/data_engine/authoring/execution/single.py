@@ -7,8 +7,8 @@ import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
-from data_engine.authoring.model import FlowStoppedError, FlowValidationError
-from data_engine.authoring.primitives import FlowContext, WatchSpec
+from data_engine.core.model import FlowStoppedError, FlowValidationError
+from data_engine.core.primitives import FlowContext, WatchSpec
 from data_engine.authoring.execution.continuous import ContinuousRuntimeLoop
 from data_engine.authoring.execution.context import RuntimeContextBuilder
 from data_engine.authoring.execution.logging import RuntimeLogEmitter
@@ -18,7 +18,7 @@ from data_engine.runtime.file_watch import PollingWatcher
 from data_engine.runtime.runtime_db import RuntimeLedger
 
 if TYPE_CHECKING:
-    from data_engine.authoring.flow import Flow
+    from data_engine.core.flow import Flow
 
 
 def _open_default_runtime_ledger() -> RuntimeLedger:

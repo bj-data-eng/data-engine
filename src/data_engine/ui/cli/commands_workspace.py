@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.platform.workspace_models import (
     WORKSPACE_CONFIG_DIR_NAME,
     WORKSPACE_DATABASES_DIR_NAME,

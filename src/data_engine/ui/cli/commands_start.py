@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.platform.interpreters import preferred_gui_python_executable
 from data_engine.platform.paths import path_display
 from data_engine.platform.processes import windows_subprocess_creationflags

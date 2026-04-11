@@ -6,14 +6,14 @@ from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from data_engine.authoring.primitives import WatchSpec
+from data_engine.core.primitives import WatchSpec
 from data_engine.authoring.execution.context import _QueuedJob
 from data_engine.domain.source_state import SourceSignature
 from data_engine.runtime.file_watch import PollingWatcher, iter_candidate_paths
 from data_engine.runtime.runtime_db import RuntimeLedger
 
 if TYPE_CHECKING:
-    from data_engine.authoring.flow import Flow
+    from data_engine.core.flow import Flow
 
 
 class RuntimePollingSupport:

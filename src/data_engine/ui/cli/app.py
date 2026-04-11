@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.platform.workspace_models import (
     DATA_ENGINE_APP_ROOT_ENV_VAR,
     DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR,

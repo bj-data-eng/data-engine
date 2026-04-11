@@ -9,7 +9,7 @@ from data_engine.authoring.execution import _FlowRuntime, _GroupedFlowRuntime
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 
 if TYPE_CHECKING:
-    from data_engine.authoring.flow import Flow
+    from data_engine.core.flow import Flow as CoreFlow
 
 
 class RuntimeExecutionService:
@@ -26,7 +26,7 @@ class RuntimeExecutionService:
 
     def run_once(
         self,
-        flow: "Flow",
+        flow: "CoreFlow",
         *,
         runtime_ledger: RuntimeCacheLedger | None = None,
         flow_stop_event: Event | None = None,
@@ -42,7 +42,7 @@ class RuntimeExecutionService:
 
     def preview(
         self,
-        flow: "Flow",
+        flow: "CoreFlow",
         *,
         use: str | None = None,
         runtime_ledger: RuntimeCacheLedger | None = None,
@@ -57,7 +57,7 @@ class RuntimeExecutionService:
 
     def run_manual(
         self,
-        flow: "Flow",
+        flow: "CoreFlow",
         *,
         runtime_ledger: RuntimeCacheLedger,
         flow_stop_event: Event,
@@ -71,7 +71,7 @@ class RuntimeExecutionService:
 
     def run_continuous(
         self,
-        flow: "Flow",
+        flow: "CoreFlow",
         *,
         runtime_ledger: RuntimeCacheLedger | None = None,
         flow_stop_event: Event | None = None,
@@ -87,7 +87,7 @@ class RuntimeExecutionService:
 
     def run_grouped(
         self,
-        flows: tuple["Flow", ...],
+        flows: tuple["CoreFlow", ...],
         *,
         runtime_ledger: RuntimeCacheLedger,
         runtime_stop_event: Event,
@@ -105,7 +105,7 @@ class RuntimeExecutionService:
 
     def run_grouped_continuous(
         self,
-        flows: tuple["Flow", ...],
+        flows: tuple["CoreFlow", ...],
         *,
         runtime_ledger: RuntimeCacheLedger | None = None,
         runtime_stop_event: Event | None = None,

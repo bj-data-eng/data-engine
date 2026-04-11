@@ -8,13 +8,13 @@ from time import monotonic, sleep
 from typing import TYPE_CHECKING
 
 from data_engine.authoring.execution.context import _QueuedJob
-from data_engine.authoring.model import FlowStoppedError
-from data_engine.authoring.primitives import WatchSpec
+from data_engine.core.model import FlowStoppedError
+from data_engine.core.primitives import WatchSpec
 from data_engine.runtime.file_watch import PollingWatcher
 
 if TYPE_CHECKING:
     from data_engine.authoring.execution.single import _FlowRuntime
-    from data_engine.authoring.primitives import FlowContext
+    from data_engine.core.primitives import FlowContext
 
 
 class ContinuousRuntimeLoop:

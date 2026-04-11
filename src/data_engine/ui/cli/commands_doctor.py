@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import Any, Callable
 
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.domain import ClassifiedProcessInfo, DoctorCheck, ProcessInfo, WorkspaceLeaseDiagnostic
 from data_engine.domain.diagnostics import is_defunct_process_status
 from data_engine.platform.paths import path_display

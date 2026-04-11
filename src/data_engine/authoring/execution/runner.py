@@ -6,14 +6,14 @@ from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING
 
-from data_engine.authoring.model import FlowExecutionError, FlowStoppedError, FlowValidationError
-from data_engine.authoring.primitives import FlowContext, WatchSpec
+from data_engine.core.model import FlowExecutionError, FlowStoppedError, FlowValidationError
+from data_engine.core.primitives import FlowContext, WatchSpec
 from data_engine.domain.time import utcnow_text
 
 if TYPE_CHECKING:
     from data_engine.authoring.execution.single import _FlowRuntime
-    from data_engine.authoring.flow import Flow
-    from data_engine.authoring.primitives import StepSpec
+    from data_engine.core.flow import Flow
+    from data_engine.core.primitives import StepSpec
 
 
 class FlowRunExecutor:

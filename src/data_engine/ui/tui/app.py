@@ -14,7 +14,7 @@ from data_engine.domain import (
     FlowRunState,
     RunDetailState,
 )
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.views.text import render_run_group_lines
 from data_engine.ui.tui.bootstrap import TuiServices
 from data_engine.ui.tui.bootstrapper import bootstrap_tui_app

@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from data_engine.authoring.flow import Flow
     from data_engine.authoring.flow import discover_flows, load_flow, run
-    from data_engine.authoring.primitives import Batch
-    from data_engine.authoring.primitives import FileRef
-    from data_engine.authoring.primitives import FlowContext
+    from data_engine.core.primitives import Batch
+    from data_engine.core.primitives import FileRef
+    from data_engine.core.primitives import FlowContext
 
 __all__ = ["Batch", "FileRef", "Flow", "FlowContext", "discover_flows", "load_flow", "run"]
 
@@ -21,9 +21,9 @@ def __getattr__(name: str):
         from data_engine.authoring.flow import discover_flows
         from data_engine.authoring.flow import load_flow
         from data_engine.authoring.flow import run
-        from data_engine.authoring.primitives import Batch
-        from data_engine.authoring.primitives import FileRef
-        from data_engine.authoring.primitives import FlowContext
+        from data_engine.core.primitives import Batch
+        from data_engine.core.primitives import FileRef
+        from data_engine.core.primitives import FlowContext
 
         return {
             "Batch": Batch,

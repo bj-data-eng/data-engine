@@ -1,5 +1,7 @@
-"""Compatibility exports for core flow primitives."""
+"""Core flow definitions and runtime primitives."""
 
+from data_engine.core.flow import Flow
+from data_engine.core.model import FlowExecutionError, FlowStoppedError, FlowValidationError
 from data_engine.core.primitives import (
     Batch,
     FileRef,
@@ -17,7 +19,11 @@ from data_engine.core.primitives import (
 __all__ = [
     "Batch",
     "FileRef",
+    "Flow",
     "FlowContext",
+    "FlowExecutionError",
+    "FlowStoppedError",
+    "FlowValidationError",
     "MirrorContext",
     "MirrorSpec",
     "SourceContext",

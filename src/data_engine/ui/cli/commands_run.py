@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.platform.processes import windows_subprocess_creationflags
 
 TEST_SLICE_CHOICES = ("all", "unit", "ui", "qt", "tui", "integration", "live")
