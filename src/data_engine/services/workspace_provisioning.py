@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from data_engine.platform.interpreters import console_python_executable
 from data_engine.platform.workspace_models import (
     DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR,
     WORKSPACE_FLOW_HELPERS_DIR_NAME,
@@ -30,11 +31,7 @@ def checkout_tests_dir(app_root: Path) -> Path | None:
 def _vscode_interpreter_path(*, settings_root: Path, app_root: Path, interpreter_path: Path | None = None) -> str:
     """Return the interpreter executable path backing the running Data Engine environment."""
     del settings_root, app_root
-    candidate = Path(interpreter_path or sys.executable).expanduser()
-    if candidate.name.lower() == "pythonw.exe":
-        sibling = candidate.with_name("python.exe")
-        if sibling.exists():
-            candidate = sibling
+    candidate = console_python_executable(interpreter_path or sys.executable)
     try:
         return str(candidate.resolve())
     except Exception:

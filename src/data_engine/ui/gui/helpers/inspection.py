@@ -36,7 +36,7 @@ def capture_step_outputs(window: "DataEngineWindow", flow_name: str, results: ob
 
 def rehydrate_step_outputs_from_ledger(window: "DataEngineWindow") -> None:
     window.step_output_index = window.runtime_history_service.rebuild_step_outputs(
-        window.runtime_binding.runtime_ledger,
+        window.runtime_binding.runtime_cache_ledger,
         window.flow_cards,
     )
 

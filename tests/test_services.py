@@ -303,23 +303,22 @@ def test_ledger_service_opens_workspace_ledgers_through_injected_collaborator(tm
 
 
 def test_ledger_service_default_open_uses_runtime_layout_policy(tmp_path):
-    workspace_root = tmp_path / "workspace"
+    expected_workspace_root = tmp_path / "workspace"
     expected_db_path = tmp_path / "runtime" / "runtime_control.sqlite"
 
     class _Policy:
-        def resolve_paths(self, *, data_root=None, **kwargs):
+        def resolve_paths(self, *, workspace_root=None, **kwargs):
             assert kwargs == {}
-            assert data_root == workspace_root.resolve()
+            assert workspace_root == expected_workspace_root.resolve()
 
             class _Paths:
-                runtime_db_path = expected_db_path
                 runtime_control_db_path = expected_db_path
 
             return _Paths()
 
     service = LedgerService(runtime_layout_policy=_Policy())
 
-    ledger = service.open_for_workspace(workspace_root)
+    ledger = service.open_for_workspace(expected_workspace_root)
     try:
         assert ledger.db_path == expected_db_path.resolve()
     finally:

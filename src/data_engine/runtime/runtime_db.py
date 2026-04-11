@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
-import ctypes
 from datetime import UTC, datetime, timedelta
 import os
 from pathlib import Path
 import sqlite3
 import threading
+from typing import Self
 
 from data_engine.domain.source_state import SourceSignature
 from data_engine.domain.time import parse_utc_text, utcnow_text
+from data_engine.platform.paths import normalized_path_text, stable_absolute_path
 from data_engine.platform.workspace_models import (
     DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR,
     DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR,
     DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR,
-    normalized_path_text,
 )
+from data_engine.platform.processes import process_is_running
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.ledger_models import (
     PersistedClientSession,
@@ -28,17 +29,13 @@ from data_engine.runtime.ledger_models import (
     elapsed_seconds,
 )
 
-_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-_WINDOWS_STILL_ACTIVE = 259
-
-
 class _RuntimeSqliteStore:
     """Own one SQLite-backed runtime store and expose narrow read/write helpers."""
 
     HISTORY_RETENTION_DAYS = 30
 
     def __init__(self, db_path: Path) -> None:
-        self.db_path = Path(db_path).expanduser().resolve()
+        self.db_path = stable_absolute_path(db_path)
         self._connections: dict[int, sqlite3.Connection] = {}
         self._connections_lock = threading.RLock()
         self._ensure_parent_dir()
@@ -93,11 +90,11 @@ class _RuntimeSqliteStore:
             pass
 
 
-class RuntimeCacheLedger(_RuntimeSqliteStore):
+class _RuntimeCacheSchema(_RuntimeSqliteStore):
     """Own the cache/runtime-history SQLite store for runs, logs, and file state."""
 
     @classmethod
-    def open_default(cls, *, data_root: Path | None = None) -> "RuntimeCacheLedger":
+    def open_default(cls, *, data_root: Path | None = None) -> Self:
         """Open the default workspace runtime cache ledger."""
         env_override_raw = os.environ.get(DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR)
         if env_override_raw is None or not env_override_raw.strip():
@@ -387,33 +384,15 @@ class RuntimeControlLedger(_RuntimeSqliteStore):
     @staticmethod
     def _pid_is_running(pid: int) -> bool:
         """Return whether the OS still reports the given PID as alive."""
-        if pid <= 0:
-            return False
-        if os.name == "nt":
-            kernel32 = ctypes.windll.kernel32
-            handle = kernel32.OpenProcess(_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-            if not handle:
-                return False
-            try:
-                exit_code = ctypes.c_ulong()
-                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-                    return False
-                return exit_code.value == _WINDOWS_STILL_ACTIVE
-            finally:
-                kernel32.CloseHandle(handle)
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        except OSError:
-            return False
-        return True
+        return process_is_running(pid, treat_defunct_as_dead=False)
+
+
+class _RuntimeCacheOperations:
+    """Runtime history operations mixed into the cache ledger only."""
 
     def normalize_source_path(self, source_path: Path | str) -> str:
         """Normalize a source path for stable persistence and comparisons."""
-        return normalized_path_text(Path(source_path).expanduser().resolve())
+        return normalized_path_text(stable_absolute_path(source_path))
 
     def source_signature_for_path(self, source_path: Path) -> SourceSignature | None:
         """Return the current source signature when the file exists."""
@@ -987,88 +966,8 @@ class RuntimeControlLedger(_RuntimeSqliteStore):
             connection.commit()
 
 
-class RuntimeCacheLedger(RuntimeControlLedger):
+class RuntimeCacheLedger(_RuntimeCacheOperations, _RuntimeCacheSchema):
     """Own the cache/runtime-history SQLite store for runs, logs, and file state."""
-
-    @classmethod
-    def open_default(cls, *, data_root: Path | None = None) -> "RuntimeCacheLedger":
-        """Open the default workspace runtime cache ledger."""
-        env_override_raw = os.environ.get(DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR)
-        if env_override_raw is None or not env_override_raw.strip():
-            env_override_raw = os.environ.get(DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR)
-        if env_override_raw is not None and env_override_raw.strip():
-            return cls(Path(env_override_raw).expanduser().resolve())
-        return cls(RuntimeLayoutPolicy().resolve_paths(data_root=data_root).runtime_cache_db_path)
-
-    def _initialize_schema(self) -> None:
-        connection = self._connection()
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS runs (
-                run_id TEXT PRIMARY KEY,
-                flow_name TEXT NOT NULL,
-                group_name TEXT NOT NULL,
-                source_path TEXT,
-                status TEXT NOT NULL,
-                started_at_utc TEXT NOT NULL,
-                finished_at_utc TEXT,
-                error_text TEXT
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS step_runs (
-                id INTEGER PRIMARY KEY,
-                run_id TEXT NOT NULL,
-                flow_name TEXT NOT NULL,
-                step_label TEXT NOT NULL,
-                status TEXT NOT NULL,
-                started_at_utc TEXT NOT NULL,
-                finished_at_utc TEXT,
-                elapsed_ms INTEGER,
-                error_text TEXT,
-                output_path TEXT,
-                FOREIGN KEY (run_id) REFERENCES runs(run_id)
-            )
-            """
-        )
-        columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(step_runs)").fetchall()}
-        if "output_path" not in columns:
-            connection.execute("ALTER TABLE step_runs ADD COLUMN output_path TEXT")
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS file_state (
-                flow_name TEXT NOT NULL,
-                source_path TEXT NOT NULL,
-                mtime_ns INTEGER NOT NULL,
-                size_bytes INTEGER NOT NULL,
-                last_success_run_id TEXT,
-                last_success_at_utc TEXT,
-                last_status TEXT NOT NULL,
-                last_error_text TEXT,
-                PRIMARY KEY (flow_name, source_path)
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS logs (
-                id INTEGER PRIMARY KEY,
-                run_id TEXT,
-                flow_name TEXT,
-                step_label TEXT,
-                level TEXT NOT NULL,
-                message TEXT NOT NULL,
-                created_at_utc TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_flow_started ON runs(flow_name, started_at_utc DESC)")
-        connection.execute("CREATE INDEX IF NOT EXISTS idx_step_runs_run ON step_runs(run_id, id)")
-        connection.execute("CREATE INDEX IF NOT EXISTS idx_logs_flow_created ON logs(flow_name, created_at_utc, id)")
-        connection.execute("CREATE INDEX IF NOT EXISTS idx_logs_run_created ON logs(run_id, created_at_utc, id)")
-        self._checkpoint_wal(passive=True)
 
 
 RuntimeLedger = RuntimeCacheLedger

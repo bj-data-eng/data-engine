@@ -732,9 +732,9 @@ def test_lease_pid_is_live_delegates_to_pid_helper(monkeypatch):
 
 def test_pid_is_live_uses_windows_helper_without_ps(monkeypatch):
     monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "nt")
-    monkeypatch.setattr("data_engine.hosts.daemon.client._windows_pid_is_live", lambda pid: pid == 123)
+    monkeypatch.setattr("data_engine.hosts.daemon.client.process_is_running", lambda pid: pid == 123)
     monkeypatch.setattr(
-        "data_engine.hosts.daemon.client.subprocess.run",
+        "data_engine.platform.processes.subprocess.run",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Windows PID checks should not use ps")),
     )
 

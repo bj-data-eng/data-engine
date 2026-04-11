@@ -85,7 +85,7 @@ class TuiRuntimeController:
             paths=window.workspace_paths,
             daemon_manager=window.runtime_binding.daemon_manager,
             flow_cards=window.flow_cards,
-            runtime_ledger=window.runtime_binding.runtime_ledger,
+            runtime_ledger=window.runtime_binding.runtime_cache_ledger,
             daemon_startup_in_progress=window._daemon_startup_in_progress,
         )
         window.runtime_session = sync_state.runtime_session

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
-from data_engine.platform.workspace_models import path_display
+from data_engine.platform.paths import path_display
 
 if TYPE_CHECKING:
     from data_engine.platform.workspace_models import WorkspacePaths

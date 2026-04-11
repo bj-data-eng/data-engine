@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any, Callable
 
 from data_engine.authoring.model import FlowValidationError
 from data_engine.domain import ClassifiedProcessInfo, DoctorCheck, ProcessInfo, WorkspaceLeaseDiagnostic
 from data_engine.domain.diagnostics import is_defunct_process_status
+from data_engine.platform.paths import path_display
+from data_engine.platform.processes import (
+    ProcessInspectionError,
+    collapse_windows_launcher_processes,
+    list_processes,
+)
 from data_engine.platform.workspace_models import authored_workspace_is_available, machine_id_text
-from data_engine.platform.workspace_models import path_display
 
 
 def doctor(*, settings: Any, paths: Any) -> int:
@@ -52,71 +54,10 @@ def doctor(*, settings: Any, paths: Any) -> int:
 
 
 def run_process_listing() -> list[ProcessInfo]:
-    if os.name == "nt":
-        return _run_windows_process_listing()
-    result = subprocess.run(
-        ["ps", "-ax", "-o", "pid=", "-o", "ppid=", "-o", "stat=", "-o", "command="],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise FlowValidationError("Unable to inspect the local process table.")
-    rows: list[ProcessInfo] = []
-    for line in result.stdout.splitlines():
-        parts = line.strip().split(None, 3)
-        if len(parts) != 4:
-            continue
-        pid_text, ppid_text, status, command = parts
-        try:
-            pid = int(pid_text)
-            ppid = int(ppid_text)
-        except ValueError:
-            continue
-        rows.append(ProcessInfo(pid=pid, ppid=ppid, status=status, command=command))
-    return rows
-
-
-def _run_windows_process_listing() -> list[ProcessInfo]:
-    result = subprocess.run(
-        [
-            "powershell.exe",
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$processes = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, CommandLine; "
-            "if ($null -eq $processes) { '[]' } else { $processes | ConvertTo-Json -Compress -Depth 3 }",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise FlowValidationError("Unable to inspect the local process table.")
-    payload = result.stdout.strip()
-    if not payload:
-        return []
     try:
-        parsed = json.loads(payload)
-    except json.JSONDecodeError as exc:
+        return list_processes()
+    except ProcessInspectionError as exc:
         raise FlowValidationError("Unable to inspect the local process table.") from exc
-    if isinstance(parsed, dict):
-        items: list[dict[str, Any]] = [parsed]
-    elif isinstance(parsed, list):
-        items = [item for item in parsed if isinstance(item, dict)]
-    else:
-        return []
-    rows: list[ProcessInfo] = []
-    for item in items:
-        try:
-            pid = int(item["ProcessId"])
-            ppid = int(item["ParentProcessId"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        command = str(item.get("CommandLine") or "")
-        rows.append(ProcessInfo(pid=pid, ppid=ppid, status="Running", command=command))
-    return rows
 
 
 def classify_process_kind(command: str) -> str | None:
@@ -127,26 +68,6 @@ def classify_process_kind(command: str) -> str | None:
     if "data_engine.ui.tui.app" in command:
         return "tui"
     return None
-
-
-def _collapse_windows_launcher_processes(rows: list[ClassifiedProcessInfo]) -> list[ClassifiedProcessInfo]:
-    """Prefer the real child interpreter over a Windows venv launcher parent."""
-    if os.name != "nt":
-        return rows
-    child_by_parent: dict[int, list[ClassifiedProcessInfo]] = {}
-    for row in rows:
-        child_by_parent.setdefault(row.ppid, []).append(row)
-    hidden_parent_pids: set[int] = set()
-    for row in rows:
-        children = child_by_parent.get(row.pid, ())
-        matching_children = [
-            child
-            for child in children
-            if child.kind == row.kind and child.command == row.command
-        ]
-        if len(matching_children) == 1:
-            hidden_parent_pids.add(row.pid)
-    return [row for row in rows if row.pid not in hidden_parent_pids]
 
 
 def doctor_daemons(
@@ -173,7 +94,7 @@ def doctor_daemons(
         for kind in (classify_process_kind_func(str(row.command)),)
         if kind is not None
     ]
-    relevant = _collapse_windows_launcher_processes(relevant)
+    relevant = collapse_windows_launcher_processes(relevant)
     daemons = [row for row in relevant if row.kind == "daemon"]
     surfaces = [row for row in relevant if row.kind in {"gui", "tui"}]
     defunct = [row for row in daemons if row.is_defunct]

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path, WindowsPath
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
 
 from data_engine.authoring.model import FlowValidationError
-from data_engine.platform.workspace_models import path_display
+from data_engine.platform.interpreters import preferred_gui_python_executable
+from data_engine.platform.paths import path_display
+from data_engine.platform.processes import windows_subprocess_creationflags
 
 
 def start_surface(surface: str) -> int:
@@ -20,31 +22,6 @@ def start_surface(surface: str) -> int:
     if surface == "tui":
         return launch_terminal_ui()
     raise FlowValidationError(f"Unknown surface: {surface}")
-
-
-def preferred_gui_python_executable() -> Path:
-    """Return the preferred Python executable for detached GUI launches."""
-    # Preserve the active interpreter path instead of resolving symlinks.
-    # On macOS, resolving a venv python can collapse back to the base framework
-    # interpreter, which loses the installed package context for child launches.
-    executable = _host_concrete_path(sys.executable).expanduser()
-    if os.name == "nt":
-        candidate = executable.with_name("pythonw.exe")
-        return candidate if candidate.exists() else executable
-    if sys.platform == "darwin":
-        try:
-            candidate = executable.with_name("pythonw")
-        except Exception:
-            return executable
-        return candidate if candidate.exists() else executable
-    return executable
-
-
-def _host_concrete_path(value: str) -> Path:
-    """Build a host-supported concrete path even if os.name is monkeypatched."""
-    if "\\" in value or (len(value) >= 2 and value[1] == ":"):
-        return WindowsPath(value)
-    return Path(value)
 
 
 def start_gui_subprocess() -> int:
@@ -62,10 +39,7 @@ def start_gui_subprocess() -> int:
             "stderr": startup_log,
         }
         if os.name == "nt":
-            creationflags = 0
-            detached_process = getattr(subprocess, "DETACHED_PROCESS", 0)
-            create_new_process_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            creationflags = detached_process | create_new_process_group
+            creationflags = windows_subprocess_creationflags(new_process_group=True, detached=True)
             if creationflags:
                 kwargs["creationflags"] = creationflags
         else:

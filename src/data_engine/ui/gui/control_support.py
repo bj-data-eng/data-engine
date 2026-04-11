@@ -105,7 +105,7 @@ class GuiControlMixin:
         """Show persisted failure detail for one failed run or step entry."""
         event = entry.event
         title, detail_text = self.runtime_history_service.error_text_for_entry(
-            self.runtime_binding.runtime_ledger,
+            self.runtime_binding.runtime_cache_ledger,
             run_group,
             entry,
         )

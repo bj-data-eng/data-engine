@@ -12,7 +12,6 @@ from multiprocessing import AuthenticationError
 from multiprocessing.connection import Client
 from pathlib import Path
 import secrets
-import signal
 import subprocess
 import sys
 import time
@@ -26,6 +25,12 @@ from data_engine.hosts.daemon.constants import (
     STALE_AFTER_SECONDS,
 )
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
+from data_engine.platform.processes import (
+    ProcessInspectionError,
+    force_kill_process_tree,
+    process_is_running,
+    windows_subprocess_creationflags,
+)
 from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
 
 
@@ -39,8 +44,6 @@ class WorkspaceLeaseError(RuntimeError):
 
 DAEMON_AUTHKEY_FILE_NAME = ".daemon-authkey"
 _SHARED_STATE_ADAPTER = DaemonSharedStateAdapter()
-_STILL_ACTIVE = 259
-_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _WINDOWS_ERROR_ALREADY_EXISTS = 183
 _WINDOWS_STARTUP_MUTEXES: dict[str, int] = {}
 
@@ -138,39 +141,10 @@ def is_daemon_live(paths: WorkspacePaths) -> bool:
 
 def _kill_pid(pid: int) -> None:
     """Forcefully terminate one local process id."""
-    if os.name == "nt":
-        result = subprocess.run(
-            ["taskkill", "/PID", str(pid), "/T", "/F"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0 and _pid_is_live(pid):
-            detail = result.stderr.strip() or result.stdout.strip() or f"taskkill returned {result.returncode}"
-            raise DaemonClientError(f"Failed to terminate local daemon process {pid}: {detail}")
-        return
-    os.kill(pid, signal.SIGKILL)
-
-
-def _windows_pid_is_live(pid: int) -> bool:
-    """Return whether one Windows process id currently exists and is active."""
-    kernel32 = ctypes.windll.kernel32
-    kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
-    kernel32.OpenProcess.restype = ctypes.c_void_p
-    kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
-    kernel32.GetExitCodeProcess.restype = ctypes.c_int
-    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-    kernel32.CloseHandle.restype = ctypes.c_int
-    handle = kernel32.OpenProcess(_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
     try:
-        exit_code = ctypes.c_ulong()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return False
-        return exit_code.value == _STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
+        force_kill_process_tree(pid)
+    except ProcessInspectionError as exc:
+        raise DaemonClientError(str(exc)) from exc
 
 
 def _harden_private_file_permissions(path: Path) -> None:
@@ -199,28 +173,7 @@ def _harden_private_file_permissions(path: Path) -> None:
 
 def _pid_is_live(pid: int | None) -> bool:
     """Return whether one OS process id currently exists."""
-    if pid is None or pid <= 0:
-        return False
-    if os.name == "nt":
-        return _windows_pid_is_live(pid)
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    result = subprocess.run(
-        ["ps", "-o", "stat=", "-p", str(pid)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return False
-    status_text = result.stdout.strip()
-    if not status_text:
-        return False
-    if status_text.split()[0].startswith("Z"):
-        return False
-    return True
+    return process_is_running(pid)
 
 
 def _same_machine_unreachable_lease_metadata(paths: WorkspacePaths) -> dict[str, Any] | None:
@@ -492,15 +445,7 @@ def spawn_daemon_process(
         "close_fds": True,
     }
     if os.name == "nt":
-        kwargs["creationflags"] = getattr(
-            subprocess,
-            "CREATE_NEW_PROCESS_GROUP",
-            0,
-        ) | getattr(
-            subprocess,
-            "CREATE_NO_WINDOW",
-            0,
-        )
+        kwargs["creationflags"] = windows_subprocess_creationflags(new_process_group=True, no_window=True)
     else:
         kwargs["start_new_session"] = True
     try:

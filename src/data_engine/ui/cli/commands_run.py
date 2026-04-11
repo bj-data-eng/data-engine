@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 from data_engine.authoring.model import FlowValidationError
+from data_engine.platform.processes import windows_subprocess_creationflags
 
 TEST_SLICE_CHOICES = ("all", "unit", "ui", "qt", "tui", "integration", "live")
 
@@ -80,7 +81,7 @@ def run_tests(*, slice_name: str, list_slices: bool, app_root: Path) -> int:
     command = [sys.executable, "-m", "pytest", "-q", *test_slice_args(slice_name, app_root=app_root)]
     kwargs: dict[str, object] = {"check": False}
     if os.name == "nt":
-        create_new_process_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        if create_new_process_group:
-            kwargs["creationflags"] = create_new_process_group
+        creationflags = windows_subprocess_creationflags(new_process_group=True)
+        if creationflags:
+            kwargs["creationflags"] = creationflags
     return subprocess.run(command, **kwargs).returncode

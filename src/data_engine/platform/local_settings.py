@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 
 from data_engine.platform.identity import APP_CACHE_DIR_NAME, env_var
+from data_engine.platform.paths import stable_absolute_path
 
 
 DATA_ENGINE_APP_ROOT_ENV_VAR = env_var("app_root")
@@ -17,7 +18,7 @@ def default_state_root(*, app_root: Path | None = None) -> Path:
     """Return the platform-local mutable state root for the app."""
     env_value = os.environ.get(DATA_ENGINE_STATE_ROOT_ENV_VAR)
     if env_value and env_value.strip():
-        return Path(env_value).expanduser().resolve()
+        return stable_absolute_path(env_value)
 
     if sys_platform() == "darwin":
         home = Path(os.environ.get("HOME") or Path.home())
@@ -28,10 +29,10 @@ def default_state_root(*, app_root: Path | None = None) -> Path:
         return base / APP_CACHE_DIR_NAME
     xdg_state = os.environ.get("XDG_STATE_HOME")
     if xdg_state and xdg_state.strip():
-        return Path(xdg_state).expanduser().resolve() / APP_CACHE_DIR_NAME
+        return stable_absolute_path(xdg_state) / APP_CACHE_DIR_NAME
     xdg_data = os.environ.get("XDG_DATA_HOME")
     if xdg_data and xdg_data.strip():
-        return Path(xdg_data).expanduser().resolve() / APP_CACHE_DIR_NAME
+        return stable_absolute_path(xdg_data) / APP_CACHE_DIR_NAME
     return home / ".local" / "share" / APP_CACHE_DIR_NAME
 
 
@@ -51,7 +52,7 @@ class LocalSettingsStore:
     """Persist simple machine-local UI settings in SQLite."""
 
     def __init__(self, db_path: Path) -> None:
-        self.db_path = Path(db_path).expanduser().resolve()
+        self.db_path = stable_absolute_path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
@@ -116,13 +117,13 @@ class LocalSettingsStore:
         value = self.get("workspace_collection_root")
         if value is None or not value.strip():
             return None
-        return Path(value).expanduser().resolve()
+        return stable_absolute_path(value)
 
     def set_workspace_collection_root(self, value: Path | str | None) -> None:
         if value is None:
             self.set("workspace_collection_root", None)
             return
-        self.set("workspace_collection_root", str(Path(value).expanduser().resolve()))
+        self.set("workspace_collection_root", str(stable_absolute_path(value)))
 
     def default_workspace_id(self) -> str | None:
         value = self.get("default_workspace_id")
@@ -137,13 +138,13 @@ class LocalSettingsStore:
         value = self.get("runtime_root")
         if value is None or not value.strip():
             return None
-        return Path(value).expanduser().resolve()
+        return stable_absolute_path(value)
 
     def set_runtime_root(self, value: Path | str | None) -> None:
         if value is None:
             self.set("runtime_root", None)
             return
-        self.set("runtime_root", str(Path(value).expanduser().resolve()))
+        self.set("runtime_root", str(stable_absolute_path(value)))
 
 
 __all__ = [

@@ -45,7 +45,7 @@ class GuiRuntimeController:
             paths=window.workspace_paths,
             daemon_manager=window.runtime_binding.daemon_manager,
             flow_cards=window.flow_cards.values(),
-            runtime_ledger=window.runtime_binding.runtime_ledger,
+            runtime_ledger=window.runtime_binding.runtime_cache_ledger,
             daemon_startup_in_progress=window._daemon_startup_in_progress,
         )
         window.daemon_status = sync_state.daemon_status

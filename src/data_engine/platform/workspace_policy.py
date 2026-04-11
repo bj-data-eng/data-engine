@@ -13,6 +13,7 @@ from data_engine.platform.identity import (
     WORKSPACE_CACHE_DIR_NAME,
 )
 from data_engine.platform.local_settings import LocalSettingsStore, default_settings_db_path, default_state_root
+from data_engine.platform.paths import normalized_path_text
 from data_engine.platform.workspace_models import (
     APP_ROOT_PATH,
     DATA_ENGINE_APP_ROOT_ENV_VAR,
@@ -39,7 +40,6 @@ from data_engine.platform.workspace_models import (
     WorkspaceSettings,
     _stable_workspace_path,
     local_workspace_namespace as workspace_local_namespace,
-    normalized_path_text,
     validate_workspace_id,
 )
 

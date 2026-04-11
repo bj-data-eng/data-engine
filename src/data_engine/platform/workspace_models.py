@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-import os
 from pathlib import Path
 import socket
 import sys
-import unicodedata
 
 from data_engine.platform.identity import APP_INTERNAL_ID, env_var
+from data_engine.platform.paths import (
+    normalized_path_text,
+    path_display,
+    stable_absolute_path as _stable_workspace_path,
+    stable_path_identity_text as _stable_workspace_identity_text,
+    toml_path_text,
+)
 
 
 def _resolve_app_root_path() -> Path:
@@ -44,37 +49,6 @@ WORKSPACE_SHARED_RUNS_DIR_NAME: str = "runs"
 WORKSPACE_SHARED_STEP_RUNS_DIR_NAME: str = "step_runs"
 WORKSPACE_SHARED_LOGS_DIR_NAME: str = "logs"
 WORKSPACE_SHARED_FILE_STATE_DIR_NAME: str = "file_state"
-
-
-def normalized_path_text(value: Path | str) -> str:
-    """Return a stable forward-slash path string for display and comparisons."""
-    return unicodedata.normalize("NFC", str(value).replace("\\", "/"))
-
-
-def _stable_workspace_path(value: Path | str) -> Path:
-    """Return an absolute workspace path without dereferencing Windows reparse points."""
-    path = Path(value).expanduser()
-    if os.name == "nt":
-        return Path(os.path.abspath(os.fspath(path)))
-    return path.resolve()
-
-
-def _stable_workspace_identity_text(value: Path | str) -> str:
-    """Return normalized path text suitable for workspace identity hashing."""
-    text = normalized_path_text(_stable_workspace_path(value))
-    return text.casefold() if os.name == "nt" else text
-
-
-def path_display(value: Path | str | None, *, empty: str = "(not set)") -> str:
-    """Render a path value consistently for UI/display use."""
-    if value is None:
-        return empty
-    return normalized_path_text(value)
-
-
-def toml_path_text(value: Path | str) -> str:
-    """Render a path as TOML-safe text without Windows backslash escapes."""
-    return normalized_path_text(value)
 
 
 class InvalidWorkspaceIdError(ValueError):

@@ -5,13 +5,11 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-import json
 import os
 from pathlib import Path
 import platform
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import threading
@@ -42,6 +40,7 @@ from data_engine.platform.workspace_models import (
     DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR,
 )
 from data_engine.platform.local_settings import DATA_ENGINE_STATE_ROOT_ENV_VAR
+from data_engine.platform.processes import force_kill_process_tree, list_processes, process_is_running
 from data_engine.platform.workspace_policy import AppStatePolicy, RuntimeLayoutPolicy, WorkspaceDiscoveryPolicy
 from data_engine.views.models import qt_flow_cards_from_entries
 from data_engine.runtime.shared_state import read_lease_metadata, recover_stale_workspace
@@ -419,59 +418,12 @@ def wait_for_engine_state(paths, *, active: bool, timeout: float) -> bool:
 
 
 def list_daemon_processes() -> list[DaemonProcess]:
-    if os.name == "nt":
-        return _list_daemon_processes_windows()
-    return _list_daemon_processes_posix()
-
-
-def _list_daemon_processes_posix() -> list[DaemonProcess]:
-    completed = subprocess.run(
-        ["ps", "-axo", "pid=,command="],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
     processes: list[DaemonProcess] = []
-    for raw_line in completed.stdout.splitlines():
-        line = raw_line.strip()
-        if not line or "data_engine.hosts.daemon.app" not in line:
+    for row in list_processes():
+        if "data_engine.hosts.daemon.app" not in row.command:
             continue
-        pid_text, _, command = line.partition(" ")
-        try:
-            pid = int(pid_text.strip())
-        except ValueError:
-            continue
-        workspace_root = _extract_workspace_root_from_command(command)
-        processes.append(DaemonProcess(pid=pid, workspace_root=workspace_root, command=command))
-    return processes
-
-
-def _list_daemon_processes_windows() -> list[DaemonProcess]:
-    command = [
-        "powershell",
-        "-NoProfile",
-        "-Command",
-        "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress",
-    ]
-    completed = subprocess.run(command, capture_output=True, text=True, check=True)
-    payload = completed.stdout.strip()
-    if not payload:
-        return []
-    import json
-
-    decoded = json.loads(payload)
-    rows = decoded if isinstance(decoded, list) else [decoded]
-    processes: list[DaemonProcess] = []
-    for row in rows:
-        command_line = str(row.get("CommandLine") or "")
-        if "data_engine.hosts.daemon.app" not in command_line:
-            continue
-        try:
-            pid = int(row.get("ProcessId"))
-        except (TypeError, ValueError):
-            continue
-        workspace_root = _extract_workspace_root_from_command(command_line)
-        processes.append(DaemonProcess(pid=pid, workspace_root=workspace_root, command=command_line))
+        workspace_root = _extract_workspace_root_from_command(row.command)
+        processes.append(DaemonProcess(pid=row.pid, workspace_root=workspace_root, command=row.command))
     return processes
 
 
@@ -480,31 +432,13 @@ def force_kill_workspace_daemons(workspace_root: Path) -> None:
         if process.workspace_root != workspace_root.resolve():
             continue
         try:
-            if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, capture_output=True)
-            else:
-                os.kill(process.pid, 15)
+            force_kill_process_tree(process.pid)
         except Exception:
             pass
 
 
 def _is_pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    if os.name == "nt":
-        command = [
-            "powershell",
-            "-NoProfile",
-            "-Command",
-            f"$p = Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\"; if ($p) {{ '1' }} else {{ '0' }}",
-        ]
-        completed = subprocess.run(command, capture_output=True, text=True, check=False)
-        return completed.stdout.strip() == "1"
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
+    return process_is_running(pid, treat_defunct_as_dead=False)
 
 
 def _extract_workspace_root_from_command(command: str) -> Path | None:

@@ -8,9 +8,9 @@ import os
 
 from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.app import DaemonClientError, daemon_request, is_daemon_live
-from data_engine.hosts.daemon.client import _pid_is_live
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.domain import WorkspaceControlState
+from data_engine.platform.processes import process_is_running as _pid_is_live
 from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
 
 _DEFAULT_SHARED_STATE_ADAPTER = DaemonSharedStateAdapter()

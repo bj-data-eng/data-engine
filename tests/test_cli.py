@@ -303,9 +303,9 @@ def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
             ]
         )
 
-    monkeypatch.setattr("data_engine.ui.cli.commands_doctor.os.name", "nt")
+    monkeypatch.setattr("data_engine.platform.processes.os.name", "nt")
     monkeypatch.setattr(
-        "data_engine.ui.cli.commands_doctor.subprocess.run",
+        "data_engine.platform.processes.subprocess.run",
         lambda command, **kwargs: recorded.append((command, kwargs)) or _Completed(),
     )
 
@@ -436,7 +436,7 @@ def test_cli_doctor_daemons_collapses_windows_launcher_parent_processes(monkeypa
             del paths, stale_after_seconds
             return False
 
-    monkeypatch.setattr("data_engine.ui.cli.commands_doctor.os.name", "nt")
+    monkeypatch.setattr("data_engine.platform.processes.os.name", "nt")
     monkeypatch.setattr("data_engine.domain.diagnostics.os.name", "nt")
 
     result = commands_doctor.doctor_daemons(

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
-
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 import data_engine.runtime.runtime_db as runtime_db_module
 from data_engine.runtime.ledger_models import PersistedFileState, PersistedLogEntry, PersistedRun, PersistedStepRun
@@ -246,19 +244,11 @@ def test_runtime_ledger_persists_daemon_state(tmp_path):
 def test_runtime_control_ledger_counts_live_windows_client_sessions(tmp_path, monkeypatch):
     ledger = RuntimeControlLedger(tmp_path / "runtime_state" / "runtime_control.sqlite")
     monkeypatch.setattr(runtime_db_module.os, "name", "nt")
-
-    class _Kernel32:
-        def OpenProcess(self, _access, _inherit, pid):
-            return 111 if pid == 4321 else 0
-
-        def GetExitCodeProcess(self, _handle, exit_code_ptr):
-            exit_code_ptr._obj.value = runtime_db_module._WINDOWS_STILL_ACTIVE
-            return 1
-
-        def CloseHandle(self, _handle):
-            return 1
-
-    monkeypatch.setattr(runtime_db_module.ctypes, "windll", SimpleNamespace(kernel32=_Kernel32()))
+    monkeypatch.setattr(
+        runtime_db_module,
+        "process_is_running",
+        lambda pid, *, treat_defunct_as_dead: pid == 4321 and treat_defunct_as_dead is False,
+    )
 
     ledger.upsert_client_session(
         client_id="live-ui",

@@ -25,7 +25,7 @@ class TuiStateMixin:
     @property
     def runtime_ledger(self: "DataEngineTui"):
         """Compatibility facade over the current runtime binding ledger."""
-        return self.runtime_binding.runtime_ledger
+        return self.runtime_binding.runtime_cache_ledger
 
     @property
     def log_store(self: "DataEngineTui"):
