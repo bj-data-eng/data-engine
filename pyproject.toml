@@ -87,10 +87,12 @@ dev = [
   "numpy>=2.4.0",
   "openpyxl>=3.1.0",
   "pandas>=3.0.0",
+  "pydoclint>=0.7.6",
   "pydocstyle>=6.3.0",
   "pyinstaller>=6.15.0",
   "pytest>=9.0.0",
   "pytest-cov>=7.0.0",
+  "ruff>=0.15.10",
   "Sphinx>=9.1.0",
   "sphinx_rtd_theme>=3.1.0",
 ]

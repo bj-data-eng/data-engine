@@ -8,6 +8,8 @@ from pathlib import Path
 import duckdb
 import polars as pl
 
+FrameLike = pl.DataFrame | pl.LazyFrame
+
 
 def _quote_identifier(value: str) -> str:
     text = str(value).strip()
@@ -91,11 +93,19 @@ def _normalize_optional_limit(limit: int | None) -> int | None:
     return normalized
 
 
+def _materialize_frame(df: FrameLike) -> pl.DataFrame:
+    if isinstance(df, pl.DataFrame):
+        return df
+    if isinstance(df, pl.LazyFrame):
+        return df.collect()
+    raise TypeError("df must be a Polars DataFrame or LazyFrame.")
+
+
 def build_dimension(
     db_path: str | Path,
     table: str,
     *,
-    df: pl.DataFrame,
+    df: FrameLike,
     key_column: str = "dimension_key",
     return_df: bool = True,
 ) -> pl.DataFrame | None:
@@ -105,10 +115,38 @@ def build_dimension(
     column participates in uniqueness. The helper ensures the dimension table
     exists, inserts only new combinations, assigns deterministic surrogate keys,
     and optionally returns the natural-key-to-surrogate-key mapping.
+
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Dimension table name, optionally schema-qualified.
+    df : FrameLike
+        Polars dataframe or lazy dataframe containing the natural key columns
+        to persist. LazyFrames are collected before DuckDB operations run.
+    key_column : str
+        Surrogate key column to create in the dimension table.
+    return_df : bool
+        Whether to return the mapping dataframe for the incoming natural keys.
+
+    Returns
+    -------
+    pl.DataFrame | None
+        Mapping dataframe with natural key columns plus ``key_column`` when
+        ``return_df`` is true; otherwise ``None``.
+
+    Raises
+    ------
+    ValueError
+        If identifiers or dataframe columns are invalid. A ``TypeError`` is
+        raised by shared frame normalization when ``df`` is not a Polars
+        DataFrame or LazyFrame.
+    Exception
+        Re-raises DuckDB transaction failures after rollback.
     """
 
-    if not isinstance(df, pl.DataFrame):
-        raise TypeError("df must be a Polars DataFrame.")
+    df = _materialize_frame(df)
 
     natural_columns = tuple(df.columns)
     if not natural_columns:
@@ -210,15 +248,46 @@ def replace_rows_by_file(
     db_path: str | Path,
     table: str,
     *,
-    df: pl.DataFrame,
+    df: FrameLike,
     file_hash: str,
     file_hash_column: str = "file_key",
     return_df: bool = True,
 ) -> pl.DataFrame | None:
-    """Atomically replace one file's fact rows and append the current batch."""
+    """Atomically replace one file's fact rows and append the current batch.
 
-    if not isinstance(df, pl.DataFrame):
-        raise TypeError("df must be a Polars DataFrame.")
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Destination table name, optionally schema-qualified.
+    df : FrameLike
+        Incoming fact rows. LazyFrames are collected before DuckDB operations
+        run.
+    file_hash : str
+        Stable source-file identifier used to delete the previous batch.
+    file_hash_column : str
+        Column name used to store ``file_hash`` in the destination table.
+    return_df : bool
+        Whether to return ``df`` with the file hash column attached.
+
+    Returns
+    -------
+    pl.DataFrame | None
+        The inserted rows with ``file_hash_column`` when ``return_df`` is true;
+        otherwise ``None``.
+
+    Raises
+    ------
+    ValueError
+        If identifiers, file hash values, or dataframe columns are invalid. A
+        ``TypeError`` is raised by shared frame normalization when ``df`` is not
+        a Polars DataFrame or LazyFrame.
+    Exception
+        Re-raises DuckDB transaction failures after rollback.
+    """
+
+    df = _materialize_frame(df)
 
     normalized_file_hash = str(file_hash).strip()
     if not normalized_file_hash:
@@ -294,14 +363,42 @@ def replace_rows_by_values(
     db_path: str | Path,
     table: str,
     *,
-    df: pl.DataFrame,
+    df: FrameLike,
     column: str,
     return_df: bool = True,
 ) -> pl.DataFrame | None:
-    """Atomically replace one value-slice of rows and append the current batch."""
+    """Atomically replace one value-slice of rows and append the current batch.
 
-    if not isinstance(df, pl.DataFrame):
-        raise TypeError("df must be a Polars DataFrame.")
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Destination table name, optionally schema-qualified.
+    df : FrameLike
+        Incoming replacement rows. LazyFrames are collected before DuckDB
+        operations run.
+    column : str
+        Column whose incoming values define the rows to replace.
+    return_df : bool
+        Whether to return the inserted dataframe.
+
+    Returns
+    -------
+    pl.DataFrame | None
+        The inserted dataframe when ``return_df`` is true; otherwise ``None``.
+
+    Raises
+    ------
+    ValueError
+        If ``column`` is invalid or missing from ``df``. A ``TypeError`` is
+        raised by shared frame normalization when ``df`` is not a Polars
+        DataFrame or LazyFrame.
+    Exception
+        Re-raises DuckDB transaction failures after rollback.
+    """
+
+    df = _materialize_frame(df)
     if df.is_empty():
         raise ValueError("df must include at least one row.")
 
@@ -391,15 +488,44 @@ def attach_dimension(
     db_path: str | Path,
     table: str,
     *,
-    df: pl.DataFrame,
+    df: FrameLike,
     on: str | list[str] | tuple[str, ...],
     key_column: str = "dimension_key",
     drop_key: bool = False,
 ) -> pl.DataFrame:
-    """Attach an existing surrogate key mapping table to an input dataframe."""
+    """Attach an existing surrogate key mapping table to an input dataframe.
 
-    if not isinstance(df, pl.DataFrame):
-        raise TypeError("df must be a Polars DataFrame.")
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Dimension table name, optionally schema-qualified.
+    df : FrameLike
+        Input dataframe containing the natural key columns. LazyFrames are
+        collected before DuckDB operations run.
+    on : str | list[str] | tuple[str, ...]
+        Natural key column or columns used to join to the dimension table.
+    key_column : str
+        Surrogate key column to attach.
+    drop_key : bool
+        Whether to drop the natural key columns after attaching the surrogate
+        key.
+
+    Returns
+    -------
+    pl.DataFrame
+        Input dataframe with the surrogate key column attached.
+
+    Raises
+    ------
+    ValueError
+        If join columns are invalid or missing. A ``TypeError`` is raised by
+        shared frame normalization when ``df`` is not a Polars DataFrame or
+        LazyFrame.
+    """
+
+    df = _materialize_frame(df)
 
     join_columns = _normalize_key_columns(on)
     missing_columns = [column for column in join_columns if column not in df.columns]
@@ -424,15 +550,43 @@ def denormalize_columns(
     db_path: str | Path,
     table: str,
     *,
-    df: pl.DataFrame,
+    df: FrameLike,
     key_column: str = "dimension_key",
     select: str | list[str] | tuple[str, ...] = "*",
     drop_key: bool = False,
 ) -> pl.DataFrame:
-    """Attach natural columns from an existing dimension table onto a keyed dataframe."""
+    """Attach natural columns from an existing dimension table onto a keyed dataframe.
 
-    if not isinstance(df, pl.DataFrame):
-        raise TypeError("df must be a Polars DataFrame.")
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Dimension table name, optionally schema-qualified.
+    df : FrameLike
+        Input dataframe containing ``key_column``. LazyFrames are collected
+        before DuckDB operations run.
+    key_column : str
+        Surrogate key column used to join to the dimension table.
+    select : str | list[str] | tuple[str, ...]
+        Natural columns to attach, or ``"*"`` for all non-key columns.
+    drop_key : bool
+        Whether to drop ``key_column`` after attaching the natural columns.
+
+    Returns
+    -------
+    pl.DataFrame
+        Input dataframe with selected dimension columns attached.
+
+    Raises
+    ------
+    ValueError
+        If the key column, selected columns, or dimension table are invalid. A
+        ``TypeError`` is raised by shared frame normalization when ``df`` is not
+        a Polars DataFrame or LazyFrame.
+    """
+
+    df = _materialize_frame(df)
 
     normalized_key_column = str(key_column).strip()
     if not normalized_key_column:
@@ -485,17 +639,51 @@ def normalize_columns(
     db_path: str | Path,
     table: str,
     *,
-    df: pl.DataFrame,
+    df: FrameLike,
     on: str | list[str] | tuple[str, ...],
     key_column: str = "dimension_key",
     drop_key: bool = True,
     returns: str | None = "df",
 ) -> pl.DataFrame | None:
-    """Build missing surrogate keys and attach them back onto the input dataframe."""
+    """Build missing surrogate keys and attach them back onto the input dataframe.
+
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Dimension table name, optionally schema-qualified.
+    df : FrameLike
+        Input dataframe containing natural key columns. LazyFrames are collected
+        before DuckDB operations run.
+    on : str | list[str] | tuple[str, ...]
+        Natural key column or columns used to build the dimension.
+    key_column : str
+        Surrogate key column to create and attach.
+    drop_key : bool
+        Whether to drop natural key columns after attaching the surrogate key.
+    returns : str | None
+        ``"df"`` for normalized input rows, ``"map"`` for only the key mapping,
+        or ``None`` to only persist dimension rows.
+
+    Returns
+    -------
+    pl.DataFrame | None
+        Normalized dataframe, mapping dataframe, or ``None`` according to
+        ``returns``.
+
+    Raises
+    ------
+    RuntimeError
+        If dimension mapping creation unexpectedly returns no mapping.
+    ValueError
+        If ``returns`` or join columns are invalid.
+    """
 
     if returns not in {"df", "map", None}:
         raise ValueError('returns must be "df", "map", or None.')
 
+    df = _materialize_frame(df)
     join_columns = _normalize_key_columns(on)
     natural_key_df = df.select(list(join_columns)).unique(maintain_order=True)
     mapping = build_dimension(
@@ -531,7 +719,31 @@ def read_rows_by_values(
     is_in: list[object] | tuple[object, ...],
     select: str | list[str] | tuple[str, ...],
 ) -> pl.DataFrame:
-    """Return selected columns for rows whose one column matches any provided value."""
+    """Return selected columns for rows whose one column matches provided values.
+
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Source table name, optionally schema-qualified.
+    column : str
+        Column matched against ``is_in``.
+    is_in : list[object] | tuple[object, ...]
+        Values to include.
+    select : str | list[str] | tuple[str, ...]
+        Columns to return.
+
+    Returns
+    -------
+    pl.DataFrame
+        Matching rows with the selected columns.
+
+    Raises
+    ------
+    ValueError
+        If ``column`` or ``select`` is empty.
+    """
 
     normalized_column = str(column).strip()
     if not normalized_column:
@@ -578,7 +790,25 @@ def read_sql(
     *,
     sql: str,
 ) -> pl.DataFrame:
-    """Run one SQL query and return the result as a Polars DataFrame."""
+    """Run one SQL query and return the result as a Polars DataFrame.
+
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    sql : str
+        SQL query text.
+
+    Returns
+    -------
+    pl.DataFrame
+        Query result.
+
+    Raises
+    ------
+    ValueError
+        If ``sql`` is empty.
+    """
 
     normalized_sql = str(sql).strip()
     if not normalized_sql:
@@ -602,7 +832,26 @@ def read_table(
     where: str | None = None,
     limit: int | None = None,
 ) -> pl.DataFrame:
-    """Read rows from one table with optional column selection, filter, and limit."""
+    """Read rows from one table with optional column selection, filter, and limit.
+
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Source table name, optionally schema-qualified.
+    select : str | list[str] | tuple[str, ...]
+        Columns to return, or ``"*"`` for all columns.
+    where : str | None
+        Optional SQL ``WHERE`` expression without the ``WHERE`` keyword.
+    limit : int | None
+        Optional maximum number of rows.
+
+    Returns
+    -------
+    pl.DataFrame
+        Table rows matching the requested projection and filter.
+    """
 
     quoted_table = _quote_table_ref(table)
     normalized_where = None if where is None else str(where).strip()
@@ -627,13 +876,39 @@ def replace_table(
     db_path: str | Path,
     table: str,
     *,
-    df: pl.DataFrame,
+    df: FrameLike,
     return_df: bool = True,
 ) -> pl.DataFrame | None:
-    """Replace one table wholesale from a dataframe, expanding to the current df schema."""
+    """Replace one table wholesale from a dataframe.
 
-    if not isinstance(df, pl.DataFrame):
-        raise TypeError("df must be a Polars DataFrame.")
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Destination table name, optionally schema-qualified.
+    df : FrameLike
+        Replacement rows. New columns are added to the destination table.
+        LazyFrames are collected before DuckDB operations run.
+    return_df : bool
+        Whether to return the inserted dataframe.
+
+    Returns
+    -------
+    pl.DataFrame | None
+        The inserted dataframe when ``return_df`` is true; otherwise ``None``.
+
+    Raises
+    ------
+    ValueError
+        If identifiers or dataframe columns are invalid. A ``TypeError`` is
+        raised by shared frame normalization when ``df`` is not a Polars
+        DataFrame or LazyFrame.
+    Exception
+        Re-raises DuckDB transaction failures after rollback.
+    """
+
+    df = _materialize_frame(df)
 
     df_columns = tuple(df.columns)
     if not df_columns:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import inspect
 from pathlib import Path
+from typing import Callable
 
 from data_engine.authoring.helpers import (
     _callable_identifier,
@@ -45,7 +46,28 @@ def _resolve_authoring_services(
 
 @dataclass(frozen=True)
 class Flow:
-    """Immutable fluent builder for generic runtime flows."""
+    """Immutable fluent builder for generic runtime flows.
+
+    Attributes
+    ----------
+    group : str
+        Display group used by the GUI, TUI, and runtime summaries.
+    name : str | None
+        Stable flow identifier. When omitted in a flow module, the module loader
+        can derive it from the module name.
+    label : str | None
+        Optional human-readable display label.
+    trigger : WatchSpec | None
+        Runtime trigger configuration.
+    mirror_spec : MirrorSpec | None
+        Mirrored output path configuration.
+    steps : tuple[StepSpec, ...]
+        Ordered callable steps to run.
+
+    Notes
+    -----
+    Builder methods return a new ``Flow`` instance, so calls can be chained.
+    """
 
     group: str
     name: str | None = None
@@ -80,6 +102,38 @@ class Flow:
         extensions: tuple[str, ...] | list[str] | set[str] | None = None,
         settle: int = 1,
     ) -> "Flow":
+        """Configure how this flow is triggered.
+
+        Parameters
+        ----------
+        mode : str
+            Trigger mode: ``"manual"``, ``"poll"``, or ``"schedule"``.
+        run_as : str
+            ``"individual"`` to run once per source file, or ``"batch"`` to run
+            once for the full source set.
+        source : str | Path | None
+            File or directory watched by poll/schedule triggers.
+        interval : str | None
+            Duration string such as ``"10s"`` or ``"5m"`` for poll intervals or
+            recurring schedules.
+        time : str | tuple[str, ...] | list[str] | set[str] | None
+            One or more ``HH:MM`` daily schedule times.
+        extensions : tuple[str, ...] | list[str] | set[str] | None
+            Optional file extensions used when discovering source files.
+        settle : int
+            Polling settle window in seconds before a changed file is queued.
+
+        Returns
+        -------
+        Flow
+            A new flow with the trigger configuration attached.
+
+        Raises
+        ------
+        FlowValidationError
+            If the trigger mode, source, schedule, or polling options are
+            inconsistent.
+        """
         normalized_mode = str(mode).strip().lower()
         if normalized_mode not in {"manual", "poll", "schedule"}:
             raise FlowValidationError("watch() mode must be one of 'manual', 'poll', or 'schedule'.")
@@ -157,17 +211,53 @@ class Flow:
         )
 
     def mirror(self, *, root: str | Path) -> "Flow":
-        """Bind a mirrored output namespace rooted at one directory."""
+        """Bind a mirrored output namespace rooted at one directory.
+
+        Parameters
+        ----------
+        root : str | Path
+            Directory used by ``context.mirror`` helpers when writing outputs.
+
+        Returns
+        -------
+        Flow
+            A new flow with mirror output helpers enabled.
+        """
         return self._clone(mirror_spec=MirrorSpec(root=_resolve_flow_path(root)))
 
     def step(
         self,
-        fn,
+        fn: Callable[[FlowContext], object],
         *,
         use: str | None = None,
         save_as: str | None = None,
         label: str | None = None,
     ) -> "Flow":
+        """Append one callable step to the flow.
+
+        Parameters
+        ----------
+        fn : Callable[[FlowContext], object]
+            Callable that accepts a single ``FlowContext`` and returns the next
+            value for ``context.current``.
+        use : str | None
+            Optional named object slot to load into ``context.current`` before
+            the step runs.
+        save_as : str | None
+            Optional named object slot to store the step result in.
+        label : str | None
+            Optional display label for logs and UI step summaries.
+
+        Returns
+        -------
+        Flow
+            A new flow with the step appended.
+
+        Raises
+        ------
+        FlowValidationError
+            If ``fn`` is not callable or does not accept exactly one argument.
+        """
         if not callable(fn):
             raise FlowValidationError("step() fn must be callable")
         normalized_use = _validate_slot_name(method_name="step", slot_name="use", value=use)
@@ -188,12 +278,36 @@ class Flow:
 
     def map(
         self,
-        fn,
+        fn: Callable[..., object],
         *,
         use: str | None = None,
         save_as: str | None = None,
         label: str | None = None,
     ) -> "Flow":
+        """Append a step that maps a callable over the current iterable value.
+
+        Parameters
+        ----------
+        fn : Callable[..., object]
+            Callable accepting either ``item`` or ``context, item``.
+        use : str | None
+            Optional named object slot to map instead of the current value.
+        save_as : str | None
+            Optional named object slot to store the mapped ``Batch`` result in.
+        label : str | None
+            Optional display label for logs and UI step summaries.
+
+        Returns
+        -------
+        Flow
+            A new flow with the mapping step appended.
+
+        Raises
+        ------
+        FlowValidationError
+            If ``fn`` is not callable, has an unsupported signature, or the
+            mapped current value is not iterable.
+        """
         if not callable(fn):
             raise FlowValidationError("map() fn must be callable")
         normalized_use = _validate_slot_name(method_name="map", slot_name="use", value=use)
@@ -241,6 +355,28 @@ class Flow:
         save_as: str | None = None,
         label: str | None = None,
     ) -> "Flow":
+        """Append a step that collects source files into a ``Batch``.
+
+        Parameters
+        ----------
+        extensions : tuple[str, ...] | list[str] | set[str]
+            File extensions to include, such as ``(".xlsx", ".csv")``.
+        root : str | Path | None
+            Optional search root. Defaults to the active source root.
+        recursive : bool
+            Whether to search child directories.
+        use : str | None
+            Optional named object slot to load before collecting.
+        save_as : str | None
+            Optional named object slot to store the collected batch in.
+        label : str | None
+            Optional display label for logs and UI step summaries.
+
+        Returns
+        -------
+        Flow
+            A new flow with the collection step appended.
+        """
         normalized_use = _validate_slot_name(method_name="collect", slot_name="use", value=use)
         normalized_save_as = _validate_slot_name(method_name="collect", slot_name="save_as", value=save_as)
         normalized_label = _validate_label(method_name="collect", label=label)
@@ -253,12 +389,30 @@ class Flow:
 
     def step_each(
         self,
-        fn,
+        fn: Callable[..., object],
         *,
         use: str | None = None,
         save_as: str | None = None,
         label: str | None = None,
     ) -> "Flow":
+        """Alias for ``map`` that reads naturally in step chains.
+
+        Parameters
+        ----------
+        fn : Callable[..., object]
+            Callable accepting either ``item`` or ``context, item``.
+        use : str | None
+            Optional named object slot to map instead of the current value.
+        save_as : str | None
+            Optional named object slot to store the mapped ``Batch`` result in.
+        label : str | None
+            Optional display label for logs and UI step summaries.
+
+        Returns
+        -------
+        Flow
+            A new flow with the per-item step appended.
+        """
         return self.map(fn, use=use, save_as=save_as, label=label)
 
     @property
@@ -273,6 +427,20 @@ class Flow:
         authoring_services: AuthoringServices | None = None,
         runtime_execution_service: RuntimeExecutionService | None = None,
     ) -> list[FlowContext]:
+        """Run this flow once and return completed runtime contexts.
+
+        Parameters
+        ----------
+        authoring_services : AuthoringServices | None
+            Optional service bundle used by tests or embedded hosts.
+        runtime_execution_service : RuntimeExecutionService | None
+            Optional runtime execution service override.
+
+        Returns
+        -------
+        list[FlowContext]
+            One context per executed source.
+        """
         service = _resolve_authoring_services(
             authoring_services=authoring_services,
             runtime_execution_service=runtime_execution_service,
@@ -285,7 +453,29 @@ class Flow:
         use: str | None = None,
         authoring_services: AuthoringServices | None = None,
         runtime_execution_service: RuntimeExecutionService | None = None,
-    ):
+    ) -> object:
+        """Run this flow in preview mode and return one preview value.
+
+        Parameters
+        ----------
+        use : str | None
+            Optional named object slot to preview instead of the final current
+            value.
+        authoring_services : AuthoringServices | None
+            Optional service bundle used by tests or embedded hosts.
+        runtime_execution_service : RuntimeExecutionService | None
+            Optional runtime execution service override.
+
+        Returns
+        -------
+        object
+            Preview value returned by the runtime execution service.
+
+        Raises
+        ------
+        FlowValidationError
+            If preview is requested from inside a compiled flow module.
+        """
         if in_compiled_flow_module_context():
             raise FlowValidationError("preview() is not available inside compiled flow modules.")
         normalized_use = _validate_slot_name(method_name="preview", slot_name="use", value=use)
@@ -295,7 +485,20 @@ class Flow:
         ).runtime_execution_service
         return service.preview(self, use=normalized_use)
 
-    def show(self):
+    def show(self) -> object:
+        """Run this flow once and return the single final current value.
+
+        Returns
+        -------
+        object
+            Final ``context.current`` value.
+
+        Raises
+        ------
+        FlowValidationError
+            If called from a compiled flow module or the flow produces anything
+            other than one result.
+        """
         if in_compiled_flow_module_context():
             raise FlowValidationError("show() is not available inside compiled flow modules.")
         results = self.run_once()
@@ -309,6 +512,20 @@ class Flow:
         authoring_services: AuthoringServices | None = None,
         runtime_execution_service: RuntimeExecutionService | None = None,
     ) -> list[FlowContext]:
+        """Run this flow continuously according to its trigger.
+
+        Parameters
+        ----------
+        authoring_services : AuthoringServices | None
+            Optional service bundle used by tests or embedded hosts.
+        runtime_execution_service : RuntimeExecutionService | None
+            Optional runtime execution service override.
+
+        Returns
+        -------
+        list[FlowContext]
+            Completed contexts collected before the runtime exits.
+        """
         service = _resolve_authoring_services(
             authoring_services=authoring_services,
             runtime_execution_service=runtime_execution_service,

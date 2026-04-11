@@ -276,7 +276,27 @@ class SourceContext:
 
 @dataclass
 class FlowContext:
-    """Mutable runtime state shared across steps during one flow execution."""
+    """Mutable runtime state shared across steps during one flow execution.
+
+    Attributes
+    ----------
+    flow_name : str
+        Name of the flow currently executing.
+    group : str
+        Display group for the active flow.
+    source : SourceContext | None
+        Source-file path helpers when the flow is bound to a source.
+    mirror : MirrorContext | None
+        Output path helpers when the flow configured ``Flow.mirror(...)``.
+    current : object | None
+        Value passed from the previous step to the current step.
+    objects : dict[str, object]
+        Named values saved by steps with ``save_as=``.
+    metadata : dict[str, object]
+        Runtime metadata such as run ids and source hashes.
+    config : WorkspaceConfigContext
+        Workspace-local TOML config accessor.
+    """
 
     flow_name: str
     group: str
@@ -288,7 +308,14 @@ class FlowContext:
     config: WorkspaceConfigContext = field(default_factory=WorkspaceConfigContext)
 
     def source_metadata(self) -> SourceMetadata | None:
-        """Return filesystem metadata for the current source file when available."""
+        """Return filesystem metadata for the current source file when available.
+
+        Returns
+        -------
+        SourceMetadata | None
+            File path, name, size, and modified timestamp, or ``None`` when the
+            runtime is not executing a concrete source file.
+        """
         source_path = self.source.path if self.source is not None else None
         if source_path is None:
             return None
@@ -301,7 +328,24 @@ class FlowContext:
         )
 
     def database(self, name: str | Path) -> Path:
-        """Return a write-ready path beneath the authored workspace databases directory."""
+        """Return a write-ready path beneath the workspace databases directory.
+
+        Parameters
+        ----------
+        name : str | Path
+            Relative database file name, for example ``"warehouse.duckdb"``.
+
+        Returns
+        -------
+        Path
+            Absolute path under ``<workspace>/databases`` with parent
+            directories created.
+
+        Raises
+        ------
+        FlowValidationError
+            If no authored workspace is active or ``name`` is empty or absolute.
+        """
         if self.config.workspace_root is None:
             raise FlowValidationError("context.database() is only available for authored workspace flows.")
         candidate = Path(name)

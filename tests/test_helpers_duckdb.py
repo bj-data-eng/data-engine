@@ -113,6 +113,24 @@ def test_build_dimension_allows_side_effect_only_calls(tmp_path):
     }
 
 
+def test_build_dimension_collects_lazy_frames(tmp_path):
+    db_path = tmp_path / "claims.duckdb"
+    incoming = pl.DataFrame({"member_id": ["a", "a", "b"], "lob": ["medical", "medical", "dental"]}).lazy()
+
+    mapping = build_dimension(
+        db_path,
+        "dim_member",
+        df=incoming,
+        key_column="member_key",
+    )
+
+    assert mapping.to_dict(as_series=False) == {
+        "member_id": ["a", "b"],
+        "lob": ["medical", "dental"],
+        "member_key": [1, 2],
+    }
+
+
 def test_build_dimension_rejects_key_column_collisions(tmp_path):
     db_path = tmp_path / "claims.duckdb"
     incoming = pl.DataFrame({"dimension_key": [1], "category": ["a"]})
@@ -674,6 +692,24 @@ def test_normalize_columns_returns_normalized_frame_for_composite_keys_by_defaul
     }
 
 
+def test_normalize_columns_collects_lazy_frames(tmp_path):
+    db_path = tmp_path / "claims.duckdb"
+    lazy_df = pl.DataFrame({"status": ["open", "ready", "open"], "amount": [10, 20, 30]}).lazy()
+
+    normalized = normalize_columns(
+        db_path,
+        "dim_status",
+        df=lazy_df,
+        on="status",
+        key_column="status_key",
+    )
+
+    assert normalized.to_dict(as_series=False) == {
+        "amount": [10, 20, 30],
+        "status_key": [1, 2, 1],
+    }
+
+
 def test_read_rows_by_values_returns_selected_columns_for_matching_rows(tmp_path):
     db_path = tmp_path / "claims.duckdb"
     replace_rows_by_file(
@@ -852,4 +888,20 @@ def test_replace_table_expands_schema_and_allows_side_effect_only_calls(tmp_path
         "claim_id": [2],
         "amount": [20],
         "group": ["claims"],
+    }
+
+
+def test_replace_table_collects_lazy_frames(tmp_path):
+    db_path = tmp_path / "claims.duckdb"
+    lazy_df = pl.DataFrame({"claim_id": [1, 2], "amount": [10, 20]}).lazy()
+
+    returned = replace_table(
+        db_path,
+        "fact_claim",
+        df=lazy_df,
+    )
+
+    assert returned.to_dict(as_series=False) == {
+        "claim_id": [1, 2],
+        "amount": [10, 20],
     }
