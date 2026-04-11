@@ -9,7 +9,7 @@ from textual.widgets import ListView, Select, Static
 from data_engine.application import FlowCatalogApplication, OperatorControlApplication, WorkspaceSessionApplication
 from data_engine.services import LogService
 from data_engine.domain import FlowRunState, FlowSummaryRow
-from data_engine.views.text import render_operation_lines, render_run_group_lines, render_selected_flow_lines
+from data_engine.views.text import render_selected_flow_lines
 from data_engine.ui.tui.widgets import FlowListItem, GroupHeaderListItem, InfoModal, RunGroupListItem
 
 if TYPE_CHECKING:

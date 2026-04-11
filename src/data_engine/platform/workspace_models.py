@@ -182,6 +182,7 @@ __all__ = [
     "WORKSPACE_STATE_DIR_NAME",
     "WorkspacePaths",
     "WorkspaceSettings",
+    "_stable_workspace_path",
     "authored_workspace_is_available",
     "local_workspace_namespace",
     "machine_id_text",

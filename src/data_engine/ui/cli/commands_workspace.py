@@ -15,8 +15,6 @@ from data_engine.platform.workspace_models import (
 )
 from data_engine.services.workspace_provisioning import (
     collection_vscode_settings as build_collection_vscode_settings,
-    checkout_source_dir,
-    checkout_tests_dir,
     write_collection_vscode_settings as persist_collection_vscode_settings,
     workspace_vscode_settings as build_workspace_vscode_settings,
     write_workspace_vscode_settings as persist_workspace_vscode_settings,

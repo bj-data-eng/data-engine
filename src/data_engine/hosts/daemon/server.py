@@ -7,7 +7,7 @@ from multiprocessing.connection import Listener
 from pathlib import Path
 import threading
 import traceback
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from data_engine.domain import DaemonLifecyclePolicy
 from data_engine.hosts.daemon.client import (

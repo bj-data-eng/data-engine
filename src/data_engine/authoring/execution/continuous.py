@@ -8,6 +8,7 @@ from time import monotonic, sleep
 from typing import TYPE_CHECKING
 
 from data_engine.authoring.execution.context import _QueuedJob
+from data_engine.authoring.model import FlowStoppedError
 from data_engine.authoring.primitives import WatchSpec
 from data_engine.runtime.file_watch import PollingWatcher
 
@@ -169,8 +170,5 @@ class ContinuousRuntimeLoop:
             if (current_dt.hour, current_dt.minute) >= (entry["hour"], entry["minute"]):
                 entry["pending"] = True
                 entry["last_run_date"] = current_dt.date()
-
-
-from data_engine.authoring.model import FlowStoppedError
 
 __all__ = ["ContinuousRuntimeLoop"]

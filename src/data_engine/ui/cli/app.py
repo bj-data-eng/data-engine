@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-import subprocess
 import sys
 
 from data_engine.authoring.model import FlowValidationError

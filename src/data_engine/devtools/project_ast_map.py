@@ -339,7 +339,6 @@ def _expr_text(node: ast.AST) -> str:
 
 def _build_import_graph(modules: tuple[ModuleSummary, ...]) -> dict[str, object]:
     module_names = {module.module for module in modules}
-    package_name = modules[0].module.split(".")[0] if modules else ""
     edges: list[dict[str, str]] = []
     internal_targets_by_source: dict[str, set[str]] = defaultdict(set)
     external_targets_by_source: dict[str, set[str]] = defaultdict(set)

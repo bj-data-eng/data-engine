@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.ui.gui.bootstrap import build_gui_services
 from data_engine.ui.gui.app import DataEngineWindow
-from data_engine.ui.gui.theme import DEFAULT_THEME, resolve_theme_name, stylesheet
+from data_engine.ui.gui.theme import DEFAULT_THEME, stylesheet
 
 
 def _configure_qt_webengine_environment() -> None:

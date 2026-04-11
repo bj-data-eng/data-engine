@@ -5,11 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from data_engine.authoring.primitives import FlowContext, MirrorContext, SourceContext, WatchSpec, WorkspaceConfigContext
 from data_engine.domain.source_state import SourceSignature
 from data_engine.domain.time import utcnow_text
+
+if TYPE_CHECKING:
+    from data_engine.authoring.flow import Flow
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 from dataclasses import replace
 from pathlib import Path
 
@@ -343,8 +345,7 @@ def test_flow_list_item_refresh_view_updates_label():
 @pytest.mark.anyio
 async def test_tui_disables_run_and_start_when_workspace_not_owned():
     app = _make_tui()
-    async with app.run_test() as pilot:
-        del pilot
+    async with app.run_test():
         app.runtime_session = replace(app.runtime_session, workspace_owned=False, leased_by_machine_id="other-host")
         app._refresh_buttons()
 
@@ -355,8 +356,7 @@ async def test_tui_disables_run_and_start_when_workspace_not_owned():
 @pytest.mark.anyio
 async def test_tui_tolerates_brief_daemon_sync_miss_without_flipping_to_lease_view():
     app = _make_tui()
-    async with app.run_test() as pilot:
-        del pilot
+    async with app.run_test():
         app.runtime_session = replace(app.runtime_session, workspace_owned=True)
         app._daemon_manager._last_snapshot = WorkspaceDaemonSnapshot(
             live=True,
@@ -426,7 +426,7 @@ async def test_tui_uses_local_workspace_collection_root_override(monkeypatch, tm
 @pytest.mark.anyio
 async def test_tui_log_run_selection_updates_preview():
     app = _make_tui(log_service=_FakeLogService(), app_cls=_RecordingTui)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         flow_name = app.flow_cards[0].name
         app.selected_flow_name = flow_name
         app.log_store.append_entry(
@@ -506,7 +506,7 @@ async def test_tui_log_run_selection_updates_preview():
 @pytest.mark.anyio
 async def test_tui_selecting_log_run_opens_modal():
     app = _make_tui(log_service=_FakeLogService(), app_cls=_RecordingTui)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         flow_name = app.flow_cards[0].name
         app.selected_flow_name = flow_name
         app.log_store.append_entry(

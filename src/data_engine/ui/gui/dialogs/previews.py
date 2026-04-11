@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
@@ -24,7 +23,6 @@ from data_engine.ui.gui.widgets import build_config_value, make_label_selectable
 
 if TYPE_CHECKING:
     from data_engine.domain import FlowLogEntry, FlowRunState
-    from data_engine.views.models import QtFlowCard
     from data_engine.ui.gui.app import DataEngineWindow
 
 

@@ -19,7 +19,6 @@ from data_engine.runtime.runtime_db import RuntimeLedger
 
 if TYPE_CHECKING:
     from data_engine.authoring.flow import Flow
-    from data_engine.authoring.primitives import StepSpec
 
 
 def _open_default_runtime_ledger() -> RuntimeLedger:

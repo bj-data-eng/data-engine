@@ -93,7 +93,7 @@ class IFileWatcher(Protocol):
 
 
 class PollingWatcher:
-    """Filesystem polling watcher that reacts to changes observed after startup."""
+    """Filesystem polling watcher for one file or directory root."""
 
     def __init__(
         self,
@@ -103,7 +103,6 @@ class PollingWatcher:
         extensions: tuple[str, ...] | None = None,
         settle: int = 1,
     ) -> None:
-        """Initialize a polling watcher for one file or directory root."""
         if settle < 0:
             raise FlowValidationError("settle must be zero or greater.")
         self.input_root = input_root

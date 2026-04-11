@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from pathlib import Path
 from queue import Queue
 from uuid import uuid4
 from typing import TYPE_CHECKING
@@ -23,6 +22,8 @@ from data_engine.ui.gui.runtime import QueueLogHandler, UiSignals
 from data_engine.ui.gui.surface import build_default_gui_services
 
 if TYPE_CHECKING:
+    from PySide6.QtWidgets import QFrame
+
     from data_engine.ui.gui.app import DataEngineWindow
 
 

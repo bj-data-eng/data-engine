@@ -33,9 +33,7 @@ from data_engine.hosts.daemon.commands import (
     DaemonCommandHandler,
 )
 from data_engine.hosts.daemon.constants import (
-    APP_VERSION,
     CHECKPOINT_INTERVAL_SECONDS,
-    CONTROL_REQUEST_POLL_INTERVAL_SECONDS,
     STALE_AFTER_SECONDS,
 )
 from data_engine.hosts.daemon.lifecycle import (
@@ -54,7 +52,7 @@ from data_engine.platform.workspace_models import (
 from data_engine.views.models import QtFlowCard, load_qt_flow_cards
 
 if TYPE_CHECKING:
-    from multiprocessing.connection import Listener
+    pass
 
 
 DAEMON_LOG_RETENTION_DAYS = 30

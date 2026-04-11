@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 from data_engine.platform.local_settings import (
     DATA_ENGINE_STATE_ROOT_ENV_VAR,

@@ -21,7 +21,8 @@ from data_engine.ui.tui.bootstrapper import bootstrap_tui_app
 from data_engine.ui.tui.theme import DEFAULT_THEME, stylesheet as tui_stylesheet
 from data_engine.ui.tui.state_support import TuiStateMixin
 from data_engine.ui.tui.support import TuiWindowSupportMixin
-from data_engine.ui.tui.widgets import FlowListItem, InfoModal, RunGroupListItem
+from data_engine.ui.tui.runtime import QueueLogHandler
+from data_engine.ui.tui.widgets import FlowListItem, GroupHeaderListItem, InfoModal, RunGroupListItem
 
 
 class DataEngineTui(TuiWindowSupportMixin, TuiStateMixin, App[None]):

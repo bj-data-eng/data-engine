@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from data_engine.domain import FlowLogEntry, FlowRunState, RuntimeStepEvent
+from data_engine.domain import FlowLogEntry, FlowRunState
 from data_engine.ui.gui.dialogs import show_run_log_preview
 from data_engine.ui.gui.preview_models import RunLogPreviewRequest
 from data_engine.ui.gui.presenters import (

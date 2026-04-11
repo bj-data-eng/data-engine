@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import polars as pl
 from PySide6.QtWidgets import (
-    QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -32,7 +31,7 @@ from data_engine.ui.gui.widgets import (
 
 
 class DataEngineWindow(GuiWindowSupportMixin, GuiRenderingMixin, GuiControlMixin, GuiStateMixin, QMainWindow):
-    """Main PySide6 operator window."""
+    """Main PySide6 operator window with timers and runtime state containers."""
 
     _MAX_LOG_EVENTS_PER_TICK = 100
     _MAX_VISIBLE_LOG_RUNS = 100
@@ -60,7 +59,6 @@ class DataEngineWindow(GuiWindowSupportMixin, GuiRenderingMixin, GuiControlMixin
         "failed": "#cf222e",
     }
     def __init__(self, *, theme_name: str = DEFAULT_THEME, services: GuiServices | None = None) -> None:
-        """Build the operator window, timers, and runtime state containers."""
         super().__init__()
         bootstrap_gui_window(self, theme_name=theme_name, services=services)
 
@@ -113,4 +111,4 @@ class DataEngineWindow(GuiWindowSupportMixin, GuiRenderingMixin, GuiControlMixin
         root_layout.addLayout(footer_row, 0)
         self.workspace_counts_footer_label.setVisible(True)
 
-__all__ = ["DataEngineWindow"]
+__all__ = ["DataEngineWindow", "QFileDialog", "helper_is_last_process_ui_window", "pl"]

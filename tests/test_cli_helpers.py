@@ -17,7 +17,6 @@ from data_engine.ui.cli.commands_workspace import (
     collection_vscode_settings as _collection_vscode_settings,
     workspace_vscode_settings as _workspace_vscode_settings,
 )
-from data_engine.ui.cli.dependencies import build_default_cli_dependencies
 from data_engine.ui.cli.parser import (
     _HelpFormatter,
     build_parser,

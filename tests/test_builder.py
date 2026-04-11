@@ -11,7 +11,6 @@ from data_engine.authoring.builder import (
     Batch,
     FileRef,
     Flow,
-    FlowContext,
     MirrorContext,
     SourceContext,
     _FlowRuntime,
@@ -602,7 +601,6 @@ def test_schedule_missing_source_file_records_failed_run_and_log(tmp_path):
         runtime.run()
 
     runs = ledger.list_runs(flow_name="scheduled_missing_file")
-    logs = ledger.list_logs(flow_name="scheduled_missing_file")
 
     assert len(runs) == 1
     assert runs[0].status == "failed"

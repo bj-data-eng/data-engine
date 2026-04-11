@@ -11,10 +11,9 @@ from data_engine.domain import FlowLogEntry, format_log_line, parse_runtime_even
 
 
 class QueueLogHandler(logging.Handler):
-    """Logging handler that forwards formatted runtime lines into a queue."""
+    """Logging handler that forwards formatted runtime lines into the UI queue."""
 
     def __init__(self, queue: Queue[FlowLogEntry]) -> None:
-        """Initialize the handler with the queue consumed by the UI thread."""
         super().__init__(level=logging.INFO)
         self.queue = queue
 

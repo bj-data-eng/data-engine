@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING
 
@@ -26,7 +27,6 @@ from data_engine.ui.gui.presenters import (
     save_workspace_collection_root_override as present_save_workspace_collection_root_override,
 )
 from data_engine.ui.gui.surface import show_message_box_later as surface_show_message_box_later
-from data_engine.views.state import build_flow_summary
 
 if TYPE_CHECKING:
     from data_engine.ui.gui.app import DataEngineWindow

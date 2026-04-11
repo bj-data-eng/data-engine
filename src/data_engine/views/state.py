@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from data_engine.domain.details import FlowSummaryState, OperationArtifactState
-from data_engine.domain.operations import OperationFlowState, OperationRowState, OperationSessionState
+from data_engine.domain.operations import OperationFlowState, OperationRowState
 from data_engine.views.models import QtFlowCard
 
 def build_flow_summary(card: QtFlowCard | None, flow_states: dict[str, str]) -> FlowSummaryState:

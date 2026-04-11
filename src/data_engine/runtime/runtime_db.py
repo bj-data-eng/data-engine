@@ -20,13 +20,11 @@ from data_engine.platform.workspace_models import (
 from data_engine.platform.processes import process_is_running
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.ledger_models import (
-    PersistedClientSession,
     PersistedDaemonState,
     PersistedFileState,
     PersistedLogEntry,
     PersistedRun,
     PersistedStepRun,
-    elapsed_seconds,
 )
 
 class _RuntimeSqliteStore:
