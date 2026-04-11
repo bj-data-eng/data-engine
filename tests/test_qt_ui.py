@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget, Q
 from shiboken6 import delete as shiboken_delete
 from shiboken6 import isValid as shiboken_is_valid
 
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot
 from data_engine.domain import FlowCatalogEntry, FlowRunState, RuntimeSessionState, WorkspaceControlState
 from data_engine.platform.identity import APP_DISPLAY_NAME

@@ -9,13 +9,14 @@ from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.model import FlowStoppedError, FlowValidationError
 from data_engine.core.primitives import FlowContext, WatchSpec
-from data_engine.authoring.execution.continuous import ContinuousRuntimeLoop
-from data_engine.authoring.execution.context import RuntimeContextBuilder
-from data_engine.authoring.execution.logging import RuntimeLogEmitter
-from data_engine.authoring.execution.polling import RuntimePollingSupport
-from data_engine.authoring.execution.runner import FlowRunExecutor
+from data_engine.runtime.execution.continuous import ContinuousRuntimeLoop
+from data_engine.runtime.execution.context import RuntimeContextBuilder
+from data_engine.runtime.execution.logging import RuntimeLogEmitter
+from data_engine.runtime.execution.polling import RuntimePollingSupport
+from data_engine.runtime.execution.runner import FlowRunExecutionPorts, FlowRunExecutor
 from data_engine.runtime.file_watch import PollingWatcher
 from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.stop import RuntimeStopController
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow
@@ -56,11 +57,13 @@ class _FlowRuntime:
         runtime_ledger: RuntimeLedger | None = None,
         runtime_ledger_service: RuntimeLedgerService | None = None,
         runtime_ledger_factory: Callable[[], RuntimeLedger] | None = None,
+        run_stop_controller: RuntimeStopController | None = None,
     ) -> None:
         self.flows = tuple(flows)
         self.continuous = continuous
         self.runtime_stop_event = runtime_stop_event
         self.flow_stop_event = flow_stop_event
+        self.run_stop_controller = run_stop_controller or RuntimeStopController()
         self.status_callback = status_callback
         runtime_ledger_service = runtime_ledger_service or default_runtime_ledger_service()
         self._runtime_ledger_factory = runtime_ledger_factory or runtime_ledger_service.open_runtime_ledger
@@ -69,7 +72,15 @@ class _FlowRuntime:
         self.context_builder = RuntimeContextBuilder()
         self.log_emitter = RuntimeLogEmitter(self.runtime_ledger)
         self.polling = RuntimePollingSupport(self.runtime_ledger)
-        self.run_executor = FlowRunExecutor(self)
+        self.run_executor = FlowRunExecutor(
+            FlowRunExecutionPorts(
+                context_builder=self.context_builder,
+                polling=self.polling,
+                runtime_ledger=self.runtime_ledger,
+                log_emitter=self.log_emitter,
+                stop_controller=self,
+            )
+        )
         self.continuous_loop = ContinuousRuntimeLoop(self)
 
     def run(self) -> list[FlowContext]:
@@ -97,6 +108,26 @@ class _FlowRuntime:
             if use not in context.objects:
                 raise FlowValidationError(f"preview() could not find saved object {use!r}.")
             return context.objects[use]
+        finally:
+            self._close_owned_runtime_ledger()
+
+    def run_source(self, flow: "Flow", source_path: str | Path) -> FlowContext:
+        """Run one flow for a specific source path."""
+        try:
+            self._validate()
+            return self.run_executor.run_one(flow, Path(source_path))
+        finally:
+            self._close_owned_runtime_ledger()
+
+    def run_batch(self, flow: "Flow") -> FlowContext:
+        """Run one flow once in batch mode using the configured source root."""
+        try:
+            self._validate()
+            return self.run_executor.run_one(
+                flow,
+                None,
+                batch_signatures=self.polling.stale_batch_poll_signatures(flow),
+            )
         finally:
             self._close_owned_runtime_ledger()
 
@@ -158,9 +189,19 @@ class _FlowRuntime:
     def _normalized_source_path(self, source_path: "Path | None"):
         return self.polling.normalized_source_path(source_path)
 
-    def _check_flow_stop(self) -> None:
+    def register_run(self, run_id: str) -> None:
+        """Mark one run id as active."""
+        self.run_stop_controller.register_run(run_id)
+
+    def unregister_run(self, run_id: str) -> None:
+        """Clear active and requested state for one completed run id."""
+        self.run_stop_controller.unregister_run(run_id)
+
+    def check_run(self, run_id: str | None) -> None:
+        """Raise when runtime-wide or run-id stop has been requested."""
         if self.flow_stop_event is not None and self.flow_stop_event.is_set():
             raise FlowStoppedError("Flow stop requested by operator.")
+        self.run_stop_controller.check_run(run_id)
 
     def _emit_status(self, message: str) -> None:
         if self.status_callback is not None:

@@ -7,8 +7,9 @@ import threading
 from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.primitives import FlowContext
-from data_engine.authoring.execution.single import _FlowRuntime, RuntimeLedgerService, default_runtime_ledger_service
+from data_engine.runtime.execution.single import _FlowRuntime, RuntimeLedgerService, default_runtime_ledger_service
 from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.stop import RuntimeStopController
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow
@@ -28,11 +29,13 @@ class _GroupedFlowRuntime:
         runtime_ledger: RuntimeLedger | None = None,
         runtime_ledger_service: RuntimeLedgerService | None = None,
         runtime_ledger_factory: Callable[[], RuntimeLedger] | None = None,
+        run_stop_controller: RuntimeStopController | None = None,
     ) -> None:
         self.flows = tuple(flows)
         self.continuous = continuous
         self.runtime_stop_event = runtime_stop_event
         self.flow_stop_event = flow_stop_event
+        self.run_stop_controller = run_stop_controller or RuntimeStopController()
         self.status_callback = status_callback
         self._runtime_ledger_service = runtime_ledger_service or default_runtime_ledger_service()
         self._runtime_ledger_factory = runtime_ledger_factory or self._runtime_ledger_service.open_runtime_ledger
@@ -51,6 +54,7 @@ class _GroupedFlowRuntime:
                 status_callback=self.status_callback,
                 runtime_ledger=self.runtime_ledger,
                 runtime_ledger_service=self._runtime_ledger_service,
+                run_stop_controller=self.run_stop_controller,
             ).run()
 
         results_by_group: dict[str, list[FlowContext]] = {name: [] for name in grouped}
@@ -70,6 +74,7 @@ class _GroupedFlowRuntime:
                     runtime_ledger=self.runtime_ledger,
                     runtime_ledger_service=self._runtime_ledger_service,
                     runtime_ledger_factory=self._runtime_ledger_factory,
+                    run_stop_controller=self.run_stop_controller,
                 )
                 results_by_group[group_name] = runtime.run()
             except Exception as exc:  # pragma: no cover

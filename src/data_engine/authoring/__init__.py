@@ -13,5 +13,5 @@ def __getattr__(name: str):
     if name in {"Flow", "discover_flows", "load_flow", "run"}:
         module = import_module("data_engine.authoring.flow")
         return getattr(module, name)
-    module = import_module("data_engine.authoring.primitives")
+    module = import_module("data_engine.core.primitives")
     return getattr(module, name)

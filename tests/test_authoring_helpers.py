@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from data_engine.authoring.helpers import (
+from data_engine.core.helpers import (
     _callable_identifier,
     _callable_name,
     _normalize_extensions,
@@ -16,7 +16,7 @@ from data_engine.authoring.helpers import (
     _validate_label,
     _validate_slot_name,
 )
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.flow_modules.flow_module_loader import compiled_flow_module_context
 
 

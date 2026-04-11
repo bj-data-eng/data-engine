@@ -10,11 +10,11 @@ from textwrap import dedent
 import duckdb
 import polars as pl
 
-from data_engine.authoring.execution import _FlowRuntime, _GroupedFlowRuntime
 from data_engine.authoring.flow import Flow, load_flow
-from data_engine.authoring.primitives import Batch
-from data_engine.authoring.model import FlowStoppedError
+from data_engine.core.model import FlowStoppedError
+from data_engine.core.primitives import Batch
 from data_engine.flow_modules.flow_module_loader import discover_flow_module_definitions, load_flow_module_definition
+from data_engine.runtime.execution import _FlowRuntime, _GroupedFlowRuntime
 from data_engine.runtime.runtime_db import RuntimeLedger, utcnow_text
 from data_engine.services import FlowCatalogService, FlowExecutionService
 from data_engine.views.models import qt_flow_cards_from_entries

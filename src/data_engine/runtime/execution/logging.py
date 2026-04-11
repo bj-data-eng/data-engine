@@ -4,18 +4,34 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Protocol
 
 from data_engine.domain.time import utcnow_text
-from data_engine.runtime.runtime_db import RuntimeLedger
 
 LOGGER = logging.getLogger(__name__)
+
+
+class RuntimeLogSink(Protocol):
+    """Interface for persisted runtime log writes."""
+
+    def append_log(
+        self,
+        *,
+        level: str,
+        message: str,
+        created_at_utc: str,
+        run_id: str | None = None,
+        flow_name: str | None = None,
+        step_label: str | None = None,
+    ) -> None:
+        """Persist one runtime log line."""
 
 
 class RuntimeLogEmitter:
     """Own runtime log persistence and logger emission."""
 
-    def __init__(self, runtime_ledger: RuntimeLedger) -> None:
-        self.runtime_ledger = runtime_ledger
+    def __init__(self, log_sink: RuntimeLogSink) -> None:
+        self.log_sink = log_sink
 
     def log_runtime_message(
         self,
@@ -28,7 +44,7 @@ class RuntimeLogEmitter:
         exc_info: bool = False,
     ) -> None:
         created_at_utc = utcnow_text()
-        self.runtime_ledger.append_log(
+        self.log_sink.append_log(
             level=level.upper(),
             message=message,
             created_at_utc=created_at_utc,
@@ -80,4 +96,4 @@ class RuntimeLogEmitter:
         )
 
 
-__all__ = ["RuntimeLogEmitter"]
+__all__ = ["RuntimeLogEmitter", "RuntimeLogSink"]

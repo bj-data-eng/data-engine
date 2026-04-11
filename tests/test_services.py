@@ -8,7 +8,7 @@ from time import time_ns
 import pytest
 
 from data_engine.authoring.flow import Flow
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowStoppedError, FlowValidationError
 from data_engine.domain import DaemonLifecyclePolicy, FlowCatalogEntry, WorkspaceControlState
 from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
 from data_engine.platform.local_settings import LocalSettingsStore
@@ -17,6 +17,7 @@ from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.platform.theme import GITHUB_DARK, GITHUB_LIGHT
 import data_engine.runtime.file_watch as file_watch
 from data_engine.runtime.file_watch import PollingWatcher, is_temporary_file_path, iter_candidate_paths
+from data_engine.runtime.stop import RuntimeStopController
 from data_engine.services.daemon import DaemonService
 from data_engine.services.daemon_state import DaemonStateService
 from data_engine.services.flow_catalog import FlowCatalogService, flow_catalog_entry_from_flow
@@ -475,11 +476,12 @@ def test_runtime_execution_service_constructs_runtime_objects():
     class _Runtime:
         instances: list["_Runtime"] = []
 
-        def __init__(self, flows, *, continuous, flow_stop_event=None, runtime_ledger=None):
+        def __init__(self, flows, *, continuous, flow_stop_event=None, runtime_ledger=None, run_stop_controller=None):
             self.flows = flows
             self.continuous = continuous
             self.flow_stop_event = flow_stop_event
             self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
             type(self).instances.append(self)
 
         def run(self):
@@ -491,12 +493,22 @@ def test_runtime_execution_service_constructs_runtime_objects():
     class _GroupedRuntime:
         instances: list["_GroupedRuntime"] = []
 
-        def __init__(self, flows, *, continuous, runtime_stop_event=None, flow_stop_event=None, runtime_ledger=None):
+        def __init__(
+            self,
+            flows,
+            *,
+            continuous,
+            runtime_stop_event=None,
+            flow_stop_event=None,
+            runtime_ledger=None,
+            run_stop_controller=None,
+        ):
             self.flows = flows
             self.continuous = continuous
             self.runtime_stop_event = runtime_stop_event
             self.flow_stop_event = flow_stop_event
             self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
             type(self).instances.append(self)
 
         def run(self):
@@ -520,3 +532,78 @@ def test_runtime_execution_service_constructs_runtime_objects():
     assert _Runtime.instances[3].continuous is True
     assert _GroupedRuntime.instances[0].runtime_stop_event is runtime_stop
     assert _GroupedRuntime.instances[1].flow_stop_event is flow_stop
+
+
+def test_runtime_execution_service_exposes_explicit_engine_commands(tmp_path):
+    flow = Flow(name="claims", group="Claims")
+    source = tmp_path / "claims.csv"
+    source.write_text("claim_id\n1\n", encoding="utf-8")
+
+    class _RunExecutor:
+        def run_one(self, flow, source_path, *, batch_signatures=()):
+            return {
+                "flow": flow.name,
+                "source_path": source_path,
+                "batch_signatures": batch_signatures,
+            }
+
+    class _Polling:
+        def stale_batch_poll_signatures(self, flow):
+            return (f"{flow.name}:signature",)
+
+    class _Runtime:
+        def __init__(self, flows, *, continuous, flow_stop_event=None, runtime_ledger=None, run_stop_controller=None):
+            self.flows = flows
+            self.continuous = continuous
+            self.flow_stop_event = flow_stop_event
+            self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
+            self.run_executor = _RunExecutor()
+            self.polling = _Polling()
+            self.closed = False
+
+        def _validate(self):
+            return None
+
+        def _close_owned_runtime_ledger(self):
+            self.closed = True
+
+        def run_source(self, flow, source_path):
+            self._validate()
+            try:
+                return self.run_executor.run_one(flow, source_path)
+            finally:
+                self._close_owned_runtime_ledger()
+
+        def run_batch(self, flow):
+            self._validate()
+            try:
+                return self.run_executor.run_one(
+                    flow,
+                    None,
+                    batch_signatures=self.polling.stale_batch_poll_signatures(flow),
+                )
+            finally:
+                self._close_owned_runtime_ledger()
+
+    service = RuntimeExecutionService(flow_runtime_type=_Runtime)
+
+    assert service.run_source(flow, source) == {
+        "flow": "claims",
+        "source_path": source,
+        "batch_signatures": (),
+    }
+    assert service.run_batch(flow) == {
+        "flow": "claims",
+        "source_path": None,
+        "batch_signatures": ("claims:signature",),
+    }
+
+
+def test_runtime_execution_service_stop_requests_run_id_on_controller():
+    controller = RuntimeStopController()
+    controller.register_run("run-123")
+    RuntimeExecutionService(run_stop_controller=controller).stop("run-123")
+
+    with pytest.raises(FlowStoppedError, match="run-123"):
+        controller.check_run("run-123")

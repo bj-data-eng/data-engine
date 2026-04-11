@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.flow_modules.flow_module_compiler import compile_flow_module_notebook, compile_stale_flow_module_notebooks
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 

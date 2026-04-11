@@ -41,10 +41,36 @@ Core Runtime Models
    :undoc-members:
    :show-inheritance:
 
+Runtime Engine
+--------------
+
+.. automodule:: data_engine.runtime.engine
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: data_engine.runtime.execution
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: data_engine.runtime.stop
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 File Watching
 -------------
 
 .. automodule:: data_engine.runtime.file_watch
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Host Surfaces
+-------------
+
+.. automodule:: data_engine.hosts.scheduler
    :members:
    :undoc-members:
    :show-inheritance:

@@ -7,12 +7,13 @@ import threading
 import polars as pl
 import pytest
 
-from data_engine.authoring.execution import _FlowRuntime, _GroupedFlowRuntime
 from data_engine.authoring.flow import Flow, discover_flows, load_flow, run
-from data_engine.authoring.primitives import Batch, FileRef, MirrorContext, SourceContext
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowStoppedError, FlowValidationError
+from data_engine.core.primitives import Batch, FileRef, MirrorContext, SourceContext
 from data_engine.flow_modules.flow_module_loader import compiled_flow_module_context
+from data_engine.runtime.execution import _FlowRuntime, _GroupedFlowRuntime
 from data_engine.runtime.runtime_db import RuntimeLedger
+from data_engine.runtime.stop import RuntimeStopController
 
 
 def test_flow_requires_non_empty_name_group_and_label():
@@ -923,6 +924,22 @@ def test_runtime_stops_when_flow_stop_event_is_set():
 
     with pytest.raises(Exception, match="stop requested"):
         _FlowRuntime((flow,), continuous=False, flow_stop_event=stop_event).run()
+
+
+def test_runtime_stops_specific_run_id_between_steps():
+    controller = RuntimeStopController()
+
+    def request_stop(context):
+        controller.request_stop(str(context.metadata["run_id"]))
+        return context.current
+
+    def should_not_run(context):
+        raise AssertionError("The stopped run should not reach this step.")
+
+    flow = Flow(name="run_id_stopped", group="Claims").step(request_stop).step(should_not_run)
+
+    with pytest.raises(FlowStoppedError, match="Run stop requested"):
+        _FlowRuntime((flow,), continuous=False, run_stop_controller=controller).run()
 
 
 def test_poll_rejects_negative_settle(tmp_path):

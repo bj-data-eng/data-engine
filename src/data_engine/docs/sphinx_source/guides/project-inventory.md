@@ -3,7 +3,7 @@
 This page is generated from the current AST map and is intentionally inventory-shaped rather than explanatory.
 
 - package root: `src/data_engine`
-- module count: `178`
+- module count: `177`
 
 - module `data_engine`
   - attribute `__all__`
@@ -345,273 +345,6 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `__all__`
   - function `__getattr__`
     - param `name: str`
-- module `data_engine.authoring.builder`
-  - attribute `__all__`
-- module `data_engine.authoring.execution`
-  - attribute `__all__`
-- module `data_engine.authoring.execution.app`
-  - attribute `__all__`
-- module `data_engine.authoring.execution.context`
-  - attribute `__all__`
-  - class `_QueuedJob`
-    - attribute `flow`
-    - attribute `source_path`
-    - attribute `batch_signatures`
-  - class `RuntimeContextBuilder`
-    - method `_source_key_text`
-      - param `*`
-      - param `source_path: Path | None`
-      - param `relative_path: Path | None`
-    - method `_source_file_hash`
-      - param `cls`
-      - param `*`
-      - param `source_path: Path | None`
-      - param `relative_path: Path | None`
-    - method `new_run_id`
-      - param `self`
-    - method `build`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `source_path: Path | None`
-      - param `*`
-      - param `run_id: str`
-- module `data_engine.authoring.execution.continuous`
-  - attribute `__all__`
-  - class `ContinuousRuntimeLoop`
-    - instance attribute `runtime`
-    - method `__init__`
-      - param `self`
-      - param `runtime: '_FlowRuntime'`
-    - method `run`
-      - param `self`
-    - method `_poll_watch_entries`
-      - param `self`
-      - param `watch_entries: list[dict[str, object]]`
-      - param `queue: deque[_QueuedJob]`
-      - param `queued_keys: set[tuple[str, str | None]]`
-      - param `now: float`
-    - method `_update_schedule_entries`
-      - param `self`
-      - param `schedule_entries: list[dict[str, object]]`
-      - param `now: float`
-- module `data_engine.authoring.execution.grouped`
-  - attribute `__all__`
-  - class `_GroupedFlowRuntime`
-    - instance attribute `flows`
-    - instance attribute `continuous`
-    - instance attribute `runtime_stop_event`
-    - instance attribute `flow_stop_event`
-    - instance attribute `status_callback`
-    - instance attribute `_runtime_ledger_service`
-    - instance attribute `_runtime_ledger_factory`
-    - instance attribute `_owns_runtime_ledger`
-    - instance attribute `runtime_ledger`
-    - method `__init__`
-      - param `self`
-      - param `flows: tuple['Flow', ...]`
-      - param `*`
-      - param `continuous: bool`
-      - param `runtime_stop_event: threading.Event | None=None`
-      - param `flow_stop_event: threading.Event | None=None`
-      - param `status_callback: Callable[[str], None] | None=None`
-      - param `runtime_ledger: RuntimeLedger | None=None`
-      - param `runtime_ledger_service: RuntimeLedgerService | None=None`
-      - param `runtime_ledger_factory: Callable[[], RuntimeLedger] | None=None`
-    - method `run`
-      - param `self`
-    - method `_grouped_flows`
-      - param `self`
-- module `data_engine.authoring.execution.logging`
-  - attribute `LOGGER`
-  - attribute `__all__`
-  - class `RuntimeLogEmitter`
-    - instance attribute `runtime_ledger`
-    - method `__init__`
-      - param `self`
-      - param `runtime_ledger: RuntimeLedger`
-    - method `log_runtime_message`
-      - param `self`
-      - param `message: str`
-      - param `*`
-      - param `level: str`
-      - param `run_id: str | None`
-      - param `flow_name: str | None`
-      - param `step_label: str | None=None`
-      - param `exc_info: bool=False`
-    - method `log_flow_event`
-      - param `self`
-      - param `run_id: str`
-      - param `flow_name: str`
-      - param `source_path: Path | None`
-      - param `*`
-      - param `status: str`
-      - param `elapsed: float | None=None`
-      - param `level: str='info'`
-      - param `exc_info: bool=False`
-    - method `log_step_event`
-      - param `self`
-      - param `run_id: str`
-      - param `flow_name: str`
-      - param `step_label: str`
-      - param `source_path: Path | None`
-      - param `*`
-      - param `status: str`
-      - param `elapsed: float | None=None`
-      - param `level: str='info'`
-      - param `exc_info: bool=False`
-- module `data_engine.authoring.execution.polling`
-  - attribute `__all__`
-  - class `RuntimePollingSupport`
-    - instance attribute `runtime_ledger`
-    - method `__init__`
-      - param `self`
-      - param `runtime_ledger: RuntimeLedger`
-    - method `make_watcher`
-      - param `self`
-      - param `trigger: WatchSpec`
-    - method `startup_sources`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `*`
-      - param `allow_missing: bool=False`
-    - method `enqueue_job`
-      - param `self`
-      - param `queue: deque[_QueuedJob]`
-      - param `queued_keys: set[tuple[str, str | None]]`
-      - param `flow: 'Flow'`
-      - param `source_path: Path | None`
-      - param `*`
-      - param `batch_signatures: tuple[SourceSignature, ...]=()`
-    - method `job_key`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `source_path: Path | None`
-    - method `stale_poll_sources`
-      - param `self`
-      - param `flow: 'Flow'`
-    - method `stale_batch_poll_signatures`
-      - param `self`
-      - param `flow: 'Flow'`
-    - method `is_poll_source_stale`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `source_path: Path | None`
-    - method `poll_source_signature`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `source_path: Path | None`
-    - method `normalized_source_path`
-      - param `self`
-      - param `source_path: Path | None`
-- module `data_engine.authoring.execution.runner`
-  - attribute `__all__`
-  - class `FlowRunExecutor`
-    - instance attribute `runtime`
-    - method `__init__`
-      - param `self`
-      - param `runtime: '_FlowRuntime'`
-    - method `run_one`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `source_path: 'Path | None'`
-      - param `*`
-      - param `batch_signatures=()`
-    - method `preview_one`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `source_path: 'Path | None'`
-      - param `*`
-      - param `use: str | None`
-    - method `_ensure_runtime_sources_available`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `context: FlowContext`
-      - param `source_path: 'Path | None'`
-    - method `_load_current_for_step`
-      - param `self`
-      - param `context: FlowContext`
-      - param `step: 'StepSpec'`
-- module `data_engine.authoring.execution.single`
-  - attribute `__all__`
-  - function `_open_default_runtime_ledger`
-  - function `default_runtime_ledger_service`
-  - class `RuntimeLedgerService`
-    - attribute `open_runtime_ledger_func`
-    - method `open_runtime_ledger`
-      - param `self`
-  - class `_FlowRuntime`
-    - instance attribute `flows`
-    - instance attribute `continuous`
-    - instance attribute `runtime_stop_event`
-    - instance attribute `flow_stop_event`
-    - instance attribute `status_callback`
-    - instance attribute `_runtime_ledger_factory`
-    - instance attribute `_owns_runtime_ledger`
-    - instance attribute `runtime_ledger`
-    - instance attribute `context_builder`
-    - instance attribute `log_emitter`
-    - instance attribute `polling`
-    - instance attribute `run_executor`
-    - instance attribute `continuous_loop`
-    - method `__init__`
-      - param `self`
-      - param `flows: tuple['Flow', ...]`
-      - param `*`
-      - param `continuous: bool`
-      - param `runtime_stop_event: threading.Event | None=None`
-      - param `flow_stop_event: threading.Event | None=None`
-      - param `status_callback: Callable[[str], None] | None=None`
-      - param `runtime_ledger: RuntimeLedger | None=None`
-      - param `runtime_ledger_service: RuntimeLedgerService | None=None`
-      - param `runtime_ledger_factory: Callable[[], RuntimeLedger] | None=None`
-    - method `run`
-      - param `self`
-    - method `preview`
-      - param `self`
-      - param `*`
-      - param `use: str | None=None`
-    - method `_close_owned_runtime_ledger`
-      - param `self`
-    - method `_validate`
-      - param `self`
-    - method `_run_once_all`
-      - param `self`
-    - method `_preview_one`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `source_path: 'Path | None'`
-      - param `*`
-      - param `use: str | None`
-    - method `_make_watcher`
-      - param `self`
-      - param `trigger: WatchSpec`
-    - method `_startup_sources`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `*`
-      - param `allow_missing: bool=False`
-    - method `_stale_poll_sources`
-      - param `self`
-      - param `flow: 'Flow'`
-    - method `_stale_batch_poll_signatures`
-      - param `self`
-      - param `flow: 'Flow'`
-    - method `_is_poll_source_stale`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `source_path: 'Path | None'`
-    - method `_poll_source_signature`
-      - param `self`
-      - param `flow: 'Flow'`
-      - param `source_path: 'Path | None'`
-    - method `_normalized_source_path`
-      - param `self`
-      - param `source_path: 'Path | None'`
-    - method `_check_flow_stop`
-      - param `self`
-    - method `_emit_status`
-      - param `self`
-      - param `message: str`
 - module `data_engine.authoring.flow`
   - attribute `__all__`
   - function `_resolve_authoring_services`
@@ -653,12 +386,6 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `*`
       - param `authoring_services: AuthoringServices | None=None`
       - param `runtime_execution_service: RuntimeExecutionService | None=None`
-- module `data_engine.authoring.helpers`
-  - attribute `__all__`
-- module `data_engine.authoring.model`
-  - attribute `__all__`
-- module `data_engine.authoring.primitives`
-  - attribute `__all__`
 - module `data_engine.authoring.services`
   - attribute `__all__`
   - function `build_authoring_services`
@@ -1933,7 +1660,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `df: pl.DataFrame | pl.LazyFrame`
 - module `data_engine.hosts`
-  - no top-level symbols
+  - attribute `__all__`
 - module `data_engine.hosts.daemon`
   - attribute `__all__`
 - module `data_engine.hosts.daemon.app`
@@ -2553,6 +2280,62 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `*`
       - param `status: str`
+- module `data_engine.hosts.scheduler`
+  - attribute `__all__`
+  - class `SchedulerPort`
+    - method `add_job`
+      - param `self`
+      - param `func`
+      - param `*`
+      - param `trigger`
+      - param `id: str`
+      - param `replace_existing: bool=False`
+      - param `max_instances: int=1`
+    - method `remove_job`
+      - param `self`
+      - param `job_id: str`
+    - method `start`
+      - param `self`
+    - method `shutdown`
+      - param `self`
+      - param `wait: bool=True`
+  - class `ScheduledFlowJob`
+    - attribute `job_id`
+    - attribute `flow_name`
+    - attribute `trigger_kind`
+  - class `SchedulerHost`
+    - instance attribute `runtime_engine`
+    - instance attribute `scheduler`
+    - instance attribute `job_id_prefix`
+    - instance attribute `_lock`
+    - instance attribute `_job_ids`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `runtime_engine: RuntimeEngine | None=None`
+      - param `scheduler: SchedulerPort | None=None`
+      - param `job_id_prefix: str='data-engine:schedule:'`
+    - method `rebuild_jobs`
+      - param `self`
+      - param `flows: tuple['Flow', ...]`
+    - method `start`
+      - param `self`
+    - method `shutdown`
+      - param `self`
+      - param `*`
+      - param `wait: bool=True`
+    - method `_remove_known_jobs`
+      - param `self`
+    - method `_add_flow_jobs`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `_run_flow`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `_job_id`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `suffix: str`
 - module `data_engine.platform`
   - no top-level symbols
 - module `data_engine.platform.identity`
@@ -2884,6 +2667,482 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `workspace_id: str`
 - module `data_engine.runtime`
   - no top-level symbols
+- module `data_engine.runtime.engine`
+  - attribute `__all__`
+  - class `RuntimeEngine`
+    - instance attribute `runtime_ledger`
+    - instance attribute `runtime_stop_event`
+    - instance attribute `flow_stop_event`
+    - instance attribute `status_callback`
+    - instance attribute `flow_runtime_type`
+    - instance attribute `grouped_runtime_type`
+    - instance attribute `run_stop_controller`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_stop_event: Event | None=None`
+      - param `flow_stop_event: Event | None=None`
+      - param `status_callback: Callable[[str], None] | None=None`
+      - param `flow_runtime_type: type[_FlowRuntime]=_FlowRuntime`
+      - param `grouped_runtime_type: type[_GroupedFlowRuntime]=_GroupedFlowRuntime`
+      - param `run_stop_controller: RuntimeStopController | None=None`
+    - method `run_once`
+      - param `self`
+      - param `flow: 'CoreFlow'`
+    - method `run_source`
+      - param `self`
+      - param `flow: 'CoreFlow'`
+      - param `source_path: str | Path`
+    - method `run_batch`
+      - param `self`
+      - param `flow: 'CoreFlow'`
+    - method `preview`
+      - param `self`
+      - param `flow: 'CoreFlow'`
+      - param `*`
+      - param `use: str | None=None`
+    - method `run_continuous`
+      - param `self`
+      - param `flow: 'CoreFlow'`
+    - method `run_grouped`
+      - param `self`
+      - param `flows: tuple['CoreFlow', ...]`
+      - param `*`
+      - param `continuous: bool=True`
+    - method `stop`
+      - param `self`
+      - param `run_id: str`
+    - method `_flow_runtime`
+      - param `self`
+      - param `flows: tuple['CoreFlow', ...]`
+      - param `*`
+      - param `continuous: bool`
+    - method `_flow_runtime_kwargs`
+      - param `self`
+    - method `_grouped_runtime_kwargs`
+      - param `self`
+- module `data_engine.runtime.execution`
+  - attribute `__all__`
+- module `data_engine.runtime.execution.app`
+  - attribute `__all__`
+- module `data_engine.runtime.execution.context`
+  - attribute `__all__`
+  - class `_QueuedJob`
+    - attribute `flow`
+    - attribute `source_path`
+    - attribute `batch_signatures`
+  - class `RuntimeContextBuilder`
+    - method `_source_key_text`
+      - param `*`
+      - param `source_path: Path | None`
+      - param `relative_path: Path | None`
+    - method `_source_file_hash`
+      - param `cls`
+      - param `*`
+      - param `source_path: Path | None`
+      - param `relative_path: Path | None`
+    - method `new_run_id`
+      - param `self`
+    - method `build`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `run_id: str`
+- module `data_engine.runtime.execution.continuous`
+  - attribute `__all__`
+  - class `ContinuousRuntimeLoop`
+    - instance attribute `runtime`
+    - method `__init__`
+      - param `self`
+      - param `runtime: '_FlowRuntime'`
+    - method `run`
+      - param `self`
+    - method `_poll_watch_entries`
+      - param `self`
+      - param `watch_entries: list[dict[str, object]]`
+      - param `queue: deque[_QueuedJob]`
+      - param `queued_keys: set[tuple[str, str | None]]`
+      - param `now: float`
+    - method `_update_schedule_entries`
+      - param `self`
+      - param `schedule_entries: list[dict[str, object]]`
+      - param `now: float`
+- module `data_engine.runtime.execution.grouped`
+  - attribute `__all__`
+  - class `_GroupedFlowRuntime`
+    - instance attribute `flows`
+    - instance attribute `continuous`
+    - instance attribute `runtime_stop_event`
+    - instance attribute `flow_stop_event`
+    - instance attribute `run_stop_controller`
+    - instance attribute `status_callback`
+    - instance attribute `_runtime_ledger_service`
+    - instance attribute `_runtime_ledger_factory`
+    - instance attribute `_owns_runtime_ledger`
+    - instance attribute `runtime_ledger`
+    - method `__init__`
+      - param `self`
+      - param `flows: tuple['Flow', ...]`
+      - param `*`
+      - param `continuous: bool`
+      - param `runtime_stop_event: threading.Event | None=None`
+      - param `flow_stop_event: threading.Event | None=None`
+      - param `status_callback: Callable[[str], None] | None=None`
+      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `runtime_ledger_service: RuntimeLedgerService | None=None`
+      - param `runtime_ledger_factory: Callable[[], RuntimeLedger] | None=None`
+      - param `run_stop_controller: RuntimeStopController | None=None`
+    - method `run`
+      - param `self`
+    - method `_grouped_flows`
+      - param `self`
+- module `data_engine.runtime.execution.logging`
+  - attribute `LOGGER`
+  - attribute `__all__`
+  - class `RuntimeLogSink`
+    - method `append_log`
+      - param `self`
+      - param `*`
+      - param `level: str`
+      - param `message: str`
+      - param `created_at_utc: str`
+      - param `run_id: str | None=None`
+      - param `flow_name: str | None=None`
+      - param `step_label: str | None=None`
+  - class `RuntimeLogEmitter`
+    - instance attribute `log_sink`
+    - method `__init__`
+      - param `self`
+      - param `log_sink: RuntimeLogSink`
+    - method `log_runtime_message`
+      - param `self`
+      - param `message: str`
+      - param `*`
+      - param `level: str`
+      - param `run_id: str | None`
+      - param `flow_name: str | None`
+      - param `step_label: str | None=None`
+      - param `exc_info: bool=False`
+    - method `log_flow_event`
+      - param `self`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `status: str`
+      - param `elapsed: float | None=None`
+      - param `level: str='info'`
+      - param `exc_info: bool=False`
+    - method `log_step_event`
+      - param `self`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `step_label: str`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `status: str`
+      - param `elapsed: float | None=None`
+      - param `level: str='info'`
+      - param `exc_info: bool=False`
+- module `data_engine.runtime.execution.polling`
+  - attribute `__all__`
+  - class `RuntimeSourceStateStore`
+    - method `normalize_source_path`
+      - param `self`
+      - param `source_path: Path | str`
+    - method `source_signature_for_path`
+      - param `self`
+      - param `source_path: Path`
+    - method `is_poll_source_stale`
+      - param `self`
+      - param `flow_name: str`
+      - param `signature: SourceSignature | None`
+    - method `prune_missing_file_state`
+      - param `self`
+      - param `*`
+      - param `flow_name: str`
+      - param `current_source_paths: set[str]`
+  - class `RuntimePollingSupport`
+    - instance attribute `source_state_store`
+    - method `__init__`
+      - param `self`
+      - param `source_state_store: RuntimeSourceStateStore`
+    - method `make_watcher`
+      - param `self`
+      - param `trigger: WatchSpec`
+    - method `startup_sources`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `*`
+      - param `allow_missing: bool=False`
+    - method `enqueue_job`
+      - param `self`
+      - param `queue: deque[_QueuedJob]`
+      - param `queued_keys: set[tuple[str, str | None]]`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `batch_signatures: tuple[SourceSignature, ...]=()`
+    - method `job_key`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+    - method `stale_poll_sources`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `stale_batch_poll_signatures`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `is_poll_source_stale`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+    - method `poll_source_signature`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+    - method `normalized_source_path`
+      - param `self`
+      - param `source_path: Path | None`
+- module `data_engine.runtime.execution.runner`
+  - attribute `__all__`
+  - class `FlowContextBuilderPort`
+    - method `new_run_id`
+      - param `self`
+    - method `build`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `run_id: str`
+  - class `RuntimeSourceStatePort`
+    - method `poll_source_signature`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: Path | None`
+    - method `normalized_source_path`
+      - param `self`
+      - param `source_path: Path | None`
+  - class `RuntimeStateWriterPort`
+    - method `record_run_started`
+      - param `self`
+      - param `*`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `group_name: str`
+      - param `source_path: str | None`
+      - param `started_at_utc: str`
+    - method `record_run_finished`
+      - param `self`
+      - param `*`
+      - param `run_id: str`
+      - param `status: str`
+      - param `finished_at_utc: str`
+      - param `error_text: str | None=None`
+    - method `record_step_started`
+      - param `self`
+      - param `*`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `step_label: str`
+      - param `started_at_utc: str`
+    - method `record_step_finished`
+      - param `self`
+      - param `*`
+      - param `step_run_id: int`
+      - param `status: str`
+      - param `finished_at_utc: str`
+      - param `elapsed_ms: int | None`
+      - param `error_text: str | None=None`
+      - param `output_path: str | None=None`
+    - method `upsert_file_state`
+      - param `self`
+      - param `*`
+      - param `flow_name: str`
+      - param `signature: SourceSignature`
+      - param `status: str`
+      - param `run_id: str | None=None`
+      - param `finished_at_utc: str | None=None`
+      - param `error_text: str | None=None`
+  - class `RuntimeEventWriterPort`
+    - method `log_runtime_message`
+      - param `self`
+      - param `message: str`
+      - param `*`
+      - param `level: str`
+      - param `run_id: str | None`
+      - param `flow_name: str | None`
+      - param `step_label: str | None=None`
+      - param `exc_info: bool=False`
+    - method `log_flow_event`
+      - param `self`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `status: str`
+      - param `elapsed: float | None=None`
+      - param `level: str='info'`
+      - param `exc_info: bool=False`
+    - method `log_step_event`
+      - param `self`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `step_label: str`
+      - param `source_path: Path | None`
+      - param `*`
+      - param `status: str`
+      - param `elapsed: float | None=None`
+      - param `level: str='info'`
+      - param `exc_info: bool=False`
+  - class `RuntimeStopPort`
+    - method `register_run`
+      - param `self`
+      - param `run_id: str`
+    - method `unregister_run`
+      - param `self`
+      - param `run_id: str`
+    - method `check_run`
+      - param `self`
+      - param `run_id: str | None`
+  - class `FlowRunExecutionPorts`
+    - attribute `context_builder`
+    - attribute `polling`
+    - attribute `runtime_ledger`
+    - attribute `log_emitter`
+    - attribute `stop_controller`
+  - class `FlowRunExecutor`
+    - instance attribute `ports`
+    - method `__init__`
+      - param `self`
+      - param `ports: FlowRunExecutionPorts`
+    - method `run_one`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+      - param `*`
+      - param `batch_signatures=()`
+    - method `_run_one_registered`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+      - param `*`
+      - param `run_id: str`
+      - param `batch_signatures=()`
+    - method `preview_one`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+      - param `*`
+      - param `use: str | None`
+    - method `_ensure_runtime_sources_available`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `context: FlowContext`
+      - param `source_path: 'Path | None'`
+    - method `_load_current_for_step`
+      - param `self`
+      - param `context: FlowContext`
+      - param `step: 'StepSpec'`
+- module `data_engine.runtime.execution.single`
+  - attribute `__all__`
+  - function `_open_default_runtime_ledger`
+  - function `default_runtime_ledger_service`
+  - class `RuntimeLedgerService`
+    - attribute `open_runtime_ledger_func`
+    - method `open_runtime_ledger`
+      - param `self`
+  - class `_FlowRuntime`
+    - instance attribute `flows`
+    - instance attribute `continuous`
+    - instance attribute `runtime_stop_event`
+    - instance attribute `flow_stop_event`
+    - instance attribute `run_stop_controller`
+    - instance attribute `status_callback`
+    - instance attribute `_runtime_ledger_factory`
+    - instance attribute `_owns_runtime_ledger`
+    - instance attribute `runtime_ledger`
+    - instance attribute `context_builder`
+    - instance attribute `log_emitter`
+    - instance attribute `polling`
+    - instance attribute `run_executor`
+    - instance attribute `continuous_loop`
+    - method `__init__`
+      - param `self`
+      - param `flows: tuple['Flow', ...]`
+      - param `*`
+      - param `continuous: bool`
+      - param `runtime_stop_event: threading.Event | None=None`
+      - param `flow_stop_event: threading.Event | None=None`
+      - param `status_callback: Callable[[str], None] | None=None`
+      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `runtime_ledger_service: RuntimeLedgerService | None=None`
+      - param `runtime_ledger_factory: Callable[[], RuntimeLedger] | None=None`
+      - param `run_stop_controller: RuntimeStopController | None=None`
+    - method `run`
+      - param `self`
+    - method `preview`
+      - param `self`
+      - param `*`
+      - param `use: str | None=None`
+    - method `run_source`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: str | Path`
+    - method `run_batch`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `_close_owned_runtime_ledger`
+      - param `self`
+    - method `_validate`
+      - param `self`
+    - method `_run_once_all`
+      - param `self`
+    - method `_preview_one`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+      - param `*`
+      - param `use: str | None`
+    - method `_make_watcher`
+      - param `self`
+      - param `trigger: WatchSpec`
+    - method `_startup_sources`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `*`
+      - param `allow_missing: bool=False`
+    - method `_stale_poll_sources`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `_stale_batch_poll_signatures`
+      - param `self`
+      - param `flow: 'Flow'`
+    - method `_is_poll_source_stale`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+    - method `_poll_source_signature`
+      - param `self`
+      - param `flow: 'Flow'`
+      - param `source_path: 'Path | None'`
+    - method `_normalized_source_path`
+      - param `self`
+      - param `source_path: 'Path | None'`
+    - method `register_run`
+      - param `self`
+      - param `run_id: str`
+    - method `unregister_run`
+      - param `self`
+      - param `run_id: str`
+    - method `check_run`
+      - param `self`
+      - param `run_id: str | None`
+    - method `_emit_status`
+      - param `self`
+      - param `message: str`
 - module `data_engine.runtime.file_watch`
   - attribute `__all__`
   - function `_normalized_name`
@@ -3303,6 +3562,28 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `paths: WorkspacePaths`
     - param `*`
     - param `retries: int=_PARQUET_READ_RETRIES`
+- module `data_engine.runtime.stop`
+  - attribute `__all__`
+  - class `RuntimeStopController`
+    - instance attribute `_lock`
+    - instance attribute `_requested_run_ids`
+    - instance attribute `_active_run_ids`
+    - method `__init__`
+      - param `self`
+    - method `request_stop`
+      - param `self`
+      - param `run_id: str`
+    - method `register_run`
+      - param `self`
+      - param `run_id: str`
+    - method `unregister_run`
+      - param `self`
+      - param `run_id: str`
+    - method `check_run`
+      - param `self`
+      - param `run_id: str | None`
+    - method `active_run_ids`
+      - param `self`
 - module `data_engine.services`
   - attribute `__all__`
   - attribute `_SERVICE_MODULES`
@@ -3578,12 +3859,35 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `RuntimeExecutionService`
     - instance attribute `_flow_runtime_type`
     - instance attribute `_grouped_runtime_type`
+    - instance attribute `_runtime_engine_type`
+    - instance attribute `_run_stop_controller`
     - method `__init__`
       - param `self`
       - param `*`
       - param `flow_runtime_type: type[_FlowRuntime]=_FlowRuntime`
       - param `grouped_runtime_type: type[_GroupedFlowRuntime]=_GroupedFlowRuntime`
+      - param `runtime_engine_type: type[RuntimeEngine]=RuntimeEngine`
+      - param `run_stop_controller: RuntimeStopController | None=None`
+    - method `_engine`
+      - param `self`
+      - param `*`
+      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_stop_event: Event | None=None`
+      - param `flow_stop_event: Event | None=None`
     - method `run_once`
+      - param `self`
+      - param `flow: 'CoreFlow'`
+      - param `*`
+      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `flow_stop_event: Event | None=None`
+    - method `run_source`
+      - param `self`
+      - param `flow: 'CoreFlow'`
+      - param `source_path: str`
+      - param `*`
+      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `flow_stop_event: Event | None=None`
+    - method `run_batch`
       - param `self`
       - param `flow: 'CoreFlow'`
       - param `*`
@@ -3620,6 +3924,11 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `*`
       - param `runtime_ledger: RuntimeCacheLedger | None=None`
       - param `runtime_stop_event: Event | None=None`
+      - param `flow_stop_event: Event | None=None`
+    - method `stop`
+      - param `self`
+      - param `run_id: str`
+      - param `*`
       - param `flow_stop_event: Event | None=None`
 - module `data_engine.services.runtime_history`
   - attribute `__all__`

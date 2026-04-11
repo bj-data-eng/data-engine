@@ -10,7 +10,7 @@ from data_engine.application import (
     RuntimeApplication,
     WorkspaceSessionApplication,
 )
-from data_engine.authoring.model import FlowValidationError
+from data_engine.core.model import FlowValidationError
 from data_engine.domain import (
     DaemonLifecyclePolicy,
     FlowCatalogEntry,
