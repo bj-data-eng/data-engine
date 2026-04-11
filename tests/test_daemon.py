@@ -1264,7 +1264,7 @@ def test_start_engine_retries_after_empty_automated_flow_snapshot(tmp_path, monk
         )
         monkeypatch.setattr(
             service.runtime_execution_service,
-            "run_grouped",
+            "run_automated",
             lambda flows, runtime_ledger, runtime_stop_event, flow_stop_event: [],
         )
 
@@ -1440,7 +1440,7 @@ def test_start_engine_coalesces_duplicate_start_while_first_start_is_loading(tmp
         monkeypatch.setattr(service.flow_execution_service, "load_flows", _load_flows)
         monkeypatch.setattr(
             service.runtime_execution_service,
-            "run_grouped",
+            "run_automated",
             lambda flows, runtime_ledger, runtime_stop_event, flow_stop_event: [],
         )
 

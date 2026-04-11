@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from threading import Lock
+from threading import Event, Lock
 from typing import TYPE_CHECKING, Protocol
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -75,6 +75,18 @@ class SchedulerHost:
     def shutdown(self, *, wait: bool = True) -> None:
         """Stop the underlying scheduler."""
         self.scheduler.shutdown(wait=wait)
+
+    def run_until_stopped(self, flows: tuple["Flow", ...], stop_event: Event) -> tuple[ScheduledFlowJob, ...]:
+        """Run scheduled flow jobs until ``stop_event`` is set."""
+        jobs = self.rebuild_jobs(flows)
+        if not jobs:
+            return jobs
+        try:
+            self.start()
+            stop_event.wait()
+        finally:
+            self.shutdown()
+        return jobs
 
     def _remove_known_jobs(self) -> None:
         for job_id in tuple(self._job_ids):

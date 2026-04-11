@@ -1,9 +1,8 @@
-"""Continuous watch/schedule loop for one sequential flow runtime."""
+"""Continuous polling loop for one sequential flow runtime."""
 
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime
 from time import monotonic, sleep
 from typing import TYPE_CHECKING
 
@@ -18,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class ContinuousRuntimeLoop:
-    """Own the watch/schedule loop for one sequential runtime."""
+    """Own the polling loop for one sequential runtime."""
 
     def __init__(self, runtime: "_FlowRuntime") -> None:
         self.runtime = runtime
@@ -28,7 +27,6 @@ class ContinuousRuntimeLoop:
         queue: deque[_QueuedJob] = deque()
         queued_keys: set[tuple[str, str | None]] = set()
         watch_entries: list[dict[str, object]] = []
-        schedule_entries: list[dict[str, object]] = []
         now = monotonic()
 
         for flow in self.runtime.flows:
@@ -50,39 +48,15 @@ class ContinuousRuntimeLoop:
                         "watcher": watcher,
                     }
                 )
-            elif isinstance(flow.trigger, WatchSpec) and flow.trigger.mode == "schedule":
-                if flow.trigger.interval_seconds is not None:
-                    schedule_entries.append(
-                        {
-                            "flow": flow,
-                            "kind": "every",
-                            "interval": flow.trigger.interval_seconds,
-                            "next_due": now + float(flow.trigger.interval_seconds),
-                            "pending": False,
-                        }
-                    )
-                else:
-                    for hour, minute in flow.trigger.time_slots:
-                        schedule_entries.append(
-                            {
-                                "flow": flow,
-                                "kind": "at",
-                                "hour": hour,
-                                "minute": minute,
-                                "pending": False,
-                                "last_run_date": None,
-                            }
-                        )
 
-        self.runtime._emit_status("Watcher/scheduler running.")
+        self.runtime._emit_status("Polling watcher running.")
         try:
             while True:
                 if self.runtime.runtime_stop_event is not None and self.runtime.runtime_stop_event.is_set():
-                    self.runtime._emit_status("Watcher/scheduler stopped.")
+                    self.runtime._emit_status("Polling watcher stopped.")
                     break
                 now = monotonic()
                 self._poll_watch_entries(watch_entries, queue, queued_keys, now)
-                self._update_schedule_entries(schedule_entries, now)
 
                 job = queue.popleft() if queue else None
                 if job is not None:
@@ -95,20 +69,6 @@ class ContinuousRuntimeLoop:
                                 batch_signatures=job.batch_signatures,
                             )
                         )
-                    except FlowStoppedError:
-                        if self.runtime.flow_stop_event is not None:
-                            self.runtime.flow_stop_event.clear()
-                    except Exception:
-                        continue
-                    continue
-
-                scheduled = next((entry for entry in schedule_entries if entry["pending"]), None)
-                if scheduled is not None:
-                    scheduled["pending"] = False
-                    scheduled_flow = scheduled["flow"]
-                    try:
-                        for source_path in self.runtime.polling.startup_sources(scheduled_flow):
-                            results.append(self.runtime.run_executor.run_one(scheduled_flow, source_path))
                     except FlowStoppedError:
                         if self.runtime.flow_stop_event is not None:
                             self.runtime.flow_stop_event.clear()
@@ -153,22 +113,5 @@ class ContinuousRuntimeLoop:
                 if self.runtime.polling.is_poll_source_stale(watched_flow, path):
                     self.runtime.polling.enqueue_job(queue, queued_keys, watched_flow, path)
             entry["next_poll"] = now + float(entry["interval"])
-
-    def _update_schedule_entries(self, schedule_entries: list[dict[str, object]], now: float) -> None:
-        for entry in schedule_entries:
-            if entry["kind"] == "every":
-                if now >= entry["next_due"]:
-                    entry["pending"] = True
-                    entry["next_due"] = now + float(entry["interval"])
-                continue
-        current_dt = datetime.now()
-        for entry in schedule_entries:
-            if entry["kind"] != "at":
-                continue
-            if entry["last_run_date"] == current_dt.date():
-                continue
-            if (current_dt.hour, current_dt.minute) >= (entry["hour"], entry["minute"]):
-                entry["pending"] = True
-                entry["last_run_date"] = current_dt.date()
 
 __all__ = ["ContinuousRuntimeLoop"]

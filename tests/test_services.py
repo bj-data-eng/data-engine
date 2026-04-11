@@ -607,3 +607,92 @@ def test_runtime_execution_service_stop_requests_run_id_on_controller():
 
     with pytest.raises(FlowStoppedError, match="run-123"):
         controller.check_run("run-123")
+
+
+def test_runtime_execution_service_run_automated_splits_poll_and_schedule_flows():
+    poll_flow = Flow(name="poll_claims", group="Claims").watch(mode="poll", source="/tmp/in", interval="5s").step(lambda context: context.current)
+    schedule_flow = Flow(name="schedule_claims", group="Claims").watch(mode="schedule", interval="10m").step(lambda context: context.current)
+    scheduler_calls: list[tuple[str, object]] = []
+
+    class _GroupedRuntime:
+        instances: list["_GroupedRuntime"] = []
+
+        def __init__(self, flows, *, continuous, runtime_stop_event=None, flow_stop_event=None, runtime_ledger=None, run_stop_controller=None):
+            self.flows = flows
+            self.continuous = continuous
+            self.runtime_stop_event = runtime_stop_event
+            self.flow_stop_event = flow_stop_event
+            self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
+            type(self).instances.append(self)
+
+        def run(self):
+            self.runtime_stop_event.set()
+            return tuple(flow.name for flow in self.flows)
+
+    class _SchedulerHost:
+        def __init__(self, *, runtime_engine):
+            self.runtime_engine = runtime_engine
+            scheduler_calls.append(("init", runtime_engine))
+
+        def rebuild_jobs(self, flows):
+            scheduler_calls.append(("rebuild", tuple(flow.name for flow in flows)))
+            return tuple(flow.name for flow in flows)
+
+        def start(self):
+            scheduler_calls.append(("start", None))
+
+        def shutdown(self):
+            scheduler_calls.append(("shutdown", None))
+
+    runtime_stop = Event()
+    flow_stop = Event()
+    ledger = object()
+    service = RuntimeExecutionService(grouped_runtime_type=_GroupedRuntime, scheduler_host_factory=_SchedulerHost)
+
+    result = service.run_automated(
+        (poll_flow, schedule_flow),
+        runtime_ledger=ledger,
+        runtime_stop_event=runtime_stop,
+        flow_stop_event=flow_stop,
+    )
+
+    assert result == ("poll_claims",)
+    assert tuple(flow.name for flow in _GroupedRuntime.instances[0].flows) == ("poll_claims",)
+    assert _GroupedRuntime.instances[0].runtime_stop_event is runtime_stop
+    assert _GroupedRuntime.instances[0].runtime_ledger is ledger
+    assert scheduler_calls[1:] == [
+        ("rebuild", ("schedule_claims",)),
+        ("start", None),
+        ("shutdown", None),
+    ]
+
+
+def test_runtime_execution_service_run_automated_waits_for_schedule_only_flows():
+    schedule_flow = Flow(name="schedule_claims", group="Claims").watch(mode="schedule", interval="10m").step(lambda context: context.current)
+    runtime_stop = Event()
+    scheduler_calls: list[str] = []
+
+    class _SchedulerHost:
+        def __init__(self, *, runtime_engine):
+            self.runtime_engine = runtime_engine
+
+        def rebuild_jobs(self, flows):
+            scheduler_calls.append(f"rebuild:{','.join(flow.name for flow in flows)}")
+            return tuple(flow.name for flow in flows)
+
+        def start(self):
+            scheduler_calls.append("start")
+            runtime_stop.set()
+
+        def shutdown(self):
+            scheduler_calls.append("shutdown")
+
+    result = RuntimeExecutionService(scheduler_host_factory=_SchedulerHost).run_automated(
+        (schedule_flow,),
+        runtime_stop_event=runtime_stop,
+        flow_stop_event=Event(),
+    )
+
+    assert result == []
+    assert scheduler_calls == ["rebuild:schedule_claims", "start", "shutdown"]

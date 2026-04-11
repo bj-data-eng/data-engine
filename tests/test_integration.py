@@ -14,6 +14,8 @@ from data_engine.authoring.flow import Flow, load_flow
 from data_engine.core.model import FlowStoppedError
 from data_engine.core.primitives import Batch
 from data_engine.flow_modules.flow_module_loader import discover_flow_module_definitions, load_flow_module_definition
+from data_engine.hosts.scheduler import SchedulerHost
+from data_engine.runtime.engine import RuntimeEngine
 from data_engine.runtime.execution import _FlowRuntime, _GroupedFlowRuntime
 from data_engine.runtime.runtime_db import RuntimeLedger, utcnow_text
 from data_engine.services import FlowCatalogService, FlowExecutionService
@@ -629,35 +631,38 @@ def test_groups_run_in_parallel_but_keep_context_objects_isolated():
     assert by_name["alpha_flow"].objects is not by_name["beta_flow"].objects
 
 
-def test_continuous_grouped_runtime_keeps_running_when_one_flow_fails():
+def test_scheduler_host_keeps_running_when_one_scheduled_flow_fails():
     runtime_stop = threading.Event()
+    failing_count = 0
     healthy_count = 0
 
     def failing_step(context):
+        nonlocal failing_count
+        failing_count += 1
+        if healthy_count >= 2:
+            runtime_stop.set()
         raise RuntimeError("boom")
 
     def healthy_step(context):
         nonlocal healthy_count
         healthy_count += 1
-        if healthy_count >= 2:
+        if failing_count >= 1 and healthy_count >= 2:
             runtime_stop.set()
         return healthy_count
 
-    runtime = _GroupedFlowRuntime(
-        (
-            Flow(name="failing_flow", group="alpha").watch(mode="schedule", run_as="batch", interval="50ms").step(failing_step),
-            Flow(name="healthy_flow", group="beta").watch(mode="schedule", run_as="batch", interval="50ms").step(healthy_step),
-        ),
-        continuous=True,
-        runtime_stop_event=runtime_stop,
+    flows = (
+        Flow(name="failing_flow", group="alpha").watch(mode="schedule", run_as="batch", interval="50ms").step(failing_step),
+        Flow(name="healthy_flow", group="beta").watch(mode="schedule", run_as="batch", interval="50ms").step(healthy_step),
     )
+    engine = RuntimeEngine(runtime_ledger=RuntimeLedger.open_default())
+    scheduler_host = SchedulerHost(runtime_engine=engine)
 
-    results = runtime.run()
+    jobs = scheduler_host.run_until_stopped(flows, runtime_stop)
     ledger = RuntimeLedger.open_default()
     failing_runs = ledger.list_runs(flow_name="failing_flow")
     healthy_runs = ledger.list_runs(flow_name="healthy_flow")
 
     assert healthy_count >= 2
-    assert isinstance(results, list)
+    assert len(jobs) == 2
     assert any(run.status == "failed" for run in failing_runs)
     assert len([run for run in healthy_runs if run.status == "success"]) >= 2

@@ -132,7 +132,7 @@ class DaemonRuntimeCommandHandler:
 
         def _target() -> None:
             try:
-                service.runtime_execution_service.run_grouped(
+                service.runtime_execution_service.run_automated(
                     flows,
                     runtime_ledger=service.runtime_cache_ledger,
                     runtime_stop_event=runtime_stop_event,
