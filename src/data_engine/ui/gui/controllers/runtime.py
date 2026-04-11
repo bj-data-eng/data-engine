@@ -85,7 +85,7 @@ class GuiRuntimeController:
         window.signals.daemon_startup_finished.emit(success, error_text)
 
     def rebuild_runtime_snapshot(self, window: "DataEngineWindow") -> None:
-        self.log_service.reload(window.runtime_binding.log_store)
+        self.log_service.reload(window.runtime_binding.log_store, window.runtime_binding.runtime_cache_ledger)
         window._rehydrate_step_outputs_from_ledger()
         snapshot = self.runtime_application.build_runtime_snapshot(
             flow_cards=window.flow_cards.values(),

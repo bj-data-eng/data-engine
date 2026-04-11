@@ -338,8 +338,8 @@ class _FakeLogService:
         self.created_stores.append(self.store)
         return self.store
 
-    def reload(self, store) -> None:
-        del store
+    def reload(self, store, runtime_ledger=None) -> None:
+        del store, runtime_ledger
 
     def append_entry(self, store, entry) -> None:
         store.append_entry(entry)
@@ -348,7 +348,7 @@ class _FakeLogService:
         store.clear_flow(flow_name)
 
     def all_entries(self, store):
-        return tuple(store._entries)
+        return store.entries()
 
     def entries_for_flow(self, store, flow_name):
         return store.entries_for_flow(flow_name)

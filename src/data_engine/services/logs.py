@@ -14,17 +14,12 @@ class LogService:
     """Own operator log-store construction and log history queries."""
 
     def create_store(self, runtime_cache_ledger: RuntimeCacheStore | None = None) -> FlowLogStore:
-        """Create one log store backed by the given runtime cache ledger."""
-        store = FlowLogStore(self._hydrate_entries(runtime_cache_ledger))
-        store._runtime_cache_ledger = runtime_cache_ledger
-        return store
+        """Create one log store hydrated from the given runtime cache store."""
+        return FlowLogStore(self._hydrate_entries(runtime_cache_ledger))
 
-    def reload(self, store: FlowLogStore) -> None:
-        """Reload one log store from its attached runtime ledger."""
-        entries = self._hydrate_entries(getattr(store, "_runtime_cache_ledger", None))
-        store.clear()
-        for entry in entries:
-            store.append_entry(entry)
+    def reload(self, store: FlowLogStore, runtime_cache_ledger: RuntimeCacheStore | None) -> None:
+        """Reload one log store from an explicit runtime cache store."""
+        store.replace(self._hydrate_entries(runtime_cache_ledger))
 
     def append_entry(self, store: FlowLogStore, entry: FlowLogEntry) -> None:
         """Append one log entry to the current store."""
@@ -36,7 +31,7 @@ class LogService:
 
     def all_entries(self, store: FlowLogStore) -> tuple[FlowLogEntry, ...]:
         """Return every entry currently held in the store."""
-        return tuple(store._entries)
+        return store.entries()
 
     def entries_for_flow(self, store: FlowLogStore, flow_name: str | None) -> tuple[FlowLogEntry, ...]:
         """Return flow-scoped entries for one selected flow."""

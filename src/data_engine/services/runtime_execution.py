@@ -9,8 +9,8 @@ from data_engine.core.primitives import WatchSpec
 from data_engine.hosts.scheduler import SchedulerHost
 from data_engine.runtime.execution import FlowRuntime, GroupedFlowRuntime
 from data_engine.runtime.engine import RuntimeEngine
-from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
+from data_engine.services.runtime_ports import RuntimeCacheStore
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow as CoreFlow
@@ -37,7 +37,7 @@ class RuntimeExecutionService:
     def _engine(
         self,
         *,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
     ) -> RuntimeEngine:
@@ -54,7 +54,7 @@ class RuntimeExecutionService:
         self,
         flow: "CoreFlow",
         *,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:
         """Run one flow as a one-shot execution."""
@@ -68,7 +68,7 @@ class RuntimeExecutionService:
         flow: "CoreFlow",
         source_path: str,
         *,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:
         """Run one flow for a specific source path."""
@@ -81,7 +81,7 @@ class RuntimeExecutionService:
         self,
         flow: "CoreFlow",
         *,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:
         """Run one flow once in batch mode."""
@@ -95,7 +95,7 @@ class RuntimeExecutionService:
         flow: "CoreFlow",
         *,
         use: str | None = None,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
     ) -> object:
         """Preview one flow through the one-shot runtime path."""
         return self._engine(
@@ -106,7 +106,7 @@ class RuntimeExecutionService:
         self,
         flow: "CoreFlow",
         *,
-        runtime_ledger: RuntimeCacheLedger,
+        runtime_ledger: RuntimeCacheStore,
         flow_stop_event: Event,
     ) -> object:
         """Run one flow as a manual one-shot execution."""
@@ -120,7 +120,7 @@ class RuntimeExecutionService:
         self,
         flow: "CoreFlow",
         *,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:
         """Run one flow continuously."""
@@ -133,7 +133,7 @@ class RuntimeExecutionService:
         self,
         flows: tuple["CoreFlow", ...],
         *,
-        runtime_ledger: RuntimeCacheLedger,
+        runtime_ledger: RuntimeCacheStore,
         runtime_stop_event: Event,
         flow_stop_event: Event,
     ) -> object:
@@ -148,7 +148,7 @@ class RuntimeExecutionService:
         self,
         flows: tuple["CoreFlow", ...],
         *,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
         runtime_stop_event: Event,
         flow_stop_event: Event,
     ) -> object:
@@ -184,7 +184,7 @@ class RuntimeExecutionService:
         self,
         flows: tuple["CoreFlow", ...],
         *,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:

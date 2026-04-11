@@ -24,6 +24,14 @@ class FlowLogStore:
     def clear(self) -> None:
         self._entries.clear()
 
+    def replace(self, entries: tuple[FlowLogEntry, ...]) -> None:
+        """Replace the full visible log history."""
+        self._entries = list(entries)
+
+    def entries(self) -> tuple[FlowLogEntry, ...]:
+        """Return every visible log entry."""
+        return tuple(self._entries)
+
     def clear_flow(self, flow_name: str | None) -> None:
         if flow_name is None:
             return

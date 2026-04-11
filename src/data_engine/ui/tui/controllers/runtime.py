@@ -140,7 +140,7 @@ class TuiRuntimeController:
         self.sync_daemon_state(window)
 
     def rebuild_runtime_snapshot(self, window: "DataEngineTui") -> None:
-        self.log_service.reload(window.runtime_binding.log_store)
+        self.log_service.reload(window.runtime_binding.log_store, window.runtime_binding.runtime_cache_ledger)
         snapshot = self.runtime_application.build_runtime_snapshot(
             flow_cards=window.flow_cards,
             log_entries=self.log_service.all_entries(window.runtime_binding.log_store),

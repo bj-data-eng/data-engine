@@ -183,7 +183,7 @@ class _FakeFlowCatalogService:
 class _FakeLogService:
     def __init__(self, *, stores: tuple[FlowLogStore, ...] = ()) -> None:
         self._stores = list(stores)
-        self.reload_calls: list[FlowLogStore] = []
+        self.reload_calls: list[tuple[FlowLogStore, object]] = []
         self.created_ledgers: list[object] = []
 
     def create_store(self, runtime_ledger=None):
@@ -192,8 +192,8 @@ class _FakeLogService:
             return self._stores.pop(0)
         return FlowLogStore()
 
-    def reload(self, store):
-        self.reload_calls.append(store)
+    def reload(self, store, runtime_ledger=None):
+        self.reload_calls.append((store, runtime_ledger))
 
     def append_entry(self, store, entry):
         store.append_entry(entry)
@@ -202,7 +202,7 @@ class _FakeLogService:
         store.clear_flow(flow_name)
 
     def all_entries(self, store):
-        return tuple(store._entries)
+        return store.entries()
 
     def entries_for_flow(self, store, flow_name):
         return store.entries_for_flow(flow_name)
