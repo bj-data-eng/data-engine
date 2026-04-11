@@ -55,13 +55,18 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 
 - Use semi-permanent worker lanes for high-throughput parallel work: `C:\DEV_PROJECT\data-engine-worktrees\mini-1` through `C:\DEV_PROJECT\data-engine-worktrees\mini-6`.
 - The coordinator owns task slicing, architecture decisions, integration, final tests, and commits. Mini workers own bounded implementation or audit tasks inside their assigned lane.
-- Prefer fresh worker agents per task while reusing the same worktree lane. Keep worker prompts small: objective, lane path, branch name, owned files/modules, tests to run, and expected report format.
+- Treat `main` after the latest accepted commit as the source of truth. Before starting a new parallel batch, reset every mini worktree to that accepted commit and confirm each lane is clean.
+- Prefer fresh worker agents per task while reusing the same worktree lane. Keep worker prompts small: objective, lane path, branch name, owned files/modules, tests to run, and expected report format. Do not include broad repo history unless it is directly needed.
+- Use stable lane themes when possible to reduce context reload: runtime/state, scheduler/daemon host, UI boundary, platform compatibility, authoring surface/tests, and audit-only.
 - Give each worker a disjoint write scope. Do not ask multiple workers to edit the same files unless the coordinator explicitly serializes the work.
-- Worker branches should be task-scoped from the lane branch, using names like `codex/mini-1-runtime-audit`. After integration, reset or recreate the lane branch for the next task.
+- Worker branches should be task-scoped from the lane branch, using names like `codex/mini-1-runtime-audit`. After integration, reset the lane branch to the accepted coordinator commit before the next task.
 - Do not add internal compatibility shims just to preserve old project-internal call shapes during refactors. Update affected internal callers to the new boundary instead. Preserve stability for the author-facing surface: flows, flow context, and `data_engine.helpers`.
 - For speed, worker lanes may use the main repo venv at `C:\DEV_PROJECT\data-engine\.venv` for `python -m pytest`, `ruff`, and `pydoclint` when the command runs from the worker worktree root.
 - Do not rely on the main repo console scripts, such as `data-engine.exe`, to test worker-lane code; console entry points may resolve to the installed checkout. Use `python -m ...` from the worker root, or create a lane-local `.venv` when testing packaging, console scripts, editable installs, or dependency changes.
-- Workers should report only changed files, summary, tests run, and blockers. The coordinator handles synthesis and broader follow-up.
+- Workers should return patch-first decision packets, not broad narratives: changed files, short summary, tests run with results, intentional deviations, and blockers only. The coordinator handles synthesis and broader follow-up.
+- For audit-only tasks, ask workers to return only `file:line`, issue, and recommended action. Do not ask audit workers to explain architecture history or edit files unless the coordinator turns a finding into a bounded implementation task.
+- The coordinator should integrate from diffs, not prose: inspect `git diff --stat`, review relevant file diffs, selectively apply accepted changes to `main`, run focused tests, then run the full suite when the batch changes runtime behavior.
+- After each accepted integration commit, run `git reset --hard <accepted-commit>` and `git clean -fd` inside each mini worktree. Never do this before the accepted coordinator commit exists.
 
 ## Windows And Unix Compatibility
 
