@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from data_engine.domain import FlowCatalogLike, FlowLogEntry, FlowRunState, StepOutputIndex
-from data_engine.runtime.runtime_db import RuntimeCacheLedger
+from data_engine.services.runtime_ports import RuntimeCacheStore
 
 
 class RuntimeHistoryService:
@@ -13,7 +13,7 @@ class RuntimeHistoryService:
 
     def rebuild_step_outputs(
         self,
-        ledger: RuntimeCacheLedger,
+        ledger: RuntimeCacheStore,
         flow_cards: dict[str, FlowCatalogLike],
     ) -> StepOutputIndex:
         """Rebuild latest successful per-step output paths for visible flows."""
@@ -36,7 +36,7 @@ class RuntimeHistoryService:
 
     def error_text_for_entry(
         self,
-        ledger: RuntimeCacheLedger,
+        ledger: RuntimeCacheStore,
         run_group: FlowRunState,
         entry: FlowLogEntry,
     ) -> tuple[str, str | None]:

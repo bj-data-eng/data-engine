@@ -6,14 +6,14 @@ from datetime import datetime
 
 from data_engine.domain import FlowLogEntry, FlowRunState
 from data_engine.domain.logs import parse_runtime_message
-from data_engine.runtime.runtime_db import RuntimeCacheLedger
+from data_engine.services.runtime_ports import RuntimeCacheStore
 from data_engine.views.logs import FlowLogStore
 
 
 class LogService:
     """Own operator log-store construction and log history queries."""
 
-    def create_store(self, runtime_cache_ledger: RuntimeCacheLedger | None = None) -> FlowLogStore:
+    def create_store(self, runtime_cache_ledger: RuntimeCacheStore | None = None) -> FlowLogStore:
         """Create one log store backed by the given runtime cache ledger."""
         store = FlowLogStore(self._hydrate_entries(runtime_cache_ledger))
         store._runtime_cache_ledger = runtime_cache_ledger
@@ -46,7 +46,7 @@ class LogService:
         """Return grouped run history for one selected flow."""
         return store.runs_for_flow(flow_name)
 
-    def _hydrate_entries(self, runtime_cache_ledger: RuntimeCacheLedger | None) -> tuple[FlowLogEntry, ...]:
+    def _hydrate_entries(self, runtime_cache_ledger: RuntimeCacheStore | None) -> tuple[FlowLogEntry, ...]:
         """Build in-memory flow log entries from one runtime cache ledger."""
         if runtime_cache_ledger is None:
             return ()

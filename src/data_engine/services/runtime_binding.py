@@ -7,10 +7,11 @@ from os import getpid
 
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager
 from data_engine.platform.workspace_models import WorkspacePaths
-from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger
+from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.services.daemon_state import DaemonStateService
 from data_engine.services.ledger import RuntimeControlLedgerService
 from data_engine.services.logs import LogService
+from data_engine.services.runtime_ports import RuntimeCacheStore, RuntimeControlStore
 from data_engine.views.logs import FlowLogStore
 
 
@@ -79,8 +80,8 @@ class WorkspaceRuntimeBinding:
     """Concrete runtime resources bound to one selected workspace."""
 
     workspace_paths: WorkspacePaths
-    runtime_cache_ledger: RuntimeCacheLedger
-    runtime_control_ledger: RuntimeControlLedger
+    runtime_cache_ledger: RuntimeCacheStore
+    runtime_control_ledger: RuntimeControlStore
     log_store: FlowLogStore
     daemon_manager: WorkspaceDaemonManager
 

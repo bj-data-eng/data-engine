@@ -8,6 +8,7 @@ from typing import Callable
 from data_engine.platform.paths import stable_absolute_path
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.runtime_db import RuntimeControlLedger
+from data_engine.services.runtime_ports import RuntimeControlStore
 
 
 class RuntimeControlLedgerService:
@@ -30,13 +31,13 @@ class RuntimeControlLedgerService:
         """Open the configured runtime control ledger for one workspace root."""
         return self._open_ledger_func(stable_absolute_path(workspace_root))
 
-    def close(self, ledger: RuntimeControlLedger) -> None:
+    def close(self, ledger: RuntimeControlStore) -> None:
         """Close one runtime control-ledger connection."""
         ledger.close()
 
     def register_client_session(
         self,
-        ledger: RuntimeControlLedger,
+        ledger: RuntimeControlStore,
         *,
         client_id: str,
         workspace_id: str,
@@ -51,13 +52,13 @@ class RuntimeControlLedgerService:
             pid=pid,
         )
 
-    def remove_client_session(self, ledger: RuntimeControlLedger, client_id: str) -> None:
+    def remove_client_session(self, ledger: RuntimeControlStore, client_id: str) -> None:
         """Remove one active local client session row."""
         ledger.client_sessions.remove(client_id)
 
     def purge_process_client_sessions(
         self,
-        ledger: RuntimeControlLedger,
+        ledger: RuntimeControlStore,
         *,
         workspace_id: str,
         client_kind: str,
@@ -72,7 +73,7 @@ class RuntimeControlLedgerService:
 
     def count_live_client_sessions(
         self,
-        ledger: RuntimeControlLedger,
+        ledger: RuntimeControlStore,
         workspace_id: str,
         *,
         exclude_client_id: str | None = None,
