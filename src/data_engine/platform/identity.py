@@ -7,6 +7,7 @@ from typing import Final
 APP_INTERNAL_ID: Final[str] = "data_engine"
 APP_DISTRIBUTION_NAME: Final[str] = "py-data-engine"
 APP_DISPLAY_NAME: Final[str] = "Data Engine"
+APP_VERSION: Final[str] = "0.1.3"
 APP_ENV_PREFIX: Final[str] = "DATA_ENGINE"
 APP_CACHE_DIR_NAME: Final[str] = "data_engine"
 APP_RUNTIME_NAMESPACE: Final[str] = "data_engine"
@@ -28,6 +29,7 @@ __all__ = [
     "APP_ENV_PREFIX",
     "APP_INTERNAL_ID",
     "APP_RUNTIME_NAMESPACE",
+    "APP_VERSION",
     "APP_ARTIFACTS_DIR_NAME",
     "RUNTIME_STATE_DIR_NAME",
     "WORKSPACE_CACHE_DIR_NAME",

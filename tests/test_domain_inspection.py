@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from data_engine.authoring.builder import Flow
+from data_engine.authoring.flow import Flow
 from data_engine.domain import ConfigPreviewState, StepOutputIndex
 from data_engine.services.flow_catalog import flow_catalog_entry_from_flow
 from data_engine.views.models import qt_flow_card_from_entry

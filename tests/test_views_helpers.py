@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from data_engine.authoring.builder import Flow
+from data_engine.authoring.flow import Flow
 from data_engine.domain import FlowLogEntry, FlowRunState, OperatorActionContext, RunStepState, RuntimeSessionState, RuntimeStepEvent, SelectedFlowState
 from data_engine.services.flow_catalog import flow_catalog_entry_from_flow
 from data_engine.views.actions import GuiActionState, TuiActionState

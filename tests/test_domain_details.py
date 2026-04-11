@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from data_engine.authoring.builder import Flow
+from data_engine.authoring.flow import Flow
 from data_engine.domain import (
     FlowLogEntry,
     FlowRunState,

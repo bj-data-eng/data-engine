@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import json
 
-from data_engine.devtools.project_ast_map import build_project_ast_map, main, render_project_inventory_markdown
+from data_engine.devtools.project_ast_map import (
+    build_project_ast_map,
+    main,
+    render_project_inventory_markdown,
+    render_project_map_markdown,
+    write_project_docs,
+)
 
 
 def test_build_project_ast_map_summarizes_modules(tmp_path):
@@ -119,3 +125,32 @@ def test_render_project_inventory_markdown_lists_symbols_and_params(tmp_path):
     assert "    - attribute `KIND`" in rendered
     assert "    - instance attribute `value`" in rendered
     assert "    - method `__init__`" in rendered
+
+
+def test_render_project_map_markdown_lists_rollups_and_hotspots(tmp_path):
+    package_root = tmp_path / "mini_pkg"
+    package_root.mkdir()
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    (package_root / "demo.py").write_text("def build(context):\n    return context\n", encoding="utf-8")
+
+    rendered = render_project_map_markdown(package_root)
+
+    assert "# Project Map" in rendered
+    assert "| `mini_pkg` |" in rendered
+    assert "| `mini_pkg.demo` |" in rendered
+    assert "## Internal Stitching Points" in rendered
+
+
+def test_write_project_docs_writes_map_and_inventory(tmp_path):
+    package_root = tmp_path / "mini_pkg"
+    docs_guides_dir = tmp_path / "docs" / "guides"
+    package_root.mkdir()
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    (package_root / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    map_path, inventory_path = write_project_docs(package_root, docs_guides_dir)
+
+    assert map_path == docs_guides_dir.resolve() / "project-map.md"
+    assert inventory_path == docs_guides_dir.resolve() / "project-inventory.md"
+    assert map_path.read_text(encoding="utf-8").startswith("# Project Map")
+    assert "- module `mini_pkg.demo`" in inventory_path.read_text(encoding="utf-8")

@@ -14,7 +14,7 @@ from data_engine.application import (
     RuntimeApplication,
     WorkspaceSessionApplication,
 )
-from data_engine.authoring.builder import load_flow
+from data_engine.authoring.flow import load_flow
 from data_engine.flow_modules.flow_module_loader import discover_flow_module_definitions
 from data_engine.hosts.daemon.app import DaemonClientError
 from data_engine.hosts.daemon.app import daemon_request, is_daemon_live, spawn_daemon_process

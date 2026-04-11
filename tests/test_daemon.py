@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import data_engine.hosts.daemon.client as daemon_client
-from data_engine.authoring.builder import Flow
+from data_engine.authoring.flow import Flow
 from data_engine.domain import DaemonLifecyclePolicy
 from data_engine.hosts.daemon.app import (
     DAEMON_LOG_RETENTION_DAYS,

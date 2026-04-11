@@ -16,7 +16,7 @@ from data_engine.flow_modules.flow_module_compiler import compile_stale_flow_mod
 from data_engine.platform.workspace_models import APP_INTERNAL_ID
 
 if TYPE_CHECKING:
-    from data_engine.authoring.builder import Flow
+    from data_engine.authoring.flow import Flow
 
 
 _COMPILED_FLOW_MODULE_CONTEXT: ContextVar[bool] = ContextVar("compiled_flow_module_context", default=False)
@@ -127,7 +127,7 @@ def load_flow_module_definition(name: str, *, data_root: Path | None = None) -> 
 
     def guarded_build() -> "Flow":
         with compiled_flow_module_context(flow_modules_dir):
-            from data_engine.authoring.builder import Flow
+            from data_engine.authoring.flow import Flow
 
             try:
                 built = build()

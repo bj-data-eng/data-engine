@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 DEFAULT_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DOCS_GUIDES_DIR = DEFAULT_PACKAGE_ROOT / "docs" / "sphinx_source" / "guides"
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,89 @@ def render_project_inventory_markdown(package_root: Path | str | None = None) ->
             lines.append("  - no top-level symbols")
     lines.append("")
     return "\n".join(lines)
+
+
+def render_project_map_markdown(package_root: Path | str | None = None) -> str:
+    """Return a compact structural Markdown map for one package root."""
+    payload = build_project_ast_map(package_root)
+    lines = [
+        "# Project Map",
+        "",
+        "This page is generated from the current AST map and summarizes package size and stitching points.",
+        "",
+        "## Regenerating the map",
+        "",
+        "This page is regenerated automatically during packaged docs builds. To refresh it manually, run:",
+        "",
+        "```bash",
+        "python -m data_engine.devtools.project_ast_map src/data_engine --write-docs src/data_engine/docs/sphinx_source/guides",
+        "```",
+        "",
+        "## Package Rollup",
+        "",
+        "These counts are package-level rollups from the current AST snapshot.",
+        "",
+        "| Package | Modules | Functions | Classes | Flows | Lines |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for item in payload["package_rollups"]:
+        lines.append(
+            f"| `{item['package']}` | {item['module_count']} | {item['function_count']} | "
+            f"{item['class_count']} | {item['flow_count']} | {item['line_count']} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Largest Modules",
+            "",
+            "| Module | Lines | Functions | Classes |",
+            "| --- | ---: | ---: | ---: |",
+        ]
+    )
+    for item in payload["hotspots"]["largest_modules"]:
+        lines.append(f"| `{item['module']}` | {item['line_count']} | {item['function_count']} | {item['class_count']} |")
+    lines.extend(
+        [
+            "",
+            "## Internal Stitching Points",
+            "",
+            "Modules with higher internal import fan-out tend to be composition or aggregation points.",
+            "",
+            "| Module | Internal Imports | Lines |",
+            "| --- | ---: | ---: |",
+        ]
+    )
+    for item in payload["hotspots"]["most_internal_imports"]:
+        lines.append(f"| `{item['module']}` | {item['internal_imports']} | {item['line_count']} |")
+    lines.extend(
+        [
+            "",
+            "## Practical Mental Model",
+            "",
+            "- Start in `data_engine.authoring` when changing how flows are expressed or executed.",
+            "- Start in `data_engine.helpers` when improving operator-friendly flow utilities.",
+            "- Start in `data_engine.runtime` and `data_engine.hosts` for daemon behavior, state publication, logging, leasing, or checkpoints.",
+            "- Start in `data_engine.application` for host-agnostic use-case behavior.",
+            "- Start in `data_engine.ui` for interaction, rendering, presentation, or operator workflow.",
+            "- Start in `data_engine.platform` for workspace discovery, path resolution, or platform compatibility.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def write_project_docs(
+    package_root: Path | str | None = None,
+    docs_guides_dir: Path | str | None = None,
+) -> tuple[Path, Path]:
+    """Regenerate the generated project-map and project-inventory docs."""
+    target_dir = Path(docs_guides_dir or DEFAULT_DOCS_GUIDES_DIR).resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    project_map_path = target_dir / "project-map.md"
+    project_inventory_path = target_dir / "project-inventory.md"
+    project_map_path.write_text(render_project_map_markdown(package_root) + "\n", encoding="utf-8")
+    project_inventory_path.write_text(render_project_inventory_markdown(package_root) + "\n", encoding="utf-8")
+    return project_map_path, project_inventory_path
 
 
 def _summarize_module(package_root: Path, path: Path) -> ModuleSummary:
@@ -489,7 +573,17 @@ def main(argv: list[str] | None = None) -> int:
         default="json",
         help="Output format. Defaults to json.",
     )
+    parser.add_argument(
+        "--write-docs",
+        type=Path,
+        help="Regenerate project-map.md and project-inventory.md in this docs guides directory.",
+    )
     args = parser.parse_args(argv)
+    if args.write_docs is not None:
+        paths = write_project_docs(args.package_root, args.write_docs)
+        for path in paths:
+            print(path)
+        return 0
     if args.format == "markdown":
         print(render_project_inventory_markdown(args.package_root))
         return 0

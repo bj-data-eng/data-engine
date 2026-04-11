@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
-from data_engine.authoring.builder import Flow
+from data_engine.authoring.flow import Flow
 from data_engine.domain import DaemonLifecyclePolicy
 from data_engine.services import DaemonService, SettingsService, ThemeService, WorkspaceService
 from data_engine.ui.gui.bootstrap import (

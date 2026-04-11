@@ -3,7 +3,7 @@
 This page is generated from the current AST map and is intentionally inventory-shaped rather than explanatory.
 
 - package root: `src/data_engine`
-- module count: `168`
+- module count: `173`
 
 - module `data_engine`
   - attribute `__all__`
@@ -404,6 +404,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `status_callback`
     - instance attribute `_runtime_ledger_service`
     - instance attribute `_runtime_ledger_factory`
+    - instance attribute `_owns_runtime_ledger`
     - instance attribute `runtime_ledger`
     - method `__init__`
       - param `self`
@@ -665,14 +666,14 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `root: str | Path`
     - method `step`
       - param `self`
-      - param `fn`
+      - param `fn: Callable[[FlowContext], object]`
       - param `*`
       - param `use: str | None=None`
       - param `save_as: str | None=None`
       - param `label: str | None=None`
     - method `map`
       - param `self`
-      - param `fn`
+      - param `fn: Callable[..., object]`
       - param `*`
       - param `use: str | None=None`
       - param `save_as: str | None=None`
@@ -688,7 +689,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `label: str | None=None`
     - method `step_each`
       - param `self`
-      - param `fn`
+      - param `fn: Callable[..., object]`
       - param `*`
       - param `use: str | None=None`
       - param `save_as: str | None=None`
@@ -925,10 +926,16 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `__all__`
 - module `data_engine.devtools.project_ast_map`
   - attribute `DEFAULT_PACKAGE_ROOT`
+  - attribute `DEFAULT_DOCS_GUIDES_DIR`
   - function `build_project_ast_map`
     - param `package_root: Path | str | None=None`
   - function `render_project_inventory_markdown`
     - param `package_root: Path | str | None=None`
+  - function `render_project_map_markdown`
+    - param `package_root: Path | str | None=None`
+  - function `write_project_docs`
+    - param `package_root: Path | str | None=None`
+    - param `docs_guides_dir: Path | str | None=None`
   - function `_summarize_module`
     - param `package_root: Path`
     - param `path: Path`
@@ -1000,6 +1007,85 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `assignments`
     - attribute `flow_calls`
     - attribute `line_count`
+- module `data_engine.devtools.smoke_data`
+  - attribute `DEFAULT_WORKSPACE_IDS`
+  - attribute `_BASE_CLAIMS_COLUMNS`
+  - attribute `__all__`
+  - function `build_temp_smoke_environment`
+    - param `*`
+    - param `temp_root: Path`
+    - param `workspace_ids: list[str]`
+  - function `build_smoke_environment`
+    - param `*`
+    - param `root: Path`
+    - param `workspace_ids: list[str]`
+    - param `primary_data_dir_name: str='data'`
+    - param `secondary_data_dir_name: str='data2'`
+    - param `create_app_root: bool=False`
+    - param `rows_per_workbook: int=2`
+    - param `column_count: int=len(_BASE_CLAIMS_COLUMNS)`
+  - function `create_python_flow_modules`
+    - param `target_workspace: Path`
+    - param `*`
+    - param `workspace_id: str`
+    - param `data_folder_name: str`
+  - function `create_notebook_flow_modules`
+    - param `target_workspace: Path`
+    - param `*`
+    - param `workspace_id: str`
+    - param `data_folder_name: str`
+  - function `create_smoke_data_root`
+    - param `data_root: Path`
+    - param `*`
+    - param `rows_per_workbook: int=2`
+    - param `column_count: int=len(_BASE_CLAIMS_COLUMNS)`
+  - function `_claims_headers`
+    - param `*`
+    - param `column_count: int`
+  - function `_claims_row`
+    - param `*`
+    - param `workbook_index: int`
+    - param `row_number: int`
+    - param `column_count: int`
+  - function `_write_claims_workbook`
+    - param `path: Path`
+    - param `*`
+    - param `workbook_index: int`
+    - param `rows_per_workbook: int`
+    - param `column_count: int`
+  - function `create_notebook_flow_module`
+    - param `path: Path`
+    - param `source_text: str`
+  - function `write_text_file`
+    - param `path: Path`
+    - param `text: str`
+  - function `build_parser`
+  - function `main`
+    - param `argv: list[str] | None=None`
+  - function `_python_poll_source`
+    - param `*`
+    - param `data_folder_name: str`
+  - function `_python_schedule_source`
+    - param `*`
+    - param `data_folder_name: str`
+  - function `_python_manual_source`
+    - param `*`
+    - param `data_folder_name: str`
+  - function `_python_database_dimensions_source`
+    - param `*`
+    - param `data_folder_name: str`
+  - function `_poll_notebook_source`
+    - param `*`
+    - param `workspace_id: str`
+    - param `data_folder_name: str`
+  - function `_schedule_notebook_source`
+    - param `*`
+    - param `workspace_id: str`
+    - param `data_folder_name: str`
+  - function `_manual_notebook_source`
+    - param `*`
+    - param `workspace_id: str`
+    - param `data_folder_name: str`
 - module `data_engine.docs`
   - no top-level symbols
 - module `data_engine.docs.sphinx_source.conf`
@@ -1018,6 +1104,7 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `autodoc_member_order`
   - attribute `autodoc_typehints`
   - attribute `add_module_names`
+  - attribute `napoleon_use_ivar`
 - module `data_engine.domain`
   - attribute `__all__`
 - module `data_engine.domain.actions`
@@ -1175,6 +1262,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `cls`
       - param `run_state: 'FlowRunState'`
 - module `data_engine.domain.diagnostics`
+  - function `is_defunct_process_status`
+    - param `status: str`
   - class `DoctorCheck`
     - attribute `status`
     - attribute `message`
@@ -1665,6 +1754,7 @@ This page is generated from the current AST map and is intentionally inventory-s
 - module `data_engine.helpers`
   - attribute `__all__`
 - module `data_engine.helpers.duckdb`
+  - attribute `FrameLike`
   - attribute `__all__`
   - function `_quote_identifier`
     - param `value: str`
@@ -1698,18 +1788,20 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `on: str | list[str] | tuple[str, ...]`
   - function `_normalize_optional_limit`
     - param `limit: int | None`
+  - function `_materialize_frame`
+    - param `df: FrameLike`
   - function `build_dimension`
     - param `db_path: str | Path`
     - param `table: str`
     - param `*`
-    - param `df: pl.DataFrame`
+    - param `df: FrameLike`
     - param `key_column: str='dimension_key'`
     - param `return_df: bool=True`
   - function `replace_rows_by_file`
     - param `db_path: str | Path`
     - param `table: str`
     - param `*`
-    - param `df: pl.DataFrame`
+    - param `df: FrameLike`
     - param `file_hash: str`
     - param `file_hash_column: str='file_key'`
     - param `return_df: bool=True`
@@ -1717,14 +1809,14 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `db_path: str | Path`
     - param `table: str`
     - param `*`
-    - param `df: pl.DataFrame`
+    - param `df: FrameLike`
     - param `column: str`
     - param `return_df: bool=True`
   - function `attach_dimension`
     - param `db_path: str | Path`
     - param `table: str`
     - param `*`
-    - param `df: pl.DataFrame`
+    - param `df: FrameLike`
     - param `on: str | list[str] | tuple[str, ...]`
     - param `key_column: str='dimension_key'`
     - param `drop_key: bool=False`
@@ -1732,7 +1824,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `db_path: str | Path`
     - param `table: str`
     - param `*`
-    - param `df: pl.DataFrame`
+    - param `df: FrameLike`
     - param `key_column: str='dimension_key'`
     - param `select: str | list[str] | tuple[str, ...]='*'`
     - param `drop_key: bool=False`
@@ -1740,7 +1832,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `db_path: str | Path`
     - param `table: str`
     - param `*`
-    - param `df: pl.DataFrame`
+    - param `df: FrameLike`
     - param `on: str | list[str] | tuple[str, ...]`
     - param `key_column: str='dimension_key'`
     - param `drop_key: bool=True`
@@ -1767,8 +1859,65 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `db_path: str | Path`
     - param `table: str`
     - param `*`
-    - param `df: pl.DataFrame`
+    - param `df: FrameLike`
     - param `return_df: bool=True`
+- module `data_engine.helpers.schema`
+  - attribute `ColumnDtypes`
+  - attribute `ColumnRenames`
+  - attribute `__all__`
+  - function `_normalize_dtypes`
+    - param `dtypes: ColumnDtypes`
+  - function `_normalize_renames`
+    - param `rename: ColumnRenames`
+  - function `_normalize_drop`
+    - param `drop: Iterable[str]`
+  - function `_ordered_unique`
+    - param `*column_groups: Iterable[str]`
+  - function `normalize_column_name`
+    - param `name: object`
+  - function `normalized_column_renames`
+    - param `columns: Iterable[object]`
+  - function `normalize_column_names`
+    - param `df: pl.DataFrame | pl.LazyFrame`
+    - param `columns: Iterable[object] | None=None`
+  - class `ColumnSelection`
+    - method `__new__`
+      - param `cls`
+      - param `columns: Iterable[str]`
+    - method `apply`
+      - param `self`
+      - param `df: pl.DataFrame | pl.LazyFrame`
+    - method `normalize_column_names`
+      - param `self`
+      - param `df: pl.DataFrame | pl.LazyFrame`
+  - class `DropColumns`
+    - method `__new__`
+      - param `cls`
+      - param `columns: Iterable[str]`
+    - method `apply`
+      - param `self`
+      - param `df: pl.DataFrame | pl.LazyFrame`
+  - class `RenameColumns`
+    - method `apply`
+      - param `self`
+      - param `df: pl.DataFrame | pl.LazyFrame`
+  - class `ColumnCasts`
+    - method `_exprs`
+      - param `self`
+    - method `apply`
+      - param `self`
+      - param `df: pl.DataFrame | pl.LazyFrame`
+  - class `TableSchema`
+    - attribute `dtypes`
+    - attribute `rename`
+    - attribute `drop`
+    - method `__post_init__`
+      - param `self`
+    - method `columns`
+      - param `self`
+    - method `normalize_column_names`
+      - param `self`
+      - param `df: pl.DataFrame | pl.LazyFrame`
 - module `data_engine.hosts`
   - no top-level symbols
 - module `data_engine.hosts.daemon`
@@ -1795,7 +1944,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `started_at_utc`
     - instance attribute `state`
     - instance attribute `host`
-    - instance attribute `runtime_ledger`
+    - instance attribute `runtime_cache_ledger`
+    - instance attribute `runtime_control_ledger`
     - instance attribute `flow_catalog_service`
     - instance attribute `flow_execution_service`
     - instance attribute `runtime_execution_service`
@@ -1812,6 +1962,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `dependencies: DaemonHostDependencies | None=None`
       - param `identity: DaemonHostIdentity | None=None`
       - param `lifecycle_policy: DaemonLifecyclePolicy=DaemonLifecyclePolicy.PERSISTENT`
+    - method `runtime_ledger`
+      - param `self`
     - method `_workspace_root_is_available`
       - param `self`
     - method `_retained_daemon_log_lines`
@@ -1867,6 +2019,8 @@ This page is generated from the current AST map and is intentionally inventory-s
 - module `data_engine.hosts.daemon.client`
   - attribute `DAEMON_AUTHKEY_FILE_NAME`
   - attribute `_SHARED_STATE_ADAPTER`
+  - attribute `_WINDOWS_ERROR_ALREADY_EXISTS`
+  - attribute `_WINDOWS_STARTUP_MUTEXES`
   - attribute `__all__`
   - function `endpoint_address`
     - param `paths: WorkspacePaths`
@@ -1889,6 +2043,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `paths: WorkspacePaths`
   - function `_kill_pid`
     - param `pid: int`
+  - function `_harden_private_file_permissions`
+    - param `path: Path`
   - function `_pid_is_live`
     - param `pid: int | None`
   - function `_same_machine_unreachable_lease_metadata`
@@ -1913,6 +2069,13 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `paths: WorkspacePaths`
   - function `_startup_lock_path`
     - param `paths: WorkspacePaths`
+  - function `_windows_startup_mutex_name`
+    - param `paths: WorkspacePaths`
+  - function `_configure_ctypes_function`
+    - param `func: Any`
+    - param `*`
+    - param `argtypes: list[Any]`
+    - param `restype: Any`
   - function `_acquire_startup_lock`
     - param `paths: WorkspacePaths`
   - function `_release_startup_lock`
@@ -1963,16 +2126,19 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `runtime_execution_service_factory`
     - attribute `shared_state_adapter_factory`
   - class `DaemonHostDependencies`
-    - attribute `runtime_ledger`
+    - attribute `runtime_cache_ledger`
+    - attribute `runtime_control_ledger`
     - attribute `flow_catalog_service`
     - attribute `flow_execution_service`
     - attribute `runtime_execution_service`
     - attribute `shared_state_adapter`
+    - method `runtime_ledger`
+      - param `self`
     - method `build_default`
       - param `cls`
       - param `paths: WorkspacePaths`
       - param `*`
-      - param `ledger_service: LedgerService | None=None`
+      - param `ledger_service: RuntimeControlLedgerService | None=None`
       - param `factories: DaemonHostDependencyFactories | None=None`
   - class `DaemonHostIdentity`
     - attribute `machine_id`
@@ -2114,7 +2280,6 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `value: object | None`
 - module `data_engine.hosts.daemon.constants`
-  - attribute `APP_VERSION`
   - attribute `CHECKPOINT_INTERVAL_SECONDS`
   - attribute `CONTROL_REQUEST_POLL_INTERVAL_SECONDS`
   - attribute `STALE_AFTER_SECONDS`
@@ -2303,11 +2468,11 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `hydrate_local_runtime`
       - param `self`
       - param `paths: WorkspacePaths`
-      - param `ledger: RuntimeLedger`
+      - param `ledger: RuntimeCacheLedger`
     - method `checkpoint_workspace_state`
       - param `self`
       - param `paths: WorkspacePaths`
-      - param `ledger: RuntimeLedger`
+      - param `ledger: RuntimeCacheLedger`
       - param `*`
       - param `workspace_id: str`
       - param `machine_id: str`
@@ -2380,6 +2545,7 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `APP_INTERNAL_ID`
   - attribute `APP_DISTRIBUTION_NAME`
   - attribute `APP_DISPLAY_NAME`
+  - attribute `APP_VERSION`
   - attribute `APP_ENV_PREFIX`
   - attribute `APP_CACHE_DIR_NAME`
   - attribute `APP_RUNTIME_NAMESPACE`
@@ -2389,6 +2555,14 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `__all__`
   - function `env_var`
     - param `name: str`
+- module `data_engine.platform.interpreters`
+  - attribute `__all__`
+  - function `host_concrete_path`
+    - param `value: str | Path`
+  - function `console_python_executable`
+    - param `executable: str | Path | None=None`
+  - function `preferred_gui_python_executable`
+    - param `executable: str | Path | None=None`
 - module `data_engine.platform.local_settings`
   - attribute `DATA_ENGINE_APP_ROOT_ENV_VAR`
   - attribute `DATA_ENGINE_STATE_ROOT_ENV_VAR`
@@ -2437,6 +2611,49 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `set_runtime_root`
       - param `self`
       - param `value: Path | str | None`
+- module `data_engine.platform.paths`
+  - attribute `__all__`
+  - function `normalized_path_text`
+    - param `value: Path | str`
+  - function `stable_absolute_path`
+    - param `value: Path | str`
+  - function `stable_path_identity_text`
+    - param `value: Path | str`
+    - param `*`
+    - param `case_insensitive: bool | None=None`
+  - function `path_display`
+    - param `value: Path | str | None`
+    - param `*`
+    - param `empty: str='(not set)'`
+  - function `toml_path_text`
+    - param `value: Path | str`
+  - function `path_sort_key`
+    - param `value: Path | str`
+- module `data_engine.platform.processes`
+  - attribute `_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION`
+  - attribute `_WINDOWS_STILL_ACTIVE`
+  - attribute `__all__`
+  - function `windows_subprocess_creationflags`
+    - param `*`
+    - param `new_process_group: bool=False`
+    - param `no_window: bool=False`
+    - param `detached: bool=False`
+  - function `process_is_running`
+    - param `pid: int | None`
+    - param `*`
+    - param `treat_defunct_as_dead: bool=True`
+  - function `_windows_process_is_running`
+    - param `pid: int`
+  - function `process_status`
+    - param `pid: int`
+  - function `list_processes`
+  - function `_list_posix_processes`
+  - function `_list_windows_processes`
+  - function `collapse_windows_launcher_processes`
+    - param `rows: list[ClassifiedProcessInfo]`
+  - function `force_kill_process_tree`
+    - param `pid: int`
+  - class `ProcessInspectionError`
 - module `data_engine.platform.theme`
   - attribute `GITHUB_DARK`
   - attribute `GITHUB_LIGHT`
@@ -2503,6 +2720,8 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `DATA_ENGINE_WORKSPACE_ID_ENV_VAR`
   - attribute `DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR`
   - attribute `DATA_ENGINE_RUNTIME_ROOT_ENV_VAR`
+  - attribute `DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR`
+  - attribute `DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR`
   - attribute `DATA_ENGINE_RUNTIME_DB_PATH_ENV_VAR`
   - attribute `WORKSPACE_CONFIG_DIR_NAME`
   - attribute `WORKSPACE_FLOW_MODULES_DIR_NAME`
@@ -2521,14 +2740,6 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `WORKSPACE_SHARED_FILE_STATE_DIR_NAME`
   - attribute `__all__`
   - function `_resolve_app_root_path`
-  - function `normalized_path_text`
-    - param `value: Path | str`
-  - function `path_display`
-    - param `value: Path | str | None`
-    - param `*`
-    - param `empty: str='(not set)'`
-  - function `toml_path_text`
-    - param `value: Path | str`
   - function `validate_workspace_id`
     - param `workspace_id: str`
   - function `local_workspace_namespace`
@@ -2580,6 +2791,10 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `daemon_endpoint_path`
     - attribute `sphinx_source_dir`
     - attribute `workspace_configured`
+    - attribute `runtime_cache_db_path`
+    - attribute `runtime_control_db_path`
+    - method `__post_init__`
+      - param `self`
 - module `data_engine.platform.workspace_policy`
   - attribute `__all__`
   - class `AppStatePolicy`
@@ -2657,8 +2872,6 @@ This page is generated from the current AST map and is intentionally inventory-s
   - no top-level symbols
 - module `data_engine.runtime.file_watch`
   - attribute `__all__`
-  - function `_normalize_path`
-    - param `value: Path`
   - function `_normalized_name`
     - param `value: str`
   - function `_queue_key`
@@ -2770,8 +2983,9 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `started_at_utc`
     - attribute `updated_at_utc`
 - module `data_engine.runtime.runtime_db`
+  - attribute `RuntimeLedger`
   - attribute `__all__`
-  - class `RuntimeLedger`
+  - class `_RuntimeSqliteStore`
     - attribute `HISTORY_RETENTION_DAYS`
     - instance attribute `db_path`
     - instance attribute `_connections`
@@ -2779,10 +2993,6 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `__init__`
       - param `self`
       - param `db_path: Path`
-    - method `open_default`
-      - param `cls`
-      - param `*`
-      - param `data_root: Path | None=None`
     - method `_ensure_parent_dir`
       - param `self`
     - method `_connection`
@@ -2791,6 +3001,24 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
     - method `__del__`
       - param `self`
+    - method `_initialize_schema`
+      - param `self`
+    - method `_checkpoint_wal`
+      - param `self`
+      - param `*`
+      - param `passive: bool=False`
+  - class `_RuntimeCacheSchema`
+    - method `open_default`
+      - param `cls`
+      - param `*`
+      - param `data_root: Path | None=None`
+    - method `_initialize_schema`
+      - param `self`
+  - class `RuntimeControlLedger`
+    - method `open_default`
+      - param `cls`
+      - param `*`
+      - param `data_root: Path | None=None`
     - method `_initialize_schema`
       - param `self`
     - method `upsert_daemon_state`
@@ -2835,6 +3063,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `exclude_client_id: str | None=None`
     - method `_pid_is_running`
       - param `pid: int`
+  - class `_RuntimeCacheOperations`
     - method `normalize_source_path`
       - param `self`
       - param `source_path: Path | str`
@@ -2938,6 +3167,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `step_runs: tuple[PersistedStepRun, ...]`
       - param `logs: tuple[PersistedLogEntry, ...]`
       - param `file_states: tuple[PersistedFileState, ...]`
+  - class `RuntimeCacheLedger`
 - module `data_engine.runtime.shared_state`
   - attribute `_LEASE_METADATA_SCHEMA`
   - attribute `_CONTROL_REQUEST_SCHEMA`
@@ -2965,7 +3195,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `reclaim: bool=True`
   - function `checkpoint_workspace_state`
     - param `paths: WorkspacePaths`
-    - param `ledger: RuntimeLedger`
+    - param `ledger: RuntimeCacheLedger`
     - param `*`
     - param `workspace_id: str`
     - param `machine_id: str`
@@ -2988,7 +3218,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `app_version: str | None`
   - function `hydrate_local_runtime_state`
     - param `paths: WorkspacePaths`
-    - param `ledger: RuntimeLedger`
+    - param `ledger: RuntimeCacheLedger`
   - function `read_lease_metadata`
     - param `paths: WorkspacePaths`
   - function `read_control_request`
@@ -3179,13 +3409,14 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `*`
       - param `workspace_root: Path | None=None`
 - module `data_engine.services.ledger`
+  - attribute `LedgerService`
   - attribute `__all__`
-  - class `LedgerService`
+  - class `RuntimeControlLedgerService`
     - instance attribute `runtime_layout_policy`
     - instance attribute `_open_ledger_func`
     - method `__init__`
       - param `self`
-      - param `open_ledger_func: Callable[[Path], RuntimeLedger] | None=None`
+      - param `open_ledger_func: Callable[[Path], RuntimeControlLedger] | None=None`
       - param `*`
       - param `runtime_layout_policy: RuntimeLayoutPolicy | None=None`
     - method `_open_default_ledger`
@@ -3196,10 +3427,10 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `workspace_root: Path`
     - method `close`
       - param `self`
-      - param `ledger: RuntimeLedger`
+      - param `ledger: RuntimeControlLedger`
     - method `register_client_session`
       - param `self`
-      - param `ledger: RuntimeLedger`
+      - param `ledger: RuntimeControlLedger`
       - param `*`
       - param `client_id: str`
       - param `workspace_id: str`
@@ -3207,18 +3438,18 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `pid: int`
     - method `remove_client_session`
       - param `self`
-      - param `ledger: RuntimeLedger`
+      - param `ledger: RuntimeControlLedger`
       - param `client_id: str`
     - method `purge_process_client_sessions`
       - param `self`
-      - param `ledger: RuntimeLedger`
+      - param `ledger: RuntimeControlLedger`
       - param `*`
       - param `workspace_id: str`
       - param `client_kind: str`
       - param `pid: int`
     - method `count_live_client_sessions`
       - param `self`
-      - param `ledger: RuntimeLedger`
+      - param `ledger: RuntimeControlLedger`
       - param `workspace_id: str`
       - param `*`
       - param `exclude_client_id: str | None=None`
@@ -3227,7 +3458,7 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `LogService`
     - method `create_store`
       - param `self`
-      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `runtime_cache_ledger: RuntimeCacheLedger | None=None`
     - method `reload`
       - param `self`
       - param `store: FlowLogStore`
@@ -3252,14 +3483,44 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `flow_name: str | None`
     - method `_hydrate_entries`
       - param `self`
-      - param `runtime_ledger: RuntimeLedger | None`
+      - param `runtime_cache_ledger: RuntimeCacheLedger | None`
 - module `data_engine.services.runtime_binding`
   - attribute `__all__`
+  - class `_NullRuntimeCacheLedger`
+    - method `list_logs`
+      - param `self`
+    - method `list_runs`
+      - param `self`
+    - method `close`
+      - param `self`
+  - class `_NullRuntimeControlLedger`
+    - method `close`
+      - param `self`
+    - method `upsert_client_session`
+      - param `self`
+      - param `**kwargs: object`
+    - method `remove_client_session`
+      - param `self`
+      - param `client_id: str`
+    - method `remove_client_sessions_for_process`
+      - param `self`
+      - param `*`
+      - param `workspace_id: str`
+      - param `client_kind: str`
+      - param `pid: int`
+    - method `count_live_client_sessions`
+      - param `self`
+      - param `workspace_id: str`
+      - param `*`
+      - param `exclude_client_id: str | None=None`
   - class `WorkspaceRuntimeBinding`
     - attribute `workspace_paths`
-    - attribute `runtime_ledger`
+    - attribute `runtime_cache_ledger`
+    - attribute `runtime_control_ledger`
     - attribute `log_store`
     - attribute `daemon_manager`
+    - method `runtime_ledger`
+      - param `self`
   - class `WorkspaceRuntimeBindingService`
     - instance attribute `ledger_service`
     - instance attribute `log_service`
@@ -3267,7 +3528,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `__init__`
       - param `self`
       - param `*`
-      - param `ledger_service: LedgerService`
+      - param `ledger_service: RuntimeControlLedgerService`
       - param `log_service: LogService`
       - param `daemon_state_service: DaemonStateService`
     - method `open_binding`
@@ -3312,38 +3573,38 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `flow: 'Flow'`
       - param `*`
-      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheLedger | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `preview`
       - param `self`
       - param `flow: 'Flow'`
       - param `*`
       - param `use: str | None=None`
-      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheLedger | None=None`
     - method `run_manual`
       - param `self`
       - param `flow: 'Flow'`
       - param `*`
-      - param `runtime_ledger: RuntimeLedger`
+      - param `runtime_ledger: RuntimeCacheLedger`
       - param `flow_stop_event: Event`
     - method `run_continuous`
       - param `self`
       - param `flow: 'Flow'`
       - param `*`
-      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheLedger | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `run_grouped`
       - param `self`
       - param `flows: tuple['Flow', ...]`
       - param `*`
-      - param `runtime_ledger: RuntimeLedger`
+      - param `runtime_ledger: RuntimeCacheLedger`
       - param `runtime_stop_event: Event`
       - param `flow_stop_event: Event`
     - method `run_grouped_continuous`
       - param `self`
       - param `flows: tuple['Flow', ...]`
       - param `*`
-      - param `runtime_ledger: RuntimeLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheLedger | None=None`
       - param `runtime_stop_event: Event | None=None`
       - param `flow_stop_event: Event | None=None`
 - module `data_engine.services.runtime_history`
@@ -3351,11 +3612,11 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `RuntimeHistoryService`
     - method `rebuild_step_outputs`
       - param `self`
-      - param `ledger: RuntimeLedger`
+      - param `ledger: RuntimeCacheLedger`
       - param `flow_cards: dict[str, FlowCatalogLike]`
     - method `error_text_for_entry`
       - param `self`
-      - param `ledger: RuntimeLedger`
+      - param `ledger: RuntimeCacheLedger`
       - param `run_group: FlowRunState`
       - param `entry: FlowLogEntry`
 - module `data_engine.services.settings`
@@ -3395,7 +3656,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `hydrate_local_runtime`
       - param `self`
       - param `paths: WorkspacePaths`
-      - param `ledger: RuntimeLedger`
+      - param `ledger: RuntimeCacheLedger`
     - method `read_lease_metadata`
       - param `self`
       - param `paths: WorkspacePaths`
@@ -3442,6 +3703,11 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `app_root: Path`
   - function `checkout_tests_dir`
     - param `app_root: Path`
+  - function `_vscode_interpreter_path`
+    - param `*`
+    - param `settings_root: Path`
+    - param `app_root: Path`
+    - param `interpreter_path: Path | None=None`
   - function `workspace_vscode_settings`
     - param `workspace_root: Path`
     - param `*`
@@ -3583,7 +3849,6 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `__all__`
   - function `start_surface`
     - param `surface: str`
-  - function `preferred_gui_python_executable`
   - function `start_gui_subprocess`
   - function `launch_desktop_ui`
     - param `*`
@@ -3824,7 +4089,13 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `theme_service_factory`
     - attribute `workspace_provisioning_service_factory`
 - module `data_engine.ui.gui.bootstrapper`
+  - attribute `_DEFAULT_WINDOW_SIZE`
+  - attribute `_MINIMUM_WINDOW_SIZE`
+  - attribute `_STARTUP_SCREEN_WIDTH_RATIO`
+  - attribute `_STARTUP_SCREEN_HEIGHT_RATIO`
   - attribute `__all__`
+  - function `initial_window_size_for_screen`
+    - param `screen: object | None`
   - function `bootstrap_gui_window`
     - param `window: 'DataEngineWindow'`
     - param `*`
@@ -3979,6 +4250,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `window: 'DataEngineWindow'`
       - param `presentation: '_GuiFlowPresentationController'`
+    - method `_workspace_selectors`
+      - param `window: 'DataEngineWindow'`
   - class `_GuiFlowPresentationController`
     - instance attribute `flow_catalog_application`
     - instance attribute `log_service`
@@ -4294,6 +4567,12 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `file_name: str`
 - module `data_engine.ui.gui.presenters.logs`
   - attribute `__all__`
+  - function `next_log_scroll_value`
+    - param `*`
+    - param `previous_value: int`
+    - param `previous_maximum: int`
+    - param `current_maximum: int`
+    - param `force_scroll_to_bottom: bool=False`
   - function `refresh_log_view`
     - param `window: 'DataEngineWindow'`
     - param `*`
@@ -4355,6 +4634,8 @@ This page is generated from the current AST map and is intentionally inventory-s
 - module `data_engine.ui.gui.presenters.workspace_binding`
   - attribute `__all__`
   - function `_close_workspace_scoped_dialogs`
+    - param `window: 'DataEngineWindow'`
+  - function `_sync_workspace_selector`
     - param `window: 'DataEngineWindow'`
   - function `rebind_workspace_context`
     - param `window: 'DataEngineWindow'`

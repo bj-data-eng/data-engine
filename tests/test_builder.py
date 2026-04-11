@@ -7,18 +7,9 @@ import threading
 import polars as pl
 import pytest
 
-from data_engine.authoring.builder import (
-    Batch,
-    FileRef,
-    Flow,
-    MirrorContext,
-    SourceContext,
-    _FlowRuntime,
-    _GroupedFlowRuntime,
-    discover_flows,
-    load_flow,
-    run,
-)
+from data_engine.authoring.execution import _FlowRuntime, _GroupedFlowRuntime
+from data_engine.authoring.flow import Flow, discover_flows, load_flow, run
+from data_engine.authoring.primitives import Batch, FileRef, MirrorContext, SourceContext
 from data_engine.authoring.model import FlowValidationError
 from data_engine.flow_modules.flow_module_loader import compiled_flow_module_context
 from data_engine.runtime.runtime_db import RuntimeLedger

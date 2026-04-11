@@ -9,9 +9,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "src"))
 
+from data_engine.platform.identity import APP_VERSION  # noqa: E402
+
 project = "Data Engine"
 author = "Data Engine contributors"
-release = "0.1.2"
+release = APP_VERSION
 
 extensions = [
     "sphinx.ext.autodoc",
@@ -35,3 +37,4 @@ html_title = "Data Engine documentation"
 autodoc_member_order = "bysource"
 autodoc_typehints = "description"
 add_module_names = False
+napoleon_use_ivar = True

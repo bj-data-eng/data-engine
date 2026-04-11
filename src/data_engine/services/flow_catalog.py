@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from data_engine.authoring.builder import Flow, _title_case_words
+from data_engine.authoring.flow import Flow
+from data_engine.authoring.helpers import _title_case_words
 from data_engine.domain import FlowCatalogEntry, default_flow_state, flow_category
 from data_engine.authoring.model import FlowValidationError
 from data_engine.flow_modules.flow_module_loader import FlowModuleDefinition, discover_flow_module_definitions

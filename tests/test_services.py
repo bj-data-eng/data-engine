@@ -7,7 +7,7 @@ from time import time_ns
 
 import pytest
 
-from data_engine.authoring.builder import Flow
+from data_engine.authoring.flow import Flow
 from data_engine.authoring.model import FlowValidationError
 from data_engine.domain import DaemonLifecyclePolicy, FlowCatalogEntry, WorkspaceControlState
 from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot

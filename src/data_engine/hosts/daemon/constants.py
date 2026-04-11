@@ -1,6 +1,7 @@
 """Shared daemon host constants."""
 
-APP_VERSION = "0.1.2"
+from data_engine.platform.identity import APP_VERSION
+
 CHECKPOINT_INTERVAL_SECONDS = 30.0
 CONTROL_REQUEST_POLL_INTERVAL_SECONDS = 1.0
 STALE_AFTER_SECONDS = 90.0

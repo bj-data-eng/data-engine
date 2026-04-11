@@ -37,6 +37,13 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 .\.venv\Scripts\python.exe -m pytest tests\test_daemon.py tests\test_live_runtime_suite.py -q
 ```
 
+- Lint and docstring checks:
+
+```powershell
+.\.venv\Scripts\ruff.exe check .
+.\.venv\Scripts\pydoclint.exe src\data_engine
+```
+
 - Packaging check:
 
 ```powershell
@@ -86,10 +93,7 @@ git status --short
 .\.venv\Scripts\python.exe -m twine check dist\*
 ```
 
-- Keep version values aligned in:
-  - `pyproject.toml`
-  - `src/data_engine/hosts/daemon/constants.py`
-  - `src/data_engine/docs/sphinx_source/conf.py`
+- Keep version values centralized in `src/data_engine/platform/identity.py`; package metadata, daemon constants, and Sphinx config should read from `APP_VERSION`.
 
 ## Git Hygiene
 

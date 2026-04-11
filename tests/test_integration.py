@@ -10,7 +10,9 @@ from textwrap import dedent
 import duckdb
 import polars as pl
 
-from data_engine.authoring.builder import Batch, Flow, _FlowRuntime, _GroupedFlowRuntime, load_flow
+from data_engine.authoring.execution import _FlowRuntime, _GroupedFlowRuntime
+from data_engine.authoring.flow import Flow, load_flow
+from data_engine.authoring.primitives import Batch
 from data_engine.authoring.model import FlowStoppedError
 from data_engine.flow_modules.flow_module_loader import discover_flow_module_definitions, load_flow_module_definition
 from data_engine.runtime.runtime_db import RuntimeLedger, utcnow_text

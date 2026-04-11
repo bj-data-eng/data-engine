@@ -5,7 +5,7 @@ import json
 import pytest
 
 import data_engine.flow_modules.flow_module_loader as flow_module_loader
-from data_engine.authoring.builder import Flow
+from data_engine.authoring.flow import Flow
 from data_engine.authoring.model import FlowValidationError
 from data_engine.flow_modules.flow_module_loader import compiled_flow_module_context, current_compiled_flow_module_dir, discover_flow_module_definitions, in_compiled_flow_module_context, load_flow_module_definition
 
