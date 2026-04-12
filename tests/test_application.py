@@ -222,6 +222,48 @@ def test_flow_catalog_application_builds_grouped_presentation_and_selected_index
     assert presentation.selected_list_index == 1
 
 
+def test_flow_catalog_application_selects_first_visual_flow_on_load(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    scheduled = FlowCatalogEntry(
+        name="scheduled_import",
+        group=None,
+        title="Scheduled Import",
+        description="desc",
+        source_root="/tmp/source",
+        target_root="/tmp/target",
+        mode="schedule",
+        interval="30s",
+        operations="Read",
+        operation_items=("Read",),
+        state="schedule ready",
+        valid=True,
+        category="automated",
+    )
+    manual = FlowCatalogEntry(
+        name="manual_review",
+        group=None,
+        title="Manual Review",
+        description="desc",
+        source_root="/tmp/source",
+        target_root="/tmp/target",
+        mode="manual",
+        interval="-",
+        operations="Review",
+        operation_items=("Review",),
+        state="manual",
+        valid=True,
+        category="manual",
+    )
+    app = FlowCatalogApplication(flow_catalog_service=_FakeFlowCatalogService((scheduled, manual)))
+
+    state = app.load_state(workspace_root=workspace_root)
+    presentation = app.build_presentation(catalog_state=state)
+
+    assert tuple(group_name for group_name, _entries in presentation.grouped_cards) == ("manual", "schedule")
+    assert state.selected_flow_name == "manual_review"
+    assert presentation.selected_list_index == 1
+
+
 def test_workspace_session_application_refreshes_discovery(tmp_path: Path, monkeypatch) -> None:
     app_root = tmp_path / "app"
     collection_root = tmp_path / "workspaces"

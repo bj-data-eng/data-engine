@@ -64,16 +64,36 @@ def build_smoke_environment(
         target_workspace = workspace_collection_root / workspace_id
         (target_workspace / "flow_modules").mkdir(parents=True, exist_ok=True)
         data_folder_name = secondary_data_dir_name if workspace_id.endswith("2") else primary_data_dir_name
-        create_python_flow_modules(target_workspace, workspace_id=workspace_id, data_folder_name=data_folder_name)
-        create_notebook_flow_modules(target_workspace, workspace_id=workspace_id, data_folder_name=data_folder_name)
+        schedule_interval = "15s" if workspace_id.endswith("2") else "30s"
+        create_python_flow_modules(
+            target_workspace,
+            workspace_id=workspace_id,
+            data_folder_name=data_folder_name,
+            schedule_interval=schedule_interval,
+        )
+        create_notebook_flow_modules(
+            target_workspace,
+            workspace_id=workspace_id,
+            data_folder_name=data_folder_name,
+            schedule_interval=schedule_interval,
+        )
 
 
-def create_python_flow_modules(target_workspace: Path, *, workspace_id: str, data_folder_name: str) -> None:
+def create_python_flow_modules(
+    target_workspace: Path,
+    *,
+    workspace_id: str,
+    data_folder_name: str,
+    schedule_interval: str = "30s",
+) -> None:
     """Write starter Python-authored flow modules into one workspace."""
     del workspace_id
     flow_dir = target_workspace / "flow_modules"
     write_text_file(flow_dir / "example_mirror.py", _python_poll_source(data_folder_name=data_folder_name))
-    write_text_file(flow_dir / "example_schedule.py", _python_schedule_source(data_folder_name=data_folder_name))
+    write_text_file(
+        flow_dir / "example_schedule.py",
+        _python_schedule_source(data_folder_name=data_folder_name, schedule_interval=schedule_interval),
+    )
     write_text_file(flow_dir / "example_manual.py", _python_manual_source(data_folder_name=data_folder_name))
     write_text_file(
         flow_dir / "example_database_dimensions.py",
@@ -81,7 +101,13 @@ def create_python_flow_modules(target_workspace: Path, *, workspace_id: str, dat
     )
 
 
-def create_notebook_flow_modules(target_workspace: Path, *, workspace_id: str, data_folder_name: str) -> None:
+def create_notebook_flow_modules(
+    target_workspace: Path,
+    *,
+    workspace_id: str,
+    data_folder_name: str,
+    schedule_interval: str = "30s",
+) -> None:
     """Write starter notebook-authored flow modules into one workspace."""
     flow_dir = target_workspace / "flow_modules"
     create_notebook_flow_module(
@@ -90,7 +116,11 @@ def create_notebook_flow_modules(target_workspace: Path, *, workspace_id: str, d
     )
     create_notebook_flow_module(
         flow_dir / f"{workspace_id}_nb_schedule.ipynb",
-        _schedule_notebook_source(workspace_id=workspace_id, data_folder_name=data_folder_name),
+        _schedule_notebook_source(
+            workspace_id=workspace_id,
+            data_folder_name=data_folder_name,
+            schedule_interval=schedule_interval,
+        ),
     )
     create_notebook_flow_module(
         flow_dir / f"{workspace_id}_nb_manual.ipynb",
@@ -318,7 +348,7 @@ def build():
 """
 
 
-def _python_schedule_source(*, data_folder_name: str) -> str:
+def _python_schedule_source(*, data_folder_name: str, schedule_interval: str = "30s") -> str:
     return f"""from __future__ import annotations
 
 import polars as pl
@@ -343,7 +373,7 @@ def write_example_schedule(context):
 def build():
     return (
         Flow(name="example_schedule", group="Settings")
-        .watch(mode="schedule", run_as="batch", interval="15m", source="../../../{data_folder_name}/Settings/single_watch.xlsx")
+        .watch(mode="schedule", run_as="batch", interval="{schedule_interval}", source="../../../{data_folder_name}/Settings/single_watch.xlsx")
         .mirror(root="../../../{data_folder_name}/Output/example_schedule")
         .step(read_settings, save_as="settings_df", label="Read Excel")
         .step(write_example_schedule, use="settings_df", label="Write Parquet")
@@ -495,7 +525,7 @@ def build():
 """
 
 
-def _schedule_notebook_source(*, workspace_id: str, data_folder_name: str) -> str:
+def _schedule_notebook_source(*, workspace_id: str, data_folder_name: str, schedule_interval: str = "30s") -> str:
     return f"""from __future__ import annotations
 
 import polars as pl
@@ -520,7 +550,7 @@ def write_example_schedule(context):
 def build():
     return (
         Flow(name="{workspace_id}_nb_schedule", group="Notebook")
-        .watch(mode="schedule", run_as="batch", interval="15m", source="../../../{data_folder_name}/Settings/single_watch.xlsx")
+        .watch(mode="schedule", run_as="batch", interval="{schedule_interval}", source="../../../{data_folder_name}/Settings/single_watch.xlsx")
         .mirror(root="../../../{data_folder_name}/Output/{workspace_id}_nb_schedule")
         .step(read_settings, save_as="settings_df", label="Read Excel")
         .step(write_example_schedule, use="settings_df", label="Write Parquet")

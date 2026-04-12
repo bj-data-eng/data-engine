@@ -86,7 +86,10 @@ class FlowCatalogApplication:
         """Load discovered entries and merge them into one catalog state."""
         base = current_state or FlowCatalogState.empty()
         entries = self.flow_catalog_service.load_entries(workspace_root=workspace_root)
-        return base.with_entries(entries).with_empty_message("")
+        state = base.with_entries(entries).with_empty_message("")
+        if base.selected_flow_name is not None and state.selected_flow_name == base.selected_flow_name:
+            return state
+        return state.with_selected_flow_name(_first_grouped_entry_name(state.entries))
 
     def empty_state(
         self,
@@ -149,3 +152,11 @@ class FlowCatalogApplication:
                 error_text=message,
             )
         return FlowCatalogLoadResult(catalog_state=catalog_state, loaded=True)
+
+
+def _first_grouped_entry_name(entries: tuple[FlowCatalogEntry, ...]) -> str | None:
+    """Return the first entry name in the same grouped order used by operator surfaces."""
+    for bucket in group_cards(entries):
+        if bucket.entries:
+            return bucket.entries[0].name
+    return None
