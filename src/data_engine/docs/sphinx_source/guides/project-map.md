@@ -17,35 +17,35 @@ These counts are package-level rollups from the current AST snapshot.
 | Package | Modules | Functions | Classes | Flows | Lines |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `data_engine` | 1 | 1 | 0 | 0 | 37 |
-| `data_engine.application` | 7 | 5 | 19 | 0 | 1029 |
-| `data_engine.authoring` | 3 | 7 | 2 | 0 | 257 |
+| `data_engine.application` | 7 | 6 | 19 | 0 | 1040 |
+| `data_engine.authoring` | 3 | 7 | 2 | 0 | 262 |
 | `data_engine.core` | 5 | 12 | 14 | 0 | 1107 |
-| `data_engine.devtools` | 3 | 39 | 5 | 0 | 1189 |
+| `data_engine.devtools` | 3 | 39 | 5 | 0 | 1219 |
 | `data_engine.docs` | 2 | 0 | 0 | 0 | 41 |
 | `data_engine.domain` | 16 | 10 | 40 | 0 | 1827 |
 | `data_engine.flow_modules` | 3 | 17 | 2 | 0 | 384 |
 | `data_engine.helpers` | 3 | 30 | 5 | 0 | 1308 |
-| `data_engine.hosts` | 18 | 58 | 17 | 0 | 2577 |
+| `data_engine.hosts` | 18 | 58 | 17 | 0 | 2576 |
 | `data_engine.platform` | 9 | 35 | 10 | 0 | 1308 |
-| `data_engine.runtime` | 16 | 38 | 32 | 0 | 3192 |
-| `data_engine.services` | 15 | 14 | 18 | 0 | 1296 |
-| `data_engine.ui` | 65 | 172 | 35 | 0 | 8558 |
-| `data_engine.views` | 11 | 29 | 9 | 0 | 835 |
+| `data_engine.runtime` | 19 | 39 | 45 | 0 | 3302 |
+| `data_engine.services` | 16 | 14 | 32 | 0 | 1547 |
+| `data_engine.ui` | 65 | 172 | 35 | 0 | 8540 |
+| `data_engine.views` | 11 | 29 | 9 | 0 | 843 |
 
 ## Largest Modules
 
 | Module | Lines | Functions | Classes |
 | --- | ---: | ---: | ---: |
 | `data_engine.helpers.duckdb` | 980 | 23 | 0 |
-| `data_engine.runtime.runtime_db` | 980 | 0 | 5 |
+| `data_engine.runtime.runtime_cache_store` | 764 | 0 | 8 |
 | `data_engine.ui.gui.theme` | 736 | 1 | 0 |
+| `data_engine.devtools.smoke_data` | 607 | 19 | 0 |
 | `data_engine.devtools.project_ast_map` | 597 | 20 | 5 |
-| `data_engine.devtools.smoke_data` | 577 | 19 | 0 |
+| `data_engine.runtime.shared_state` | 572 | 31 | 6 |
 | `data_engine.hosts.daemon.client` | 520 | 29 | 2 |
-| `data_engine.runtime.shared_state` | 520 | 30 | 0 |
 | `data_engine.ui.gui.widgets.panels` | 498 | 12 | 0 |
-| `data_engine.ui.gui.bootstrap` | 489 | 6 | 2 |
-| `data_engine.ui.tui.bootstrap` | 475 | 6 | 2 |
+| `data_engine.ui.gui.bootstrap` | 491 | 6 | 2 |
+| `data_engine.ui.tui.bootstrap` | 477 | 6 | 2 |
 
 ## Internal Stitching Points
 
@@ -55,10 +55,10 @@ Modules with higher internal import fan-out tend to be composition or aggregatio
 | --- | ---: | ---: |
 | `data_engine.domain` | 65 | 92 |
 | `data_engine.views` | 61 | 109 |
-| `data_engine.hosts.daemon.app` | 44 | 225 |
+| `data_engine.hosts.daemon.app` | 44 | 220 |
 | `data_engine.ui.gui.render_support` | 43 | 241 |
-| `data_engine.ui.gui.bootstrap` | 40 | 489 |
-| `data_engine.ui.tui.bootstrap` | 39 | 475 |
+| `data_engine.ui.gui.bootstrap` | 40 | 491 |
+| `data_engine.ui.tui.bootstrap` | 39 | 477 |
 | `data_engine.platform.workspace_policy` | 38 | 343 |
 | `data_engine.ui.gui.presenters` | 35 | 64 |
 | `data_engine.ui.gui.helpers` | 30 | 62 |

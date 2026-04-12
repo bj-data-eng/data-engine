@@ -3,7 +3,7 @@
 This page is generated from the current AST map and is intentionally inventory-shaped rather than explanatory.
 
 - package root: `src/data_engine`
-- module count: `177`
+- module count: `181`
 
 - module `data_engine`
   - attribute `__all__`
@@ -27,6 +27,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `workspace_available: bool=True`
       - param `selected_run_group_present: bool=False`
 - module `data_engine.application.catalog`
+  - function `_first_grouped_entry_name`
+    - param `entries: tuple[FlowCatalogEntry, ...]`
   - class `FlowCatalogLoadResult`
     - attribute `catalog_state`
     - attribute `loaded`
@@ -770,11 +772,13 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `*`
     - param `workspace_id: str`
     - param `data_folder_name: str`
+    - param `schedule_interval: str='30s'`
   - function `create_notebook_flow_modules`
     - param `target_workspace: Path`
     - param `*`
     - param `workspace_id: str`
     - param `data_folder_name: str`
+    - param `schedule_interval: str='30s'`
   - function `create_smoke_data_root`
     - param `data_root: Path`
     - param `*`
@@ -809,6 +813,7 @@ This page is generated from the current AST map and is intentionally inventory-s
   - function `_python_schedule_source`
     - param `*`
     - param `data_folder_name: str`
+    - param `schedule_interval: str='30s'`
   - function `_python_manual_source`
     - param `*`
     - param `data_folder_name: str`
@@ -823,6 +828,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `*`
     - param `workspace_id: str`
     - param `data_folder_name: str`
+    - param `schedule_interval: str='30s'`
   - function `_manual_notebook_source`
     - param `*`
     - param `workspace_id: str`
@@ -1703,8 +1709,6 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `dependencies: DaemonHostDependencies | None=None`
       - param `identity: DaemonHostIdentity | None=None`
       - param `lifecycle_policy: DaemonLifecyclePolicy=DaemonLifecyclePolicy.PERSISTENT`
-    - method `runtime_ledger`
-      - param `self`
     - method `_workspace_root_is_available`
       - param `self`
     - method `_retained_daemon_log_lines`
@@ -1859,7 +1863,6 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `status: str`
 - module `data_engine.hosts.daemon.composition`
   - attribute `__all__`
-  - attribute `DaemonHostInitialState`
   - function `default_daemon_host_dependency_factories`
   - class `DaemonHostDependencyFactories`
     - attribute `flow_catalog_service_factory`
@@ -1873,8 +1876,6 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `flow_execution_service`
     - attribute `runtime_execution_service`
     - attribute `shared_state_adapter`
-    - method `runtime_ledger`
-      - param `self`
     - method `build_default`
       - param `cls`
       - param `paths: WorkspacePaths`
@@ -2209,11 +2210,11 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `hydrate_local_runtime`
       - param `self`
       - param `paths: WorkspacePaths`
-      - param `ledger: RuntimeCacheLedger`
+      - param `ledger: RuntimeSnapshotStore`
     - method `checkpoint_workspace_state`
       - param `self`
       - param `paths: WorkspacePaths`
-      - param `ledger: RuntimeCacheLedger`
+      - param `ledger: RuntimeSnapshotStore`
       - param `*`
       - param `workspace_id: str`
       - param `machine_id: str`
@@ -2324,6 +2325,10 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `*`
       - param `wait: bool=True`
+    - method `run_until_stopped`
+      - param `self`
+      - param `flows: tuple['Flow', ...]`
+      - param `stop_event: Event`
     - method `_remove_known_jobs`
       - param `self`
     - method `_add_flow_jobs`
@@ -2684,8 +2689,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `runtime_stop_event: Event | None=None`
       - param `flow_stop_event: Event | None=None`
       - param `status_callback: Callable[[str], None] | None=None`
-      - param `flow_runtime_type: type[_FlowRuntime]=_FlowRuntime`
-      - param `grouped_runtime_type: type[_GroupedFlowRuntime]=_GroupedFlowRuntime`
+      - param `flow_runtime_type: type[FlowRuntime]=FlowRuntime`
+      - param `grouped_runtime_type: type[GroupedFlowRuntime]=GroupedFlowRuntime`
       - param `run_stop_controller: RuntimeStopController | None=None`
     - method `run_once`
       - param `self`
@@ -2728,7 +2733,7 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `__all__`
 - module `data_engine.runtime.execution.context`
   - attribute `__all__`
-  - class `_QueuedJob`
+  - class `QueuedRunJob`
     - attribute `flow`
     - attribute `source_path`
     - attribute `batch_signatures`
@@ -2756,22 +2761,18 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `runtime`
     - method `__init__`
       - param `self`
-      - param `runtime: '_FlowRuntime'`
+      - param `runtime: 'FlowRuntime'`
     - method `run`
       - param `self`
     - method `_poll_watch_entries`
       - param `self`
       - param `watch_entries: list[dict[str, object]]`
-      - param `queue: deque[_QueuedJob]`
+      - param `queue: deque[QueuedRunJob]`
       - param `queued_keys: set[tuple[str, str | None]]`
-      - param `now: float`
-    - method `_update_schedule_entries`
-      - param `self`
-      - param `schedule_entries: list[dict[str, object]]`
       - param `now: float`
 - module `data_engine.runtime.execution.grouped`
   - attribute `__all__`
-  - class `_GroupedFlowRuntime`
+  - class `GroupedFlowRuntime`
     - instance attribute `flows`
     - instance attribute `continuous`
     - instance attribute `runtime_stop_event`
@@ -2790,9 +2791,9 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `runtime_stop_event: threading.Event | None=None`
       - param `flow_stop_event: threading.Event | None=None`
       - param `status_callback: Callable[[str], None] | None=None`
-      - param `runtime_ledger: RuntimeLedger | None=None`
-      - param `runtime_ledger_service: RuntimeLedgerService | None=None`
-      - param `runtime_ledger_factory: Callable[[], RuntimeLedger] | None=None`
+      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_ledger_service: RuntimeCacheLedgerService | None=None`
+      - param `runtime_ledger_factory: Callable[[], RuntimeCacheLedger] | None=None`
       - param `run_stop_controller: RuntimeStopController | None=None`
     - method `run`
       - param `self`
@@ -2802,7 +2803,7 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `LOGGER`
   - attribute `__all__`
   - class `RuntimeLogSink`
-    - method `append_log`
+    - method `append`
       - param `self`
       - param `*`
       - param `level: str`
@@ -2849,17 +2850,17 @@ This page is generated from the current AST map and is intentionally inventory-s
 - module `data_engine.runtime.execution.polling`
   - attribute `__all__`
   - class `RuntimeSourceStateStore`
-    - method `normalize_source_path`
+    - method `normalize_path`
       - param `self`
       - param `source_path: Path | str`
-    - method `source_signature_for_path`
+    - method `signature_for_path`
       - param `self`
       - param `source_path: Path`
-    - method `is_poll_source_stale`
+    - method `is_stale`
       - param `self`
       - param `flow_name: str`
       - param `signature: SourceSignature | None`
-    - method `prune_missing_file_state`
+    - method `prune_missing`
       - param `self`
       - param `*`
       - param `flow_name: str`
@@ -2879,7 +2880,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `allow_missing: bool=False`
     - method `enqueue_job`
       - param `self`
-      - param `queue: deque[_QueuedJob]`
+      - param `queue: deque[QueuedRunJob]`
       - param `queued_keys: set[tuple[str, str | None]]`
       - param `flow: 'Flow'`
       - param `source_path: Path | None`
@@ -3010,7 +3011,7 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `FlowRunExecutionPorts`
     - attribute `context_builder`
     - attribute `polling`
-    - attribute `runtime_ledger`
+    - attribute `state_writer`
     - attribute `log_emitter`
     - attribute `stop_controller`
   - class `FlowRunExecutor`
@@ -3048,13 +3049,13 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `step: 'StepSpec'`
 - module `data_engine.runtime.execution.single`
   - attribute `__all__`
-  - function `_open_default_runtime_ledger`
-  - function `default_runtime_ledger_service`
-  - class `RuntimeLedgerService`
-    - attribute `open_runtime_ledger_func`
-    - method `open_runtime_ledger`
+  - function `_open_default_runtime_cache_ledger`
+  - function `default_runtime_cache_ledger_service`
+  - class `RuntimeCacheLedgerService`
+    - attribute `open_runtime_cache_ledger_func`
+    - method `open_runtime_cache_ledger`
       - param `self`
-  - class `_FlowRuntime`
+  - class `FlowRuntime`
     - instance attribute `flows`
     - instance attribute `continuous`
     - instance attribute `runtime_stop_event`
@@ -3071,15 +3072,15 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `continuous_loop`
     - method `__init__`
       - param `self`
-      - param `flows: tuple['Flow', ...]`
+      - param `flows: tuple['CoreFlow', ...]`
       - param `*`
       - param `continuous: bool`
       - param `runtime_stop_event: threading.Event | None=None`
       - param `flow_stop_event: threading.Event | None=None`
       - param `status_callback: Callable[[str], None] | None=None`
-      - param `runtime_ledger: RuntimeLedger | None=None`
-      - param `runtime_ledger_service: RuntimeLedgerService | None=None`
-      - param `runtime_ledger_factory: Callable[[], RuntimeLedger] | None=None`
+      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_ledger_service: RuntimeCacheLedgerService | None=None`
+      - param `runtime_ledger_factory: Callable[[], RuntimeCacheLedger] | None=None`
       - param `run_stop_controller: RuntimeStopController | None=None`
     - method `run`
       - param `self`
@@ -3089,11 +3090,11 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `use: str | None=None`
     - method `run_source`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
       - param `source_path: str | Path`
     - method `run_batch`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
     - method `_close_owned_runtime_ledger`
       - param `self`
     - method `_validate`
@@ -3102,7 +3103,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
     - method `_preview_one`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
       - param `source_path: 'Path | None'`
       - param `*`
       - param `use: str | None`
@@ -3111,22 +3112,22 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `trigger: WatchSpec`
     - method `_startup_sources`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
       - param `*`
       - param `allow_missing: bool=False`
     - method `_stale_poll_sources`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
     - method `_stale_batch_poll_signatures`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
     - method `_is_poll_source_stale`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
       - param `source_path: 'Path | None'`
     - method `_poll_source_signature`
       - param `self`
-      - param `flow: 'Flow'`
+      - param `flow: 'CoreFlow'`
       - param `source_path: 'Path | None'`
     - method `_normalized_source_path`
       - param `self`
@@ -3255,31 +3256,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `pid`
     - attribute `started_at_utc`
     - attribute `updated_at_utc`
-- module `data_engine.runtime.runtime_db`
-  - attribute `RuntimeLedger`
+- module `data_engine.runtime.runtime_cache_store`
   - attribute `__all__`
-  - class `_RuntimeSqliteStore`
-    - attribute `HISTORY_RETENTION_DAYS`
-    - instance attribute `db_path`
-    - instance attribute `_connections`
-    - instance attribute `_connections_lock`
-    - method `__init__`
-      - param `self`
-      - param `db_path: Path`
-    - method `_ensure_parent_dir`
-      - param `self`
-    - method `_connection`
-      - param `self`
-    - method `close`
-      - param `self`
-    - method `__del__`
-      - param `self`
-    - method `_initialize_schema`
-      - param `self`
-    - method `_checkpoint_wal`
-      - param `self`
-      - param `*`
-      - param `passive: bool=False`
   - class `_RuntimeCacheSchema`
     - method `open_default`
       - param `cls`
@@ -3287,66 +3265,144 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `data_root: Path | None=None`
     - method `_initialize_schema`
       - param `self`
-  - class `RuntimeControlLedger`
-    - method `open_default`
-      - param `cls`
-      - param `*`
-      - param `data_root: Path | None=None`
-    - method `_initialize_schema`
+  - class `RuntimeRunRepository`
+    - instance attribute `_store`
+    - method `__init__`
       - param `self`
-    - method `upsert_daemon_state`
+      - param `store: _RuntimeCacheSchema`
+    - method `record_started`
       - param `self`
       - param `*`
-      - param `workspace_id: str`
-      - param `pid: int`
-      - param `endpoint_kind: str`
-      - param `endpoint_path: str`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `group_name: str`
+      - param `source_path: str | None`
       - param `started_at_utc: str`
-      - param `last_checkpoint_at_utc: str`
+    - method `record_finished`
+      - param `self`
+      - param `*`
+      - param `run_id: str`
       - param `status: str`
-      - param `app_root: str`
-      - param `workspace_root: str`
-      - param `version_text: str | None=None`
-    - method `get_daemon_state`
-      - param `self`
-      - param `workspace_id: str`
-    - method `clear_daemon_state`
-      - param `self`
-      - param `workspace_id: str`
-    - method `upsert_client_session`
+      - param `finished_at_utc: str`
+      - param `error_text: str | None=None`
+    - method `list`
       - param `self`
       - param `*`
-      - param `client_id: str`
-      - param `workspace_id: str`
-      - param `client_kind: str`
-      - param `pid: int`
-    - method `remove_client_session`
+      - param `flow_name: str | None=None`
+    - method `replace`
       - param `self`
-      - param `client_id: str`
-    - method `remove_client_sessions_for_process`
+      - param `rows: tuple[PersistedRun, ...]`
+    - method `prune_history`
       - param `self`
       - param `*`
-      - param `workspace_id: str`
-      - param `client_kind: str`
-      - param `pid: int`
-    - method `count_live_client_sessions`
+      - param `retention_days: int`
+  - class `RuntimeStepOutputRepository`
+    - instance attribute `_store`
+    - method `__init__`
       - param `self`
-      - param `workspace_id: str`
+      - param `store: _RuntimeCacheSchema`
+    - method `record_started`
+      - param `self`
       - param `*`
-      - param `exclude_client_id: str | None=None`
-    - method `_pid_is_running`
-      - param `pid: int`
-  - class `_RuntimeCacheOperations`
-    - method `normalize_source_path`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `step_label: str`
+      - param `started_at_utc: str`
+    - method `record_finished`
+      - param `self`
+      - param `*`
+      - param `step_run_id: int`
+      - param `status: str`
+      - param `finished_at_utc: str`
+      - param `elapsed_ms: int | None`
+      - param `error_text: str | None=None`
+      - param `output_path: str | None=None`
+    - method `list_for_run`
+      - param `self`
+      - param `run_id: str`
+    - method `replace`
+      - param `self`
+      - param `rows: tuple[PersistedStepRun, ...]`
+  - class `SourceSignatureRepository`
+    - instance attribute `_store`
+    - method `__init__`
+      - param `self`
+      - param `store: _RuntimeCacheSchema`
+    - method `normalize_path`
       - param `self`
       - param `source_path: Path | str`
-    - method `source_signature_for_path`
+    - method `signature_for_path`
       - param `self`
       - param `source_path: Path`
-    - method `is_poll_source_stale`
+    - method `is_stale`
       - param `self`
       - param `flow_name: str`
       - param `signature: SourceSignature | None`
+    - method `upsert_file_state`
+      - param `self`
+      - param `*`
+      - param `flow_name: str`
+      - param `signature: SourceSignature`
+      - param `status: str`
+      - param `run_id: str | None=None`
+      - param `finished_at_utc: str | None=None`
+      - param `error_text: str | None=None`
+    - method `prune_missing`
+      - param `self`
+      - param `*`
+      - param `flow_name: str`
+      - param `current_source_paths: set[str]`
+    - method `list_file_states`
+      - param `self`
+      - param `*`
+      - param `flow_name: str | None=None`
+    - method `replace_file_states`
+      - param `self`
+      - param `rows: tuple[PersistedFileState, ...]`
+  - class `RuntimeLogRepository`
+    - instance attribute `_store`
+    - method `__init__`
+      - param `self`
+      - param `store: _RuntimeCacheSchema`
+    - method `append`
+      - param `self`
+      - param `*`
+      - param `level: str`
+      - param `message: str`
+      - param `created_at_utc: str`
+      - param `run_id: str | None=None`
+      - param `flow_name: str | None=None`
+      - param `step_label: str | None=None`
+    - method `list`
+      - param `self`
+      - param `*`
+      - param `flow_name: str | None=None`
+      - param `run_id: str | None=None`
+    - method `replace`
+      - param `self`
+      - param `rows: tuple[PersistedLogEntry, ...]`
+  - class `RuntimeSnapshotRepository`
+    - instance attribute `_store`
+    - method `__init__`
+      - param `self`
+      - param `store: _RuntimeCacheSchema`
+    - method `replace`
+      - param `self`
+      - param `*`
+      - param `runs: tuple[PersistedRun, ...]`
+      - param `step_runs: tuple[PersistedStepRun, ...]`
+      - param `logs: tuple[PersistedLogEntry, ...]`
+      - param `file_states: tuple[PersistedFileState, ...]`
+  - class `RuntimeExecutionStateRepository`
+    - instance attribute `runs`
+    - instance attribute `step_outputs`
+    - instance attribute `source_signatures`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `runs: RuntimeRunRepository`
+      - param `step_outputs: RuntimeStepOutputRepository`
+      - param `source_signatures: SourceSignatureRepository`
     - method `record_run_started`
       - param `self`
       - param `*`
@@ -3387,60 +3443,82 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `run_id: str | None=None`
       - param `finished_at_utc: str | None=None`
       - param `error_text: str | None=None`
-    - method `append_log`
-      - param `self`
-      - param `*`
-      - param `level: str`
-      - param `message: str`
-      - param `created_at_utc: str`
-      - param `run_id: str | None=None`
-      - param `flow_name: str | None=None`
-      - param `step_label: str | None=None`
-    - method `prune_history`
-      - param `self`
-      - param `*`
-      - param `retention_days: int`
-    - method `prune_missing_file_state`
-      - param `self`
-      - param `*`
-      - param `flow_name: str`
-      - param `current_source_paths: set[str]`
-    - method `list_logs`
-      - param `self`
-      - param `*`
-      - param `flow_name: str | None=None`
-      - param `run_id: str | None=None`
-    - method `list_runs`
-      - param `self`
-      - param `*`
-      - param `flow_name: str | None=None`
-    - method `list_step_runs`
-      - param `self`
-      - param `run_id: str`
-    - method `list_file_states`
-      - param `self`
-      - param `*`
-      - param `flow_name: str | None=None`
-    - method `replace_runs`
-      - param `self`
-      - param `rows: tuple[PersistedRun, ...]`
-    - method `replace_step_runs`
-      - param `self`
-      - param `rows: tuple[PersistedStepRun, ...]`
-    - method `replace_logs`
-      - param `self`
-      - param `rows: tuple[PersistedLogEntry, ...]`
-    - method `replace_file_states`
-      - param `self`
-      - param `rows: tuple[PersistedFileState, ...]`
-    - method `replace_runtime_snapshot`
-      - param `self`
-      - param `*`
-      - param `runs: tuple[PersistedRun, ...]`
-      - param `step_runs: tuple[PersistedStepRun, ...]`
-      - param `logs: tuple[PersistedLogEntry, ...]`
-      - param `file_states: tuple[PersistedFileState, ...]`
   - class `RuntimeCacheLedger`
+    - instance attribute `runs`
+    - instance attribute `step_outputs`
+    - instance attribute `source_signatures`
+    - instance attribute `logs`
+    - instance attribute `snapshots`
+    - instance attribute `execution_state`
+    - method `__init__`
+      - param `self`
+      - param `db_path: Path`
+- module `data_engine.runtime.runtime_control_store`
+  - attribute `__all__`
+  - class `DaemonStateRepository`
+    - instance attribute `_store`
+    - method `__init__`
+      - param `self`
+      - param `store: _RuntimeSqliteStore`
+    - method `upsert`
+      - param `self`
+      - param `*`
+      - param `workspace_id: str`
+      - param `pid: int`
+      - param `endpoint_kind: str`
+      - param `endpoint_path: str`
+      - param `started_at_utc: str`
+      - param `last_checkpoint_at_utc: str`
+      - param `status: str`
+      - param `app_root: str`
+      - param `workspace_root: str`
+      - param `version_text: str | None=None`
+    - method `get`
+      - param `self`
+      - param `workspace_id: str`
+    - method `clear`
+      - param `self`
+      - param `workspace_id: str`
+  - class `ClientSessionRepository`
+    - instance attribute `_store`
+    - method `__init__`
+      - param `self`
+      - param `store: _RuntimeSqliteStore`
+    - method `upsert`
+      - param `self`
+      - param `*`
+      - param `client_id: str`
+      - param `workspace_id: str`
+      - param `client_kind: str`
+      - param `pid: int`
+    - method `remove`
+      - param `self`
+      - param `client_id: str`
+    - method `remove_for_process`
+      - param `self`
+      - param `*`
+      - param `workspace_id: str`
+      - param `client_kind: str`
+      - param `pid: int`
+    - method `count_live`
+      - param `self`
+      - param `workspace_id: str`
+      - param `*`
+      - param `exclude_client_id: str | None=None`
+  - class `RuntimeControlLedger`
+    - instance attribute `daemon_state`
+    - instance attribute `client_sessions`
+    - method `__init__`
+      - param `self`
+      - param `db_path: Path`
+    - method `open_default`
+      - param `cls`
+      - param `*`
+      - param `data_root: Path | None=None`
+    - method `_initialize_schema`
+      - param `self`
+- module `data_engine.runtime.runtime_db`
+  - attribute `__all__`
 - module `data_engine.runtime.shared_state`
   - attribute `_LEASE_METADATA_SCHEMA`
   - attribute `_CONTROL_REQUEST_SCHEMA`
@@ -3468,7 +3546,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `reclaim: bool=True`
   - function `checkpoint_workspace_state`
     - param `paths: WorkspacePaths`
-    - param `ledger: RuntimeCacheLedger`
+    - param `ledger: RuntimeSnapshotStore`
     - param `*`
     - param `workspace_id: str`
     - param `machine_id: str`
@@ -3491,7 +3569,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `app_version: str | None`
   - function `hydrate_local_runtime_state`
     - param `paths: WorkspacePaths`
-    - param `ledger: RuntimeCacheLedger`
+    - param `ledger: RuntimeSnapshotStore`
   - function `read_lease_metadata`
     - param `paths: WorkspacePaths`
   - function `read_control_request`
@@ -3507,6 +3585,11 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `requester_pid: int`
     - param `requester_client_kind: str`
     - param `requested_at_utc: str`
+  - function `_write_shared_runtime_snapshot`
+    - param `paths: WorkspacePaths`
+    - param `ledger: RuntimeSnapshotStore`
+    - param `*`
+    - param `snapshot_generation_id: str`
   - function `remove_control_request`
     - param `paths: WorkspacePaths`
   - function `_atomic_write_parquet`
@@ -3562,6 +3645,56 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `paths: WorkspacePaths`
     - param `*`
     - param `retries: int=_PARQUET_READ_RETRIES`
+  - class `_RunRepository`
+    - method `list`
+      - param `self`
+  - class `_StepOutputRepository`
+    - method `list_for_run`
+      - param `self`
+      - param `run_id: str`
+  - class `_LogRepository`
+    - method `list`
+      - param `self`
+  - class `_SourceSignatureRepository`
+    - method `list_file_states`
+      - param `self`
+  - class `_SnapshotRepository`
+    - method `replace`
+      - param `self`
+      - param `*`
+      - param `runs: tuple[PersistedRun, ...]`
+      - param `step_runs: tuple[PersistedStepRun, ...]`
+      - param `logs: tuple[PersistedLogEntry, ...]`
+      - param `file_states: tuple[PersistedFileState, ...]`
+  - class `RuntimeSnapshotStore`
+    - attribute `runs`
+    - attribute `step_outputs`
+    - attribute `logs`
+    - attribute `source_signatures`
+    - attribute `snapshots`
+- module `data_engine.runtime.sqlite_store`
+  - class `_RuntimeSqliteStore`
+    - attribute `HISTORY_RETENTION_DAYS`
+    - instance attribute `db_path`
+    - instance attribute `_connections`
+    - instance attribute `_connections_lock`
+    - method `__init__`
+      - param `self`
+      - param `db_path: Path`
+    - method `_ensure_parent_dir`
+      - param `self`
+    - method `_connection`
+      - param `self`
+    - method `close`
+      - param `self`
+    - method `__del__`
+      - param `self`
+    - method `_initialize_schema`
+      - param `self`
+    - method `_checkpoint_wal`
+      - param `self`
+      - param `*`
+      - param `passive: bool=False`
 - module `data_engine.runtime.stop`
   - attribute `__all__`
   - class `RuntimeStopController`
@@ -3711,7 +3844,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `_open_ledger_func`
     - method `__init__`
       - param `self`
-      - param `open_ledger_func: Callable[[Path], RuntimeControlLedger] | None=None`
+      - param `open_ledger_func: Callable[[Path], RuntimeControlStore] | None=None`
       - param `*`
       - param `runtime_layout_policy: RuntimeLayoutPolicy | None=None`
     - method `_open_default_ledger`
@@ -3722,10 +3855,10 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `workspace_root: Path`
     - method `close`
       - param `self`
-      - param `ledger: RuntimeControlLedger`
+      - param `ledger: RuntimeControlStore`
     - method `register_client_session`
       - param `self`
-      - param `ledger: RuntimeControlLedger`
+      - param `ledger: RuntimeControlStore`
       - param `*`
       - param `client_id: str`
       - param `workspace_id: str`
@@ -3733,18 +3866,18 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `pid: int`
     - method `remove_client_session`
       - param `self`
-      - param `ledger: RuntimeControlLedger`
+      - param `ledger: RuntimeControlStore`
       - param `client_id: str`
     - method `purge_process_client_sessions`
       - param `self`
-      - param `ledger: RuntimeControlLedger`
+      - param `ledger: RuntimeControlStore`
       - param `*`
       - param `workspace_id: str`
       - param `client_kind: str`
       - param `pid: int`
     - method `count_live_client_sessions`
       - param `self`
-      - param `ledger: RuntimeControlLedger`
+      - param `ledger: RuntimeControlStore`
       - param `workspace_id: str`
       - param `*`
       - param `exclude_client_id: str | None=None`
@@ -3753,10 +3886,11 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `LogService`
     - method `create_store`
       - param `self`
-      - param `runtime_cache_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_cache_ledger: RuntimeCacheStore | None=None`
     - method `reload`
       - param `self`
       - param `store: FlowLogStore`
+      - param `runtime_cache_ledger: RuntimeCacheStore | None`
     - method `append_entry`
       - param `self`
       - param `store: FlowLogStore`
@@ -3778,54 +3912,85 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `flow_name: str | None`
     - method `_hydrate_entries`
       - param `self`
-      - param `runtime_cache_ledger: RuntimeCacheLedger | None`
+      - param `runtime_cache_ledger: RuntimeCacheStore | None`
 - module `data_engine.services.runtime_binding`
   - attribute `__all__`
   - class `_NullRuntimeCacheLedger`
-    - method `list_logs`
-      - param `self`
-    - method `list_runs`
+    - instance attribute `runs`
+    - instance attribute `step_outputs`
+    - instance attribute `logs`
+    - instance attribute `source_signatures`
+    - instance attribute `execution_state`
+    - method `__init__`
       - param `self`
     - method `close`
       - param `self`
-  - class `_NullRuntimeControlLedger`
-    - method `close`
+  - class `_NullRuntimeRunRepository`
+    - method `list`
       - param `self`
-    - method `upsert_client_session`
+      - param `*`
+      - param `flow_name: str | None=None`
+  - class `_NullRuntimeLogRepository`
+    - method `list`
+      - param `self`
+      - param `*`
+      - param `flow_name: str | None=None`
+      - param `run_id: str | None=None`
+  - class `_NullRuntimeStepOutputRepository`
+    - method `list_for_run`
+      - param `self`
+      - param `run_id: str`
+  - class `_NullRuntimeSourceSignatureRepository`
+    - method `list_file_states`
+      - param `self`
+      - param `*`
+      - param `flow_name: str | None=None`
+  - class `_NullRuntimeExecutionStateRepository`
+    - method `record_run_started`
       - param `self`
       - param `**kwargs: object`
-    - method `remove_client_session`
+  - class `_NullClientSessionRepository`
+    - method `upsert`
+      - param `self`
+      - param `**kwargs: object`
+    - method `remove`
       - param `self`
       - param `client_id: str`
-    - method `remove_client_sessions_for_process`
+    - method `remove_for_process`
       - param `self`
       - param `*`
       - param `workspace_id: str`
       - param `client_kind: str`
       - param `pid: int`
-    - method `count_live_client_sessions`
+    - method `count_live`
       - param `self`
       - param `workspace_id: str`
       - param `*`
       - param `exclude_client_id: str | None=None`
+  - class `_NullRuntimeControlLedger`
+    - instance attribute `client_sessions`
+    - method `__init__`
+      - param `self`
+    - method `close`
+      - param `self`
   - class `WorkspaceRuntimeBinding`
     - attribute `workspace_paths`
     - attribute `runtime_cache_ledger`
     - attribute `runtime_control_ledger`
     - attribute `log_store`
     - attribute `daemon_manager`
-    - method `runtime_ledger`
-      - param `self`
   - class `WorkspaceRuntimeBindingService`
     - instance attribute `ledger_service`
     - instance attribute `log_service`
     - instance attribute `daemon_state_service`
+    - instance attribute `runtime_history_service`
     - method `__init__`
       - param `self`
       - param `*`
       - param `ledger_service: RuntimeControlLedgerService`
       - param `log_service: LogService`
       - param `daemon_state_service: DaemonStateService`
+      - param `runtime_history_service: RuntimeHistoryService`
     - method `open_binding`
       - param `self`
       - param `workspace_paths: WorkspacePaths`
@@ -3854,75 +4019,108 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `binding: WorkspaceRuntimeBinding`
       - param `*`
       - param `exclude_client_id: str | None=None`
+    - method `sync_runtime_state`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `runtime_application: 'RuntimeApplication'`
+      - param `flow_cards`
+      - param `daemon_startup_in_progress: bool=False`
+    - method `reload_logs`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+    - method `rebuild_step_outputs`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `flow_cards: dict[str, FlowCatalogLike]`
+    - method `error_text_for_entry`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `run_group: FlowRunState`
+      - param `entry: FlowLogEntry`
+    - method `recent_run_count`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `days: int`
 - module `data_engine.services.runtime_execution`
   - attribute `__all__`
   - class `RuntimeExecutionService`
     - instance attribute `_flow_runtime_type`
     - instance attribute `_grouped_runtime_type`
     - instance attribute `_runtime_engine_type`
+    - instance attribute `_scheduler_host_factory`
     - instance attribute `_run_stop_controller`
     - method `__init__`
       - param `self`
       - param `*`
-      - param `flow_runtime_type: type[_FlowRuntime]=_FlowRuntime`
-      - param `grouped_runtime_type: type[_GroupedFlowRuntime]=_GroupedFlowRuntime`
+      - param `flow_runtime_type: type[FlowRuntime]=FlowRuntime`
+      - param `grouped_runtime_type: type[GroupedFlowRuntime]=GroupedFlowRuntime`
       - param `runtime_engine_type: type[RuntimeEngine]=RuntimeEngine`
+      - param `scheduler_host_factory: Callable[..., SchedulerHost]=SchedulerHost`
       - param `run_stop_controller: RuntimeStopController | None=None`
     - method `_engine`
       - param `self`
       - param `*`
-      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheStore | None=None`
       - param `runtime_stop_event: Event | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `run_once`
       - param `self`
       - param `flow: 'CoreFlow'`
       - param `*`
-      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheStore | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `run_source`
       - param `self`
       - param `flow: 'CoreFlow'`
       - param `source_path: str`
       - param `*`
-      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheStore | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `run_batch`
       - param `self`
       - param `flow: 'CoreFlow'`
       - param `*`
-      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheStore | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `preview`
       - param `self`
       - param `flow: 'CoreFlow'`
       - param `*`
       - param `use: str | None=None`
-      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheStore | None=None`
     - method `run_manual`
       - param `self`
       - param `flow: 'CoreFlow'`
       - param `*`
-      - param `runtime_ledger: RuntimeCacheLedger`
+      - param `runtime_ledger: RuntimeCacheStore`
       - param `flow_stop_event: Event`
     - method `run_continuous`
       - param `self`
       - param `flow: 'CoreFlow'`
       - param `*`
-      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheStore | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `run_grouped`
       - param `self`
       - param `flows: tuple['CoreFlow', ...]`
       - param `*`
-      - param `runtime_ledger: RuntimeCacheLedger`
+      - param `runtime_ledger: RuntimeCacheStore`
+      - param `runtime_stop_event: Event`
+      - param `flow_stop_event: Event`
+    - method `run_automated`
+      - param `self`
+      - param `flows: tuple['CoreFlow', ...]`
+      - param `*`
+      - param `runtime_ledger: RuntimeCacheStore | None=None`
       - param `runtime_stop_event: Event`
       - param `flow_stop_event: Event`
     - method `run_grouped_continuous`
       - param `self`
       - param `flows: tuple['CoreFlow', ...]`
       - param `*`
-      - param `runtime_ledger: RuntimeCacheLedger | None=None`
+      - param `runtime_ledger: RuntimeCacheStore | None=None`
       - param `runtime_stop_event: Event | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `stop`
@@ -3930,18 +4128,91 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `run_id: str`
       - param `*`
       - param `flow_stop_event: Event | None=None`
+    - method `_split_automated_flows`
+      - param `self`
+      - param `flows: tuple['CoreFlow', ...]`
 - module `data_engine.services.runtime_history`
   - attribute `__all__`
   - class `RuntimeHistoryService`
     - method `rebuild_step_outputs`
       - param `self`
-      - param `ledger: RuntimeCacheLedger`
+      - param `ledger: RuntimeCacheStore`
       - param `flow_cards: dict[str, FlowCatalogLike]`
     - method `error_text_for_entry`
       - param `self`
-      - param `ledger: RuntimeCacheLedger`
+      - param `ledger: RuntimeCacheStore`
       - param `run_group: FlowRunState`
       - param `entry: FlowLogEntry`
+- module `data_engine.services.runtime_ports`
+  - attribute `__all__`
+  - class `RuntimeRunReader`
+    - method `list`
+      - param `self`
+      - param `*`
+      - param `flow_name: str | None=None`
+  - class `RuntimeStepOutputReader`
+    - method `list_for_run`
+      - param `self`
+      - param `run_id: str`
+  - class `RuntimeLogReader`
+    - method `list`
+      - param `self`
+      - param `*`
+      - param `flow_name: str | None=None`
+      - param `run_id: str | None=None`
+  - class `RuntimeSourceSignatureStore`
+    - method `list_file_states`
+      - param `self`
+      - param `*`
+      - param `flow_name: str | None=None`
+    - method `upsert_file_state`
+      - param `self`
+      - param `*`
+      - param `flow_name: str`
+      - param `signature: SourceSignature`
+      - param `status: str`
+      - param `run_id: str | None=None`
+      - param `finished_at_utc: str | None=None`
+      - param `error_text: str | None=None`
+  - class `RuntimeExecutionStateWriter`
+    - method `record_run_started`
+      - param `self`
+      - param `*`
+      - param `run_id: str`
+      - param `flow_name: str`
+      - param `group_name: str`
+      - param `source_path: str | None`
+      - param `started_at_utc: str`
+  - class `RuntimeCacheStore`
+    - attribute `runs`
+    - attribute `step_outputs`
+    - attribute `logs`
+    - attribute `source_signatures`
+    - attribute `execution_state`
+    - method `close`
+      - param `self`
+  - class `RuntimeClientSessionStore`
+    - method `upsert`
+      - param `self`
+      - param `**kwargs: object`
+    - method `remove`
+      - param `self`
+      - param `client_id: str`
+    - method `remove_for_process`
+      - param `self`
+      - param `*`
+      - param `workspace_id: str`
+      - param `client_kind: str`
+      - param `pid: int`
+    - method `count_live`
+      - param `self`
+      - param `workspace_id: str`
+      - param `*`
+      - param `exclude_client_id: str | None=None`
+  - class `RuntimeControlStore`
+    - attribute `client_sessions`
+    - method `close`
+      - param `self`
 - module `data_engine.services.settings`
   - attribute `__all__`
   - class `SettingsService`
@@ -3979,7 +4250,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `hydrate_local_runtime`
       - param `self`
       - param `paths: WorkspacePaths`
-      - param `ledger: RuntimeCacheLedger`
+      - param `ledger: RuntimeSnapshotStore`
     - method `read_lease_metadata`
       - param `self`
       - param `paths: WorkspacePaths`
@@ -5185,8 +5456,6 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `_daemon_status`
     - instance attribute `_docs_root_dir`
     - instance attribute `workspace_session_state`
-    - method `runtime_ledger`
-      - param `self: 'DataEngineWindow'`
     - method `log_store`
       - param `self: 'DataEngineWindow'`
     - method `_daemon_manager`
@@ -5909,8 +6178,6 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `_operator_session_state`
     - instance attribute `flow_catalog_state`
     - instance attribute `workspace_session_state`
-    - method `runtime_ledger`
-      - param `self: 'DataEngineTui'`
     - method `log_store`
       - param `self: 'DataEngineTui'`
     - method `_daemon_manager`
@@ -6135,6 +6402,11 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `kind: LogKind`
       - param `flow_name: str | None=None`
     - method `clear`
+      - param `self`
+    - method `replace`
+      - param `self`
+      - param `entries: tuple[FlowLogEntry, ...]`
+    - method `entries`
       - param `self`
     - method `clear_flow`
       - param `self`

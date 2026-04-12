@@ -19,7 +19,7 @@ from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
 
 if TYPE_CHECKING:
-    from data_engine.core.flow import Flow
+    from data_engine.core.flow import Flow as CoreFlow
 
 
 def _open_default_runtime_cache_ledger() -> RuntimeCacheLedger:
@@ -48,7 +48,7 @@ class FlowRuntime:
 
     def __init__(
         self,
-        flows: tuple["Flow", ...],
+        flows: tuple["CoreFlow", ...],
         *,
         continuous: bool,
         runtime_stop_event: threading.Event | None = None,
@@ -111,7 +111,7 @@ class FlowRuntime:
         finally:
             self._close_owned_runtime_ledger()
 
-    def run_source(self, flow: "Flow", source_path: str | Path) -> FlowContext:
+    def run_source(self, flow: "CoreFlow", source_path: str | Path) -> FlowContext:
         """Run one flow for a specific source path."""
         try:
             self._validate()
@@ -119,7 +119,7 @@ class FlowRuntime:
         finally:
             self._close_owned_runtime_ledger()
 
-    def run_batch(self, flow: "Flow") -> FlowContext:
+    def run_batch(self, flow: "CoreFlow") -> FlowContext:
         """Run one flow once in batch mode using the configured source root."""
         try:
             self._validate()
@@ -165,25 +165,25 @@ class FlowRuntime:
                 results.append(self.run_executor.run_one(flow, source_path, batch_signatures=batch_signatures))
         return results
 
-    def _preview_one(self, flow: "Flow", source_path: "Path | None", *, use: str | None) -> FlowContext:
+    def _preview_one(self, flow: "CoreFlow", source_path: "Path | None", *, use: str | None) -> FlowContext:
         return self.run_executor.preview_one(flow, source_path, use=use)
 
     def _make_watcher(self, trigger: WatchSpec) -> PollingWatcher:
         return self.polling.make_watcher(trigger)
 
-    def _startup_sources(self, flow: "Flow", *, allow_missing: bool = False):
+    def _startup_sources(self, flow: "CoreFlow", *, allow_missing: bool = False):
         return self.polling.startup_sources(flow, allow_missing=allow_missing)
 
-    def _stale_poll_sources(self, flow: "Flow"):
+    def _stale_poll_sources(self, flow: "CoreFlow"):
         return self.polling.stale_poll_sources(flow)
 
-    def _stale_batch_poll_signatures(self, flow: "Flow"):
+    def _stale_batch_poll_signatures(self, flow: "CoreFlow"):
         return self.polling.stale_batch_poll_signatures(flow)
 
-    def _is_poll_source_stale(self, flow: "Flow", source_path: "Path | None") -> bool:
+    def _is_poll_source_stale(self, flow: "CoreFlow", source_path: "Path | None") -> bool:
         return self.polling.is_poll_source_stale(flow, source_path)
 
-    def _poll_source_signature(self, flow: "Flow", source_path: "Path | None"):
+    def _poll_source_signature(self, flow: "CoreFlow", source_path: "Path | None"):
         return self.polling.poll_source_signature(flow, source_path)
 
     def _normalized_source_path(self, source_path: "Path | None"):

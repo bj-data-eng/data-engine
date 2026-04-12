@@ -2,6 +2,7 @@
 requires = [
   "setuptools>=68",
   "wheel",
+  "APScheduler>=3.11.0",
   "polars>=1.39.0",
   "myst-parser>=4.0.0",
   "Sphinx>=9.1.0",
