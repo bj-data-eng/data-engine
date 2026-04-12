@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from os import getpid
+from typing import TYPE_CHECKING
 
+from data_engine.domain import FlowLogEntry, FlowRunState, StepOutputIndex
+from data_engine.domain.catalog import FlowCatalogLike
+from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager
 from data_engine.platform.workspace_models import WorkspacePaths
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.services.daemon_state import DaemonStateService
 from data_engine.services.ledger import RuntimeControlLedgerService
 from data_engine.services.logs import LogService
+from data_engine.services.runtime_history import RuntimeHistoryService
 from data_engine.services.runtime_ports import RuntimeCacheStore, RuntimeControlStore
 from data_engine.views.logs import FlowLogStore
+
+if TYPE_CHECKING:
+    from data_engine.application.runtime import RuntimeApplication
 
 
 class _NullRuntimeCacheLedger:
@@ -20,7 +29,10 @@ class _NullRuntimeCacheLedger:
 
     def __init__(self) -> None:
         self.runs = _NullRuntimeRunRepository()
+        self.step_outputs = _NullRuntimeStepOutputRepository()
         self.logs = _NullRuntimeLogRepository()
+        self.source_signatures = _NullRuntimeSourceSignatureRepository()
+        self.execution_state = _NullRuntimeExecutionStateRepository()
 
     def close(self) -> None:
         return
@@ -42,6 +54,32 @@ class _NullRuntimeLogRepository:
         """Return no logs for an unconfigured workspace selection."""
         del flow_name, run_id
         return ()
+
+
+class _NullRuntimeStepOutputRepository:
+    """No-op step-output repository for an unconfigured workspace selection."""
+
+    def list_for_run(self, run_id: str) -> tuple[object, ...]:
+        """Return no step outputs for an unconfigured workspace selection."""
+        del run_id
+        return ()
+
+
+class _NullRuntimeSourceSignatureRepository:
+    """No-op source-signature repository for an unconfigured workspace selection."""
+
+    def list_file_states(self, *, flow_name: str | None = None) -> tuple[object, ...]:
+        """Return no file states for an unconfigured workspace selection."""
+        del flow_name
+        return ()
+
+
+class _NullRuntimeExecutionStateRepository:
+    """No-op execution-state writer for an unconfigured workspace selection."""
+
+    def record_run_started(self, **kwargs: object) -> None:
+        """Ignore execution-state writes for an unconfigured workspace selection."""
+        del kwargs
 
 
 class _NullClientSessionRepository:
@@ -95,10 +133,12 @@ class WorkspaceRuntimeBindingService:
         ledger_service: RuntimeControlLedgerService,
         log_service: LogService,
         daemon_state_service: DaemonStateService,
+        runtime_history_service: RuntimeHistoryService,
     ) -> None:
         self.ledger_service = ledger_service
         self.log_service = log_service
         self.daemon_state_service = daemon_state_service
+        self.runtime_history_service = runtime_history_service
 
     def open_binding(self, workspace_paths: WorkspacePaths) -> WorkspaceRuntimeBinding:
         """Open one concrete runtime binding for a workspace selection."""
@@ -169,6 +209,58 @@ class WorkspaceRuntimeBindingService:
             binding.workspace_paths.workspace_id,
             exclude_client_id=exclude_client_id,
         )
+
+    def sync_runtime_state(
+        self,
+        binding: WorkspaceRuntimeBinding,
+        *,
+        runtime_application: "RuntimeApplication",
+        flow_cards,
+        daemon_startup_in_progress: bool = False,
+    ) -> object:
+        """Return daemon/runtime sync state for one bound workspace."""
+        return runtime_application.sync_state(
+            paths=binding.workspace_paths,
+            daemon_manager=binding.daemon_manager,
+            flow_cards=flow_cards,
+            runtime_ledger=binding.runtime_cache_ledger,
+            daemon_startup_in_progress=daemon_startup_in_progress,
+        )
+
+    def reload_logs(self, binding: WorkspaceRuntimeBinding) -> None:
+        """Reload the binding log store from its runtime cache store."""
+        self.log_service.reload(binding.log_store, binding.runtime_cache_ledger)
+
+    def rebuild_step_outputs(
+        self,
+        binding: WorkspaceRuntimeBinding,
+        flow_cards: dict[str, FlowCatalogLike],
+    ) -> StepOutputIndex:
+        """Rebuild latest successful per-step output paths for visible flows."""
+        return self.runtime_history_service.rebuild_step_outputs(binding.runtime_cache_ledger, flow_cards)
+
+    def error_text_for_entry(
+        self,
+        binding: WorkspaceRuntimeBinding,
+        run_group: FlowRunState,
+        entry: FlowLogEntry,
+    ) -> tuple[str, str | None]:
+        """Return one user-facing error title and persisted error text."""
+        return self.runtime_history_service.error_text_for_entry(binding.runtime_cache_ledger, run_group, entry)
+
+    def recent_run_count(self, binding: WorkspaceRuntimeBinding, *, days: int) -> int:
+        """Return the number of persisted runs started in the recent window."""
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        count = 0
+        try:
+            runs = binding.runtime_cache_ledger.runs.list()
+        except Exception:
+            return 0
+        for run in runs:
+            started_at = parse_utc_text(run.started_at_utc)
+            if started_at is not None and started_at >= cutoff:
+                count += 1
+        return count
 
 
 __all__ = ["WorkspaceRuntimeBinding", "WorkspaceRuntimeBindingService"]

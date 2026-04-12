@@ -81,11 +81,10 @@ class TuiRuntimeController:
             live = False
         if not live:
             self.ensure_daemon_started(window)
-        sync_state = self.runtime_application.sync_state(
-            paths=window.workspace_paths,
-            daemon_manager=window.runtime_binding.daemon_manager,
+        sync_state = window.runtime_binding_service.sync_runtime_state(
+            window.runtime_binding,
+            runtime_application=self.runtime_application,
             flow_cards=window.flow_cards,
-            runtime_ledger=window.runtime_binding.runtime_cache_ledger,
             daemon_startup_in_progress=window._daemon_startup_in_progress,
         )
         window.runtime_session = sync_state.runtime_session
@@ -140,7 +139,7 @@ class TuiRuntimeController:
         self.sync_daemon_state(window)
 
     def rebuild_runtime_snapshot(self, window: "DataEngineTui") -> None:
-        self.log_service.reload(window.runtime_binding.log_store, window.runtime_binding.runtime_cache_ledger)
+        window.runtime_binding_service.reload_logs(window.runtime_binding)
         snapshot = self.runtime_application.build_runtime_snapshot(
             flow_cards=window.flow_cards,
             log_entries=self.log_service.all_entries(window.runtime_binding.log_store),

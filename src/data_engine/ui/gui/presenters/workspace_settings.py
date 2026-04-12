@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QFileDialog
-
-from data_engine.domain.time import parse_utc_text
 
 if TYPE_CHECKING:
     from data_engine.ui.gui.app import DataEngineWindow
@@ -161,17 +158,7 @@ def _workspace_counts_footer_text(window: "DataEngineWindow") -> str:
 
 
 def _recent_workspace_run_count(window: "DataEngineWindow", *, days: int) -> int:
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    count = 0
-    try:
-        runs = window.runtime_binding.runtime_cache_ledger.runs.list()
-    except Exception:
-        return 0
-    for run in runs:
-        started_at = parse_utc_text(run.started_at_utc)
-        if started_at is not None and started_at >= cutoff:
-            count += 1
-    return count
+    return window.runtime_binding_service.recent_run_count(window.runtime_binding, days=days)
 
 
 __all__ = [

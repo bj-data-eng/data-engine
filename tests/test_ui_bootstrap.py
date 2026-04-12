@@ -241,11 +241,12 @@ def test_build_default_gui_services_uses_injected_factories():
         daemon_state_service_factory=lambda: "daemon-state",
         ledger_service_factory=lambda: "ledger",
         log_service_factory=lambda: "log",
-        runtime_binding_service_factory=lambda ledger_service, log_service, daemon_state_service: (
+        runtime_binding_service_factory=lambda ledger_service, log_service, daemon_state_service, runtime_history_service: (
             "runtime-binding",
             ledger_service,
             log_service,
             daemon_state_service,
+            runtime_history_service,
         ),
         runtime_history_service_factory=lambda: "runtime-history",
         shared_state_service_factory=lambda: "shared-state",
@@ -300,11 +301,12 @@ def test_build_default_tui_services_uses_injected_factories():
         daemon_state_service_factory=lambda: "daemon-state",
         ledger_service_factory=lambda: "ledger",
         log_service_factory=lambda: "log",
-        runtime_binding_service_factory=lambda ledger_service, log_service, daemon_state_service: (
+        runtime_binding_service_factory=lambda ledger_service, log_service, daemon_state_service, runtime_history_service: (
             "runtime-binding",
             ledger_service,
             log_service,
             daemon_state_service,
+            runtime_history_service,
         ),
         runtime_history_service_factory=lambda: "runtime-history",
         shared_state_service_factory=lambda: "shared-state",

@@ -84,7 +84,7 @@ class TuiDependencyFactories:
     daemon_state_service_factory: Callable[[], DaemonStateService]
     ledger_service_factory: Callable[[], LedgerService]
     log_service_factory: Callable[[], LogService]
-    runtime_binding_service_factory: Callable[[LedgerService, LogService, DaemonStateService], WorkspaceRuntimeBindingService]
+    runtime_binding_service_factory: Callable[[LedgerService, LogService, DaemonStateService, RuntimeHistoryService], WorkspaceRuntimeBindingService]
     runtime_history_service_factory: Callable[[], RuntimeHistoryService]
     shared_state_service_factory: Callable[[], SharedStateService]
     runtime_application_factory: Callable[[DaemonService, DaemonStateService, SharedStateService], RuntimeApplication]
@@ -126,10 +126,11 @@ def default_tui_dependency_factories() -> TuiDependencyFactories:
         daemon_state_service_factory=DaemonStateService,
         ledger_service_factory=LedgerService,
         log_service_factory=LogService,
-        runtime_binding_service_factory=lambda ledger_service, log_service, daemon_state_service: WorkspaceRuntimeBindingService(
+        runtime_binding_service_factory=lambda ledger_service, log_service, daemon_state_service, runtime_history_service: WorkspaceRuntimeBindingService(
             ledger_service=ledger_service,
             log_service=log_service,
             daemon_state_service=daemon_state_service,
+            runtime_history_service=runtime_history_service,
         ),
         runtime_history_service_factory=RuntimeHistoryService,
         shared_state_service_factory=SharedStateService,
@@ -264,12 +265,13 @@ def build_tui_service_kwargs(
     daemon_state_service = daemon_state_service or factories.daemon_state_service_factory()
     ledger_service = ledger_service or factories.ledger_service_factory()
     log_service = log_service or factories.log_service_factory()
+    runtime_history_service = runtime_history_service or factories.runtime_history_service_factory()
     runtime_binding_service = runtime_binding_service or factories.runtime_binding_service_factory(
         ledger_service,
         log_service,
         daemon_state_service,
+        runtime_history_service,
     )
-    runtime_history_service = runtime_history_service or factories.runtime_history_service_factory()
     shared_state_service = shared_state_service or factories.shared_state_service_factory()
     runtime_application = runtime_application or factories.runtime_application_factory(
         daemon_service,

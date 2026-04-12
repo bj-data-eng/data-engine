@@ -41,11 +41,10 @@ class GuiRuntimeController:
             live = False
         if not live and window._auto_daemon_enabled:
             self.ensure_daemon_started(window)
-        sync_state = self.runtime_application.sync_state(
-            paths=window.workspace_paths,
-            daemon_manager=window.runtime_binding.daemon_manager,
+        sync_state = window.runtime_binding_service.sync_runtime_state(
+            window.runtime_binding,
+            runtime_application=self.runtime_application,
             flow_cards=window.flow_cards.values(),
-            runtime_ledger=window.runtime_binding.runtime_cache_ledger,
             daemon_startup_in_progress=window._daemon_startup_in_progress,
         )
         window.daemon_status = sync_state.daemon_status
@@ -85,8 +84,11 @@ class GuiRuntimeController:
         window.signals.daemon_startup_finished.emit(success, error_text)
 
     def rebuild_runtime_snapshot(self, window: "DataEngineWindow") -> None:
-        self.log_service.reload(window.runtime_binding.log_store, window.runtime_binding.runtime_cache_ledger)
-        window._rehydrate_step_outputs_from_ledger()
+        window.runtime_binding_service.reload_logs(window.runtime_binding)
+        window.step_output_index = window.runtime_binding_service.rebuild_step_outputs(
+            window.runtime_binding,
+            window.flow_cards,
+        )
         snapshot = self.runtime_application.build_runtime_snapshot(
             flow_cards=window.flow_cards.values(),
             log_entries=self.log_service.all_entries(window.runtime_binding.log_store),
