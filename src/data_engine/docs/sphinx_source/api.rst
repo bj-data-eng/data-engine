@@ -67,6 +67,24 @@ File Watching
    :undoc-members:
    :show-inheritance:
 
+Authoring Helpers
+-----------------
+
+.. automodule:: data_engine.helpers.schema
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: data_engine.helpers.polars
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: data_engine.helpers.duckdb
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Host Surfaces
 -------------
 

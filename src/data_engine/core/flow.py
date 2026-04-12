@@ -26,6 +26,24 @@ from data_engine.core.primitives import Batch, FlowContext, MirrorSpec, StepSpec
 class Flow:
     """Immutable fluent builder for generic runtime flows.
 
+    ``Flow`` is the authoring object most flow modules return. Builder methods
+    never mutate the existing instance; each method returns a new flow so chained
+    definitions stay predictable and easy to review.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        from data_engine import Flow
+
+        flow = (
+            Flow(group="Claims")
+            .watch(mode="poll", source="incoming", interval="30s", extensions=[".xlsx"])
+            .mirror(root="processed")
+        )
+
+        assert flow.mode == "poll"
+
     Attributes
     ----------
     group : str
@@ -81,6 +99,25 @@ class Flow:
         settle: int = 1,
     ) -> "Flow":
         """Configure how this flow is triggered.
+
+        Use ``manual`` for explicit operator-driven runs, ``poll`` when source
+        file changes should trigger work, and ``schedule`` when time should
+        trigger work. ``run_as="individual"`` runs once per concrete source
+        file; ``run_as="batch"`` runs once for the watched source root.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            from data_engine import Flow
+
+            manual_flow = Flow(group="Claims").watch(mode="manual")
+            poll_flow = Flow(group="Claims").watch(mode="poll", source="incoming", interval="5s")
+            schedule_flow = Flow(group="Claims").watch(mode="schedule", interval="15m")
+
+            assert manual_flow.mode == "manual"
+            assert poll_flow.mode == "poll"
+            assert schedule_flow.mode == "schedule"
 
         Parameters
         ----------
@@ -191,6 +228,19 @@ class Flow:
     def mirror(self, *, root: str | Path) -> "Flow":
         """Bind a mirrored output namespace rooted at one directory.
 
+        ``mirror`` only configures paths. It does not write files by itself; the
+        runtime later exposes write-ready paths through ``context.mirror``.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            from data_engine import Flow
+
+            flow = Flow(group="Claims").mirror(root="processed")
+
+            assert str(flow.mirror_spec.root).endswith("processed")
+
         Parameters
         ----------
         root : str | Path
@@ -212,6 +262,25 @@ class Flow:
         label: str | None = None,
     ) -> "Flow":
         """Append one callable step to the flow.
+
+        ``step`` is the default workhorse for flow authoring. The callable
+        receives one ``FlowContext`` and its return value becomes the next
+        ``context.current``. Use ``save_as`` to keep an intermediate result under
+        ``context.objects`` and ``use`` to load a saved object before a later
+        step runs.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            from data_engine import Flow
+
+            def read_claims(context):
+                return context.current
+
+            flow = Flow(group="Claims").step(read_claims, save_as="raw_df")
+
+            assert flow.steps[0].save_as == "raw_df"
 
         Parameters
         ----------
@@ -263,6 +332,23 @@ class Flow:
         label: str | None = None,
     ) -> "Flow":
         """Append a step that maps a callable over the current iterable value.
+
+        ``map`` is best when the same callable should run once per collected
+        item. The callable may accept either ``item`` or ``context, item`` and
+        the mapped values are returned as a ``Batch``.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            from data_engine import Flow
+
+            def summarize(file_ref):
+                return file_ref.name
+
+            flow = Flow(group="Claims").collect(extensions=[".xlsx"]).map(fn=summarize)
+
+            assert len(flow.steps) == 2
 
         Parameters
         ----------
@@ -334,6 +420,20 @@ class Flow:
         label: str | None = None,
     ) -> "Flow":
         """Append a step that collects source files into a ``Batch``.
+
+        If ``root`` is omitted, collection uses the active source root from the
+        runtime context. This keeps scheduled or poll-driven batch flows concise
+        because the watched source directory can also be the collection root.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            from data_engine import Flow
+
+            flow = Flow(group="Docs").collect(extensions=[".pdf"], recursive=True)
+
+            assert flow.steps[0].label == "Collect Files"
 
         Parameters
         ----------

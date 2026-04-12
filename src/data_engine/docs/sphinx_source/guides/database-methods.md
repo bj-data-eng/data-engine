@@ -4,6 +4,11 @@ There is no first-class database sub-chain. Use DuckDB directly inside step call
 
 If you want common warehouse-style shortcuts, see [DuckDB Helpers](duckdb-helpers.md). That helper layer covers several repeated patterns without taking over general SQL authoring.
 
+The exact `context.database(...)` reference lives in the `FlowContext.database`
+docstring and is rendered in the API reference. Keep parameter details and
+copyable method examples beside the code in `src/data_engine/core/primitives.py`
+so editor help and packaged docs stay aligned.
+
 That is intentional. The core API deliberately avoids hiding connection ownership, transactions, or query semantics behind a special fluent DSL.
 
 In practice, that means:

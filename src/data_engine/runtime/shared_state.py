@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
-import os
 from pathlib import Path
 import shutil
 from uuid import uuid4
@@ -12,6 +11,7 @@ from typing import Any, Protocol
 
 import polars as pl
 
+from data_engine.helpers.polars import write_parquet_atomic
 from data_engine.platform.workspace_models import WorkspacePaths
 from data_engine.runtime.ledger_models import (
     PersistedFileState,
@@ -332,8 +332,7 @@ def write_control_request(
     requested_at_utc: str,
 ) -> None:
     """Persist one pending request to transfer workspace control."""
-    _atomic_write_parquet(
-        paths.control_request_path,
+    write_parquet_atomic(
         _frame_with_schema(
             [
                 {
@@ -347,6 +346,7 @@ def write_control_request(
             ],
             _CONTROL_REQUEST_SCHEMA,
         ),
+        paths.control_request_path,
     )
 
 
@@ -376,13 +376,6 @@ def remove_control_request(paths: WorkspacePaths) -> None:
         pass
 
 
-def _atomic_write_parquet(path: Path, frame: pl.DataFrame) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.tmp")
-    frame.write_parquet(tmp_path)
-    os.replace(tmp_path, path)
-
-
 def _frame_with_schema(rows: list[dict[str, Any]], schema: dict[str, pl.DataType]) -> pl.DataFrame:
     """Build one parquet-ready frame with stable column dtypes, even when values are all null."""
     if not rows:
@@ -391,19 +384,19 @@ def _frame_with_schema(rows: list[dict[str, Any]], schema: dict[str, pl.DataType
 
 
 def _write_lease_metadata(path: Path, row: dict[str, Any]) -> None:
-    _atomic_write_parquet(path, _frame_with_schema([row], _LEASE_METADATA_SCHEMA))
+    write_parquet_atomic(_frame_with_schema([row], _LEASE_METADATA_SCHEMA), path)
 
 
 def _write_runs(path: Path, rows: tuple[PersistedRun, ...], *, snapshot_generation_id: str) -> None:
     if not rows:
         remove_file_if_exists(path)
         return
-    _atomic_write_parquet(
-        path,
+    write_parquet_atomic(
         _frame_with_schema(
             [{"snapshot_generation_id": snapshot_generation_id, **asdict(row)} for row in rows],
             _RUNS_SCHEMA,
         ),
+        path,
     )
 
 
@@ -411,12 +404,12 @@ def _write_step_runs(path: Path, rows: tuple[PersistedStepRun, ...], *, snapshot
     if not rows:
         remove_file_if_exists(path)
         return
-    _atomic_write_parquet(
-        path,
+    write_parquet_atomic(
         _frame_with_schema(
             [{"snapshot_generation_id": snapshot_generation_id, **asdict(row)} for row in rows],
             _STEP_RUNS_SCHEMA,
         ),
+        path,
     )
 
 
@@ -424,12 +417,12 @@ def _write_logs(path: Path, rows: tuple[PersistedLogEntry, ...], *, snapshot_gen
     if not rows:
         remove_file_if_exists(path)
         return
-    _atomic_write_parquet(
-        path,
+    write_parquet_atomic(
         _frame_with_schema(
             [{"snapshot_generation_id": snapshot_generation_id, **asdict(row)} for row in rows],
             _LOGS_SCHEMA,
         ),
+        path,
     )
 
 
@@ -437,12 +430,12 @@ def _write_file_states(path: Path, rows: tuple[PersistedFileState, ...], *, snap
     if not rows:
         remove_file_if_exists(path)
         return
-    _atomic_write_parquet(
-        path,
+    write_parquet_atomic(
         _frame_with_schema(
             [{"snapshot_generation_id": snapshot_generation_id, **asdict(row)} for row in rows],
             _FILE_STATE_SCHEMA,
         ),
+        path,
     )
 
 

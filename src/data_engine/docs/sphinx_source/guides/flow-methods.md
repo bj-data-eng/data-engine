@@ -2,6 +2,12 @@
 
 This page covers the small author-facing `Flow` surface.
 
+The method-level reference now lives in the `Flow` docstrings and is rendered in
+the API reference. Keep examples that describe exact parameters, return values,
+and validation rules beside the methods in `src/data_engine/core/flow.py`; that
+keeps VS Code hover help and the packaged docs in sync. This page is the
+author-facing tour of when to use those methods together.
+
 ```python
 from data_engine import Flow
 ```
@@ -114,9 +120,9 @@ This is the default workhorse method. Most flows are easiest to read when they a
 Map one callable across the current batch.
 
 ```python
-flow = flow.collect([".pdf"])
-flow = flow.map(validate_pdf)
-flow = flow.map(validate_pdf_with_context, label="Validate Pdf")
+flow = flow.collect(extensions=[".pdf"])
+flow = flow.map(fn=validate_pdf)
+flow = flow.map(fn=validate_pdf_with_context, label="Validate Pdf")
 ```
 
 ```python
@@ -145,8 +151,8 @@ Reach for `map(...)` when the same callable should run once per collected item. 
 Use whichever reads better in the flow module:
 
 ```python
-flow = flow.map(read_claims)
-flow = flow.step_each(read_claims)
+flow = flow.map(fn=read_claims)
+flow = flow.step_each(fn=read_claims)
 ```
 
 ## `collect(extensions, root=None, recursive=False, use=None, save_as=None, label=None)`
@@ -154,8 +160,8 @@ flow = flow.step_each(read_claims)
 Collect matching files into a `Batch` of `FileRef` items.
 
 ```python
-flow = flow.collect([".xlsx"])
-flow = flow.collect([".pdf"], recursive=True)
+flow = flow.collect(extensions=[".xlsx"])
+flow = flow.collect(extensions=[".pdf"], recursive=True)
 ```
 
 Behavior:

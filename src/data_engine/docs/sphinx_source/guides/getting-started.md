@@ -184,8 +184,8 @@ def build():
     return (
         Flow(group="Claims")
         .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/pdfs")
-        .collect([".pdf"], save_as="pdf_files")
-        .map(validate_pdf, use="pdf_files", save_as="pdf_results")
+        .collect(extensions=[".pdf"], save_as="pdf_files")
+        .map(fn=validate_pdf, use="pdf_files", save_as="pdf_results")
         .step(summarize_results, use="pdf_results")
     )
 ```

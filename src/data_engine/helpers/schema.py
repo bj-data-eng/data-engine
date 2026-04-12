@@ -13,7 +13,24 @@ ColumnRenames: TypeAlias = Mapping[str, str] | Iterable[tuple[str, str]]
 
 
 class ColumnSelection(tuple[str, ...]):
-    """Tuple-like column selection with a Polars ``apply`` helper."""
+    """Tuple-like column projection with Polars convenience methods.
+
+    ``TableSchema.columns`` returns this type so schema definitions can be used
+    directly in dataframe chains while still behaving like a normal tuple.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import polars as pl
+
+        from data_engine.helpers import TableSchema
+
+        schema = TableSchema(columns=("Claim Id",), dtypes={"Claim Id": pl.Int64})
+        df = pl.DataFrame({"Claim Id": [1], "SSN": ["123"]})
+
+        assert schema.columns.apply(df).columns == ["Claim Id"]
+    """
 
     def __new__(cls, columns: Iterable[str]) -> "ColumnSelection":
         return super().__new__(cls, tuple(columns))
@@ -50,7 +67,11 @@ class ColumnSelection(tuple[str, ...]):
 
 
 class DropColumns(tuple[str, ...]):
-    """Tuple-like drop list with a Polars ``apply`` helper."""
+    """Tuple-like drop list with a Polars ``apply`` helper.
+
+    ``TableSchema.drop`` returns this type. Empty drop lists are no-ops, which
+    keeps chained cleanup code simple.
+    """
 
     def __new__(cls, columns: Iterable[str]) -> "DropColumns":
         return super().__new__(cls, tuple(columns))
@@ -74,7 +95,12 @@ class DropColumns(tuple[str, ...]):
 
 
 class RenameColumns(dict[str, str]):
-    """Dict-like rename mapping with a Polars ``apply`` helper."""
+    """Dict-like rename mapping with a Polars ``apply`` helper.
+
+    ``TableSchema.rename`` returns this type. Empty mappings are no-ops, so the
+    same cleanup chain can be used whether a schema currently renames columns or
+    not.
+    """
 
     def apply(self, df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
         """Rename columns on a Polars frame.
@@ -95,15 +121,20 @@ class RenameColumns(dict[str, str]):
 
 
 class ColumnCasts(dict[str, object]):
-    """Dict-like dtype mapping with a Polars ``apply`` helper."""
+    """Dict-like dtype mapping with a Polars ``apply`` helper.
 
-    @property
-    def _exprs(self) -> tuple[pl.Expr, ...]:
-        """Return Polars expressions that cast configured source columns."""
-        return tuple(pl.col(column).cast(dtype) for column, dtype in self.items())
+    ``TableSchema.dtypes`` returns this type. Values are passed to
+    ``polars.Expr.cast`` so callers can use normal Polars dtype objects such as
+    ``pl.String``, ``pl.Int64``, and ``pl.Datetime``. ``apply`` casts remaining
+    frame columns to ``pl.String``.
+    """
+
+    def _exprs(self, columns: Iterable[str]) -> tuple[pl.Expr, ...]:
+        """Return Polars expressions for explicit casts plus string fallbacks."""
+        return tuple(pl.col(column).cast(self.get(column, pl.String)) for column in columns)
 
     def apply(self, df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
-        """Cast configured columns on a Polars frame.
+        """Cast columns on a Polars frame.
 
         Parameters
         ----------
@@ -113,11 +144,13 @@ class ColumnCasts(dict[str, object]):
         Returns
         -------
         pl.DataFrame | pl.LazyFrame
-            Frame with configured dtype casts applied.
+            Frame with configured dtype casts applied and unspecified columns
+            cast to ``pl.String``.
         """
-        if not self:
+        columns = df.columns if isinstance(df, pl.DataFrame) else df.collect_schema().names()
+        if not columns:
             return df
-        return df.with_columns(self._exprs)
+        return df.with_columns(self._exprs(columns))
 
 
 def _normalize_dtypes(dtypes: ColumnDtypes) -> dict[str, object]:
@@ -167,16 +200,18 @@ def _normalize_drop(drop: Iterable[str]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _ordered_unique(*column_groups: Iterable[str]) -> tuple[str, ...]:
-    columns: list[str] = []
+def _normalize_columns(columns: Iterable[str]) -> tuple[str, ...]:
+    normalized: list[str] = []
     seen: set[str] = set()
-    for group in column_groups:
-        for column in group:
-            if column in seen:
-                continue
-            columns.append(column)
-            seen.add(column)
-    return tuple(columns)
+    for column in columns:
+        column_name = str(column).strip()
+        if not column_name:
+            raise ValueError("TableSchema column names must be non-empty.")
+        if column_name in seen:
+            raise ValueError(f"Duplicate column in TableSchema columns: {column_name!r}")
+        normalized.append(column_name)
+        seen.add(column_name)
+    return tuple(normalized)
 
 
 def normalize_column_name(name: object) -> str:
@@ -249,21 +284,90 @@ def normalize_column_names(
 
 @dataclass(frozen=True)
 class TableSchema:
-    """Column-selection helper for compact Polars cleanup chains."""
+    """Column cleanup helper for compact Polars dataframe chains.
 
+    ``TableSchema`` is intentionally small: it stores an explicit column
+    projection, a source-column dtype map, a rename map, and a drop list. Each
+    attribute exposes an ``apply`` method so flow code can decide the cleanup
+    order explicitly instead of relying on a magical all-in-one schema
+    operation.
+
+    Attributes
+    ----------
+    columns : Iterable[str] | ColumnSelection
+        Explicit projection columns. Use ``schema.columns.apply(df)`` wherever
+        that projection belongs in your chain.
+    dtypes : ColumnDtypes | ColumnCasts
+        Source column names mapped to Polars dtype objects. Use
+        ``schema.dtypes.apply(df)`` to cast them. Remaining frame columns are
+        cast to ``pl.String``.
+    rename : ColumnRenames
+        Source-to-target column names. Use ``schema.rename.apply(df)`` to rename
+        them.
+    drop : Iterable[str]
+        Source columns to remove. Use ``schema.drop.apply(df)`` to drop them.
+
+    Notes
+    -----
+    ``columns`` is an explicit projection applied at the point you call
+    ``schema.columns.apply(df)``. For example, you might cast all incoming
+    columns, drop private fields before persistence, write to DuckDB, and then
+    select the columns to return.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import polars as pl
+
+        from data_engine.helpers import TableSchema
+
+        schema = TableSchema(
+            columns=("step", "time", "workflow"),
+            dtypes={"step_to": pl.String, "time": pl.Time},
+            rename={"step_to": "step", "workflow_to": "workflow"},
+            drop=("workflow_from", "ssn"),
+        )
+
+        df = pl.DataFrame(
+            {
+                "step_to": ["review"],
+                "time": ["09:30:00"],
+                "workflow_to": ["claims"],
+                "workflow_from": ["intake"],
+                "ssn": ["000-00-0000"],
+            }
+        ).with_columns(pl.col("time").str.to_time())
+
+        df = schema.dtypes.apply(df)
+        df = schema.drop.apply(df)
+        df = schema.rename.apply(df)
+        df = schema.columns.apply(df)
+
+        assert df.columns == ["step", "time", "workflow"]
+        assert df.schema["workflow"] == pl.String
+
+    Normalize all incoming names first when source files use inconsistent
+    spacing or capitalization:
+
+    .. code-block:: python
+
+        df = pl.DataFrame({"Workflow\\tTo": ["claims"]})
+        df = schema.normalize_column_names(df)
+
+        assert df.columns == ["workflow_to"]
+    """
+
+    columns: Iterable[str] | ColumnSelection = ()
     dtypes: ColumnDtypes | ColumnCasts = ()
     rename: ColumnRenames = ()
     drop: Iterable[str] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "columns", ColumnSelection(_normalize_columns(self.columns)))
         object.__setattr__(self, "dtypes", ColumnCasts(_normalize_dtypes(self.dtypes)))
         object.__setattr__(self, "rename", RenameColumns(_normalize_renames(self.rename)))
         object.__setattr__(self, "drop", DropColumns(_normalize_drop(self.drop)))
-
-    @property
-    def columns(self) -> ColumnSelection:
-        """Return source columns needed before drop/rename cleanup."""
-        return ColumnSelection(_ordered_unique(self.dtypes.keys(), self.rename.keys(), self.drop))
 
     def normalize_column_names(self, df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
         """Normalize all column names on a Polars frame.

@@ -3,7 +3,7 @@
 This page is generated from the current AST map and is intentionally inventory-shaped rather than explanatory.
 
 - package root: `src/data_engine`
-- module count: `181`
+- module count: `182`
 
 - module `data_engine`
   - attribute `__all__`
@@ -1608,6 +1608,163 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `*`
     - param `df: FrameLike`
     - param `return_df: bool=True`
+- module `data_engine.helpers.polars`
+  - attribute `PathLike`
+  - attribute `ColumnNames`
+  - attribute `ReturnMode`
+  - function `write_parquet_atomic`
+    - param `df: pl.DataFrame`
+    - param `path: PathLike`
+    - param `**write_options: object`
+  - function `write_excel_atomic`
+    - param `df: pl.DataFrame`
+    - param `path: PathLike`
+    - param `worksheet: str | None=None`
+    - param `**write_options: object`
+  - function `sink_parquet_atomic`
+    - param `lf: pl.LazyFrame`
+    - param `path: PathLike`
+    - param `**sink_options: object`
+  - function `_write_atomic`
+    - param `path: PathLike`
+    - param `write: Callable[[Path], object]`
+  - function `_remove_temporary_file`
+    - param `path: Path`
+  - class `DataEngineDataFrameNamespace`
+    - instance attribute `_df`
+    - method `__init__`
+      - param `self`
+      - param `df: pl.DataFrame`
+    - method `normalize_column_names`
+      - param `self`
+      - param `columns: Iterable[object] | None=None`
+    - method `write_parquet_atomic`
+      - param `self`
+      - param `path: PathLike`
+      - param `**write_options: object`
+    - method `write_excel_atomic`
+      - param `self`
+      - param `path: PathLike`
+      - param `worksheet: str | None=None`
+      - param `**write_options: object`
+    - method `build_dimension`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `key_column: str='dimension_key'`
+      - param `return_df: bool=True`
+    - method `attach_dimension`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `on: ColumnNames`
+      - param `key_column: str='dimension_key'`
+      - param `drop_key: bool=False`
+    - method `denormalize_columns`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `key_column: str='dimension_key'`
+      - param `select: ColumnNames='*'`
+      - param `drop_key: bool=False`
+    - method `normalize_columns`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `on: ColumnNames`
+      - param `key_column: str='dimension_key'`
+      - param `drop_key: bool=True`
+      - param `returns: ReturnMode='df'`
+    - method `replace_rows_by_file`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `file_hash: str`
+      - param `file_hash_column: str='file_key'`
+      - param `return_df: bool=True`
+    - method `replace_rows_by_values`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `column: str`
+      - param `return_df: bool=True`
+    - method `replace_table`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `return_df: bool=True`
+  - class `DataEngineLazyFrameNamespace`
+    - instance attribute `_lf`
+    - method `__init__`
+      - param `self`
+      - param `lf: pl.LazyFrame`
+    - method `normalize_column_names`
+      - param `self`
+      - param `columns: Iterable[object] | None=None`
+    - method `sink_parquet_atomic`
+      - param `self`
+      - param `path: PathLike`
+      - param `**sink_options: object`
+    - method `build_dimension`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `key_column: str='dimension_key'`
+      - param `return_df: bool=True`
+    - method `attach_dimension`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `on: ColumnNames`
+      - param `key_column: str='dimension_key'`
+      - param `drop_key: bool=False`
+    - method `denormalize_columns`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `key_column: str='dimension_key'`
+      - param `select: ColumnNames='*'`
+      - param `drop_key: bool=False`
+    - method `normalize_columns`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `on: ColumnNames`
+      - param `key_column: str='dimension_key'`
+      - param `drop_key: bool=True`
+      - param `returns: ReturnMode='df'`
+    - method `replace_rows_by_file`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `file_hash: str`
+      - param `file_hash_column: str='file_key'`
+      - param `return_df: bool=True`
+    - method `replace_rows_by_values`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `column: str`
+      - param `return_df: bool=True`
+    - method `replace_table`
+      - param `self`
+      - param `db_path: PathLike`
+      - param `table: str`
+      - param `*`
+      - param `return_df: bool=True`
 - module `data_engine.helpers.schema`
   - attribute `ColumnDtypes`
   - attribute `ColumnRenames`
@@ -1618,8 +1775,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `rename: ColumnRenames`
   - function `_normalize_drop`
     - param `drop: Iterable[str]`
-  - function `_ordered_unique`
-    - param `*column_groups: Iterable[str]`
+  - function `_normalize_columns`
+    - param `columns: Iterable[str]`
   - function `normalize_column_name`
     - param `name: object`
   - function `normalized_column_renames`
@@ -1651,16 +1808,16 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `ColumnCasts`
     - method `_exprs`
       - param `self`
+      - param `columns: Iterable[str]`
     - method `apply`
       - param `self`
       - param `df: pl.DataFrame | pl.LazyFrame`
   - class `TableSchema`
+    - attribute `columns`
     - attribute `dtypes`
     - attribute `rename`
     - attribute `drop`
     - method `__post_init__`
-      - param `self`
-    - method `columns`
       - param `self`
     - method `normalize_column_names`
       - param `self`
@@ -3592,9 +3749,6 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `snapshot_generation_id: str`
   - function `remove_control_request`
     - param `paths: WorkspacePaths`
-  - function `_atomic_write_parquet`
-    - param `path: Path`
-    - param `frame: pl.DataFrame`
   - function `_frame_with_schema`
     - param `rows: list[dict[str, Any]]`
     - param `schema: dict[str, pl.DataType]`

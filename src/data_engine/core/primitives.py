@@ -61,7 +61,28 @@ class SourceMetadata:
 
 @dataclass
 class WorkspaceConfigContext:
-    """Lazy read-only access to workspace-local TOML config files."""
+    """Lazy read-only access to workspace-local TOML config files.
+
+    ``context.config`` reads files from ``<workspace>/config/*.toml`` on demand.
+    It returns dictionaries so flows can keep environment-specific settings out
+    of Python modules without introducing a larger configuration framework.
+
+    Attributes
+    ----------
+    workspace_root : Path | None
+        Authored workspace root. When omitted, config lookup is unavailable and
+        returns no names.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        from data_engine.core.primitives import WorkspaceConfigContext
+
+        config = WorkspaceConfigContext()
+
+        assert config.names() == ()
+    """
 
     workspace_root: Path | None = None
     _cache: dict[str, dict[str, object]] = field(default_factory=dict)
@@ -127,7 +148,12 @@ class WorkspaceConfigContext:
 
 @dataclass(frozen=True)
 class MirrorContext:
-    """Write-ready mirrored output namespace for one runtime source."""
+    """Write-ready mirrored output namespace for one runtime source.
+
+    ``context.mirror`` is available when a flow was configured with
+    ``Flow.mirror(root=...)``. The helpers return paths and create parent
+    directories as needed, but they do not write file contents.
+    """
 
     root: Path
     source_path: Path | None = None
@@ -206,7 +232,12 @@ class MirrorContext:
 
 @dataclass(frozen=True)
 class SourceContext:
-    """Resolved source namespace for one runtime source."""
+    """Resolved source namespace for one runtime source.
+
+    ``context.source`` points at the watched source root and, for individual
+    file runs, the concrete source file. Its helpers are read-oriented path
+    conveniences; unlike ``MirrorContext`` they do not create directories.
+    """
 
     root: Path
     path: Path | None = None
@@ -276,7 +307,44 @@ class SourceContext:
 
 @dataclass
 class FlowContext:
-    """Mutable runtime state shared across steps during one flow execution."""
+    """Mutable runtime state shared across steps during one flow execution.
+
+    Steps receive a ``FlowContext`` object. ``current`` is the active value,
+    ``objects`` stores named intermediate values created with ``save_as``,
+    ``metadata`` holds runtime annotations, and ``source``/``mirror`` expose
+    source and output path helpers when the flow configuration provides them.
+
+    Attributes
+    ----------
+    flow_name : str
+        Stable flow name for the current execution.
+    group : str
+        Flow group used by operator surfaces.
+    source : SourceContext | None
+        Source path helper for source-backed executions.
+    mirror : MirrorContext | None
+        Write-ready mirrored output helper when the flow configured a mirror.
+    current : object | None
+        Active value passed between steps.
+    objects : dict[str, object]
+        Named intermediate values saved by ``save_as``.
+    metadata : dict[str, object]
+        Runtime metadata attached to the execution.
+    config : WorkspaceConfigContext
+        Lazy workspace config reader.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        from data_engine.core.primitives import FlowContext
+
+        context = FlowContext(flow_name="claims", group="Claims", current=1)
+        context.objects["raw"] = context.current
+
+        assert context.current == 1
+        assert context.objects["raw"] == 1
+    """
 
     flow_name: str
     group: str
@@ -301,7 +369,29 @@ class FlowContext:
         )
 
     def database(self, name: str | Path) -> Path:
-        """Return a write-ready path beneath the workspace databases directory."""
+        """Return a write-ready path beneath the workspace databases directory.
+
+        Use this for workspace-owned DuckDB files and other durable database
+        artifacts. The returned path is rooted under
+        ``<workspace>/databases/`` and parent directories are created for you.
+
+        Parameters
+        ----------
+        name : str | Path
+            Relative database file name, such as ``"analytics.duckdb"`` or
+            ``"claims/analytics.duckdb"``.
+
+        Returns
+        -------
+        Path
+            Absolute write-ready database path.
+
+        Raises
+        ------
+        FlowValidationError
+            If the flow is not running from an authored workspace, or if
+            ``name`` is absolute or empty.
+        """
         if self.config.workspace_root is None:
             raise FlowValidationError("context.database() is only available for authored workspace flows.")
         candidate = Path(name)

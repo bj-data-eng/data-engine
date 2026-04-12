@@ -2,6 +2,12 @@
 
 `data_engine.helpers.duckdb` is the first public helper layer for common warehouse-style authoring patterns.
 
+The function-by-function reference lives in the helper docstrings and is
+rendered in the API reference. Keep signature details and copyable examples
+beside the functions in `src/data_engine/helpers/duckdb.py`; that keeps editor
+hover help and the packaged docs aligned. This page explains the shared design
+shape and when the helper family is a good fit.
+
 These helpers are intentionally:
 
 - one-shot
