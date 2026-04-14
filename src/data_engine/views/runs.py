@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from data_engine.domain import FlowLogEntry, FlowRunState, RunDetailState
+from data_engine.domain import FlowLogEntry, FlowRunState
 from data_engine.views.presentation import format_seconds
 
 
@@ -20,13 +20,12 @@ class RunGroupDisplay:
 
     @classmethod
     def from_run(cls, run_state: FlowRunState) -> "RunGroupDisplay":
-        detail = RunDetailState.from_run(run_state)
         return cls(
-            primary_label=detail.display_label,
-            source_label=detail.source_label,
-            status_text=detail.status.title(),
-            status_visual_state=_status_visual_state(detail.status),
-            duration_text=format_seconds(detail.elapsed_seconds) if detail.elapsed_seconds is not None else None,
+            primary_label=run_state.display_label,
+            source_label=run_state.source_label,
+            status_text=run_state.status.title(),
+            status_visual_state=_status_visual_state(run_state.status),
+            duration_text=format_seconds(run_state.elapsed_seconds) if run_state.elapsed_seconds is not None else None,
         )
 
 

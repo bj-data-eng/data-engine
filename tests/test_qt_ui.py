@@ -2530,3 +2530,49 @@ def test_log_view_limits_visible_run_history_for_busy_flow(qapp, monkeypatch):
     finally:
         _dispose_window(qapp, window)
 
+
+def test_refresh_log_view_skips_row_rebuild_when_visible_runs_are_unchanged(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        flow_name = "poller"
+        window.selected_flow_name = flow_name
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="run-1",
+                kind="flow",
+                flow_name=flow_name,
+                event=RuntimeStepEvent(
+                    run_id="run-1",
+                    flow_name=flow_name,
+                    step_name=None,
+                    source_label="claims.xlsx",
+                    status="success",
+                    elapsed_seconds=0.3,
+                ),
+            )
+        )
+
+        add_calls = 0
+        from data_engine.ui.gui.presenters import logs as log_presenter
+
+        original_add = log_presenter.add_log_run_item
+
+        def counting_add(window_arg, run_group):
+            nonlocal add_calls
+            add_calls += 1
+            return original_add(window_arg, run_group)
+
+        monkeypatch.setattr(log_presenter, "add_log_run_item", counting_add)
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+        first_item = window.log_view.item(0)
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+        second_item = window.log_view.item(0)
+
+        assert add_calls == 1
+        assert first_item is second_item
+        assert window.log_view.count() == 1
+    finally:
+        _dispose_window(qapp, window)
+

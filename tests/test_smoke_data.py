@@ -10,6 +10,8 @@ def test_build_smoke_environment_creates_repo_style_data_and_workspaces(tmp_path
 
     assert (tmp_path / "data" / "Input" / "claims_flat" / "claims_flat_1.xlsx").exists() is True
     assert (tmp_path / "data2" / "Settings" / "single_watch.xlsx").exists() is True
+    assert (tmp_path / "data2" / "Input" / "claims_parallel_12" / "claims_parallel_01.xlsx").exists() is True
+    assert (tmp_path / "data2" / "Input" / "claims_parallel_12" / "claims_parallel_12.xlsx").exists() is True
     assert (tmp_path / "workspaces" / "example_workspace" / "flow_modules" / "example_manual.py").exists() is True
     starter_database_flow = tmp_path / "workspaces" / "example_workspace" / "flow_modules" / "example_database_dimensions.py"
     assert starter_database_flow.exists() is True
@@ -17,6 +19,14 @@ def test_build_smoke_environment_creates_repo_style_data_and_workspaces(tmp_path
     assert 'context.database("claims/warehouse.duckdb")' in starter_database_text
     assert "build_dimension(" in starter_database_text
     assert (tmp_path / "workspaces" / "claims2" / "flow_modules" / "claims2_nb_manual.ipynb").exists() is True
+    parallel_poll_flow = tmp_path / "workspaces" / "claims2" / "flow_modules" / "claims2_parallel_poll.py"
+    parallel_schedule_flow = tmp_path / "workspaces" / "claims2" / "flow_modules" / "claims2_parallel_schedule.py"
+    parallel_manual_flow = tmp_path / "workspaces" / "claims2" / "flow_modules" / "claims2_parallel_manual.py"
+    assert parallel_poll_flow.exists() is True
+    assert parallel_schedule_flow.exists() is True
+    assert parallel_manual_flow.exists() is True
+    assert "max_parallel=4" in parallel_poll_flow.read_text(encoding="utf-8")
+    assert 'run_as="individual"' in parallel_schedule_flow.read_text(encoding="utf-8")
 
 
 def test_build_temp_smoke_environment_preserves_live_suite_layout(tmp_path):

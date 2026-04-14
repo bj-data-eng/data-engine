@@ -3,6 +3,7 @@ from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services.logs import LogService
 from data_engine.views.logs import FlowLogStore
 from data_engine.domain import RuntimeStepEvent
+from data_engine.domain.runs import FlowRunState
 
 
 def test_flow_log_store_filters_entries_by_selected_flow():
@@ -244,3 +245,46 @@ def test_flow_log_store_hydrates_persisted_runtime_logs(tmp_path):
     assert len(groups) == 1
     assert groups[0].status == "success"
     assert groups[0].source_label == "input.xlsx"
+
+
+def test_flow_log_store_caches_grouped_runs_per_flow(monkeypatch):
+    store = FlowLogStore()
+    store.append_entry(
+        FlowLogEntry(
+            line="poller  started  input.xlsx",
+            kind="flow",
+            flow_name="poller",
+            event=RuntimeStepEvent(run_id="run-1", flow_name="poller", step_name=None, source_label="input.xlsx", status="started"),
+        )
+    )
+
+    original = FlowRunState.group_entries
+    calls: list[tuple[FlowLogEntry, ...]] = []
+
+    def counting_group_entries(entries):
+        calls.append(entries)
+        return original(entries)
+
+    monkeypatch.setattr(FlowRunState, "group_entries", counting_group_entries)
+
+    first = store.runs_for_flow("poller")
+    second = store.runs_for_flow("poller")
+
+    assert len(first) == 1
+    assert second == first
+    assert len(calls) == 1
+
+    store.append_entry(
+        FlowLogEntry(
+            line="poller  success  input.xlsx",
+            kind="flow",
+            flow_name="poller",
+            event=RuntimeStepEvent(run_id="run-1", flow_name="poller", step_name=None, source_label="input.xlsx", status="success"),
+        )
+    )
+
+    refreshed = store.runs_for_flow("poller")
+
+    assert len(refreshed) == 1
+    assert refreshed[0].status == "success"
+    assert len(calls) == 2

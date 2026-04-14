@@ -92,6 +92,7 @@ class Flow:
         *,
         mode: str,
         run_as: str = "individual",
+        max_parallel: int = 1,
         source: str | Path | None = None,
         interval: str | None = None,
         time: str | tuple[str, ...] | list[str] | set[str] | None = None,
@@ -126,6 +127,9 @@ class Flow:
         run_as : str
             ``"individual"`` to run once per source file, or ``"batch"`` to run
             once for the full source set.
+        max_parallel : int
+            Maximum number of concurrent source-file runs for one flow when
+            ``run_as="individual"``. Defaults to ``1``.
         source : str | Path | None
             File or directory watched by poll/schedule triggers.
         interval : str | None
@@ -157,6 +161,9 @@ class Flow:
         if normalized_run_as not in {"individual", "batch"}:
             raise FlowValidationError("watch() run_as must be either 'individual' or 'batch'.")
 
+        if not isinstance(max_parallel, int) or max_parallel <= 0:
+            raise FlowValidationError("watch() max_parallel must be an integer greater than or equal to one.")
+
         if not isinstance(settle, int) or settle < 0:
             raise FlowValidationError("watch() settle must be an integer greater than or equal to zero.")
 
@@ -172,6 +179,7 @@ class Flow:
                 trigger=WatchSpec(
                     mode="manual",
                     run_as=normalized_run_as,
+                    max_parallel=max_parallel,
                     source=resolved_source,
                     extensions=normalized_extensions,
                 )
@@ -188,6 +196,7 @@ class Flow:
                 trigger=WatchSpec(
                     mode="poll",
                     run_as=normalized_run_as,
+                    max_parallel=max_parallel,
                     source=resolved_source,
                     interval=interval,
                     interval_seconds=_parse_duration(interval),
@@ -205,6 +214,7 @@ class Flow:
                 trigger=WatchSpec(
                     mode="schedule",
                     run_as=normalized_run_as,
+                    max_parallel=max_parallel,
                     source=resolved_source,
                     interval=interval,
                     interval_seconds=_parse_duration(interval),
@@ -217,6 +227,7 @@ class Flow:
             trigger=WatchSpec(
                 mode="schedule",
                 run_as=normalized_run_as,
+                max_parallel=max_parallel,
                 source=resolved_source,
                 time=time_values[0] if len(time_values) == 1 else time_values,
                 times=time_values,

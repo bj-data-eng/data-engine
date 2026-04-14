@@ -56,6 +56,7 @@ def test_watch_validates_poll_single_file_and_directory_modes(tmp_path):
     assert built.trigger is not None
     assert built.trigger.mode == "poll"
     assert built.trigger.run_as == "individual"
+    assert built.trigger.max_parallel == 1
     assert built.trigger.source == source_file.resolve()
 
     directory_built = Flow(name="claims_dir", group="Claims").watch(
@@ -69,6 +70,29 @@ def test_watch_validates_poll_single_file_and_directory_modes(tmp_path):
     assert directory_built.trigger.source == source_dir.resolve()
     assert directory_built.trigger.extensions == (".xlsx", ".xlsm")
     assert directory_built.trigger.settle == 2
+
+
+def test_watch_validates_max_parallel(tmp_path):
+    source_dir = tmp_path / "input"
+    source_dir.mkdir()
+
+    built = Flow(name="claims_parallel", group="Claims").watch(
+        mode="poll",
+        source=source_dir,
+        interval="5s",
+        max_parallel=4,
+    )
+
+    assert built.trigger is not None
+    assert built.trigger.max_parallel == 4
+
+    with pytest.raises(FlowValidationError, match="greater than or equal to one"):
+        Flow(name="claims_bad_parallel", group="Claims").watch(
+            mode="poll",
+            source=source_dir,
+            interval="5s",
+            max_parallel=0,
+        )
 
 
 def test_watch_validates_schedule_interval_and_times():

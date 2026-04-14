@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from pathlib import Path
 import threading
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import TYPE_CHECKING, Callable
 from data_engine.core.model import FlowStoppedError, FlowValidationError
 from data_engine.core.primitives import FlowContext, WatchSpec
 from data_engine.runtime.execution.continuous import ContinuousRuntimeLoop
-from data_engine.runtime.execution.context import RuntimeContextBuilder
+from data_engine.runtime.execution.context import QueuedRunJob, RuntimeContextBuilder
 from data_engine.runtime.execution.logging import RuntimeLogEmitter
 from data_engine.runtime.execution.polling import RuntimePollingSupport
 from data_engine.runtime.execution.runner import FlowRunExecutionPorts, FlowRunExecutor
@@ -150,6 +151,7 @@ class FlowRuntime:
     def _run_once_all(self) -> list[FlowContext]:
         results: list[FlowContext] = []
         for flow in self.flows:
+            jobs: list[QueuedRunJob] = []
             for source_path in self.polling.startup_sources(flow):
                 batch_signatures = ()
                 trigger = flow.trigger
@@ -162,8 +164,111 @@ class FlowRuntime:
                     and trigger.source.is_dir()
                 ):
                     batch_signatures = self.polling.stale_batch_poll_signatures(flow)
-                results.append(self.run_executor.run_one(flow, source_path, batch_signatures=batch_signatures))
+                jobs.append(QueuedRunJob(flow=flow, source_path=source_path, batch_signatures=batch_signatures))
+            results.extend(self._run_jobs(jobs))
         return results
+
+    def max_parallel_for_flow(self, flow: "CoreFlow") -> int:
+        """Return the allowed per-flow source concurrency for one flow."""
+        trigger = flow.trigger
+        if not isinstance(trigger, WatchSpec):
+            return 1
+        if trigger.run_as != "individual":
+            return 1
+        return max(int(trigger.max_parallel), 1)
+
+    def _run_jobs(self, jobs: list[QueuedRunJob]) -> list[FlowContext]:
+        if not jobs:
+            return []
+        max_parallel = self.max_parallel_for_flow(jobs[0].flow)
+        if max_parallel <= 1 or len(jobs) <= 1:
+            return [
+                self.run_executor.run_one(job.flow, job.source_path, batch_signatures=job.batch_signatures)
+                for job in jobs
+            ]
+        results_by_index: dict[int, FlowContext] = {}
+        with ThreadPoolExecutor(max_workers=min(max_parallel, len(jobs))) as executor:
+            future_to_index: dict[Future[FlowContext], int] = {
+                executor.submit(self.run_executor.run_one, job.flow, job.source_path, batch_signatures=job.batch_signatures): index
+                for index, job in enumerate(jobs)
+            }
+            try:
+                for future in as_completed(future_to_index):
+                    results_by_index[future_to_index[future]] = future.result()
+            except Exception:
+                for future in future_to_index:
+                    future.cancel()
+                raise
+        return [results_by_index[index] for index in range(len(jobs))]
+
+    def dispatch_queued_jobs(
+        self,
+        queue,
+        queued_keys: set[tuple[str, str | None]],
+        pending_futures: dict[Future[FlowContext], tuple[QueuedRunJob, int]],
+        executor: ThreadPoolExecutor,
+        *,
+        results: list[FlowContext],
+    ) -> None:
+        """Submit queued source jobs up to each flow's bounded concurrency and drain completions."""
+        self._drain_completed_jobs(pending_futures, results=results)
+        if queue:
+            queue_length = len(queue)
+            for _ in range(queue_length):
+                job = queue.popleft()
+                key = self.polling.job_key(job.flow, job.source_path)
+                flow_name = job.flow.name
+                active_count = sum(1 for pending_job, _ in pending_futures.values() if pending_job.flow.name == flow_name)
+                if active_count >= self.max_parallel_for_flow(job.flow):
+                    queue.append(job)
+                    continue
+                queued_keys.discard(key)
+                future = executor.submit(
+                    self.run_executor.run_one,
+                    job.flow,
+                    job.source_path,
+                    batch_signatures=job.batch_signatures,
+                )
+                pending_futures[future] = (job, len(results) + len(pending_futures))
+        self._drain_completed_jobs(pending_futures, results=results)
+
+    def wait_for_dispatched_jobs(
+        self,
+        pending_futures: dict[Future[FlowContext], tuple[QueuedRunJob, int]],
+        *,
+        results: list[FlowContext],
+    ) -> None:
+        """Wait for all pending queued jobs to complete."""
+        while pending_futures:
+            done, _ = wait(tuple(pending_futures), return_when=FIRST_COMPLETED)
+            for future in done:
+                self._consume_completed_future(future, pending_futures, results=results)
+
+    def _drain_completed_jobs(
+        self,
+        pending_futures: dict[Future[FlowContext], tuple[QueuedRunJob, int]],
+        *,
+        results: list[FlowContext],
+    ) -> None:
+        done = [future for future in pending_futures if future.done()]
+        for future in done:
+            self._consume_completed_future(future, pending_futures, results=results)
+
+    def _consume_completed_future(
+        self,
+        future: Future[FlowContext],
+        pending_futures: dict[Future[FlowContext], tuple[QueuedRunJob, int]],
+        *,
+        results: list[FlowContext],
+    ) -> None:
+        pending_futures.pop(future, None)
+        try:
+            results.append(future.result())
+        except FlowStoppedError:
+            if self.flow_stop_event is not None:
+                self.flow_stop_event.clear()
+        except Exception:
+            return
 
     def _preview_one(self, flow: "CoreFlow", source_path: "Path | None", *, use: str | None) -> FlowContext:
         return self.run_executor.preview_one(flow, source_path, use=use)

@@ -143,6 +143,9 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window._pending_workspace_switch_id = None
     window._workspace_switch_scheduled = False
     window._color_scheme_changed_slot = None
+    window._last_log_view_flow_name = None
+    window._last_log_view_run_keys = ()
+    window._last_log_view_signature = ()
 
     window._build_window()
     window._reload_workspace_options()

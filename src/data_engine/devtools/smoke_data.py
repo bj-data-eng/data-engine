@@ -38,6 +38,7 @@ def build_smoke_environment(
     secondary_data_dir_name: str = "data2",
     create_app_root: bool = False,
     rows_per_workbook: int = 2,
+    parallel_rows_per_workbook: int | None = None,
     column_count: int = len(_BASE_CLAIMS_COLUMNS),
 ) -> None:
     """Generate starter data roots plus authored workspaces under one root."""
@@ -57,6 +58,12 @@ def build_smoke_environment(
     create_smoke_data_root(
         secondary_data_root,
         rows_per_workbook=rows_per_workbook,
+        column_count=column_count,
+    )
+    create_parallel_claims_data_root(
+        secondary_data_root,
+        file_count=12,
+        rows_per_workbook=parallel_rows_per_workbook or rows_per_workbook,
         column_count=column_count,
     )
 
@@ -87,7 +94,6 @@ def create_python_flow_modules(
     schedule_interval: str = "30s",
 ) -> None:
     """Write starter Python-authored flow modules into one workspace."""
-    del workspace_id
     flow_dir = target_workspace / "flow_modules"
     write_text_file(flow_dir / "example_mirror.py", _python_poll_source(data_folder_name=data_folder_name))
     write_text_file(
@@ -99,6 +105,19 @@ def create_python_flow_modules(
         flow_dir / "example_database_dimensions.py",
         _python_database_dimensions_source(data_folder_name=data_folder_name),
     )
+    if workspace_id == "claims2":
+        write_text_file(
+            flow_dir / "claims2_parallel_poll.py",
+            _python_parallel_poll_source(data_folder_name=data_folder_name),
+        )
+        write_text_file(
+            flow_dir / "claims2_parallel_schedule.py",
+            _python_parallel_schedule_source(data_folder_name=data_folder_name),
+        )
+        write_text_file(
+            flow_dir / "claims2_parallel_manual.py",
+            _python_parallel_manual_source(data_folder_name=data_folder_name),
+        )
 
 
 def create_notebook_flow_modules(
@@ -166,6 +185,25 @@ def create_smoke_data_root(
         rows_per_workbook=rows_per_workbook,
         column_count=column_count,
     )
+
+
+def create_parallel_claims_data_root(
+    data_root: Path,
+    *,
+    file_count: int = 12,
+    rows_per_workbook: int = 2,
+    column_count: int = len(_BASE_CLAIMS_COLUMNS),
+) -> None:
+    """Generate one fixed-size parallel smoke dataset for file-scoped runtime tests."""
+    parallel_dir = data_root / "Input" / "claims_parallel_12"
+    parallel_dir.mkdir(parents=True, exist_ok=True)
+    for index in range(1, file_count + 1):
+        _write_claims_workbook(
+            parallel_dir / f"claims_parallel_{index:02d}.xlsx",
+            workbook_index=100 + index,
+            rows_per_workbook=rows_per_workbook,
+            column_count=column_count,
+        )
 
 
 def _claims_headers(*, column_count: int) -> tuple[str, ...]:
@@ -486,6 +524,120 @@ def build():
         .step(write_target, label="Write Snapshot")
     )
 """
+
+
+def _parallel_runtime_helpers(*, data_folder_name: str, output_folder_name: str) -> str:
+    return f"""
+
+import polars as pl
+
+from data_engine.helpers import write_parquet_atomic
+
+
+def read_claims(context):
+    return pl.read_excel(context.source.path)
+
+
+def write_target(context):
+    output = context.mirror.with_suffix(".parquet")
+    write_parquet_atomic(context.current, output)
+    return output
+
+
+SOURCE_ROOT = "../../../{data_folder_name}/Input/claims_parallel_12"
+TARGET_ROOT = "../../../{data_folder_name}/Output/{output_folder_name}"
+"""
+
+
+def _python_parallel_poll_source(*, data_folder_name: str) -> str:
+    return (
+        """from __future__ import annotations
+
+from data_engine import Flow
+"""
+        + _parallel_runtime_helpers(data_folder_name=data_folder_name, output_folder_name="claims2_parallel_poll")
+        + """
+
+DESCRIPTION = "Claims2 parallel poll demo with 12 source workbooks and bounded file concurrency."
+
+
+def build():
+    return (
+        Flow(name="claims2_parallel_poll", group="Parallel")
+        .watch(
+            mode="poll",
+            source=SOURCE_ROOT,
+            interval="5s",
+            extensions=[".xlsx", ".xls", ".xlsm"],
+            settle=1,
+            max_parallel=4,
+        )
+        .mirror(root=TARGET_ROOT)
+        .step(read_claims, label="Read Excel")
+        .step(write_target, label="Write Parquet")
+    )
+"""
+    )
+
+
+def _python_parallel_schedule_source(*, data_folder_name: str) -> str:
+    return (
+        """from __future__ import annotations
+
+from data_engine import Flow
+"""
+        + _parallel_runtime_helpers(data_folder_name=data_folder_name, output_folder_name="claims2_parallel_schedule")
+        + """
+
+DESCRIPTION = "Claims2 parallel schedule demo with 12 source workbooks and bounded file concurrency."
+
+
+def build():
+    return (
+        Flow(name="claims2_parallel_schedule", group="Parallel")
+        .watch(
+            mode="schedule",
+            run_as="individual",
+            source=SOURCE_ROOT,
+            interval="5s",
+            extensions=[".xlsx", ".xls", ".xlsm"],
+            max_parallel=4,
+        )
+        .mirror(root=TARGET_ROOT)
+        .step(read_claims, label="Read Excel")
+        .step(write_target, label="Write Parquet")
+    )
+"""
+    )
+
+
+def _python_parallel_manual_source(*, data_folder_name: str) -> str:
+    return (
+        """from __future__ import annotations
+
+from data_engine import Flow
+"""
+        + _parallel_runtime_helpers(data_folder_name=data_folder_name, output_folder_name="claims2_parallel_manual")
+        + """
+
+DESCRIPTION = "Claims2 parallel manual demo with 12 source workbooks and bounded file concurrency."
+
+
+def build():
+    return (
+        Flow(name="claims2_parallel_manual", group="Parallel")
+        .watch(
+            mode="manual",
+            source=SOURCE_ROOT,
+            extensions=[".xlsx", ".xls", ".xlsm"],
+            max_parallel=4,
+        )
+        .mirror(root=TARGET_ROOT)
+        .step(read_claims, label="Read Excel")
+        .step(write_target, label="Write Parquet")
+    )
+"""
+    )
 
 
 def _poll_notebook_source(*, workspace_id: str, data_folder_name: str) -> str:

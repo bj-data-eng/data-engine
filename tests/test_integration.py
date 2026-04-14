@@ -407,6 +407,82 @@ def test_directory_poll_assigns_distinct_run_ids_per_source_execution(tmp_path):
     assert {Path(run.source_path).name for run in runs if run.source_path is not None} == {"a.parquet", "b.parquet"}
 
 
+def test_directory_poll_can_run_source_files_in_parallel_once(tmp_path):
+    source_dir = tmp_path / "input"
+    source_dir.mkdir()
+    for index in range(3):
+        pl.DataFrame({"value": [index]}).write_parquet(source_dir / f"{index}.parquet")
+
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+
+    def read_source(context):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            time.sleep(0.15)
+            return pl.read_parquet(context.source.path)
+        finally:
+            with lock:
+                active -= 1
+
+    results = (
+        Flow(name="parallel_poll_once", group="Claims")
+        .watch(mode="poll", source=source_dir, interval="5s", extensions=[".parquet"], max_parallel=3)
+        .step(read_source)
+        .run_once()
+    )
+
+    assert len(results) == 3
+    assert peak >= 2
+
+
+def test_directory_poll_can_run_source_files_in_parallel_continuously(tmp_path):
+    source_dir = tmp_path / "input"
+    source_dir.mkdir()
+    for index in range(3):
+        pl.DataFrame({"value": [index]}).write_parquet(source_dir / f"{index}.parquet")
+
+    runtime_stop = threading.Event()
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+    completed = 0
+
+    def read_source(context):
+        nonlocal active, peak, completed
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            time.sleep(0.15)
+            return pl.read_parquet(context.source.path)
+        finally:
+            with lock:
+                active -= 1
+                completed += 1
+                if completed >= 3:
+                    runtime_stop.set()
+
+    runtime = FlowRuntime(
+        (
+            Flow(name="parallel_poll_continuous", group="Claims")
+            .watch(mode="poll", source=source_dir, interval="5s", extensions=[".parquet"], max_parallel=3)
+            .step(read_source),
+        ),
+        continuous=True,
+        runtime_stop_event=runtime_stop,
+    )
+
+    results = runtime.run()
+
+    assert len(results) == 3
+    assert peak >= 2
+
+
 def test_scheduled_flow_can_create_duckdb_in_missing_output_directory(tmp_path):
     source_dir = tmp_path / "input"
     target_file = tmp_path / "output" / "claims_summary" / "workflow_summary.parquet"

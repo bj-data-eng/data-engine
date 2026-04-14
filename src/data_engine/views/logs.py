@@ -12,9 +12,12 @@ class FlowLogStore:
 
     def __init__(self, entries: tuple[FlowLogEntry, ...] = ()) -> None:
         self._entries: list[FlowLogEntry] = list(entries)
+        self._runs_cache: dict[str, tuple[FlowRunState, ...]] = {}
 
     def append_entry(self, entry: FlowLogEntry) -> None:
         self._entries.append(entry)
+        if entry.kind == "flow" and entry.flow_name is not None:
+            self._runs_cache.pop(entry.flow_name, None)
 
     def append_line(self, line: str, *, kind: LogKind, flow_name: str | None = None) -> FlowLogEntry:
         entry = FlowLogEntry(line=line, kind=kind, flow_name=flow_name)
@@ -23,10 +26,12 @@ class FlowLogStore:
 
     def clear(self) -> None:
         self._entries.clear()
+        self._runs_cache.clear()
 
     def replace(self, entries: tuple[FlowLogEntry, ...]) -> None:
         """Replace the full visible log history."""
         self._entries = list(entries)
+        self._runs_cache.clear()
 
     def entries(self) -> tuple[FlowLogEntry, ...]:
         """Return every visible log entry."""
@@ -40,6 +45,7 @@ class FlowLogStore:
             for entry in self._entries
             if not (entry.kind == "flow" and entry.flow_name == flow_name)
         ]
+        self._runs_cache.pop(flow_name, None)
 
     def entries_for_flow(self, flow_name: str | None) -> tuple[FlowLogEntry, ...]:
         if flow_name is None:
@@ -50,7 +56,13 @@ class FlowLogStore:
         entries = self.entries_for_flow(flow_name)
         if not entries:
             return ()
-        return FlowRunState.group_entries(entries)
+        assert flow_name is not None
+        cached = self._runs_cache.get(flow_name)
+        if cached is not None:
+            return cached
+        grouped = FlowRunState.group_entries(entries)
+        self._runs_cache[flow_name] = grouped
+        return grouped
 
 __all__ = [
     "CollapsedLogKey",

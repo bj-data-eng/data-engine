@@ -21,6 +21,7 @@ class WatchSpec:
 
     mode: str
     run_as: str
+    max_parallel: int = 1
     source: Path | None = None
     interval: str | None = None
     interval_seconds: float | None = None
