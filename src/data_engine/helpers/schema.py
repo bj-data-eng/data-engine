@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+import re
 from typing import TypeAlias
 
 import polars as pl
@@ -91,7 +92,11 @@ class DropColumns(tuple[str, ...]):
         """
         if not self:
             return df
-        return df.drop(tuple(self))
+        available = df.columns if isinstance(df, pl.DataFrame) else df.collect_schema().names()
+        present = tuple(column for column in self if column in available)
+        if not present:
+            return df
+        return df.drop(present)
 
 
 class RenameColumns(dict[str, str]):
@@ -225,10 +230,14 @@ def normalize_column_name(name: object) -> str:
     Returns
     -------
     str
-        Lowercase column name with leading/trailing whitespace removed, internal
+        Lowercase column name with separator-adjacent spaces removed, remaining
         whitespace collapsed, and spaces replaced with underscores.
     """
-    return "_".join(str(name).strip().lower().split())
+    text = str(name).strip()
+    text = re.sub(r"\s*([#_\-/\\\\])\s*", r"\1", text)
+    text = " ".join(text.split())
+    text = text.replace(" ", "_")
+    return text.lower()
 
 
 def normalized_column_renames(columns: Iterable[object]) -> dict[str, str]:

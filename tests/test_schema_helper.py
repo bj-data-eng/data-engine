@@ -110,6 +110,18 @@ def test_table_schema_attributes_apply_individually():
     assert result.to_dict(as_series=False) == {"step": ["1"]}
 
 
+def test_table_schema_drop_ignores_missing_columns_on_eager_and_lazy_frames():
+    schema = TableSchema(drop=("ssn", "missing_column"))
+    eager_df = pl.DataFrame({"step_to": [1], "ssn": ["123-45-6789"]})
+    lazy_df = eager_df.lazy()
+
+    eager_result = schema.drop.apply(eager_df)
+    lazy_result = schema.drop.apply(lazy_df)
+
+    assert eager_result.columns == ["step_to"]
+    assert lazy_result.collect().columns == ["step_to"]
+
+
 def test_table_schema_parts_preserve_lazy_frames():
     schema = TableSchema(
         columns=("step",),
@@ -136,10 +148,15 @@ def test_table_schema_rejects_empty_column_names():
         TableSchema(dtypes={"": pl.String})
 
 
-def test_normalize_column_name_collapses_spaces_and_lowercases():
+def test_normalize_column_name_applies_separator_spacing_then_spaces_then_underscores_then_lowercase():
     assert normalize_column_name("  Step   To  ") == "step_to"
     assert normalize_column_name("Workflow\tTo") == "workflow_to"
     assert normalize_column_name("Already_Normal") == "already_normal"
+    assert normalize_column_name("Claim # Id") == "claim#id"
+    assert normalize_column_name("Member _ Id") == "member_id"
+    assert normalize_column_name("Workflow - To") == "workflow-to"
+    assert normalize_column_name("Folder / Name") == "folder/name"
+    assert normalize_column_name(r"Folder \ Name") == r"folder\name"
 
 
 def test_normalized_column_renames_only_returns_changed_columns():
@@ -147,12 +164,12 @@ def test_normalized_column_renames_only_returns_changed_columns():
 
 
 def test_normalize_column_names_renames_eager_and_lazy_frames():
-    df = pl.DataFrame({"Step   To": [1], "Workflow To": ["claims"]})
+    df = pl.DataFrame({"Step   To": [1], "Workflow To": ["claims"], "Claim # Id": [10]})
     eager = normalize_column_names(df)
     lazy = normalize_column_names(df.lazy())
 
-    assert eager.columns == ["step_to", "workflow_to"]
-    assert lazy.collect().columns == ["step_to", "workflow_to"]
+    assert eager.columns == ["step_to", "workflow_to", "claim#id"]
+    assert lazy.collect().columns == ["step_to", "workflow_to", "claim#id"]
 
 
 def test_table_schema_can_normalize_column_names():
