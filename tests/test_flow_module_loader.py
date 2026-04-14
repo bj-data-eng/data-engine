@@ -52,6 +52,27 @@ def test_load_flow_module_definition_reads_description_and_flow_label(tmp_path):
     assert built.label == "Demo"
 
 
+def test_load_flow_module_definition_defaults_flow_label_from_module_name(tmp_path):
+    workspace = tmp_path / "workspace"
+    flow_modules_dir = workspace / "flow_modules"
+    flow_modules_dir.mkdir(parents=True)
+    _write_notebook(
+        flow_modules_dir / "claims_summary.ipynb",
+        [
+            "from data_engine import Flow\n",
+            "def build():\n",
+            '    return Flow(group="Tests").step(lambda context: context.current)\n',
+        ],
+    )
+
+    definition = load_flow_module_definition("claims_summary", data_root=workspace)
+    built = definition.build()
+
+    assert isinstance(built, Flow)
+    assert built.name == "claims_summary"
+    assert built.label == "Claims Summary"
+
+
 def test_load_flow_module_definition_rejects_missing_build(tmp_path):
     workspace = tmp_path / "workspace"
     flow_modules_dir = workspace / "flow_modules"
@@ -357,6 +378,5 @@ def test_load_flow_module_definition_overrides_flow_name_with_module_name(tmp_pa
     )
 
     definition = load_flow_module_definition("claims_demo", data_root=workspace)
-    built = definition.build()
-
-    assert built.name == "claims_demo"
+    with pytest.raises(FlowValidationError, match="must not override the module-defined flow name"):
+        definition.build()

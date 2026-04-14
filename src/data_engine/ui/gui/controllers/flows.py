@@ -8,6 +8,7 @@ from PySide6.QtCore import QTimer
 
 from data_engine.application import FlowCatalogApplication, WorkspaceSessionApplication
 from data_engine.services import LogService
+from data_engine.services.reset import ResetService
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.views import GuiActionState, QtFlowCard, surface_control_status_text
 
@@ -211,9 +212,11 @@ class _GuiFlowPresentationController:
         *,
         flow_catalog_application: FlowCatalogApplication,
         log_service: LogService,
+        reset_service: ResetService,
     ) -> None:
         self.flow_catalog_application = flow_catalog_application
         self.log_service = log_service
+        self.reset_service = reset_service
 
     def select_flow(self, window: "DataEngineWindow", flow_name: str | None) -> None:
         window.flow_catalog_state = self.flow_catalog_application.select_flow(
@@ -380,9 +383,34 @@ class _GuiFlowPresentationController:
     def clear_logs(self, window: "DataEngineWindow") -> None:
         if window.selected_flow_name is None:
             return
-        self.log_service.clear_flow(window.runtime_binding.log_store, window.selected_flow_name)
-        window._refresh_log_view(force_scroll_to_bottom=True)
-        self.refresh_action_buttons(window)
+        if window.runtime_session.has_active_work or window.runtime_session.runtime_stopping:
+            window._show_message_box(
+                title=APP_DISPLAY_NAME,
+                text="Stop the engine and any active manual runs before resetting a flow.",
+                tone="error",
+            )
+            return
+        if not window.runtime_session.control_available:
+            window._show_message_box(
+                title=APP_DISPLAY_NAME,
+                text=window.workspace_control_state.blocked_status_text,
+                tone="error",
+            )
+            return
+        try:
+            self.reset_service.reset_flow(
+                paths=window.workspace_paths,
+                runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
+                flow_name=window.selected_flow_name,
+            )
+        except Exception as exc:
+            window._show_message_box(
+                title=APP_DISPLAY_NAME,
+                text=f"Flow reset failed.\n\n{exc}",
+                tone="error",
+            )
+            return
+        window._rebuild_runtime_snapshot()
 
 
 class GuiFlowController:
@@ -394,6 +422,7 @@ class GuiFlowController:
         workspace_session_application: WorkspaceSessionApplication,
         flow_catalog_application: FlowCatalogApplication,
         log_service: LogService,
+        reset_service: ResetService,
     ) -> None:
         self.workspace = _GuiWorkspaceCatalogController(
             workspace_session_application=workspace_session_application,
@@ -402,6 +431,7 @@ class GuiFlowController:
         self.presentation = _GuiFlowPresentationController(
             flow_catalog_application=flow_catalog_application,
             log_service=log_service,
+            reset_service=reset_service,
         )
 
     def load_flows(self, window: "DataEngineWindow") -> None:

@@ -28,7 +28,7 @@ def build():
     return Flow(group="Claims")
 ```
 
-When you want a custom display title in the UI, set `label=` on the returned `Flow(...)`. Otherwise the UI derives a readable title from the flow-module filename.
+In flow modules, the module filename owns the flow identity. Use `label=` on the returned `Flow(...)` when you want a custom UI title. When `label=` is omitted, Data Engine derives a readable label from the flow-module filename automatically.
 
 `build()` must not accept any parameters.
 

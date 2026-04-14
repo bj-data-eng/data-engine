@@ -249,6 +249,7 @@ def test_build_default_gui_services_uses_injected_factories():
             runtime_history_service,
         ),
         runtime_history_service_factory=lambda: "runtime-history",
+        reset_service_factory=lambda shared_state_service: ("reset-service", shared_state_service),
         shared_state_service_factory=lambda: "shared-state",
         runtime_application_factory=lambda daemon_service, daemon_state_service, shared_state_service: (
             "runtime-app",
@@ -309,6 +310,7 @@ def test_build_default_tui_services_uses_injected_factories():
             runtime_history_service,
         ),
         runtime_history_service_factory=lambda: "runtime-history",
+        reset_service_factory=lambda shared_state_service: ("reset-service", shared_state_service),
         shared_state_service_factory=lambda: "shared-state",
         runtime_application_factory=lambda daemon_service, daemon_state_service, shared_state_service: (
             "runtime-app",

@@ -35,6 +35,7 @@ from data_engine.services import (
     LedgerService,
     LogService,
     RuntimeHistoryService,
+    ResetService,
     WorkspaceRuntimeBindingService,
     SettingsService,
     SharedStateService,
@@ -63,6 +64,7 @@ class TuiServices:
     log_service: LogService
     runtime_binding_service: WorkspaceRuntimeBindingService
     runtime_history_service: RuntimeHistoryService
+    reset_service: ResetService
     shared_state_service: SharedStateService
     theme_service: ThemeService
 
@@ -86,6 +88,7 @@ class TuiDependencyFactories:
     log_service_factory: Callable[[], LogService]
     runtime_binding_service_factory: Callable[[LedgerService, LogService, DaemonStateService, RuntimeHistoryService], WorkspaceRuntimeBindingService]
     runtime_history_service_factory: Callable[[], RuntimeHistoryService]
+    reset_service_factory: Callable[[SharedStateService], ResetService]
     shared_state_service_factory: Callable[[], SharedStateService]
     runtime_application_factory: Callable[[DaemonService, DaemonStateService, SharedStateService], RuntimeApplication]
     control_application_factory: Callable[[RuntimeApplication, DaemonStateService], OperatorControlApplication]
@@ -133,6 +136,7 @@ def default_tui_dependency_factories() -> TuiDependencyFactories:
             runtime_history_service=runtime_history_service,
         ),
         runtime_history_service_factory=RuntimeHistoryService,
+        reset_service_factory=lambda shared_state_service: ResetService(shared_state_service=shared_state_service),
         shared_state_service_factory=SharedStateService,
         runtime_application_factory=lambda daemon_service, daemon_state_service, shared_state_service: RuntimeApplication(
             daemon_service=daemon_service,
@@ -186,6 +190,7 @@ def _tui_services_from_kwargs(service_kwargs: dict[str, object]) -> TuiServices:
         log_service=service_kwargs["log_service"],
         runtime_binding_service=service_kwargs["runtime_binding_service"],
         runtime_history_service=service_kwargs["runtime_history_service"],
+        reset_service=service_kwargs["reset_service"],
         shared_state_service=service_kwargs["shared_state_service"],
         theme_service=service_kwargs["theme_service"],
     )
@@ -209,6 +214,7 @@ def build_tui_service_kwargs(
     log_service: LogService | None = None,
     runtime_binding_service: WorkspaceRuntimeBindingService | None = None,
     runtime_history_service: RuntimeHistoryService | None = None,
+    reset_service: ResetService | None = None,
     shared_state_service: SharedStateService | None = None,
     theme_service: ThemeService | None = None,
     settings_store: LocalSettingsStore | None = None,
@@ -273,6 +279,7 @@ def build_tui_service_kwargs(
         runtime_history_service,
     )
     shared_state_service = shared_state_service or factories.shared_state_service_factory()
+    reset_service = reset_service or factories.reset_service_factory(shared_state_service)
     runtime_application = runtime_application or factories.runtime_application_factory(
         daemon_service,
         daemon_state_service,
@@ -307,6 +314,7 @@ def build_tui_service_kwargs(
         "log_service": log_service,
         "runtime_binding_service": runtime_binding_service,
         "runtime_history_service": runtime_history_service,
+        "reset_service": reset_service,
         "shared_state_service": shared_state_service,
         "theme_service": theme_service,
     }
@@ -330,6 +338,7 @@ def build_default_tui_services(
     log_service: LogService | None = None,
     runtime_binding_service: WorkspaceRuntimeBindingService | None = None,
     runtime_history_service: RuntimeHistoryService | None = None,
+    reset_service: ResetService | None = None,
     shared_state_service: SharedStateService | None = None,
     theme_service: ThemeService | None = None,
     settings_store: LocalSettingsStore | None = None,
@@ -368,6 +377,7 @@ def build_default_tui_services(
         log_service=log_service,
         runtime_binding_service=runtime_binding_service,
         runtime_history_service=runtime_history_service,
+        reset_service=reset_service,
         shared_state_service=shared_state_service,
         theme_service=theme_service,
         settings_store=settings_store,
@@ -408,6 +418,7 @@ def build_tui_services(
     ledger_service: LedgerService | None = None,
     log_service: LogService | None = None,
     runtime_history_service: RuntimeHistoryService | None = None,
+    reset_service: ResetService | None = None,
     shared_state_service: SharedStateService | None = None,
     theme_service: ThemeService | None = None,
     settings_store: LocalSettingsStore | None = None,
@@ -445,6 +456,7 @@ def build_tui_services(
         ledger_service=ledger_service,
         log_service=log_service,
         runtime_history_service=runtime_history_service,
+        reset_service=reset_service,
         shared_state_service=shared_state_service,
         theme_service=theme_service,
         settings_store=settings_store,

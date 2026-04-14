@@ -20,6 +20,7 @@ from data_engine.ui.gui.presenters import (
     initialize_docs_view as present_initialize_docs_view,
     load_docs_page as present_load_docs_page,
     provision_selected_workspace as present_provision_selected_workspace,
+    reset_workspace as present_reset_workspace,
     rebind_workspace_context as present_rebind_workspace_context,
     refresh_workspace_visibility_panel as present_refresh_workspace_visibility_panel,
     refresh_workspace_root_controls as present_refresh_workspace_root_controls,
@@ -155,6 +156,10 @@ class GuiWindowSupportMixin:
     def _force_shutdown_daemon(self: "DataEngineWindow") -> None:
         """Force-stop the local workspace daemon for the selected workspace."""
         present_force_shutdown_daemon(self)
+
+    def _reset_workspace(self: "DataEngineWindow") -> None:
+        """Delete local and shared runtime state for the selected workspace."""
+        present_reset_workspace(self)
 
     def _refresh_workspace_visibility_panel(self: "DataEngineWindow") -> None:
         """Refresh the read-only workspace visibility stats shown in Settings."""

@@ -282,6 +282,15 @@ def _build_bootstrap_settings_panel(window: "DataEngineWindow") -> QWidget:
     window.force_shutdown_daemon_status_label.setObjectName("sectionMeta")
     details_layout.addWidget(window.force_shutdown_daemon_status_label)
 
+    window.reset_workspace_button = QPushButton("Reset Workspace")
+    window.reset_workspace_button.clicked.connect(window._reset_workspace)
+    details_layout.addWidget(window.reset_workspace_button, 0, Qt.AlignmentFlag.AlignLeft)
+
+    window.reset_workspace_status_label = QLabel("")
+    window.reset_workspace_status_label.setWordWrap(True)
+    window.reset_workspace_status_label.setObjectName("sectionMeta")
+    details_layout.addWidget(window.reset_workspace_status_label)
+
     details_layout.addStretch(1)
     return details_panel
 
@@ -472,7 +481,7 @@ def build_right_panel(window: "DataEngineWindow") -> QWidget:
     header.addWidget(title)
     header.addStretch(1)
 
-    window.clear_flow_log_button = QPushButton("Clear Flow Log")
+    window.clear_flow_log_button = QPushButton("Reset Flow")
     window.clear_flow_log_button.clicked.connect(window._clear_logs)
     header.addWidget(window.clear_flow_log_button)
     layout.addLayout(header)

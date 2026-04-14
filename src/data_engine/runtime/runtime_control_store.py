@@ -178,6 +178,13 @@ class ClientSessionRepository:
             )
         return live_count
 
+    def clear_workspace(self, workspace_id: str) -> None:
+        """Delete all client-session rows for one workspace."""
+        self._store._connection().execute(
+            "DELETE FROM client_sessions WHERE workspace_id = ?",
+            (workspace_id,),
+        )
+
 
 class RuntimeControlLedger(_RuntimeSqliteStore):
     """Own the control SQLite store for daemon ownership and client sessions."""
@@ -226,6 +233,19 @@ class RuntimeControlLedger(_RuntimeSqliteStore):
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_client_sessions_workspace ON client_sessions(workspace_id, updated_at_utc DESC)")
         self._checkpoint_wal(passive=True)
+
+    def reset_workspace(self, workspace_id: str) -> None:
+        """Delete daemon-state and client-session rows for one workspace."""
+        connection = self._connection()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            self.client_sessions.clear_workspace(workspace_id)
+            self.daemon_state.clear(workspace_id)
+        except Exception:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
 
 
 __all__ = ["ClientSessionRepository", "DaemonStateRepository", "RuntimeControlLedger"]

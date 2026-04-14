@@ -69,6 +69,7 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.log_service = window.services.log_service
     window.runtime_binding_service = window.services.runtime_binding_service
     window.runtime_history_service = window.services.runtime_history_service
+    window.reset_service = window.services.reset_service
     window.shared_state_service = window.services.shared_state_service
     window.settings_service = window.services.settings_service
     window.theme_service = window.services.theme_service
@@ -79,6 +80,7 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
         workspace_session_application=window.workspace_session_application,
         flow_catalog_application=window.flow_catalog_application,
         log_service=window.log_service,
+        reset_service=window.reset_service,
     )
     window.runtime_controller = GuiRuntimeController(
         runtime_application=window.runtime_application,

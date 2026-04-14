@@ -98,6 +98,49 @@ def force_shutdown_daemon(window: "DataEngineWindow") -> None:
     window._sync_from_daemon()
 
 
+def reset_workspace(window: "DataEngineWindow") -> None:
+    if not window.workspace_paths.workspace_configured:
+        window._show_message_box(
+            title="Workspace Required",
+            text="Choose a workspace before resetting workspace state.",
+            tone="error",
+        )
+        return
+    if window.runtime_session.has_active_work or window.runtime_session.runtime_stopping:
+        window._show_message_box(
+            title="Stop Active Work First",
+            text="Stop the engine and any active manual runs before resetting the workspace.",
+            tone="error",
+        )
+        return
+    if not window.runtime_session.control_available:
+        window._show_message_box(
+            title="Control Required",
+            text=window.workspace_control_state.blocked_status_text,
+            tone="error",
+        )
+        return
+    workspace_id = window.workspace_paths.workspace_id
+    try:
+        window.reset_service.reset_workspace(
+            paths=window.workspace_paths,
+            runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
+            runtime_control_ledger=window.runtime_binding.runtime_control_ledger,
+        )
+    except Exception as exc:
+        window.reset_workspace_status_label.setText(f"Workspace reset failed: {exc}")
+        window._show_message_box(
+            title="Workspace Reset Failed",
+            text=str(exc),
+            tone="error",
+        )
+        return
+    window.reset_workspace_status_label.setText(
+        "Workspace runtime state reset. Local ledgers, daemon log, and shared workspace state were cleared."
+    )
+    window._rebind_workspace_context(workspace_id=workspace_id)
+
+
 def refresh_workspace_provisioning_controls(window: "DataEngineWindow") -> None:
     if not window.workspace_paths.workspace_configured:
         window.workspace_target_label.setText(
@@ -129,9 +172,14 @@ def refresh_workspace_visibility_panel(window: "DataEngineWindow") -> None:
     interpreter_path = Path(sys.executable).expanduser()
     interpreter_mode = "virtual environment" if sys.prefix != getattr(sys, "base_prefix", sys.prefix) else "system/global"
     window.force_shutdown_daemon_button.setEnabled(window.workspace_paths.workspace_configured)
+    window.reset_workspace_button.setEnabled(window.workspace_paths.workspace_configured)
     if not window.force_shutdown_daemon_status_label.text().strip():
         window.force_shutdown_daemon_status_label.setText(
             "Use only when normal stop does not return control."
+        )
+    if not window.reset_workspace_status_label.text().strip():
+        window.reset_workspace_status_label.setText(
+            "Reset deletes local runtime ledgers, daemon logs, and shared workspace state for the selected workspace."
         )
     window.visibility_interpreter_value.setText(str(interpreter_path))
     window.visibility_interpreter_mode_value.setText(interpreter_mode.title())
@@ -165,6 +213,7 @@ __all__ = [
     "browse_workspace_collection_root_override",
     "force_shutdown_daemon",
     "provision_selected_workspace",
+    "reset_workspace",
     "refresh_workspace_provisioning_controls",
     "refresh_workspace_visibility_panel",
     "refresh_workspace_root_controls",

@@ -219,6 +219,15 @@ class _FakeSharedStateService:
         self.hydrated.append((paths, ledger))
 
 
+class _FakeResetService:
+    def __init__(self) -> None:
+        self.flow_resets: list[tuple[object, str]] = []
+
+    def reset_flow(self, *, paths, runtime_cache_ledger, flow_name: str) -> None:
+        del runtime_cache_ledger
+        self.flow_resets.append((paths, flow_name))
+
+
 class _SyncingDaemonManager(_FakeDaemonManager):
     def __init__(self, snapshot: WorkspaceDaemonSnapshot) -> None:
         super().__init__(snapshot=snapshot)
@@ -295,6 +304,7 @@ def _make_tui(
     shared_state_service=None,
     daemon_state_service=None,
     flow_catalog_application=None,
+    reset_service=None,
     app_cls=DataEngineTui,
 ) -> DataEngineTui:
     manager = _FakeDaemonManager(snapshot=snapshot)
@@ -311,6 +321,7 @@ def _make_tui(
         log_service=log_service,
         shared_state_service=shared_state_service,
         flow_catalog_application=flow_catalog_application,
+        reset_service=reset_service,
         discover_workspaces_func=discover_workspaces_func or (lambda **kwargs: ()),
         resolve_workspace_paths_func=resolve_workspace_paths_func or resolve_workspace_paths,
     )
@@ -687,6 +698,17 @@ async def test_tui_empty_workspace_reload_clears_stale_flow_rows():
 
         assert app.selected_flow_name is None
         assert len(list_view.children) == 0
+
+
+@pytest.mark.anyio
+async def test_tui_reset_flow_calls_persistent_reset_path():
+    reset_service = _FakeResetService()
+    app = _make_tui(reset_service=reset_service, app_cls=_RecordingStatusTui)
+    async with app.run_test():
+        app.action_clear_flow_log()
+
+        assert reset_service.flow_resets == [(app.workspace_paths, "poller")]
+        assert app.status_messages[-1] == "Reset flow history for poller."
 
 
 @pytest.mark.anyio

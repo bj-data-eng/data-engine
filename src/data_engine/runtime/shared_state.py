@@ -368,12 +368,66 @@ def _write_shared_runtime_snapshot(
     )
 
 
+def _replace_shared_runtime_snapshot(
+    paths: WorkspacePaths,
+    *,
+    runs: tuple[PersistedRun, ...],
+    step_runs: tuple[PersistedStepRun, ...],
+    logs: tuple[PersistedLogEntry, ...],
+    file_states: tuple[PersistedFileState, ...],
+) -> None:
+    snapshot_generation_id = uuid4().hex
+    _write_runs(paths.shared_runs_path, runs, snapshot_generation_id=snapshot_generation_id)
+    _write_step_runs(paths.shared_step_runs_path, step_runs, snapshot_generation_id=snapshot_generation_id)
+    _write_logs(paths.shared_logs_path, logs, snapshot_generation_id=snapshot_generation_id)
+    _write_file_states(paths.shared_file_state_path, file_states, snapshot_generation_id=snapshot_generation_id)
+
+
 def remove_control_request(paths: WorkspacePaths) -> None:
     """Delete one pending control-request parquet when present."""
     try:
         paths.control_request_path.unlink()
     except FileNotFoundError:
         pass
+
+
+def reset_flow_state(paths: WorkspacePaths, *, flow_name: str) -> None:
+    """Delete one flow's shared snapshot history and freshness state."""
+    snapshot = _read_consistent_runtime_snapshot(paths)
+    if snapshot is None:
+        return
+    runs, step_runs, logs, file_states = snapshot
+    removed_run_ids = {run.run_id for run in runs if run.flow_name == flow_name}
+    _replace_shared_runtime_snapshot(
+        paths,
+        runs=tuple(run for run in runs if run.flow_name != flow_name),
+        step_runs=tuple(
+            step_run
+            for step_run in step_runs
+            if step_run.flow_name != flow_name and step_run.run_id not in removed_run_ids
+        ),
+        logs=tuple(
+            log
+            for log in logs
+            if log.flow_name != flow_name and (log.run_id is None or log.run_id not in removed_run_ids)
+        ),
+        file_states=tuple(file_state for file_state in file_states if file_state.flow_name != flow_name),
+    )
+
+
+def reset_workspace_state(paths: WorkspacePaths) -> None:
+    """Delete shared runtime snapshots and pending control-transfer state for one workspace."""
+    remove_file_if_exists(paths.shared_runs_path)
+    remove_file_if_exists(paths.shared_step_runs_path)
+    remove_file_if_exists(paths.shared_logs_path)
+    remove_file_if_exists(paths.shared_file_state_path)
+    remove_control_request(paths)
+    if paths.stale_markers_dir.is_dir():
+        for stale_path in paths.stale_markers_dir.glob(f"{paths.workspace_id}__*"):
+            if stale_path.is_dir():
+                shutil.rmtree(stale_path, ignore_errors=True)
+            else:
+                remove_file_if_exists(stale_path)
 
 
 def _frame_with_schema(rows: list[dict[str, Any]], schema: dict[str, pl.DataType]) -> pl.DataFrame:
@@ -557,6 +611,8 @@ __all__ = [
     "read_lease_metadata",
     "recover_stale_workspace",
     "remove_control_request",
+    "reset_flow_state",
+    "reset_workspace_state",
     "release_workspace",
     "remove_lease_metadata",
     "RuntimeSnapshotStore",

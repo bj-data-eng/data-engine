@@ -13,7 +13,7 @@ import sys
 from types import ModuleType
 from typing import TYPE_CHECKING, Callable
 
-from data_engine.core.helpers import _flow_path_base_dir
+from data_engine.core.helpers import _flow_path_base_dir, _title_case_words
 from data_engine.core.model import FlowExecutionError, FlowValidationError
 from data_engine.flow_modules.flow_module_compiler import compile_stale_flow_module_notebooks, resolve_flow_module_paths
 from data_engine.platform.workspace_models import APP_INTERNAL_ID
@@ -204,7 +204,16 @@ def load_flow_module_definition(name: str, *, data_root: Path | None = None) -> 
                 ) from exc
         if not isinstance(built, Flow):
             raise FlowValidationError(f"Flow module {name!r} build() did not return a Flow.")
-        return built._clone(name=name, _workspace_root=flow_modules_dir.parent.resolve())
+        if built.name is not None and built.name.strip() != name:
+            raise FlowValidationError(
+                f"Flow module {name!r} must not override the module-defined flow name. "
+                "Rename the module file to change identity, or use label= for the UI title."
+            )
+        return built._clone(
+            name=name,
+            label=built.label or _title_case_words(name, empty="Flow"),
+            _workspace_root=flow_modules_dir.parent.resolve(),
+        )
 
     return FlowModuleDefinition(
         name=name,

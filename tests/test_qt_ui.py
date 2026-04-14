@@ -393,6 +393,20 @@ class _FakeSharedStateService:
         self.hydrated.append((paths, ledger))
 
 
+class _FakeResetService:
+    def __init__(self) -> None:
+        self.flow_resets: list[tuple[object, str]] = []
+        self.workspace_resets: list[object] = []
+
+    def reset_flow(self, *, paths, runtime_cache_ledger, flow_name: str) -> None:
+        del runtime_cache_ledger
+        self.flow_resets.append((paths, flow_name))
+
+    def reset_workspace(self, *, paths, runtime_cache_ledger, runtime_control_ledger) -> None:
+        del runtime_cache_ledger, runtime_control_ledger
+        self.workspace_resets.append(paths)
+
+
 def _make_window(
     *,
     cards: tuple[QtFlowCard, ...] | None = None,
@@ -408,6 +422,7 @@ def _make_window(
     control_application=None,
     shared_state_service=None,
     workspace_provisioning_service=None,
+    reset_service=None,
 ) -> DataEngineWindow:
     manager = _FakeDaemonManager(snapshot=snapshot)
     log_service = log_service or _FakeLogService()
@@ -427,6 +442,7 @@ def _make_window(
         control_application=control_application,
         shared_state_service=shared_state_service,
         workspace_provisioning_service=workspace_provisioning_service,
+        reset_service=reset_service,
         discover_workspaces_func=discover_workspaces_func or (lambda **kwargs: ()),
         resolve_workspace_paths_func=resolve_workspace_paths_func or resolve_workspace_paths,
     )
@@ -2072,6 +2088,59 @@ def test_force_shutdown_daemon_button_calls_force_stop_path(qapp, monkeypatch):
 
         assert force_shutdown_calls == [{"workspace": window.workspace_paths.workspace_root, "timeout": 0.5}]
         assert "force-stopped" in window.force_shutdown_daemon_status_label.text().lower()
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_reset_flow_button_calls_persistent_reset_path(qapp, monkeypatch):
+    reset_service = _FakeResetService()
+    window = _make_window(reset_service=reset_service)
+    rebuild_calls = _attach_call_recorder(window, "_rebuild_runtime_snapshot")
+    try:
+        window._clear_logs()
+
+        assert reset_service.flow_resets == [(window.workspace_paths, "poller")]
+        assert len(rebuild_calls) == 1
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_reset_workspace_button_calls_reset_service_and_rebinds(qapp, monkeypatch):
+    del monkeypatch
+    reset_service = _FakeResetService()
+    window = _make_window(reset_service=reset_service)
+    rebind_calls = _attach_call_recorder(window, "_rebind_workspace_context")
+    try:
+        window._reset_workspace()
+
+        assert reset_service.workspace_resets == [window.workspace_paths]
+        assert rebind_calls == [ ((), {"workspace_id": window.workspace_paths.workspace_id}) ]
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_reset_workspace_button_allows_idle_live_daemon(qapp, monkeypatch):
+    del monkeypatch
+    reset_service = _FakeResetService()
+    window = _make_window(
+        reset_service=reset_service,
+        snapshot=WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=False,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=datetime.now(UTC).isoformat(),
+            source="daemon",
+        ),
+    )
+    rebind_calls = _attach_call_recorder(window, "_rebind_workspace_context")
+    try:
+        window._reset_workspace()
+
+        assert reset_service.workspace_resets == [window.workspace_paths]
+        assert rebind_calls == [((), {"workspace_id": window.workspace_paths.workspace_id})]
     finally:
         _dispose_window(qapp, window)
 

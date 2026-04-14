@@ -69,6 +69,7 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
     app.log_service = app.services.log_service
     app.runtime_binding_service = app.services.runtime_binding_service
     app.shared_state_service = app.services.shared_state_service
+    app.reset_service = app.services.reset_service
     app.settings_service = app.services.settings_service
     app.theme_service = app.services.theme_service
     app.workspace_session_application = app.services.workspace_session_application
@@ -78,6 +79,7 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
         flow_catalog_application=app.flow_catalog_application,
         control_application=app.services.control_application,
         log_service=app.log_service,
+        reset_service=app.reset_service,
     )
     app.runtime_controller = TuiRuntimeController(
         runtime_application=app.services.runtime_application,

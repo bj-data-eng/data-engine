@@ -8,6 +8,7 @@ from textual.widgets import ListView, Select, Static
 
 from data_engine.application import FlowCatalogApplication, OperatorControlApplication, WorkspaceSessionApplication
 from data_engine.services import LogService
+from data_engine.services.reset import ResetService
 from data_engine.domain import FlowRunState, FlowSummaryRow
 from data_engine.views.text import render_selected_flow_lines
 from data_engine.ui.tui.widgets import FlowListItem, GroupHeaderListItem, InfoModal, RunGroupListItem
@@ -26,6 +27,7 @@ class TuiFlowController:
         flow_catalog_application: FlowCatalogApplication,
         control_application: OperatorControlApplication,
         log_service: LogService,
+        reset_service: ResetService,
     ) -> None:
         self.workspace = _TuiWorkspaceCatalogController(
             workspace_session_application=workspace_session_application,
@@ -35,6 +37,7 @@ class TuiFlowController:
         self.presentation = _TuiFlowPresentationController(
             control_application=control_application,
             log_service=log_service,
+            reset_service=reset_service,
         )
 
     def action_refresh_flows(self, window: "DataEngineTui") -> None:
@@ -215,9 +218,11 @@ class _TuiFlowPresentationController:
         *,
         control_application: OperatorControlApplication,
         log_service: LogService,
+        reset_service: ResetService,
     ) -> None:
         self.control_application = control_application
         self.log_service = log_service
+        self.reset_service = reset_service
 
     def action_run_selected(self, window: "DataEngineTui") -> None:
         window._sync_daemon_state()
@@ -290,9 +295,23 @@ class _TuiFlowPresentationController:
     def action_clear_flow_log(self, window: "DataEngineTui") -> None:
         if window.selected_flow_name is None:
             return
-        self.log_service.clear_flow(window.runtime_binding.log_store, window.selected_flow_name)
-        self.render_selected_flow(window)
-        window._set_status(f"Cleared log history for {window.selected_flow_name}.")
+        if window.runtime_session.has_active_work or window.runtime_session.runtime_stopping:
+            window._set_status("Stop the engine and any active manual runs before resetting a flow.")
+            return
+        if not window.runtime_session.control_available:
+            window._set_status(window.workspace_control_state.blocked_status_text)
+            return
+        try:
+            self.reset_service.reset_flow(
+                paths=window.workspace_paths,
+                runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
+                flow_name=window.selected_flow_name,
+            )
+        except Exception as exc:
+            window._set_status(f"Flow reset failed: {exc}")
+            return
+        window._rebuild_runtime_snapshot()
+        window._set_status(f"Reset flow history for {window.selected_flow_name}.")
 
     def action_view_log(self, window: "DataEngineTui") -> None:
         run_group = self.selected_run_group(window)

@@ -208,6 +208,23 @@ class RuntimeRunRepository:
             ],
         )
 
+    def delete_flow(self, flow_name: str) -> tuple[str, ...]:
+        """Delete all persisted runs for one flow and return the removed run ids."""
+        connection = self._store._connection()
+        run_ids = tuple(
+            str(row["run_id"])
+            for row in connection.execute(
+                """
+                SELECT run_id
+                FROM runs
+                WHERE flow_name = ?
+                """,
+                (flow_name,),
+            ).fetchall()
+        )
+        connection.execute("DELETE FROM runs WHERE flow_name = ?", (flow_name,))
+        return run_ids
+
     def prune_history(self, *, retention_days: int) -> None:
         if retention_days <= 0:
             raise ValueError("retention_days must be positive.")
@@ -327,6 +344,10 @@ class RuntimeStepOutputRepository:
                 for row in rows
             ],
         )
+
+    def delete_flow(self, flow_name: str) -> None:
+        """Delete all persisted step rows for one flow."""
+        self._store._connection().execute("DELETE FROM step_runs WHERE flow_name = ?", (flow_name,))
 
 
 class SourceSignatureRepository:
@@ -494,6 +515,10 @@ class SourceSignatureRepository:
             ],
         )
 
+    def delete_flow(self, flow_name: str) -> None:
+        """Delete all persisted source-signature rows for one flow."""
+        self._store._connection().execute("DELETE FROM file_state WHERE flow_name = ?", (flow_name,))
+
 
 class RuntimeLogRepository:
     """Repository for persisted runtime log rows."""
@@ -566,6 +591,15 @@ class RuntimeLogRepository:
                 for row in rows
             ],
         )
+
+    def delete_flow(self, flow_name: str, *, run_ids: tuple[str, ...] = ()) -> None:
+        """Delete all persisted log rows for one flow."""
+        connection = self._store._connection()
+        connection.execute("DELETE FROM logs WHERE flow_name = ?", (flow_name,))
+        if not run_ids:
+            return
+        placeholders = ", ".join("?" for _ in run_ids)
+        connection.execute(f"DELETE FROM logs WHERE run_id IN ({placeholders})", run_ids)
 
 
 class RuntimeSnapshotRepository:
@@ -751,6 +785,37 @@ class RuntimeCacheLedger(_RuntimeCacheSchema):
             step_outputs=self.step_outputs,
             source_signatures=self.source_signatures,
         )
+
+    def reset_flow(self, flow_name: str) -> None:
+        """Delete persisted runtime history and freshness state for one flow."""
+        connection = self._connection()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            run_ids = tuple(run.run_id for run in self.runs.list(flow_name=flow_name))
+            self.step_outputs.delete_flow(flow_name)
+            self.logs.delete_flow(flow_name, run_ids=run_ids)
+            self.source_signatures.delete_flow(flow_name)
+            self.runs.delete_flow(flow_name)
+        except Exception:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+
+    def reset_all(self) -> None:
+        """Delete all persisted runtime history and freshness state."""
+        connection = self._connection()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute("DELETE FROM step_runs")
+            connection.execute("DELETE FROM logs")
+            connection.execute("DELETE FROM runs")
+            connection.execute("DELETE FROM file_state")
+        except Exception:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
 
 
 __all__ = [

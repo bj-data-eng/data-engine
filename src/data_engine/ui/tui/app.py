@@ -71,7 +71,7 @@ class DataEngineTui(TuiWindowSupportMixin, TuiStateMixin, App[None]):
                 yield Static("LOGS", classes="pane-title")
                 with Horizontal(classes="pane-toolbar"):
                     yield Button("View Log", id="view-log")
-                    yield Button("Clear Flow Log", id="clear-flow-log")
+                    yield Button("Reset Flow", id="clear-flow-log")
                 yield ListView(id="log-run-list")
         yield Footer()
 
