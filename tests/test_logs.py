@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from data_engine.domain import FlowLogEntry
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services.logs import LogService
@@ -245,6 +247,81 @@ def test_flow_log_store_hydrates_persisted_runtime_logs(tmp_path):
     assert len(groups) == 1
     assert groups[0].status == "success"
     assert groups[0].source_label == "input.xlsx"
+
+
+def test_log_service_reload_appends_only_new_persisted_entries(tmp_path):
+    ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    created_at = utcnow_text()
+    ledger.logs.append(
+        level="INFO",
+        message="run=run-1 flow=poller source=/tmp/input-a.xlsx status=success elapsed=0.250000",
+        created_at_utc=created_at,
+        run_id="run-1",
+        flow_name="poller",
+    )
+    service = LogService()
+    store = service.create_store(ledger)
+    first_ids = tuple(entry.persisted_id for entry in store.entries())
+
+    ledger.logs.append(
+        level="INFO",
+        message="run=run-2 flow=poller source=/tmp/input-b.xlsx status=success elapsed=0.250000",
+        created_at_utc=utcnow_text(),
+        run_id="run-2",
+        flow_name="poller",
+    )
+    service.reload(store, ledger)
+
+    entries = store.entries()
+    assert len(entries) == 2
+    assert tuple(entry.persisted_id for entry in entries[:1]) == first_ids
+    assert entries[-1].event is not None
+    assert entries[-1].event.run_id == "run-2"
+
+
+def test_log_service_reload_dedupes_incremental_persisted_copy_of_live_entry(tmp_path):
+    ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    first_created_at = utcnow_text()
+    ledger.logs.append(
+        level="INFO",
+        message="run=run-0 flow=poller source=/tmp/old.xlsx status=success elapsed=0.250000",
+        created_at_utc=first_created_at,
+        run_id="run-0",
+        flow_name="poller",
+    )
+    service = LogService()
+    store = service.create_store(ledger)
+    created_at = utcnow_text()
+    live_entry = FlowLogEntry(
+        line=FlowLogEntry.format_runtime_message(
+            "run=run-1 flow=poller source=/tmp/input.xlsx status=success elapsed=0.250000"
+        ),
+        kind="flow",
+        flow_name="poller",
+        event=RuntimeStepEvent(
+            run_id="run-1",
+            flow_name="poller",
+            step_name=None,
+            source_label="input.xlsx",
+            status="success",
+            elapsed_seconds=0.25,
+        ),
+        created_at_utc=datetime.fromisoformat(created_at),
+    )
+    store.append_entry(live_entry)
+    ledger.logs.append(
+        level="INFO",
+        message="run=run-1 flow=poller source=/tmp/input.xlsx status=success elapsed=0.250000",
+        created_at_utc=created_at,
+        run_id="run-1",
+        flow_name="poller",
+    )
+
+    service.reload(store, ledger)
+
+    entries = store.entries()
+    assert len(entries) == 2
+    assert [entry.event.run_id if entry.event is not None else None for entry in entries] == ["run-0", "run-1"]
 
 
 def test_flow_log_store_caches_grouped_runs_per_flow(monkeypatch):

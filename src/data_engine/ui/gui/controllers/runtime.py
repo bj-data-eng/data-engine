@@ -72,16 +72,42 @@ class GuiRuntimeController:
         return False
 
     def start_daemon_worker(self, window: "DataEngineWindow") -> None:
+        if window.ui_closing:
+            window.signals.daemon_startup_finished.emit(False, "")
+            return
         success = False
         error_text = ""
         spawn_result = self.runtime_application.spawn_daemon(window.workspace_paths)
         if not spawn_result.ok:
             error_text = spawn_result.error
+        elif window.ui_closing:
+            self._shutdown_started_daemon_if_orphaned(window)
         else:
             success = self.daemon_service.is_live(window.workspace_paths)
         if not success and not error_text:
             error_text = "Daemon startup did not provide any additional error details."
         window.signals.daemon_startup_finished.emit(success, error_text)
+
+    def _shutdown_started_daemon_if_orphaned(self, window: "DataEngineWindow") -> None:
+        """Shut down one late-starting ephemeral daemon when no local clients remain."""
+        temporary_binding = None
+        try:
+            temporary_binding = window.runtime_binding_service.open_binding(window.workspace_paths)
+            remaining_clients = window.runtime_binding_service.count_live_client_sessions(temporary_binding)
+        except Exception:
+            remaining_clients = 1
+        finally:
+            if temporary_binding is not None:
+                try:
+                    window.runtime_binding_service.close_binding(temporary_binding)
+                except Exception:
+                    pass
+        if remaining_clients != 0:
+            return
+        try:
+            window._shutdown_daemon_on_close()
+        except Exception:
+            return
 
     def rebuild_runtime_snapshot(self, window: "DataEngineWindow") -> None:
         window.runtime_binding_service.reload_logs(window.runtime_binding)

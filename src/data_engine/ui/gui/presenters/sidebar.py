@@ -31,7 +31,9 @@ def refresh_sidebar_state_views(window: "DataEngineWindow", changed_flow_names: 
 
     Return True when the caller should fall back to a full sidebar rebuild.
     """
-    if not changed_flow_names or not window.sidebar_flow_widgets:
+    if not changed_flow_names:
+        return False
+    if not window.sidebar_flow_widgets:
         return True
 
     affected_groups: set[str] = set()

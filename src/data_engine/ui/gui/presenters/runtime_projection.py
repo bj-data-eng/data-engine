@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 def finish_daemon_startup(window: "DataEngineWindow", success: bool, error_text: str) -> None:
     window._daemon_startup_in_progress = False
+    if window.ui_closing:
+        return
     if not success and not error_text:
         error_text = "Daemon startup did not provide any additional error details."
     if not success and error_text and window.isVisible():

@@ -318,6 +318,46 @@ class RuntimeStepOutputRepository:
             for row in rows
         )
 
+    def list(
+        self,
+        *,
+        flow_name: str | None = None,
+        after_id: int | None = None,
+    ) -> tuple[PersistedStepRun, ...]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if flow_name is not None:
+            clauses.append("flow_name = ?")
+            params.append(flow_name)
+        if after_id is not None:
+            clauses.append("id > ?")
+            params.append(after_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._store._connection().execute(
+            f"""
+            SELECT id, run_id, flow_name, step_label, status, started_at_utc, finished_at_utc, elapsed_ms, error_text, output_path
+            FROM step_runs
+            {where}
+            ORDER BY id
+            """,
+            params,
+        ).fetchall()
+        return tuple(
+            PersistedStepRun(
+                id=int(row["id"]),
+                run_id=str(row["run_id"]),
+                flow_name=str(row["flow_name"]),
+                step_label=str(row["step_label"]),
+                status=str(row["status"]),
+                started_at_utc=str(row["started_at_utc"]),
+                finished_at_utc=row["finished_at_utc"],
+                elapsed_ms=row["elapsed_ms"],
+                error_text=row["error_text"],
+                output_path=row["output_path"],
+            )
+            for row in rows
+        )
+
     def replace(self, rows: tuple[PersistedStepRun, ...]) -> None:
         connection = self._store._connection()
         connection.execute("DELETE FROM step_runs")
@@ -559,7 +599,13 @@ class RuntimeLogRepository:
             ],
         )
 
-    def list(self, *, flow_name: str | None = None, run_id: str | None = None) -> tuple[PersistedLogEntry, ...]:
+    def list(
+        self,
+        *,
+        flow_name: str | None = None,
+        run_id: str | None = None,
+        after_id: int | None = None,
+    ) -> tuple[PersistedLogEntry, ...]:
         clauses: list[str] = []
         params: list[object] = []
         if flow_name is not None:
@@ -568,6 +614,9 @@ class RuntimeLogRepository:
         if run_id is not None:
             clauses.append("run_id = ?")
             params.append(run_id)
+        if after_id is not None:
+            clauses.append("id > ?")
+            params.append(after_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._store._connection().execute(
             f"""

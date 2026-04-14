@@ -15,9 +15,22 @@ class RuntimeRunReader(Protocol):
 class RuntimeStepOutputReader(Protocol):
     def list_for_run(self, run_id: str) -> tuple[PersistedStepRun, ...]: ...
 
+    def list(
+        self,
+        *,
+        flow_name: str | None = None,
+        after_id: int | None = None,
+    ) -> tuple[PersistedStepRun, ...]: ...
+
 
 class RuntimeLogReader(Protocol):
-    def list(self, *, flow_name: str | None = None, run_id: str | None = None) -> tuple[PersistedLogEntry, ...]: ...
+    def list(
+        self,
+        *,
+        flow_name: str | None = None,
+        run_id: str | None = None,
+        after_id: int | None = None,
+    ) -> tuple[PersistedLogEntry, ...]: ...
 
 
 class RuntimeSourceSignatureStore(Protocol):

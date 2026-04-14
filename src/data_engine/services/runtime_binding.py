@@ -50,9 +50,15 @@ class _NullRuntimeRunRepository:
 class _NullRuntimeLogRepository:
     """No-op runtime log repository for an unconfigured workspace selection."""
 
-    def list(self, *, flow_name: str | None = None, run_id: str | None = None) -> tuple[object, ...]:
+    def list(
+        self,
+        *,
+        flow_name: str | None = None,
+        run_id: str | None = None,
+        after_id: int | None = None,
+    ) -> tuple[object, ...]:
         """Return no logs for an unconfigured workspace selection."""
-        del flow_name, run_id
+        del flow_name, run_id, after_id
         return ()
 
 
@@ -62,6 +68,11 @@ class _NullRuntimeStepOutputRepository:
     def list_for_run(self, run_id: str) -> tuple[object, ...]:
         """Return no step outputs for an unconfigured workspace selection."""
         del run_id
+        return ()
+
+    def list(self, *, flow_name: str | None = None, after_id: int | None = None) -> tuple[object, ...]:
+        """Return no step outputs for an unconfigured workspace selection."""
+        del flow_name, after_id
         return ()
 
 
@@ -139,6 +150,7 @@ class WorkspaceRuntimeBindingService:
         self.log_service = log_service
         self.daemon_state_service = daemon_state_service
         self.runtime_history_service = runtime_history_service
+        self._step_output_cache: dict[int, tuple[tuple[object, ...], int | None, StepOutputIndex]] = {}
 
     def open_binding(self, workspace_paths: WorkspacePaths) -> WorkspaceRuntimeBinding:
         """Open one concrete runtime binding for a workspace selection."""
@@ -158,6 +170,7 @@ class WorkspaceRuntimeBindingService:
 
     def close_binding(self, binding: WorkspaceRuntimeBinding) -> None:
         """Close one concrete runtime binding."""
+        self._step_output_cache.pop(id(binding), None)
         binding.runtime_cache_ledger.close()
         self.ledger_service.close(binding.runtime_control_ledger)
 
@@ -237,7 +250,31 @@ class WorkspaceRuntimeBindingService:
         flow_cards: dict[str, FlowCatalogLike],
     ) -> StepOutputIndex:
         """Rebuild latest successful per-step output paths for visible flows."""
-        return self.runtime_history_service.rebuild_step_outputs(binding.runtime_cache_ledger, flow_cards)
+        cache_key = id(binding)
+        flow_signature = tuple(
+            sorted((flow_name, tuple(card.operation_items)) for flow_name, card in flow_cards.items())
+        )
+        cached = self._step_output_cache.get(cache_key)
+        if cached is None or cached[0] != flow_signature:
+            refreshed = self.runtime_history_service.rebuild_step_outputs(
+                binding.runtime_cache_ledger,
+                flow_cards,
+            )
+            last_step_run_id = refreshed.last_step_run_id
+            index = refreshed.index
+        else:
+            last_seen_id = cached[1]
+            current_index = cached[2]
+            refreshed = self.runtime_history_service.refresh_step_outputs(
+                binding.runtime_cache_ledger,
+                flow_cards,
+                current_index=current_index,
+                last_seen_step_run_id=last_seen_id,
+            )
+            last_step_run_id = refreshed.last_step_run_id
+            index = refreshed.index
+        self._step_output_cache[cache_key] = (flow_signature, last_step_run_id, index)
+        return index
 
     def error_text_for_entry(
         self,

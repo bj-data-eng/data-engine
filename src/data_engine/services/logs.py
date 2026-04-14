@@ -19,7 +19,14 @@ class LogService:
 
     def reload(self, store: FlowLogStore, runtime_cache_ledger: RuntimeCacheStore | None) -> None:
         """Reload one log store from an explicit runtime cache store."""
-        store.replace(self._hydrate_entries(runtime_cache_ledger))
+        if runtime_cache_ledger is None:
+            store.replace(())
+            return
+        after_id = store.last_persisted_log_id
+        if after_id is None:
+            store.replace(self._hydrate_entries(runtime_cache_ledger))
+            return
+        store.append_entries(self._hydrate_entries(runtime_cache_ledger, after_id=after_id))
 
     def append_entry(self, store: FlowLogStore, entry: FlowLogEntry) -> None:
         """Append one log entry to the current store."""
@@ -41,7 +48,12 @@ class LogService:
         """Return grouped run history for one selected flow."""
         return store.runs_for_flow(flow_name)
 
-    def _hydrate_entries(self, runtime_cache_ledger: RuntimeCacheStore | None) -> tuple[FlowLogEntry, ...]:
+    def _hydrate_entries(
+        self,
+        runtime_cache_ledger: RuntimeCacheStore | None,
+        *,
+        after_id: int | None = None,
+    ) -> tuple[FlowLogEntry, ...]:
         """Build in-memory flow log entries from one runtime cache ledger."""
         if runtime_cache_ledger is None:
             return ()
@@ -52,8 +64,9 @@ class LogService:
                 event=parse_runtime_message(entry.message),
                 flow_name=entry.flow_name,
                 created_at_utc=datetime.fromisoformat(entry.created_at_utc),
+                persisted_id=entry.id,
             )
-            for entry in runtime_cache_ledger.logs.list()
+            for entry in runtime_cache_ledger.logs.list(after_id=after_id)
         )
 
 

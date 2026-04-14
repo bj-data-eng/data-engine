@@ -1687,6 +1687,51 @@ def test_close_event_requests_stop_waits_for_workers_and_closes_ledger(qapp, mon
             thread.join(timeout=1.0)
 
 
+def test_daemon_startup_worker_shuts_down_late_orphaned_daemon_when_window_closes(qapp, monkeypatch):
+    window = _make_window()
+    entered_spawn = threading.Event()
+    release_spawn = threading.Event()
+    shutdown_calls: list[object] = []
+    binding_events: list[str] = []
+    original_open_binding = window.runtime_binding_service.open_binding
+    original_close_binding = window.runtime_binding_service.close_binding
+
+    def _spawn_daemon(paths):
+        del paths
+        entered_spawn.set()
+        assert release_spawn.wait(timeout=1.0)
+        return type("Result", (), {"ok": True, "error": ""})()
+
+    def _open_binding(paths):
+        binding_events.append("open")
+        return original_open_binding(paths)
+
+    def _close_binding(binding):
+        binding_events.append("close")
+        original_close_binding(binding)
+
+    monkeypatch.setattr(window.runtime_application, "spawn_daemon", _spawn_daemon)
+    monkeypatch.setattr(window.runtime_binding_service, "open_binding", _open_binding)
+    monkeypatch.setattr(window.runtime_binding_service, "close_binding", _close_binding)
+    monkeypatch.setattr(window.runtime_binding_service, "count_live_client_sessions", lambda binding: 0)
+    monkeypatch.setattr(window.daemon_service, "is_live", lambda paths: True)
+    monkeypatch.setattr(window, "_shutdown_daemon_on_close", lambda: shutdown_calls.append(window.workspace_paths))
+
+    worker = threading.Thread(target=window.runtime_controller.start_daemon_worker, args=(window,), daemon=True)
+    worker.start()
+    assert entered_spawn.wait(timeout=1.0)
+
+    window.ui_closing = True
+    release_spawn.set()
+    worker.join(timeout=1.0)
+
+    assert worker.is_alive() is False
+    assert shutdown_calls == [window.workspace_paths]
+    assert binding_events == ["open", "close"]
+    assert window._daemon_startup_in_progress is False
+    _dispose_window(qapp, window)
+
+
 def test_workspace_selector_shows_placeholder_when_no_workspaces_are_discovered(qapp, monkeypatch, tmp_path):
     app_root = tmp_path / "data_engine"
     placeholder_root = app_root / ".workspace_unconfigured"
@@ -2527,6 +2572,23 @@ def test_log_view_limits_visible_run_history_for_busy_flow(qapp, monkeypatch):
         qapp.processEvents()
 
         assert window.log_view.count() == window._MAX_VISIBLE_LOG_RUNS
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_sidebar_state_views_skips_rebuild_when_no_flow_states_changed(qapp, monkeypatch):
+    window = _make_window()
+    populate_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _record_populate(*args, **kwargs):
+        populate_calls.append((args, kwargs))
+
+    monkeypatch.setattr(window, "_populate_flow_tree", _record_populate)
+
+    try:
+        window._refresh_sidebar_state_views(set())
+
+        assert populate_calls == []
     finally:
         _dispose_window(qapp, window)
 

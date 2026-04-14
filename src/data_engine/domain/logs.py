@@ -33,11 +33,31 @@ class FlowLogEntry:
     event: RuntimeStepEvent | None = None
     flow_name: str | None = None
     created_at_utc: datetime = field(default_factory=lambda: datetime.now(UTC))
+    persisted_id: int | None = None
 
     @staticmethod
     def format_runtime_message(message: str) -> str:
         """Render a runtime message into a compact operator-facing single line."""
         return format_runtime_message(message)
+
+    def fingerprint(self) -> tuple[object, ...]:
+        """Return a stable identity fingerprint for one visible log entry."""
+        event = self.event
+        event_key = (
+            event.run_id,
+            event.flow_name,
+            event.step_name,
+            event.source_label,
+            event.status,
+            event.elapsed_seconds,
+        ) if event is not None else None
+        return (
+            self.kind,
+            self.flow_name,
+            self.line,
+            self.created_at_utc,
+            event_key,
+        )
 
 
 def short_source_label(value: str | None) -> str:

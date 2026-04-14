@@ -104,7 +104,68 @@ def test_runtime_history_service_rebuilds_latest_existing_step_outputs(tmp_path:
 
         rebuilt = service.rebuild_step_outputs(ledger, flow_cards)
 
-        assert rebuilt.output_path("claims", "Write Output") == second_output
+        assert rebuilt.index.output_path("claims", "Write Output") == second_output
+        assert rebuilt.last_step_run_id is not None
+    finally:
+        ledger.close()
+
+
+def test_runtime_history_service_refreshes_step_outputs_incrementally(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    ledger = RuntimeCacheLedger.open_default(data_root=workspace_root)
+    service = RuntimeHistoryService()
+    first_output = tmp_path / "first.parquet"
+    first_output.write_text("first", encoding="utf-8")
+    second_output = tmp_path / "second.parquet"
+    second_output.write_text("second", encoding="utf-8")
+    flow_cards = {
+        "claims": FlowCatalogEntry(
+            name="claims",
+            group="Claims",
+            title="Claims",
+            description="",
+            source_root="(not set)",
+            target_root="(not set)",
+            mode="manual",
+            interval="-",
+            operations="Write Output",
+            operation_items=("Write Output",),
+            state="manual",
+            valid=True,
+            category="manual",
+        )
+    }
+
+    try:
+        _record_run_with_step(
+            ledger,
+            run_id="run-first",
+            flow_name="claims",
+            step_label="Write Output",
+            status="success",
+            output_path=str(first_output),
+        )
+        initial = service.rebuild_step_outputs(ledger, flow_cards)
+
+        _record_run_with_step(
+            ledger,
+            run_id="run-second",
+            flow_name="claims",
+            step_label="Write Output",
+            status="success",
+            output_path=str(second_output),
+        )
+        refreshed = service.refresh_step_outputs(
+            ledger,
+            flow_cards,
+            current_index=initial.index,
+            last_seen_step_run_id=initial.last_step_run_id,
+        )
+
+        assert refreshed.index.output_path("claims", "Write Output") == second_output
+        assert refreshed.last_step_run_id is not None
+        assert initial.last_step_run_id is not None
+        assert refreshed.last_step_run_id > initial.last_step_run_id
     finally:
         ledger.close()
 

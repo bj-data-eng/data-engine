@@ -59,14 +59,14 @@ def handle_close_event(window: "DataEngineWindow", event: "QCloseEvent") -> None
         window.operation_timer.stop()
     if hasattr(window, "daemon_timer"):
         window.daemon_timer.stop()
+    if hasattr(window, "_wait_for_worker_threads"):
+        window._wait_for_worker_threads(timeout_seconds=1.5)
     if hasattr(window, "_unregister_client_session_and_check_for_shutdown") and hasattr(window, "_is_last_process_ui_window"):
         should_shutdown_daemon = window._unregister_client_session_and_check_for_shutdown(
             purge_process_ui_sessions=window._is_last_process_ui_window(),
         )
         if should_shutdown_daemon and hasattr(window, "_shutdown_daemon_on_close"):
             window._shutdown_daemon_on_close()
-    if hasattr(window, "_wait_for_worker_threads"):
-        window._wait_for_worker_threads(timeout_seconds=1.5)
     if hasattr(window, "runtime_binding_service") and hasattr(window, "runtime_binding"):
         window.runtime_binding_service.close_binding(window.runtime_binding)
     super(type(window), window).closeEvent(event)

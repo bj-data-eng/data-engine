@@ -215,6 +215,18 @@ def test_runtime_log_repository_append_many_persists_batched_rows(tmp_path):
     assert [entry.message for entry in logs] == ["first", "second"]
 
 
+def test_runtime_log_repository_list_after_id_returns_incremental_tail(tmp_path):
+    ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
+    created_at = utcnow_text()
+    ledger.logs.append(level="INFO", message="first", created_at_utc=created_at, run_id="run-1", flow_name="claims_poll")
+    ledger.logs.append(level="INFO", message="second", created_at_utc=created_at, run_id="run-1", flow_name="claims_poll")
+    all_logs = ledger.logs.list(flow_name="claims_poll")
+
+    tail = ledger.logs.list(flow_name="claims_poll", after_id=all_logs[0].id)
+
+    assert [entry.message for entry in tail] == ["second"]
+
+
 def test_runtime_ledger_prunes_history_older_than_30_days(tmp_path):
     ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
     old_started = (datetime.now(UTC) - timedelta(days=31)).isoformat()

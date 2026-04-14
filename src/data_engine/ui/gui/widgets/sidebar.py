@@ -107,7 +107,7 @@ def build_flow_row_widget(window: "DataEngineWindow", card: "QtFlowCard") -> QFr
     state_dot.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     state_dot.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
     row.addWidget(state_dot)
-    frame.setToolTip(flow_display.tooltip)
+    frame.setToolTip("")
     frame.mousePressEvent = lambda event, flow_name=card.name: window._select_flow(flow_name)
     frame.enterEvent = lambda event, widget=frame: window._set_hovered(widget, True)
     frame.leaveEvent = lambda event, widget=frame: window._set_hovered(widget, False)
