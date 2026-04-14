@@ -544,6 +544,21 @@ class RuntimeLogRepository:
             (run_id, flow_name, step_label, level, message, created_at_utc),
         )
 
+    def append_many(self, rows: tuple[PersistedLogEntry, ...]) -> None:
+        """Persist multiple runtime log rows in one batch."""
+        if not rows:
+            return
+        self._store._connection().executemany(
+            """
+            INSERT INTO logs(run_id, flow_name, step_label, level, message, created_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (row.run_id, row.flow_name, row.step_label, row.level, row.message, row.created_at_utc)
+                for row in rows
+            ],
+        )
+
     def list(self, *, flow_name: str | None = None, run_id: str | None = None) -> tuple[PersistedLogEntry, ...]:
         clauses: list[str] = []
         params: list[object] = []

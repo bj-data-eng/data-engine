@@ -360,20 +360,20 @@ The selected workspace also has a machine-local SQLite runtime ledger. That is t
 
 ### GUI run history limits
 
-The GUI intentionally limits how much visible run history it renders at once. The current run-history sidebar/view is capped to 100 visible run groups in the UI.
+The GUI intentionally limits how much visible run history it renders at once. The current run-history sidebar/view is capped to 50 visible run groups in the UI.
 
 That cap is a presentation choice for the current UI view.
 
-### "Runs last 30 days"
+### "Runs last 7 days"
 
 The small footer tag on the home view shows:
 
 - modules
 - groups
 - flows
-- runs in the last 30 days
+- runs in the last 7 days
 
-That 30-day value is a summary count for the currently selected workspace.
+That 7-day value is a summary count for the currently selected workspace.
 
 ## The kill switch
 

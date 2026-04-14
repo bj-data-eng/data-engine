@@ -12,7 +12,7 @@ from data_engine.core.model import FlowStoppedError, FlowValidationError
 from data_engine.core.primitives import FlowContext, WatchSpec
 from data_engine.runtime.execution.continuous import ContinuousRuntimeLoop
 from data_engine.runtime.execution.context import QueuedRunJob, RuntimeContextBuilder
-from data_engine.runtime.execution.logging import RuntimeLogEmitter
+from data_engine.runtime.execution.logging import RuntimeLogEmitter, acquire_queued_runtime_log_sink
 from data_engine.runtime.execution.polling import RuntimePollingSupport
 from data_engine.runtime.execution.runner import FlowRunExecutionPorts, FlowRunExecutor
 from data_engine.runtime.file_watch import PollingWatcher
@@ -71,7 +71,8 @@ class FlowRuntime:
         self._owns_runtime_ledger = runtime_ledger is None
         self.runtime_ledger = runtime_ledger or self._runtime_ledger_factory()
         self.context_builder = RuntimeContextBuilder()
-        self.log_emitter = RuntimeLogEmitter(self.runtime_ledger.logs)
+        self._queued_log_sink = acquire_queued_runtime_log_sink(self.runtime_ledger.logs)
+        self.log_emitter = RuntimeLogEmitter(self._queued_log_sink)
         self.polling = RuntimePollingSupport(self.runtime_ledger.source_signatures)
         self.run_executor = FlowRunExecutor(
             FlowRunExecutionPorts(
@@ -91,7 +92,7 @@ class FlowRuntime:
                 return self._run_once_all()
             return self.continuous_loop.run()
         finally:
-            self._close_owned_runtime_ledger()
+            self._close_runtime_resources()
 
     def preview(self, *, use: str | None = None):
         """Run exactly one flow for notebook-style inspection and return one object."""
@@ -110,7 +111,7 @@ class FlowRuntime:
                 raise FlowValidationError(f"preview() could not find saved object {use!r}.")
             return context.objects[use]
         finally:
-            self._close_owned_runtime_ledger()
+            self._close_runtime_resources()
 
     def run_source(self, flow: "CoreFlow", source_path: str | Path) -> FlowContext:
         """Run one flow for a specific source path."""
@@ -118,7 +119,7 @@ class FlowRuntime:
             self._validate()
             return self.run_executor.run_one(flow, Path(source_path))
         finally:
-            self._close_owned_runtime_ledger()
+            self._close_runtime_resources()
 
     def run_batch(self, flow: "CoreFlow") -> FlowContext:
         """Run one flow once in batch mode using the configured source root."""
@@ -130,10 +131,11 @@ class FlowRuntime:
                 batch_signatures=self.polling.stale_batch_poll_signatures(flow),
             )
         finally:
-            self._close_owned_runtime_ledger()
+            self._close_runtime_resources()
 
-    def _close_owned_runtime_ledger(self) -> None:
-        """Close the runtime ledger when this runtime opened it implicitly."""
+    def _close_runtime_resources(self) -> None:
+        """Drain queued log writes and close the runtime ledger when owned by this runtime."""
+        self._queued_log_sink.close()
         if not self._owns_runtime_ledger:
             return
         self.runtime_ledger.close()

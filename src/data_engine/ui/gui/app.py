@@ -34,7 +34,7 @@ class DataEngineWindow(GuiWindowSupportMixin, GuiRenderingMixin, GuiControlMixin
     """Main PySide6 operator window with timers and runtime state containers."""
 
     _MAX_LOG_EVENTS_PER_TICK = 100
-    _MAX_VISIBLE_LOG_RUNS = 100
+    _MAX_VISIBLE_LOG_RUNS = 50
     _MAX_DAEMON_SYNC_MISSES = 3
     _DOCS_HOME_PAGE = "index.html"
     _ACTIVE_FLOW_STATES = {"running", "polling", "scheduled", "stopping flow", "stopping runtime"}

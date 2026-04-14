@@ -201,8 +201,8 @@ def _workspace_counts_footer_text(window: "DataEngineWindow") -> str:
     module_count = _workspace_module_count(window.workspace_paths.flow_modules_dir)
     group_count = len({card.group for card in cards})
     flow_count = len(cards)
-    recent_runs_count = _recent_workspace_run_count(window, days=30)
-    return f"{module_count} modules - {group_count} groups - {flow_count} flows - {recent_runs_count} runs last 30 days"
+    recent_runs_count = _recent_workspace_run_count(window, days=7)
+    return f"{module_count} modules - {group_count} groups - {flow_count} flows - {recent_runs_count} runs last 7 days"
 
 
 def _recent_workspace_run_count(window: "DataEngineWindow", *, days: int) -> int:

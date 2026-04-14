@@ -1578,7 +1578,7 @@ def test_shutdown_creates_runtime_snapshot_parquets(tmp_path, monkeypatch):
         service._shutdown()  # noqa: SLF001
 
 
-def test_shutdown_request_returns_without_waking_listener(tmp_path, monkeypatch):
+def test_shutdown_request_wakes_listener_to_exit_accept_loop(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -1588,12 +1588,27 @@ def test_shutdown_request_returns_without_waking_listener(tmp_path, monkeypatch)
     service = DataEngineDaemonService(paths)
     service.initialize()
     try:
-        monkeypatch.setattr(service, "_wake_listener", lambda: (_ for _ in ()).throw(AssertionError("shutdown request should not wake the listener synchronously")))
+        wake_calls: list[str] = []
+        monkeypatch.setattr(service, "_wake_listener", lambda: wake_calls.append("wake"))
+        started_threads: list[object] = []
+
+        class _InlineThread:
+            def __init__(self, *, target, daemon):
+                self._target = target
+                self.daemon = daemon
+
+            def start(self):
+                started_threads.append(self)
+                self._target()
+
+        monkeypatch.setattr("data_engine.hosts.daemon.commands.threading.Thread", _InlineThread)
 
         response = service._handle_command({"command": "shutdown_daemon"})  # noqa: SLF001
 
         assert response["ok"] is True
         assert service.host.shutdown_event.is_set() is True
+        assert len(started_threads) == 1
+        assert wake_calls == ["wake"]
     finally:
         service._shutdown()  # noqa: SLF001
 

@@ -184,6 +184,37 @@ def test_runtime_ledger_persists_run_step_and_log_history(tmp_path):
     assert logs[0].run_id == "run-1"
 
 
+def test_runtime_log_repository_append_many_persists_batched_rows(tmp_path):
+    ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
+    created_at = utcnow_text()
+    ledger.logs.append_many(
+        (
+            PersistedLogEntry(
+                id=1,
+                run_id="run-1",
+                flow_name="claims_poll",
+                step_label="Read Excel",
+                level="INFO",
+                message="first",
+                created_at_utc=created_at,
+            ),
+            PersistedLogEntry(
+                id=2,
+                run_id="run-1",
+                flow_name="claims_poll",
+                step_label="Write Parquet",
+                level="INFO",
+                message="second",
+                created_at_utc=created_at,
+            ),
+        )
+    )
+
+    logs = ledger.logs.list(flow_name="claims_poll")
+
+    assert [entry.message for entry in logs] == ["first", "second"]
+
+
 def test_runtime_ledger_prunes_history_older_than_30_days(tmp_path):
     ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
     old_started = (datetime.now(UTC) - timedelta(days=31)).isoformat()

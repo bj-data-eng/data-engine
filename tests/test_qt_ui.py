@@ -541,7 +541,7 @@ def test_settings_visibility_panel_reports_workspace_stats(qapp):
     )
     window._refresh_workspace_visibility_panel()
 
-    assert window.workspace_counts_footer_label.text() == "0 modules - 1 groups - 2 flows - 1 runs last 30 days"
+    assert window.workspace_counts_footer_label.text() == "0 modules - 1 groups - 2 flows - 1 runs last 7 days"
     assert window.visibility_interpreter_mode_value.text() == "Virtual Environment"
 
 

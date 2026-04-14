@@ -12,7 +12,7 @@ from data_engine.platform.paths import stable_absolute_path
 class _RuntimeSqliteStore:
     """Own one SQLite-backed runtime store and expose narrow read/write helpers."""
 
-    HISTORY_RETENTION_DAYS = 30
+    HISTORY_RETENTION_DAYS = 7
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = stable_absolute_path(db_path)
