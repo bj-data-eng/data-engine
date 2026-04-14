@@ -63,7 +63,7 @@ def test_runtime_session_state_projects_daemon_snapshot_into_surface_state():
     assert session.control_available is False
 
 
-def test_daemon_status_state_round_trips_legacy_and_runtime_session_shapes():
+def test_daemon_status_state_projects_idle_snapshot_to_empty_runtime_session():
     status = DaemonStatusState.from_snapshot(
         WorkspaceDaemonSnapshot(
             live=False,

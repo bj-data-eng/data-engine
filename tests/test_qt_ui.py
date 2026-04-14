@@ -1589,26 +1589,46 @@ def test_request_control_button_preserves_verbose_error_text(qapp, monkeypatch):
         _dispose_window(qapp, window)
 
 
-def test_request_control_does_not_recover_live_local_owner(monkeypatch):
-    manager = WorkspaceDaemonManager(resolve_workspace_paths())
-    monkeypatch.setattr(
-        "data_engine.hosts.daemon.manager.read_lease_metadata",
-        lambda paths: {
-            "machine_id": machine_id_text(),
-            "pid": os.getpid(),
-            "last_checkpoint_at_utc": datetime.now(UTC).isoformat(),
-        },
-    )
+def test_request_control_uses_shared_state_adapter_without_recovering_live_local_owner(monkeypatch):
+    class _FakeSharedStateAdapter:
+        def __init__(self) -> None:
+            self.recovered_calls: list[tuple[object, str, float]] = []
+            self.written_requests: list[dict[str, object]] = []
+
+        def read_lease_metadata(self, paths):
+            del paths
+            return {
+                "machine_id": machine_id_text(),
+                "pid": os.getpid(),
+                "last_checkpoint_at_utc": datetime.now(UTC).isoformat(),
+            }
+
+        def recover_stale_workspace(self, paths, *, machine_id, stale_after_seconds, reclaim=True):
+            del reclaim
+            self.recovered_calls.append((paths, machine_id, stale_after_seconds))
+            return False
+
+        def write_control_request(self, paths, **kwargs):
+            self.written_requests.append({"paths": paths, **kwargs})
+
+        def read_control_request(self, paths):
+            del paths
+            return None
+
+    adapter = _FakeSharedStateAdapter()
+    manager = WorkspaceDaemonManager(resolve_workspace_paths(), shared_state_adapter=adapter)
     recovered_calls: list[bool] = []
-    written_requests: list[str] = []
-    monkeypatch.setattr("data_engine.hosts.daemon.manager.recover_stale_workspace", lambda *args, **kwargs: recovered_calls.append(True) or False)
-    monkeypatch.setattr("data_engine.hosts.daemon.manager.write_control_request", lambda paths, **kwargs: written_requests.append("written"))
+    monkeypatch.setattr(
+        "data_engine.hosts.daemon.manager._lease_pid_is_live",
+        lambda metadata: recovered_calls.append(True) or True,
+    )
 
     message = manager.request_control()
 
     assert message == "Control request sent."
-    assert recovered_calls == []
-    assert written_requests == ["written"]
+    assert recovered_calls == [True]
+    assert adapter.recovered_calls == []
+    assert len(adapter.written_requests) == 1
 
 
 def test_close_event_requests_stop_waits_for_workers_and_closes_ledger(qapp, monkeypatch):
@@ -1674,8 +1694,10 @@ def test_workspace_selector_shows_placeholder_when_no_workspaces_are_discovered(
         assert window.workspace_settings_selector.currentText() == "(no workspace)"
         assert window.workspace_settings_selector.isEnabled() is False
         assert placeholder_root.exists() is False
+        window._sync_from_daemon()
         assert window.workspace_paths.runtime_cache_db_path.exists() is False
         assert window.workspace_paths.runtime_control_db_path.exists() is False
+        assert window.workspace_paths.runtime_state_dir.exists() is False
     finally:
         _dispose_window(qapp, window)
 

@@ -83,14 +83,14 @@ What watching owns:
 - settle/debounce behavior for poll flows
 - whether runtime executes per file or as one root-level batch via `run_as=`
 
-What watching does not own:
+What watching leaves to step code:
 
 - dataframe reads
 - dataframe transforms
 - database work
 - output writing
 
-That separation is what keeps `watch(...)` readable. It tells the engine when and why to run, not how to do the underlying data work.
+That separation keeps `watch(...)` readable. It tells the engine when and why to run while step code handles the underlying data work.
 
 `watch(mode="schedule", ...)` accepts exactly one of:
 
@@ -117,7 +117,7 @@ Use `batch` when the flow should reason about the watched source as one collecti
 
 `extensions=` limits which files in a polled directory participate in freshness checks and execution.
 
-`settle=` adds debounce behavior so the engine does not immediately react to a file that is still being written by another process.
+`settle=` adds debounce behavior so the engine reacts after a file has had time to finish writing.
 
 ## Mirror bindings
 
@@ -132,9 +132,9 @@ context.mirror.namespaced_file("open_claims.parquet")
 context.mirror.root_file("analytics.duckdb")
 ```
 
-`mirror(...)` does not write files. It only defines the output namespace available at runtime.
+`mirror(...)` defines the output namespace available at runtime.
 
-If a flow has no natural mirrored outputs, you do not need `mirror(...)`.
+Use `mirror(...)` when the flow has natural mirrored outputs.
 
 If a flow writes several related outputs, `mirror(...)` is usually the cleanest way to keep them organized without scattering path math through your steps.
 

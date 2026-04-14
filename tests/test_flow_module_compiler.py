@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -135,6 +136,39 @@ def test_compile_stale_flow_module_notebooks_mirrors_authored_python_modules(tmp
     assert "Mirrored flow module" in rendered
     assert 'label="Python Flow"' in rendered
     assert [item.name for item in compiled] == ["python_flow"]
+
+
+def test_compile_stale_flow_module_notebooks_recompiles_when_source_changes_without_newer_mtime(tmp_path):
+    flow_modules_dir = tmp_path / "workspace" / "flow_modules"
+    compiled_flow_modules_dir = resolve_workspace_paths(workspace_root=tmp_path / "workspace").compiled_flow_modules_dir
+    flow_modules_dir.mkdir(parents=True)
+    compiled_flow_modules_dir.mkdir(parents=True)
+
+    source_path = flow_modules_dir / "python_flow.py"
+    source_path.write_text(
+        "from data_engine import Flow\n\n"
+        "def build():\n"
+        '    return Flow(name="python_flow", label="Original", group="Tests").step(lambda context: context.current)\n',
+        encoding="utf-8",
+    )
+
+    first = compile_stale_flow_module_notebooks(data_root=tmp_path / "workspace")
+    assert [item.name for item in first] == ["python_flow"]
+
+    compiled_path = compiled_flow_modules_dir / "python_flow.py"
+    compiled_mtime = compiled_path.stat().st_mtime
+    source_path.write_text(
+        "from data_engine import Flow\n\n"
+        "def build():\n"
+        '    return Flow(name="python_flow", label="Updated", group="Tests").step(lambda context: context.current)\n',
+        encoding="utf-8",
+    )
+    os.utime(source_path, (compiled_mtime, compiled_mtime))
+
+    second = compile_stale_flow_module_notebooks(data_root=tmp_path / "workspace")
+
+    assert [item.name for item in second] == ["python_flow"]
+    assert 'label="Updated"' in compiled_path.read_text(encoding="utf-8")
 
 
 def test_compile_stale_flow_module_notebooks_mirrors_flow_helpers_package(tmp_path):

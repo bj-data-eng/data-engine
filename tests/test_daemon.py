@@ -720,6 +720,24 @@ def test_workspace_daemon_manager_auto_recovers_dead_same_machine_lease(tmp_path
     assert snapshot.leased_by_machine_id is None
 
 
+def test_workspace_daemon_manager_unconfigured_sync_does_not_create_runtime_state(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    monkeypatch.delenv("DATA_ENGINE_WORKSPACE_ROOT", raising=False)
+    monkeypatch.delenv("DATA_ENGINE_WORKSPACE_ID", raising=False)
+    monkeypatch.delenv("DATA_ENGINE_WORKSPACE_COLLECTION_ROOT", raising=False)
+
+    paths = resolve_workspace_paths()
+    manager = WorkspaceDaemonManager(paths)
+
+    snapshot = manager.sync()
+
+    assert paths.workspace_configured is False
+    assert snapshot.source == "none"
+    assert snapshot.workspace_owned is True
+    assert paths.runtime_state_dir.exists() is False
+
+
 def test_lease_pid_is_live_delegates_to_pid_helper(monkeypatch):
     metadata = {"pid": 123}
 

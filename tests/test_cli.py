@@ -11,6 +11,7 @@ from data_engine.ui.cli import commands_doctor
 from data_engine.ui.cli.app import CliDependencies, main
 from data_engine.ui.cli.commands_workspace import workspace_vscode_settings as _workspace_vscode_settings
 from data_engine.ui.cli.dependencies import CliDependencyFactories, build_default_cli_dependencies
+from data_engine.platform.interpreters import console_python_executable
 from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_models import (
     DATA_ENGINE_APP_ROOT_ENV_VAR,
@@ -19,6 +20,14 @@ from data_engine.platform.workspace_models import (
     WORKSPACE_FLOW_HELPERS_DIR_NAME,
 )
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
+
+
+def _expected_vscode_interpreter_path() -> str:
+    candidate = console_python_executable(sys.executable)
+    try:
+        return str(candidate.resolve())
+    except Exception:
+        return str(candidate)
 
 
 def test_cli_start_gui_spawns_detached_surface_process(monkeypatch):
@@ -106,7 +115,7 @@ def test_cli_create_workspace_scaffolds_directories_vscode_and_default_selection
     )
     assert vscode_settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
     assert vscode_settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
-    assert vscode_settings["python.defaultInterpreterPath"] == sys.executable
+    assert vscode_settings["python.defaultInterpreterPath"] == _expected_vscode_interpreter_path()
     store = LocalSettingsStore.open_default(app_root=app_root)
     assert store.default_workspace_id() == "claims"
     assert store.workspace_collection_root() == workspace_root.parent.resolve()
@@ -150,6 +159,8 @@ def test_cli_run_tests_executes_named_slice(monkeypatch, tmp_path):
     assert str(app_root / "tests" / "test_qt_ui.py") in recorded[0][0]
     if os.name == "nt":
         assert recorded[0][1]["creationflags"] == getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        assert "creationflags" not in recorded[0][1]
 
 
 def test_cli_run_tests_defaults_to_unit_slice(monkeypatch, tmp_path):
@@ -549,7 +560,7 @@ def test_workspace_vscode_settings_only_adds_checkout_specific_entries_when_pres
 
     settings = _workspace_vscode_settings(workspace_root, app_root=app_root)
 
-    assert settings["python.defaultInterpreterPath"] == sys.executable
+    assert settings["python.defaultInterpreterPath"] == _expected_vscode_interpreter_path()
     assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ROOT"] == str(workspace_root)
     assert "python.analysis.extraPaths" not in settings
     assert "python.testing.pytestEnabled" not in settings

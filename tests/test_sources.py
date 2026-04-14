@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from data_engine.platform.paths import stable_path_identity_text
 from data_engine.platform.workspace_models import (
     APP_ROOT_PATH,
     DATA_ENGINE_APP_ROOT_ENV_VAR,
@@ -46,7 +47,6 @@ def test_workspace_path_helpers_are_stable(monkeypatch):
     assert workspace_settings_path(app_root=APP_ROOT_PATH).name == "app_settings.sqlite"
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows path identity")
 def test_local_workspace_namespace_does_not_require_path_resolve(tmp_path, monkeypatch):
     def _resolve(*args, **kwargs):  # pragma: no cover - defensive test hook
         raise AssertionError("local_workspace_namespace should not resolve paths")
@@ -58,12 +58,21 @@ def test_local_workspace_namespace_does_not_require_path_resolve(tmp_path, monke
     assert namespace.startswith("claims_")
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows path normalization")
-def test_local_workspace_namespace_is_case_insensitive_on_windows():
-    left = local_workspace_namespace(Path("C:/Workspace/Claims"), "claims")
-    right = local_workspace_namespace(Path("c:/workspace/claims"), "claims")
+def test_stable_path_identity_text_supports_case_insensitive_comparisons():
+    left = stable_path_identity_text(Path("C:/Workspace/Claims"), case_insensitive=True)
+    right = stable_path_identity_text(Path("c:/workspace/claims"), case_insensitive=True)
 
     assert left == right
+
+
+def test_local_workspace_namespace_uses_platform_default_path_identity():
+    upper = local_workspace_namespace(Path("C:/Workspace/Claims"), "claims")
+    lower = local_workspace_namespace(Path("c:/workspace/claims"), "claims")
+
+    if os.name == "nt":
+        assert upper == lower
+    else:
+        assert upper != lower
 
 
 def test_resolve_workspace_paths_prefers_explicit_workspace_root(tmp_path, monkeypatch):
@@ -161,14 +170,14 @@ def test_load_settings_leaves_workspace_collection_root_unconfigured_when_unset(
     assert resolved.workspace_id == "unconfigured"
 
 
-def test_unconfigured_workspace_normalizes_placeholder_default_selected(tmp_path, monkeypatch):
+def test_unconfigured_workspace_ignores_stale_default_selected_when_no_collection_root(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     monkeypatch.delenv(DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR, raising=False)
     monkeypatch.delenv(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR, raising=False)
     monkeypatch.delenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, raising=False)
     store = LocalSettingsStore.open_default(app_root=app_root)
-    store.set_default_workspace_id(".workspace_unconfigured")
+    store.set_default_workspace_id("claims")
 
     resolved = resolve_workspace_paths()
 

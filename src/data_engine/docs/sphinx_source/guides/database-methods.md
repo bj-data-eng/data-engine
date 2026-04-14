@@ -9,7 +9,7 @@ docstring and is rendered in the API reference. Keep parameter details and
 copyable method examples beside the code in `src/data_engine/core/primitives.py`
 so editor help and packaged docs stay aligned.
 
-That is intentional. The core API deliberately avoids hiding connection ownership, transactions, or query semantics behind a special fluent DSL.
+That is intentional. The core API keeps connection ownership, transactions, and query semantics explicit in step code.
 
 In practice, that means:
 
@@ -38,9 +38,9 @@ Rules:
 - the path must be relative
 - parent directories are created automatically
 - the helper is only available for authored workspace flows
-- it does not create a connection for you
+- it returns the database path for your step to open
 
-That last point is important. Returning the path avoids hidden connection lifetime issues and keeps the behavior obvious.
+That last point is important. Returning the path keeps connection lifetime explicit and easy to reason about.
 
 ## Example
 

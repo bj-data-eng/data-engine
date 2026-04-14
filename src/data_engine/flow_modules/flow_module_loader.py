@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from contextlib import contextmanager
 from contextvars import ContextVar
+from importlib.abc import MetaPathFinder
 from importlib.util import module_from_spec, spec_from_file_location
 import inspect
 from pathlib import Path
 import sys
+from types import ModuleType
 from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.helpers import _flow_path_base_dir
@@ -58,7 +60,7 @@ def _load_module(name: str, *, data_root: Path | None = None):
         if spec is None or spec.loader is None:
             raise FlowValidationError(f"Flow module {name!r} could not be loaded from {module_path}.")
         module = module_from_spec(spec)
-        with compiled_flow_module_context(flow_modules_dir), _compiled_flow_module_import_path(module_path.parent):
+        with compiled_flow_module_context(flow_modules_dir), _compiled_flow_module_import_guard(module_path.parent):
             spec.loader.exec_module(module)
     except FlowValidationError:
         raise
@@ -92,22 +94,81 @@ def _available_flow_module_names(*, flow_modules_dir: Path) -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
+class _WorkspaceFlowModuleFinder(MetaPathFinder):
+    """Resolve workspace-local helper imports from one compiled flow-module directory."""
+
+    def __init__(self, compiled_flow_modules_dir: Path) -> None:
+        self.compiled_flow_modules_dir = compiled_flow_modules_dir
+        self.local_module_names = {
+            path.stem
+            for path in compiled_flow_modules_dir.glob("*.py")
+            if path.name != "__init__.py" and not path.stem.startswith("_")
+        }
+
+    def matches_module(self, fullname: str) -> bool:
+        top_level = fullname.split(".", 1)[0]
+        return top_level in self.local_module_names or fullname == "flow_helpers" or fullname.startswith("flow_helpers.")
+
+    def find_spec(self, fullname: str, path: object = None, target: object = None):
+        del path, target
+        if fullname == "flow_helpers":
+            package_dir = self.compiled_flow_modules_dir / "flow_helpers"
+            init_path = package_dir / "__init__.py"
+            if not init_path.exists():
+                return None
+            return spec_from_file_location(
+                fullname,
+                init_path,
+                submodule_search_locations=[str(package_dir)],
+            )
+        if fullname.startswith("flow_helpers."):
+            relative_name = fullname.removeprefix("flow_helpers.").replace(".", "/")
+            module_path = self.compiled_flow_modules_dir / "flow_helpers" / f"{relative_name}.py"
+            if module_path.exists():
+                return spec_from_file_location(fullname, module_path)
+            package_dir = self.compiled_flow_modules_dir / "flow_helpers" / relative_name
+            init_path = package_dir / "__init__.py"
+            if init_path.exists():
+                return spec_from_file_location(
+                    fullname,
+                    init_path,
+                    submodule_search_locations=[str(package_dir)],
+                )
+            return None
+        if "." in fullname or fullname not in self.local_module_names:
+            return None
+        module_path = self.compiled_flow_modules_dir / f"{fullname}.py"
+        if not module_path.exists():
+            return None
+        return spec_from_file_location(fullname, module_path)
+
+
 @contextmanager
-def _compiled_flow_module_import_path(compiled_flow_modules_dir: Path):
-    """Temporarily expose the compiled flow-module directory for sibling helper imports."""
-    path_text = str(compiled_flow_modules_dir)
-    inserted = False
-    if path_text not in sys.path:
-        sys.path.insert(0, path_text)
-        inserted = True
+def _compiled_flow_module_import_guard(compiled_flow_modules_dir: Path):
+    """Temporarily isolate workspace-local helper imports during flow-module loading."""
+    finder = _WorkspaceFlowModuleFinder(compiled_flow_modules_dir)
+    saved_modules: dict[str, ModuleType] = {}
+    managed_names = [
+        name
+        for name in list(sys.modules)
+        if finder.matches_module(name)
+    ]
+    for name in managed_names:
+        module = sys.modules.pop(name, None)
+        if module is not None:
+            saved_modules[name] = module
+    sys.meta_path.insert(0, finder)
     try:
         yield
     finally:
-        if inserted:
-            try:
-                sys.path.remove(path_text)
-            except ValueError:
-                pass
+        try:
+            sys.meta_path.remove(finder)
+        except ValueError:
+            pass
+        for name in list(sys.modules):
+            if finder.matches_module(name):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved_modules)
 
 
 def load_flow_module_definition(name: str, *, data_root: Path | None = None) -> FlowModuleDefinition:

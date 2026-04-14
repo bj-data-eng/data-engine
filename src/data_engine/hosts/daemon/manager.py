@@ -13,28 +13,6 @@ from data_engine.domain import WorkspaceControlState
 from data_engine.platform.processes import process_is_running as _pid_is_live
 from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
 
-_DEFAULT_SHARED_STATE_ADAPTER = DaemonSharedStateAdapter()
-
-
-def read_lease_metadata(paths: WorkspacePaths) -> dict[str, object] | None:
-    """Compatibility seam for reading lease metadata in daemon-manager tests."""
-    return _DEFAULT_SHARED_STATE_ADAPTER.read_lease_metadata(paths)
-
-
-def recover_stale_workspace(*, paths: WorkspacePaths, machine_id: str, stale_after_seconds: float) -> bool:
-    """Compatibility seam for stale-lease recovery in daemon-manager tests."""
-    return _DEFAULT_SHARED_STATE_ADAPTER.recover_stale_workspace(
-        paths,
-        machine_id=machine_id,
-        stale_after_seconds=stale_after_seconds,
-    )
-
-
-def write_control_request(paths: WorkspacePaths, **kwargs: object) -> None:
-    """Compatibility seam for control-request writes in daemon-manager tests."""
-    _DEFAULT_SHARED_STATE_ADAPTER.write_control_request(paths, **kwargs)
-
-
 def _lease_pid_is_live(metadata: dict[str, object] | None) -> bool:
     """Return whether the recorded lease owner pid is still alive."""
     if not isinstance(metadata, dict):
@@ -76,6 +54,7 @@ class WorkspaceDaemonManager:
         self.paths = paths
         self.max_sync_misses = max(max_sync_misses, 1)
         self.shared_state_adapter = shared_state_adapter or DaemonSharedStateAdapter()
+        self.workspace_configured = bool(getattr(paths, "workspace_configured", True))
         self._daemon_live = False
         self._sync_misses = 0
         self._last_snapshot: WorkspaceDaemonSnapshot | None = None
@@ -87,6 +66,20 @@ class WorkspaceDaemonManager:
 
     def sync(self) -> WorkspaceDaemonSnapshot:
         """Return the latest normalized daemon snapshot for one workspace."""
+        if not self.workspace_configured:
+            self._daemon_live = False
+            snapshot = WorkspaceDaemonSnapshot(
+                live=False,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=False,
+                runtime_stopping=False,
+                manual_runs=(),
+                last_checkpoint_at_utc=None,
+                source="none",
+            )
+            self._last_snapshot = snapshot
+            return snapshot
         try:
             live = is_daemon_live(self.paths)
         except Exception:
@@ -149,20 +142,20 @@ class WorkspaceDaemonManager:
         return snapshot
 
     def _lease_snapshot(self) -> WorkspaceDaemonSnapshot:
-        metadata = read_lease_metadata(self.paths)
+        metadata = self.shared_state_adapter.read_lease_metadata(self.paths)
         local_machine_id = machine_id_text()
         if (
             isinstance(metadata, dict)
             and str(metadata.get("machine_id", "")).strip() == local_machine_id
             and not _lease_pid_is_live(metadata)
         ):
-            recovered = recover_stale_workspace(
-                paths=self.paths,
+            recovered = self.shared_state_adapter.recover_stale_workspace(
+                self.paths,
                 machine_id=local_machine_id,
                 stale_after_seconds=0.0,
             )
             if recovered:
-                metadata = read_lease_metadata(self.paths)
+                metadata = self.shared_state_adapter.read_lease_metadata(self.paths)
         owner = metadata.get("machine_id") if isinstance(metadata, dict) else None
         checkpoint = metadata.get("last_checkpoint_at_utc") if isinstance(metadata, dict) else None
         checkpoint_text = str(checkpoint) if isinstance(checkpoint, str) and checkpoint.strip() else None
@@ -202,6 +195,8 @@ class WorkspaceDaemonManager:
         daemon_startup_in_progress: bool = False,
     ) -> WorkspaceControlState:
         """Return the structured workspace control state for one snapshot."""
+        if not self.workspace_configured:
+            return WorkspaceControlState.empty()
         return WorkspaceControlState.from_snapshot(
             snapshot,
             daemon_live=self.daemon_live,
@@ -212,11 +207,13 @@ class WorkspaceDaemonManager:
 
     def request_control(self) -> str:
         """Record one control-transfer request for the current workstation."""
+        if not self.workspace_configured:
+            return "Choose a workspace folder first."
         if self._daemon_live:
             snapshot = self.sync()
             if snapshot.workspace_owned:
                 return "This workstation already has control."
-        metadata = read_lease_metadata(self.paths)
+        metadata = self.shared_state_adapter.read_lease_metadata(self.paths)
         owner = (
             str(metadata.get("machine_id")).strip()
             if isinstance(metadata, dict) and isinstance(metadata.get("machine_id"), str)
@@ -225,14 +222,14 @@ class WorkspaceDaemonManager:
         local_machine_id = machine_id_text()
         if owner == local_machine_id and not self._daemon_live:
             if not _lease_pid_is_live(metadata):
-                recovered = recover_stale_workspace(
-                    paths=self.paths,
+                recovered = self.shared_state_adapter.recover_stale_workspace(
+                    self.paths,
                     machine_id=local_machine_id,
                     stale_after_seconds=0.0,
                 )
                 if recovered:
                     return "Recovered local control."
-        write_control_request(
+        self.shared_state_adapter.write_control_request(
             self.paths,
             workspace_id=self.paths.workspace_id,
             requester_machine_id=local_machine_id,

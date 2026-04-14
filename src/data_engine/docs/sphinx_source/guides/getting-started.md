@@ -21,7 +21,7 @@ In practice:
 - step functions do real work with native libraries such as Polars, DuckDB, and plain Python
 - the desktop app discovers those flow modules inside the selected workspace and shows them as configurable runnable flows
 
-The engine does not hide the real work behind a DSL. The fluent API owns orchestration, while the step callables own your actual business logic.
+The fluent API owns orchestration, while the step callables own your actual business logic.
 
 ## The basic workspace layout
 
@@ -57,7 +57,8 @@ Reusable helper modules live in:
 
 - `workspaces/<workspace_id>/flow_modules/flow_helpers/<name>.py`
 
-Compiled runtime modules are generated into machine-local artifacts rather than into the authored workspace itself.
+Compiled runtime modules are generated into machine-local artifacts.
+Those runtime artifacts are isolated per workspace, so helper imports with the same module names stay workspace-local.
 
 Each flow module should export:
 
@@ -196,7 +197,7 @@ def build():
 
 `Flow.step_each(...)` is the same operation with a name that can read more clearly in some flows.
 
-If the batch is empty, both forms raise immediately. That behavior is intentional so batch flows fail loudly instead of silently producing ambiguous "nothing happened" results.
+If the batch is empty, both forms raise immediately. That behavior makes batch-flow outcomes explicit and easy to diagnose.
 
 ## Running flows from Python
 
@@ -227,7 +228,7 @@ build().preview(use="raw_df")
 
 That is often the fastest way to sanity-check a flow while you are still writing it.
 
-For poll flows that watch a folder, `preview(...)` uses one deterministic startup source as a representative notebook preview rather than trying to run every discovered file.
+For poll flows that watch a folder, `preview(...)` uses one deterministic startup source as a representative notebook preview.
 
 ## Manual, poll, and schedule at a glance
 
@@ -236,7 +237,7 @@ For poll flows that watch a folder, `preview(...)` uses one deterministic startu
 - `watch(mode="manual")`
 - `context.current` starts as `None`
 - useful for ad hoc or UI-driven runs
-- does not require a source binding
+- works well for flows that build data in memory or start from operator actions
 
 ### Poll
 
@@ -256,10 +257,10 @@ For poll flows that watch a folder, `preview(...)` uses one deterministic startu
 ## A few good habits early
 
 - keep import-time code side-effect free
-- keep expensive work inside steps, not at module import
+- keep expensive work inside steps
 - return output paths from writer steps when you want the UI `Inspect` action
 - move reusable SQL, parsing helpers, and constants into `flow_modules/flow_helpers/`
-- use `context.config` for workspace-local TOML configuration rather than inventing ad hoc config loading in every flow
+- use `context.config` for workspace-local TOML configuration
 - use `context.database(...)` when you want a conventional workspace-local database path
 
 ## Next steps

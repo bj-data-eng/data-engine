@@ -63,7 +63,7 @@ This is the main design boundary:
 - the fluent API orchestrates runtime behavior
 - native libraries perform the actual data and file work
 
-That means Data Engine is intentionally not trying to replace Polars, DuckDB, pathlib, or your Python helper code. It coordinates them.
+That means Data Engine coordinates Polars, DuckDB, pathlib, and your Python helper code through one runtime model.
 
 ## Saved objects
 
@@ -92,7 +92,7 @@ This is one of the most useful parts of the authoring model:
 - `current` gives you the current object in the pipeline
 - `objects` gives you stable named waypoints
 
-That makes it easy to structure flows around a few explicit intermediate states rather than one long opaque chain.
+That makes it easy to structure flows around a few explicit intermediate states and readable named waypoints.
 
 ## Batch mapping
 
@@ -116,7 +116,7 @@ flow = (
 )
 ```
 
-Use `map(...)` when the same callable should run once per batch item instead of once per whole flow. `map(...)` raises immediately when the batch is empty.
+Use `map(...)` when the same callable should run once per batch item. `map(...)` raises immediately when the batch is empty.
 
 Batch mapping is especially useful when you want to:
 
@@ -185,11 +185,11 @@ That discovered `Flow` object is what the UI inspects for:
 - runtime mode
 - source and mirror bindings
 
-The app does not maintain a second hidden config layer that mutates flow behavior after discovery. The authored `Flow` is the real contract the runtime and UI are looking at.
+The authored `Flow` is the contract the runtime and UI inspect after discovery.
 
 ## Workspaces
 
-Flows do not exist in isolation. They are discovered from the currently selected authored workspace.
+Flows are discovered from the currently selected authored workspace.
 
 An authored workspace typically contains:
 

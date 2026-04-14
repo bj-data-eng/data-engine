@@ -114,7 +114,7 @@ def write_latest_snapshot(context):
     return snapshot
 ```
 
-Use `mirror.root_file(...)` when the result should be one stable artifact for the whole flow rather than one file per source item.
+Use `mirror.root_file(...)` when the result should be one stable artifact for the whole flow.
 
 ## Recipe: Read selected worksheets from a multi-sheet workbook
 
@@ -125,7 +125,7 @@ def read_selected_sheets(context):
     return pl.read_excel(context.source.path, sheet_name=["Claims", "Summary"])
 ```
 
-This is a good reminder that step code stays native. Data Engine does not wrap the underlying dataframe library calls.
+This is a good reminder that step code stays native and can call the underlying dataframe library directly.
 
 ## Recipe: Single-file settings workflow
 
@@ -241,7 +241,7 @@ def build():
     )
 ```
 
-That last example is a good place to prefer `context.database(...)`, because the DuckDB file is acting like a workspace-local database asset rather than like a one-off mirrored source artifact.
+That last example is a good place to prefer `context.database(...)`, because the DuckDB file is acting like a workspace-local database asset with a stable workspace home.
 
 ## Recipe: Use TOML workspace config
 

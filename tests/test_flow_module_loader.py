@@ -253,6 +253,45 @@ def test_load_flow_module_definition_supports_helpers_package_imports(tmp_path):
     assert built.label == "Packaged Helper Demo"
 
 
+def test_load_flow_module_definition_isolates_workspace_local_helper_imports(tmp_path):
+    workspace_a = tmp_path / "workspace_a"
+    workspace_b = tmp_path / "workspace_b"
+    for workspace, bare_label, packaged_label in (
+        (workspace_a, "Workspace A", "Package A"),
+        (workspace_b, "Workspace B", "Package B"),
+    ):
+        flow_modules_dir = workspace / "flow_modules"
+        helper_modules_dir = flow_modules_dir / "flow_helpers"
+        helper_modules_dir.mkdir(parents=True)
+        (flow_modules_dir / "helper_values.py").write_text(
+            f"FLOW_LABEL = {bare_label!r}\n",
+            encoding="utf-8",
+        )
+        (helper_modules_dir / "labels.py").write_text(
+            f"PACKAGE_LABEL = {packaged_label!r}\n",
+            encoding="utf-8",
+        )
+        (flow_modules_dir / "python_demo.py").write_text(
+            "from helper_values import FLOW_LABEL\n"
+            "from flow_helpers.labels import PACKAGE_LABEL\n"
+            "from data_engine import Flow\n\n"
+            "def build():\n"
+            "    return (\n"
+            '        Flow(name="python_demo", label=f"{FLOW_LABEL} / {PACKAGE_LABEL}", group="Tests")\n'
+            "        .step(lambda context: context.current)\n"
+            "    )\n",
+            encoding="utf-8",
+        )
+
+    first = load_flow_module_definition("python_demo", data_root=workspace_a).build()
+    second = load_flow_module_definition("python_demo", data_root=workspace_b).build()
+    third = load_flow_module_definition("python_demo", data_root=workspace_a).build()
+
+    assert first.label == "Workspace A / Package A"
+    assert second.label == "Workspace B / Package B"
+    assert third.label == "Workspace A / Package A"
+
+
 def test_load_flow_module_definition_reports_import_error_details(tmp_path):
     workspace = tmp_path / "workspace"
     flow_modules_dir = workspace / "flow_modules"

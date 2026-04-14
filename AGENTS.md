@@ -104,7 +104,7 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 
 - Current distribution name is `py-data-engine`.
 - Prefer docstring-first API documentation for author-facing code. Put parameter details, return behavior, validation rules, and copyable examples beside the class/function implementation so VS Code hover help and Sphinx autodoc stay aligned. Keep guide pages for concepts, workflows, and cross-API recipes instead of duplicating API reference text.
-- Write documentation by describing what the API is and does. Avoid contrast-first phrasing such as "this is not..." or broad negative lists; the set of things an API is not is infinite.
+- Write documentation by describing what the API is, what it does, and when to use it. For AI-authored docs, lead with the concrete contract, behavior, and intended use. Avoid contrast-first phrasing such as "this is not..." or broad negative lists; the set of things an API is not is infinite.
 - Before publishing, verify:
 
 ```powershell

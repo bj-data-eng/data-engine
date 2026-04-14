@@ -143,7 +143,7 @@ The control model currently uses:
 - a target checkpoint interval of 30 seconds
 - a stale threshold of 90 seconds
 
-Those numbers are part of the runtime domain model, not an arbitrary UI convention.
+Those numbers come from the runtime domain model and define the control behavior used across surfaces.
 
 ### Shared runtime snapshots
 
@@ -154,9 +154,9 @@ The shared runtime snapshot is written into parquet files beneath:
 - `.workspace_state/state/logs/`
 - `.workspace_state/state/file_state/`
 
-These files let one workstation publish the current runtime picture so another workstation can hydrate a local read model without owning the workspace.
+These files let one workstation publish the current runtime picture so another workstation can hydrate a local read model while observing the shared workspace.
 
-This is how the app can show meaningful status while observing another machine's daemon rather than controlling the workspace directly.
+This lets the app show meaningful status while another machine owns the workspace daemon.
 
 ## Local state vs workspace state
 
@@ -186,7 +186,11 @@ This includes:
 - daemon log files
 - app-local workspace selection and collection-root settings
 
-The local runtime ledger path is resolved per workspace. It is machine-local, not shared.
+The local runtime ledger path is resolved per workspace and stays machine-local.
+
+When no workspace collection root is configured, the app stays in an explicit "no workspace" state. The empty-state UI uses that state directly and avoids per-workspace daemon or runtime artifacts.
+
+Compiled flow-module artifacts are also workspace-local. Data Engine loads helper imports against the active workspace's compiled artifacts so similarly named helper modules in different workspaces stay isolated from each other.
 
 That local ledger is important because the desktop app needs a fast local read model even when the authoritative daemon is elsewhere.
 
@@ -222,7 +226,7 @@ A control request records:
 - requester client kind
 - request time
 
-The app surfaces this as "control requested" rather than silently stealing ownership.
+The app surfaces this as "control requested" and makes the handoff visible to operators.
 
 ### Handoff and takeover
 
@@ -254,11 +258,11 @@ For GUI use, the daemon lifecycle is intentionally ephemeral:
 
 - it is created for the selected workspace as needed
 - it can survive workspace switches when active work is still running
-- it is not supposed to linger forever just because the GUI once touched that workspace
+- it follows the selected workspace lifecycle and can stay alive while active work continues
 
 The important behavior is this:
 
-- switching away from a workspace should not tear down active work
+- switching away from a workspace leaves active work running
 - switching back should rehydrate the selected workspace's daemon state immediately
 
 That immediate rehydration is what keeps engine state, manual runs, and control state accurate after a workspace switch.
@@ -298,7 +302,7 @@ Provisioning a workspace creates missing conventional folders without overwritin
 
 Provisioning also writes a `.vscode/settings.json` at the collection root.
 
-If those files already exist, the provisioning service preserves them by default rather than overwriting them.
+If those files already exist, the provisioning service preserves the existing authored files by default.
 
 This is meant to make a new workspace usable immediately without turning provisioning into a heavy bootstrap system.
 
@@ -328,6 +332,18 @@ The collection-root settings are for the "open the whole workspace collection in
 
 The authored-workspace settings are for the "open just one workspace" workflow.
 
+## Flow-module compilation
+
+Flow modules authored as notebooks or Python files are compiled into machine-local runtime artifacts before discovery and execution.
+
+That compilation path intentionally favors structural correctness over filesystem timing quirks:
+
+- recompilation is based on rendered content changes
+- helper imports resolve from the current workspace
+- mirrored helper packages swap into place as complete directory trees
+
+Those guarantees matter most on network filesystems, cross-platform checkouts, and fast edit/save cycles with coarse timestamp granularity.
+
 ## Logging and run history
 
 There are a few different log and history concepts that are easy to blur together.
@@ -346,7 +362,7 @@ The selected workspace also has a machine-local SQLite runtime ledger. That is t
 
 The GUI intentionally limits how much visible run history it renders at once. The current run-history sidebar/view is capped to 100 visible run groups in the UI.
 
-That cap is a presentation choice, not a statement that only 100 runs exist.
+That cap is a presentation choice for the current UI view.
 
 ### "Runs last 30 days"
 
@@ -357,7 +373,7 @@ The small footer tag on the home view shows:
 - flows
 - runs in the last 30 days
 
-That 30-day value is a summary count for the currently selected workspace. It is not a documented retention policy for deleting logs or runs.
+That 30-day value is a summary count for the currently selected workspace.
 
 ## The kill switch
 
@@ -365,7 +381,7 @@ The Settings pane exposes an emergency kill switch for the selected workspace da
 
 This is intentionally coarse.
 
-It does not try to kill one hung step or one worker thread. Instead it:
+It works at the daemon-process level:
 
 1. asks the daemon to shut down normally
 2. waits briefly for a graceful exit
@@ -374,7 +390,7 @@ It does not try to kill one hung step or one worker thread. Instead it:
 
 That is the right emergency tool when a flow is stuck inside a blocking native call or an uninterruptible external library path.
 
-It is intentionally user-driven. The system does not try to infer "stuck" from heuristics before surfacing the action.
+It is intentionally user-driven and appears as an explicit operator action.
 
 ## How this affects flow authors
 

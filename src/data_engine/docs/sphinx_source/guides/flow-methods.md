@@ -26,7 +26,7 @@ Rules:
 - the flow-module filename provides the flow identity
 - the returned object is immutable, so each fluent call returns a new `Flow`
 
-Immutability matters because it keeps authoring predictable. Each chained call produces a new flow definition rather than mutating hidden shared state.
+Immutability matters because it keeps authoring predictable. Each chained call produces a new flow definition with explicit state.
 
 ## `watch(...)`
 
@@ -89,7 +89,7 @@ Bind a mirrored output namespace rooted at one directory.
 flow = flow.mirror(root="../../example_data/Output/example_mirror")
 ```
 
-`mirror(...)` does not write files. It defines the output namespace exposed later through `context.mirror`.
+`mirror(...)` defines the output namespace exposed later through `context.mirror`.
 
 You can omit `mirror(...)` entirely if the flow has no need for a mirrored output namespace.
 
@@ -168,7 +168,7 @@ Behavior:
 
 - uses `root=` when provided
 - otherwise falls back to `context.source.root`
-- returns a `Batch`, not a raw list
+- returns a `Batch` of `FileRef` items
 - each item exposes `.name`, `.path`, `.stem`, `.suffix`, and `.parent`
 
 If `root=` is omitted, the runtime falls back to the current source root. That is often the cleanest choice for poll or scheduled batch flows already bound to a source.
@@ -177,7 +177,7 @@ If `root=` is omitted, the runtime falls back to the current source root. That i
 
 Run the flow one time and return the completed contexts.
 
-Use this when you want a one-off Python-driven execution rather than continuous watching.
+Use this when you want a one-off Python-driven execution.
 
 ## `run()`
 
@@ -201,9 +201,9 @@ Behavior:
 - with `use="name"`, runs only until `save_as="name"` exists
 - returns the real saved object, so dataframe methods like `.head(10)` work naturally
 - avoids running later write/debug steps once the requested saved object is available
-- if a poll flow would have several startup source files, preview uses the first deterministic source candidate for notebook inspection rather than trying to preview every file at once
+- if a poll flow has several startup source files, preview uses the first deterministic source candidate for notebook inspection
 
-`preview(...)` is especially useful while authoring notebook-backed flows because it lets you stop at a meaningful intermediate instead of running the whole flow to the final writer step every time.
+`preview(...)` is especially useful while authoring notebook-backed flows because it lets you stop at a meaningful intermediate and inspect it directly.
 
 ## `show()`
 

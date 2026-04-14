@@ -73,7 +73,7 @@ Use native libraries directly inside those steps:
 - DuckDB for SQL and database work
 - `pathlib` and normal Python for filesystem logic
 
-That simplicity is the intended authoring experience. Flow modules should feel like normal Python modules with a small orchestration surface, not like a second programming language.
+That simplicity is the intended authoring experience. Flow modules should feel like normal Python modules with a small orchestration surface.
 
 ## Good patterns
 
@@ -105,7 +105,7 @@ Usually worth avoiding:
 
 ## Helper modules
 
-Helper modules are regular Python files under `flow_modules/flow_helpers/`. They are mirrored into compiled workspace artifacts and are importable from both notebook-authored and Python-authored flows.
+Helper modules are regular Python files under `flow_modules/flow_helpers/`. They are compiled into workspace-local runtime artifacts and are importable from both notebook-authored and Python-authored flows.
 
 Example:
 
@@ -124,7 +124,11 @@ def build():
     return Flow(group="Claims")
 ```
 
-Files in `flow_modules/flow_helpers/` are not discovered as runnable flows. They exist only to support authored flow modules.
+Files in `flow_modules/flow_helpers/` support authored flow modules and stay out of runnable flow discovery.
+
+Helper imports are resolved against the currently selected workspace during flow loading. That isolation matters when two workspaces use the same helper module names, because one workspace's helper cache should never leak into another workspace's flow import.
+
+Flow-module compilation is content-aware. If you save a source file twice in quick succession on a filesystem with coarse mtimes, Data Engine still recompiles when the rendered module text changed.
 
 This is the right home for:
 
@@ -134,7 +138,7 @@ This is the right home for:
 - common dataframe transforms
 - shared constants
 
-It is not the right home for code that tries to secretly become a flow. If it should run independently and appear in the app, it belongs in its own flow module with its own `build()`.
+Code that should run independently and appear in the app belongs in its own flow module with its own `build()`.
 
 ## Example
 

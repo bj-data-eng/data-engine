@@ -89,7 +89,7 @@ def test_run_detail_state_collects_step_rows():
     assert detail.step_rows[0].status == "success"
 
 
-def test_flow_summary_rows_preserve_legacy_config_summary_shape():
+def test_flow_summary_rows_expose_core_flow_config_fields_in_display_order():
     rows = FlowSummaryRow.rows_for_flow(_sample_card(), {"claims_summary": "running"})
 
     assert [(row.label, row.value) for row in rows][:3] == [

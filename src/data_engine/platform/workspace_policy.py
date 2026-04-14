@@ -121,15 +121,10 @@ class WorkspaceDiscoveryPolicy:
             value = fallback
         return validate_workspace_id(value)
 
-    def _placeholder_workspace(self, *, app_root: Path, preferred_id: str | None = None) -> tuple[DiscoveredWorkspace, Path, bool]:
+    def _placeholder_workspace(self, *, app_root: Path) -> tuple[DiscoveredWorkspace, Path, bool]:
         placeholder_root = app_root / self.PLACEHOLDER_WORKSPACE_ROOT_NAME
-        placeholder_id = (
-            self._normalize_workspace_id(preferred_id, fallback=self.PLACEHOLDER_WORKSPACE_ID)
-            if preferred_id is not None
-            else self.PLACEHOLDER_WORKSPACE_ID
-        )
         return (
-            DiscoveredWorkspace(workspace_id=placeholder_id, workspace_root=placeholder_root),
+            DiscoveredWorkspace(workspace_id=self.PLACEHOLDER_WORKSPACE_ID, workspace_root=placeholder_root),
             placeholder_root.parent,
             False,
         )
@@ -212,10 +207,7 @@ class WorkspaceDiscoveryPolicy:
             else settings.workspace_collection_root
         )
         if collection_root is None:
-            return self._placeholder_workspace(
-                app_root=app_root,
-                preferred_id=workspace_id or settings.default_selected,
-            )
+            return self._placeholder_workspace(app_root=app_root)
         discovered_all = self.discover(app_root=app_root, workspace_collection_root=collection_root)
         if not discovered_all:
             if workspace_id is not None:

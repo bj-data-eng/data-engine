@@ -45,7 +45,7 @@ The expected path pattern is:
 db_path = context.database("claims/analytics.duckdb")
 ```
 
-You can also use a mirrored output path or any other DuckDB file path you control. The helpers do not require `context`; they only require a path.
+You can also use a mirrored output path or any other DuckDB file path you control. The helpers work with any DuckDB path you provide.
 
 ## Shared conventions
 
@@ -277,7 +277,7 @@ This is the usual pattern for canon-style "replace one file slice" loading.
 
 ## `replace_rows_by_values(...)`
 
-Use this helper when one incoming dataframe represents the full current contents for one logical value slice instead of one file.
+Use this helper when one incoming dataframe represents the full current contents for one logical value slice.
 
 Signature:
 
@@ -455,14 +455,14 @@ These helpers are best when:
 - the dataframe shape is already mostly what you want
 - you want predictable transactional behavior
 
-These helpers are not trying to replace normal SQL authoring. If a step needs custom joins, custom window logic, or highly specific query behavior, using plain DuckDB directly is still the right choice.
+These helpers support common repeated patterns in flow code. Steps that need custom joins, custom window logic, or highly specific query behavior can use plain DuckDB directly.
 
 ## When to use direct DuckDB instead
 
 Prefer direct DuckDB code when:
 
 - the operation is highly custom
-- you need several SQL statements that do not fit one helper
+- you want several SQL statements in one step
 - you want full manual control over relation registration, temp tables, or query flow
 
-The helpers are there to remove repeated boilerplate, not to become a second query language.
+The helpers remove repeated boilerplate and keep common warehouse-style operations concise.

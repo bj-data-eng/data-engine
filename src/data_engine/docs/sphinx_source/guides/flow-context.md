@@ -72,7 +72,7 @@ def clean_claims(context):
     return context.current.filter(...)
 ```
 
-The step does not need to fetch some external hidden pipeline object. The runtime always hands it the current value.
+The runtime always hands the step the current value.
 
 ## `objects`
 
@@ -211,7 +211,7 @@ all_config = context.config.all()
 - SQL parameters
 - external table names
 
-It is not a replacement for the `Flow(...)` chain. The orchestration shape still belongs in the fluent flow definition.
+`context.config` complements the `Flow(...)` chain. The orchestration shape still belongs in the fluent flow definition.
 
 ## `database(...)`
 
@@ -232,7 +232,7 @@ Rules:
 - the path must be relative
 - parent directories are created automatically
 - the helper is only available for authored workspace flows
-- it returns a `Path`, not a database connection
+- it returns a `Path` for your step to open
 
 Typical usage:
 
@@ -249,7 +249,7 @@ def write_summary(context):
         conn.close()
 ```
 
-This is intentionally simple. Data Engine gives you the path and leaves connection ownership to your code.
+This is intentionally simple. Data Engine gives you the path and your code owns the connection lifecycle.
 
 ## `source_metadata()`
 
@@ -416,7 +416,7 @@ def write_outputs(context):
 
 ### `root_file(...)`
 
-Use this when you want one stable artifact under the mirror root rather than one file per source item.
+Use this when you want one stable artifact under the mirror root for the whole flow.
 
 ```python
 def write_snapshot(context):
@@ -434,7 +434,7 @@ Use `mirror` when you want to:
 - write stable summary artifacts under one output root
 - avoid hand-building output folder math
 
-All helpers return write-ready paths, so callers do not need to create parent directories themselves.
+All helpers return write-ready paths with parent directories prepared.
 
 ## When `source` or `mirror` may be missing
 
@@ -458,7 +458,7 @@ def maybe_capture_source(context):
 
 ## Batch values
 
-`Flow.collect(...)` returns a `Batch` of `FileRef` items instead of a raw list.
+`Flow.collect(...)` returns a `Batch` of `FileRef` items.
 
 That means later steps can work with:
 
