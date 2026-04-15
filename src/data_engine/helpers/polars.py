@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from datetime import date, datetime
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -21,6 +22,377 @@ from data_engine.helpers.schema import normalize_column_names as _normalize_colu
 PathLike = str | os.PathLike[str]
 ColumnNames = str | list[str] | tuple[str, ...]
 ReturnMode = str | None
+WeekMask = tuple[bool, bool, bool, bool, bool, bool, bool]
+DateLike = date | datetime
+ExprLike = pl.Expr | str | DateLike
+IntExprLike = pl.Expr | str | int
+_DEFAULT_WEEK_MASK: WeekMask = (True, True, True, True, True, False, False)
+
+
+def networkdays(
+    start: ExprLike,
+    end: ExprLike,
+    *,
+    holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+    count_first_day: bool = False,
+    mask: Iterable[bool] | None = None,
+) -> pl.Expr:
+    """Return Excel-style business-day counts as a Polars expression.
+
+    This helper matches Excel ``NETWORKDAYS`` semantics by counting both
+    endpoints when they are business days. Weekends default to Saturday/Sunday,
+    and optional holidays are excluded from the count.
+
+    The one intentional extension is ``count_first_day``. When enabled, the
+    start date is still counted even if it falls on a masked weekday or one of
+    the supplied holidays.
+
+    Parameters
+    ----------
+    start : pl.Expr | str | date | datetime
+        Start date expression, column name, or scalar date/datetime.
+    end : pl.Expr | str | date | datetime
+        End date expression, column name, or scalar date/datetime.
+    holidays : list[date | datetime | str] | tuple[...] | set[...] | None
+        Optional holiday dates removed from the business-day count. String
+        values must use ISO date text such as ``"2026-04-15"``.
+    count_first_day : bool
+        Whether to force the first day into the count when it would normally be
+        excluded by the weekday mask or holiday list.
+    mask : Iterable[bool] | None
+        Monday-first seven-item business-day mask. ``None`` uses the Excel
+        default: Monday-Friday counted, Saturday-Sunday excluded.
+
+    Returns
+    -------
+    pl.Expr
+        Expression that evaluates to the signed business-day count. Datetime
+        inputs are normalized to their calendar date before counting.
+
+    Examples
+    --------
+    Add a row-level business-day count:
+
+    .. code-block:: python
+
+        from datetime import date
+        import polars as pl
+
+        import data_engine.helpers
+
+        df = pl.DataFrame(
+            {
+                "received_date": [date(2026, 4, 13), date(2026, 4, 14)],
+                "due_date": [date(2026, 4, 17), date(2026, 4, 21)],
+            }
+        ).with_columns(
+            business_days=data_engine.helpers.networkdays(
+                "received_date",
+                "due_date",
+                holidays=[date(2026, 4, 15)],
+            )
+        )
+
+    Use scalar datetimes and count the first day:
+
+    .. code-block:: python
+
+        from datetime import datetime
+
+        df = df.with_columns(
+            sla_days=data_engine.helpers.networkdays(
+                datetime(2026, 4, 13, 8, 30),
+                pl.col("resolved_at"),
+                count_first_day=True,
+            )
+        )
+
+    Chain the expression into a grouped cumulative total:
+
+    .. code-block:: python
+
+        df = (
+            df.sort(["claim_id", "sequence_number"])
+            .with_columns(
+                cumulative_business_days=
+                pl.when(pl.col("use_days"))
+                .then(
+                    data_engine.helpers.networkdays(
+                        "start_date",
+                        "end_date",
+                        holidays=[date(2026, 4, 15)],
+                    )
+                )
+                .otherwise(pl.lit(0))
+                .cum_sum()
+                .over("claim_id")
+            )
+        )
+
+    Notes
+    -----
+    ``networkdays(...)`` returns a normal ``pl.Expr``. You can chain it into
+    ``cum_sum()``, window expressions, filters, and any other Polars expression
+    pipeline.
+    """
+    week_mask = _coerce_week_mask(mask)
+    holiday_dates = _coerce_holiday_dates(holidays)
+    start_expr = _as_date_expr(start)
+    end_expr = _as_date_expr(end)
+    forward_expr = pl.business_day_count(
+        start_expr,
+        end_expr + pl.duration(days=1),
+        week_mask=week_mask,
+        holidays=holiday_dates,
+    )
+    backward_expr = -pl.business_day_count(
+        end_expr,
+        start_expr + pl.duration(days=1),
+        week_mask=week_mask,
+        holidays=holiday_dates,
+    )
+    result = pl.when(start_expr <= end_expr).then(forward_expr).otherwise(backward_expr)
+    if count_first_day:
+        result = result + _forced_first_day_adjustment(start_expr, end_expr, week_mask, holiday_dates)
+    return pl.when(start_expr.is_null() | end_expr.is_null()).then(pl.lit(None, dtype=pl.Int64)).otherwise(result)
+
+
+def workday(
+    start: ExprLike,
+    days: IntExprLike,
+    *,
+    holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+    count_first_day: bool = False,
+    mask: Iterable[bool] | None = None,
+) -> pl.Expr:
+    """Return Excel-style workday offsets as a Polars expression.
+
+    This helper mirrors Excel ``WORKDAY`` by returning the business date that
+    falls the requested number of working days before or after ``start``.
+
+    The one intentional extension is ``count_first_day``. When enabled, the
+    start date itself can be day 1, even if it falls on a masked weekday or one
+    of the supplied holidays.
+
+    Parameters
+    ----------
+    start : pl.Expr | str | date | datetime
+        Start date expression, column name, or scalar date/datetime.
+    days : pl.Expr | str | int
+        Signed business-day offset expression, column name, or scalar integer.
+    holidays : list[date | datetime | str] | tuple[...] | set[...] | None
+        Optional holiday dates skipped while calculating the result. String
+        values must use ISO date text such as ``"2026-04-15"``.
+    count_first_day : bool
+        Whether the start date itself can count as day 1 when moving forward or
+        backward through business days.
+    mask : Iterable[bool] | None
+        Monday-first seven-item business-day mask. ``None`` uses the Excel
+        default: Monday-Friday counted, Saturday-Sunday excluded.
+
+    Returns
+    -------
+    pl.Expr
+        Expression that evaluates to a ``Date`` result. Datetime inputs are
+        normalized to their calendar date before offsetting.
+
+    Examples
+    --------
+    Add one target business date column:
+
+    .. code-block:: python
+
+        from datetime import date
+        import polars as pl
+
+        import data_engine.helpers
+
+        df = pl.DataFrame(
+            {
+                "received_date": [date(2026, 4, 13), date(2026, 4, 14)],
+                "sla_days": [3, 5],
+            }
+        ).with_columns(
+            due_date=data_engine.helpers.workday(
+                "received_date",
+                "sla_days",
+                holidays=[date(2026, 4, 15)],
+            )
+        )
+
+    Count the start date as day 1:
+
+    .. code-block:: python
+
+        df = df.with_columns(
+            due_date=data_engine.helpers.workday(
+                "received_date",
+                "sla_days",
+                holidays=[date(2026, 4, 15)],
+                count_first_day=True,
+            )
+        )
+
+    Use a custom weekday mask where Saturday is also a business day:
+
+    .. code-block:: python
+
+        df = df.with_columns(
+            due_date=data_engine.helpers.workday(
+                "received_date",
+                "sla_days",
+                mask=(True, True, True, True, True, True, False),
+            )
+        )
+    """
+    week_mask = _coerce_week_mask(mask)
+    holiday_dates = _coerce_holiday_dates(holidays)
+    start_expr = _as_date_expr(start)
+    days_expr = _as_int_expr(days).cast(pl.Int64)
+    is_business = _is_business_day_expr(start_expr, week_mask, holiday_dates)
+    default_result = _workday_result(
+        start_expr,
+        days_expr,
+        week_mask,
+        holiday_dates,
+        count_first_day=False,
+        is_business=is_business,
+    )
+    counted_result = _workday_result(
+        start_expr,
+        days_expr,
+        week_mask,
+        holiday_dates,
+        count_first_day=True,
+        is_business=is_business,
+    )
+    result = counted_result if count_first_day else default_result
+    return pl.when(start_expr.is_null() | days_expr.is_null()).then(pl.lit(None, dtype=pl.Date)).otherwise(result)
+
+
+def _coerce_week_mask(mask: Iterable[bool] | None) -> WeekMask:
+    if mask is None:
+        return _DEFAULT_WEEK_MASK
+    values = tuple(bool(value) for value in mask)
+    if len(values) != 7:
+        raise ValueError("mask must contain exactly seven Monday-first boolean values.")
+    return values  # type: ignore[return-value]
+
+
+def _coerce_holiday_dates(
+    holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None,
+) -> tuple[date, ...]:
+    if holidays is None:
+        return ()
+    values: set[date] = set()
+    for value in holidays:
+        if isinstance(value, datetime):
+            values.add(value.date())
+            continue
+        if isinstance(value, date):
+            values.add(value)
+            continue
+        if isinstance(value, str):
+            values.add(date.fromisoformat(value))
+            continue
+        raise TypeError("holidays must contain date, datetime, or ISO date string values.")
+    return tuple(sorted(values))
+
+
+def _as_date_expr(value: ExprLike) -> pl.Expr:
+    if isinstance(value, pl.Expr):
+        return value.cast(pl.Date)
+    if isinstance(value, str):
+        return pl.col(value).cast(pl.Date)
+    return pl.lit(value).cast(pl.Date)
+
+
+def _as_int_expr(value: IntExprLike) -> pl.Expr:
+    if isinstance(value, pl.Expr):
+        return value
+    if isinstance(value, str):
+        return pl.col(value)
+    return pl.lit(value)
+
+
+def _is_business_day_expr(
+    date_expr: pl.Expr,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+) -> pl.Expr:
+    weekday = date_expr.dt.weekday()
+    day_allowed = pl.lit(False)
+    for index, allowed in enumerate(week_mask, start=1):
+        day_allowed = pl.when(weekday == index).then(pl.lit(allowed)).otherwise(day_allowed)
+    holiday_expr = (
+        date_expr.is_in(pl.lit(list(holiday_dates), dtype=pl.List(pl.Date)))
+        if holiday_dates
+        else pl.lit(False)
+    )
+    return day_allowed & ~holiday_expr
+
+
+def _forced_first_day_adjustment(
+    start_expr: pl.Expr,
+    end_expr: pl.Expr,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+) -> pl.Expr:
+    start_already_counted = _is_business_day_expr(start_expr, week_mask, holiday_dates)
+    return (
+        pl.when(~start_already_counted)
+        .then(pl.when(start_expr <= end_expr).then(pl.lit(1)).otherwise(pl.lit(-1)))
+        .otherwise(pl.lit(0))
+    )
+
+
+def _workday_result(
+    start_expr: pl.Expr,
+    days_expr: pl.Expr,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+    *,
+    count_first_day: bool,
+    is_business: pl.Expr,
+) -> pl.Expr:
+    kwargs = {"week_mask": week_mask, "holidays": holiday_dates}
+    if count_first_day:
+        business_result = (
+            pl.when(days_expr > 0)
+            .then(start_expr.dt.add_business_days(days_expr - 1, roll="forward", **kwargs))
+            .when(days_expr < 0)
+            .then(start_expr.dt.add_business_days(days_expr + 1, roll="backward", **kwargs))
+            .otherwise(start_expr)
+        )
+        nonbusiness_result = (
+            pl.when(days_expr > 0)
+            .then(
+                pl.when(days_expr == 1)
+                .then(start_expr)
+                .otherwise(start_expr.dt.add_business_days(days_expr - 2, roll="forward", **kwargs))
+            )
+            .when(days_expr < 0)
+            .then(
+                pl.when(days_expr == -1)
+                .then(start_expr)
+                .otherwise(start_expr.dt.add_business_days(days_expr + 2, roll="backward", **kwargs))
+            )
+            .otherwise(start_expr)
+        )
+    else:
+        business_result = (
+            pl.when(days_expr >= 0)
+            .then(start_expr.dt.add_business_days(days_expr, roll="forward", **kwargs))
+            .otherwise(start_expr.dt.add_business_days(days_expr, roll="backward", **kwargs))
+        )
+        nonbusiness_result = (
+            pl.when(days_expr > 0)
+            .then(start_expr.dt.add_business_days(days_expr - 1, roll="forward", **kwargs))
+            .when(days_expr < 0)
+            .then(start_expr.dt.add_business_days(days_expr + 1, roll="backward", **kwargs))
+            .otherwise(start_expr.dt.add_business_days(pl.lit(0), roll="forward", **kwargs))
+        )
+    return pl.when(is_business).then(business_result).otherwise(nonbusiness_result)
 
 
 def write_parquet_atomic(df: pl.DataFrame, path: PathLike, **write_options: object) -> Path:
@@ -202,6 +574,83 @@ class DataEngineDataFrameNamespace:
             Dataframe with normalized column names.
         """
         return _normalize_column_names(self._df, columns)
+
+    def networkdays(
+        self,
+        start: ExprLike,
+        end: ExprLike,
+        *,
+        holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+        count_first_day: bool = False,
+        mask: Iterable[bool] | None = None,
+    ) -> pl.Expr:
+        """Return an Excel-style business-day count expression for this dataframe.
+
+        This is a convenience wrapper around :func:`data_engine.helpers.networkdays`.
+        The returned value is still a normal ``pl.Expr``, so it can be chained
+        into cumulative windows and other Polars expressions.
+
+        Example
+        -------
+        .. code-block:: python
+
+            df = df.with_columns(
+                business_days=df.de.networkdays(
+                    "start_date",
+                    "end_date",
+                    holidays=[date(2026, 4, 15)],
+                )
+            )
+
+            df = df.sort(["claim_id", "sequence_number"]).with_columns(
+                cumulative_business_days=
+                pl.when(pl.col("use_days"))
+                .then(df.de.networkdays("start_date", "end_date"))
+                .otherwise(pl.lit(0))
+                .cum_sum()
+                .over("claim_id")
+            )
+        """
+        return networkdays(
+            start,
+            end,
+            holidays=holidays,
+            count_first_day=count_first_day,
+            mask=mask,
+        )
+
+    def workday(
+        self,
+        start: ExprLike,
+        days: IntExprLike,
+        *,
+        holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+        count_first_day: bool = False,
+        mask: Iterable[bool] | None = None,
+    ) -> pl.Expr:
+        """Return an Excel-style workday offset expression for this dataframe.
+
+        This is a convenience wrapper around :func:`data_engine.helpers.workday`.
+
+        Example
+        -------
+        .. code-block:: python
+
+            df = df.with_columns(
+                due_date=df.de.workday(
+                    "received_date",
+                    "sla_days",
+                    holidays=[date(2026, 4, 15)],
+                )
+            )
+        """
+        return workday(
+            start,
+            days,
+            holidays=holidays,
+            count_first_day=count_first_day,
+            mask=mask,
+        )
 
     def write_parquet_atomic(self, path: PathLike, **write_options: object) -> Path:
         """Write this dataframe to parquet with atomic target replacement.
@@ -510,6 +959,50 @@ class DataEngineLazyFrameNamespace:
             Lazy frame with normalized column names.
         """
         return _normalize_column_names(self._lf, columns)
+
+    def networkdays(
+        self,
+        start: ExprLike,
+        end: ExprLike,
+        *,
+        holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+        count_first_day: bool = False,
+        mask: Iterable[bool] | None = None,
+    ) -> pl.Expr:
+        """Return an Excel-style business-day count expression for this lazy frame.
+
+        This is a convenience wrapper around :func:`data_engine.helpers.networkdays`.
+        The returned value stays lazy and can be chained into window
+        expressions before ``collect()``.
+        """
+        return networkdays(
+            start,
+            end,
+            holidays=holidays,
+            count_first_day=count_first_day,
+            mask=mask,
+        )
+
+    def workday(
+        self,
+        start: ExprLike,
+        days: IntExprLike,
+        *,
+        holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+        count_first_day: bool = False,
+        mask: Iterable[bool] | None = None,
+    ) -> pl.Expr:
+        """Return an Excel-style workday offset expression for this lazy frame.
+
+        This is a convenience wrapper around :func:`data_engine.helpers.workday`.
+        """
+        return workday(
+            start,
+            days,
+            holidays=holidays,
+            count_first_day=count_first_day,
+            mask=mask,
+        )
 
     def sink_parquet_atomic(self, path: PathLike, **sink_options: object) -> Path:
         """Execute this lazy frame to parquet with atomic target replacement.

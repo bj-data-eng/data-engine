@@ -12,7 +12,9 @@ from data_engine.helpers.duckdb import replace_rows_by_values
 from data_engine.helpers.duckdb import replace_table
 from data_engine.helpers.polars import DataEngineDataFrameNamespace
 from data_engine.helpers.polars import DataEngineLazyFrameNamespace
+from data_engine.helpers.polars import networkdays
 from data_engine.helpers.polars import sink_parquet_atomic
+from data_engine.helpers.polars import workday
 from data_engine.helpers.polars import write_excel_atomic
 from data_engine.helpers.polars import write_parquet_atomic
 from data_engine.helpers.schema import TableSchema
@@ -27,6 +29,7 @@ __all__ = [
     "attach_dimension",
     "build_dimension",
     "denormalize_columns",
+    "networkdays",
     "normalize_columns",
     "read_rows_by_values",
     "read_sql",
@@ -35,6 +38,7 @@ __all__ = [
     "replace_rows_by_values",
     "replace_table",
     "sink_parquet_atomic",
+    "workday",
     "write_excel_atomic",
     "write_parquet_atomic",
     "normalize_column_name",

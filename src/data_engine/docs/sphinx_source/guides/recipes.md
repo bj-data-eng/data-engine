@@ -254,6 +254,58 @@ def apply_threshold(context):
 
 This is a clean way to keep operator-tunable values out of the flow chain while still making the dependency explicit.
 
+## Recipe: Calculate business days and keep a grouped running total
+
+```python
+from datetime import date
+
+import data_engine.helpers
+import polars as pl
+
+
+df = (
+    df.sort(["claim_id", "sequence_number"])
+    .with_columns(
+        cumulative_business_days=
+        pl.when(pl.col("use_days"))
+        .then(
+            data_engine.helpers.networkdays(
+                "start_date",
+                "end_date",
+                holidays=[date(2026, 4, 15)],
+            )
+        )
+        .otherwise(pl.lit(0))
+        .cum_sum()
+        .over("claim_id")
+    )
+)
+```
+
+This keeps the per-row business-day increment conditional, while the running
+total continues to accumulate within each group.
+
+## Recipe: Offset to the next business due date
+
+```python
+from datetime import date
+
+import data_engine.helpers
+
+
+df = df.with_columns(
+    due_date=data_engine.helpers.workday(
+        "received_date",
+        "sla_days",
+        holidays=[date(2026, 4, 15)],
+        count_first_day=True,
+    )
+)
+```
+
+Use `count_first_day=True` when the received day itself should count as day 1
+for SLA-style deadlines.
+
 ## Recipe: Write several outputs for one source
 
 ```python

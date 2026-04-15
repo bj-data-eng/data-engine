@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import polars as pl
 from polars.testing import assert_frame_equal
 import pytest
 
+from data_engine.helpers import networkdays
 from data_engine.helpers import sink_parquet_atomic
+from data_engine.helpers import workday
 from data_engine.helpers import write_excel_atomic
 from data_engine.helpers import write_parquet_atomic
 from data_engine.helpers import polars as polars_helpers
@@ -109,6 +112,157 @@ def test_lazyframe_namespace_normalizes_column_names():
     result = lazy_frame.de.normalize_column_names().collect()
 
     assert result.columns == ["claim_id", "workflow_to"]
+
+
+def test_networkdays_matches_excel_style_inclusive_business_day_count():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 13), date(2026, 4, 11), date(2026, 4, 14)],
+            "end": [date(2026, 4, 14), date(2026, 4, 13), date(2026, 4, 13)],
+        }
+    ).select(networkdays("start", "end").alias("days"))
+
+    assert result["days"].to_list() == [2, 1, -2]
+
+
+def test_networkdays_excludes_holidays_from_list_inputs():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 13)],
+            "end": [date(2026, 4, 15)],
+        }
+    ).select(networkdays("start", "end", holidays=[date(2026, 4, 14)]).alias("days"))
+
+    assert result["days"].to_list() == [2]
+
+
+def test_networkdays_count_first_day_forces_masked_or_holiday_start_into_count():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 11), date(2026, 4, 13), date(2026, 4, 15)],
+            "end": [date(2026, 4, 13), date(2026, 4, 15), date(2026, 4, 13)],
+        }
+    ).select(
+        regular=networkdays("start", "end", holidays=[date(2026, 4, 13)]),
+        forced=networkdays("start", "end", holidays=[date(2026, 4, 13)], count_first_day=True),
+    )
+
+    assert result["regular"].to_list() == [0, 2, -2]
+    assert result["forced"].to_list() == [1, 3, -2]
+
+
+def test_networkdays_accepts_custom_mask():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 13)],
+            "end": [date(2026, 4, 19)],
+        }
+    ).select(networkdays("start", "end", mask=(True, True, True, True, False, False, True)).alias("days"))
+
+    assert result["days"].to_list() == [5]
+
+
+def test_networkdays_accepts_scalar_dates_and_namespace_helpers():
+    frame = pl.DataFrame({"start": [date(2026, 4, 13)], "end": [date(2026, 4, 14)]})
+    lazy_frame = frame.lazy()
+
+    eager = frame.select(frame.de.networkdays("start", date(2026, 4, 14)).alias("days"))
+    lazy = lazy_frame.select(lazy_frame.de.networkdays("start", "end").alias("days")).collect()
+
+    assert eager["days"].to_list() == [2]
+    assert lazy["days"].to_list() == [2]
+
+
+def test_networkdays_returns_null_when_endpoint_is_null():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 13), None],
+            "end": [None, date(2026, 4, 14)],
+        }
+    ).select(networkdays("start", "end").alias("days"))
+
+    assert result["days"].to_list() == [None, None]
+
+
+def test_networkdays_rejects_invalid_mask_length():
+    with pytest.raises(ValueError, match="exactly seven"):
+        networkdays(date(2026, 4, 13), date(2026, 4, 14), mask=(True, False))
+
+
+def test_workday_matches_excel_style_offsets_for_business_and_weekend_starts():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 13), date(2026, 4, 11), date(2026, 4, 13), date(2026, 4, 11)],
+            "days": [1, 1, -1, 0],
+        }
+    ).select(workday("start", "days").alias("target"))
+
+    assert result["target"].to_list() == [
+        date(2026, 4, 14),
+        date(2026, 4, 13),
+        date(2026, 4, 10),
+        date(2026, 4, 13),
+    ]
+
+
+def test_workday_excludes_holidays_from_offsets():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 13)],
+            "days": [2],
+        }
+    ).select(workday("start", "days", holidays=[date(2026, 4, 14)]).alias("target"))
+
+    assert result["target"].to_list() == [date(2026, 4, 16)]
+
+
+def test_workday_count_first_day_allows_start_date_to_be_day_one():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 13), date(2026, 4, 11), date(2026, 4, 13)],
+            "days": [1, 1, 2],
+        }
+    ).select(
+        regular=workday("start", "days", holidays=[date(2026, 4, 13)]),
+        forced=workday("start", "days", holidays=[date(2026, 4, 13)], count_first_day=True),
+    )
+
+    assert result["regular"].to_list() == [
+        date(2026, 4, 14),
+        date(2026, 4, 14),
+        date(2026, 4, 15),
+    ]
+    assert result["forced"].to_list() == [
+        date(2026, 4, 13),
+        date(2026, 4, 11),
+        date(2026, 4, 14),
+    ]
+
+
+def test_workday_accepts_custom_mask_and_namespace_helpers():
+    frame = pl.DataFrame({"start": [date(2026, 4, 17)], "days": [1]})
+    mask = (True, True, True, True, False, False, True)
+
+    eager = frame.select(frame.de.workday("start", "days", mask=mask).alias("target"))
+    lazy = frame.lazy().select(pl.all(), pl.lit(1).alias("x")).select(
+        pl.col("start"),
+        pl.col("days"),
+        frame.lazy().de.workday("start", "days", mask=mask).alias("target"),
+    ).collect()
+
+    assert eager["target"].to_list() == [date(2026, 4, 19)]
+    assert lazy["target"].to_list() == [date(2026, 4, 19)]
+
+
+def test_workday_returns_null_when_input_is_null():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 13), None],
+            "days": [None, 1],
+        }
+    ).select(workday("start", "days").alias("target"))
+
+    assert result["target"].to_list() == [None, None]
 
 
 def test_atomic_write_cleans_temporary_file_and_preserves_target_on_replace_failure(
