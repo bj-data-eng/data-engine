@@ -154,34 +154,52 @@ def _atomic_write_text(path: Path, text: str) -> None:
     temp_path.replace(path)
 
 
+def _atomic_copy_file(source_path: Path, target_path: Path) -> None:
+    """Copy one file into place without replacing the containing directory."""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("wb", dir=target_path.parent, delete=False) as handle:
+        temp_path = Path(handle.name)
+    try:
+        shutil.copy2(source_path, temp_path)
+        temp_path.replace(target_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+
+
 def _mirror_helper_modules(helper_modules_dir: Path, compiled_helper_modules_dir: Path) -> None:
     """Mirror authored helper modules into compiled output as an importable package."""
     if not helper_modules_dir.is_dir():
         if compiled_helper_modules_dir.exists():
             shutil.rmtree(compiled_helper_modules_dir)
         return
-    temp_dir = Path(tempfile.mkdtemp(prefix=f"{compiled_helper_modules_dir.name}_", dir=compiled_helper_modules_dir.parent))
-    shutil.rmtree(temp_dir)
-    shutil.copytree(helper_modules_dir, temp_dir)
-    init_path = temp_dir / "__init__.py"
+    compiled_helper_modules_dir.mkdir(parents=True, exist_ok=True)
+    authored_relative_paths = {
+        path.relative_to(helper_modules_dir)
+        for path in helper_modules_dir.rglob("*")
+    }
+    for relative_path in sorted(authored_relative_paths):
+        source_path = helper_modules_dir / relative_path
+        target_path = compiled_helper_modules_dir / relative_path
+        if source_path.is_dir():
+            target_path.mkdir(parents=True, exist_ok=True)
+            continue
+        _atomic_copy_file(source_path, target_path)
+
+    init_path = compiled_helper_modules_dir / "__init__.py"
     if not init_path.exists():
-        init_path.write_text('"""Authored flow helper modules for flow-module imports."""\n', encoding="utf-8")
-    backup_dir: Path | None = None
-    try:
-        if compiled_helper_modules_dir.exists():
-            backup_dir = Path(tempfile.mkdtemp(prefix=f"{compiled_helper_modules_dir.name}_backup_", dir=compiled_helper_modules_dir.parent))
-            shutil.rmtree(backup_dir)
-            compiled_helper_modules_dir.rename(backup_dir)
-        temp_dir.rename(compiled_helper_modules_dir)
-    except Exception:
-        if temp_dir.exists():
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        if backup_dir is not None and backup_dir.exists() and not compiled_helper_modules_dir.exists():
-            backup_dir.rename(compiled_helper_modules_dir)
-        raise
-    else:
-        if backup_dir is not None and backup_dir.exists():
-            shutil.rmtree(backup_dir, ignore_errors=True)
+        _atomic_write_text(init_path, '"""Authored flow helper modules for flow-module imports."""\n')
+
+    expected_paths = set(authored_relative_paths)
+    expected_paths.add(Path("__init__.py"))
+    for existing_path in sorted(compiled_helper_modules_dir.rglob("*"), key=lambda path: (len(path.parts), str(path)), reverse=True):
+        relative_path = existing_path.relative_to(compiled_helper_modules_dir)
+        if relative_path in expected_paths:
+            continue
+        if existing_path.is_dir():
+            existing_path.rmdir()
+        else:
+            existing_path.unlink()
 
 
 def _validate_unique_authored_flow_module_stems(notebook_paths: list[Path], python_paths: list[Path]) -> None:

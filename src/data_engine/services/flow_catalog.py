@@ -34,6 +34,13 @@ def _flow_interval(flow: Flow) -> str:
     return "-"
 
 
+def _flow_parallelism(flow: Flow) -> str:
+    trigger = flow.trigger
+    if trigger is None:
+        return "1"
+    return str(max(int(getattr(trigger, "max_parallel", 1)), 1))
+
+
 def flow_catalog_entry_from_flow(flow: Flow, *, description: str | None) -> FlowCatalogEntry:
     source_root, target_root = _flow_paths(flow)
     operation_items = tuple(step.label for step in flow.steps)
@@ -49,6 +56,7 @@ def flow_catalog_entry_from_flow(flow: Flow, *, description: str | None) -> Flow
         target_root=target_root,
         mode=mode,
         interval=_flow_interval(flow),
+        parallelism=_flow_parallelism(flow),
         operations=operations,
         operation_items=operation_items,
         state=default_flow_state(mode),
@@ -67,6 +75,7 @@ def _invalid_entry(definition: FlowModuleDefinition, exc: Exception) -> FlowCata
         target_root="(not set)",
         mode="manual",
         interval="-",
+        parallelism="1",
         operations="Unavailable",
         operation_items=(),
         state="invalid",

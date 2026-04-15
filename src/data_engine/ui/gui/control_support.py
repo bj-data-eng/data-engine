@@ -75,6 +75,12 @@ class GuiControlMixin:
     def _finish_daemon_startup(self: "DataEngineWindow", success: bool, error_text: str) -> None:
         present_finish_daemon_startup(self, success, error_text)
 
+    def _finish_control_action(self: "DataEngineWindow", action_name: str, payload: object) -> None:
+        if action_name == "refresh_flows":
+            self.flow_controller.finish_control_action(self, action_name, payload)
+            return
+        self.runtime_controller.finish_control_action(self, action_name, payload)
+
     def _apply_daemon_snapshot(self: "DataEngineWindow", snapshot) -> None:
         present_apply_daemon_snapshot(self, snapshot)
 
@@ -123,32 +129,7 @@ class GuiControlMixin:
         )
 
     def _run_selected_flow(self: "DataEngineWindow") -> None:
-        if not self._has_authored_workspace():
-            self._sync_from_daemon()
-            return
-        card = self.flow_cards.get(self.selected_flow_name or "")
-        result = self.control_application.run_selected_flow(
-            paths=self.workspace_paths,
-            runtime_session=self.runtime_session,
-            selected_flow_name=card.name if card is not None else None,
-            selected_flow_valid=bool(card is not None and card.valid),
-            selected_flow_group=card.group if card is not None else None,
-            selected_flow_group_active=bool(card is not None and self._is_group_active(card.group)),
-            blocked_status_text=self.workspace_control_state.blocked_status_text,
-            timeout=2.0,
-        )
-        if result.error_text is not None:
-            self._show_message_box_later(
-                title="Data Engine",
-                text=result.error_text,
-                tone="error",
-            )
-            return
-        if not result.requested or card is None:
-            return
-        self._append_log_line(f"Starting one-time flow run: {card.name}", flow_name=card.name)
-        if result.sync_after:
-            self._sync_from_daemon()
+        self.runtime_controller.run_selected_flow(self)
 
     def _start_runtime(self: "DataEngineWindow") -> None:
         self.runtime_controller.start_runtime(self)

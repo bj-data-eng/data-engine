@@ -72,14 +72,16 @@ class DaemonRuntimeCommandHandler:
                 service.state.clear_manual_run_reservation(name)
             return {"ok": False, "error": str(exc)}
 
-        stop_event = threading.Event()
+        runtime_stop_event = threading.Event()
+        flow_stop_event = threading.Event()
 
         def _target() -> None:
             try:
                 service.runtime_execution_service.run_manual(
                     flow,
                     runtime_ledger=service.runtime_cache_ledger,
-                    flow_stop_event=stop_event,
+                    runtime_stop_event=runtime_stop_event,
+                    flow_stop_event=flow_stop_event,
                 )
                 service._debug_log(f"manual flow completed name={name}")
             except Exception as exc:
@@ -98,7 +100,12 @@ class DaemonRuntimeCommandHandler:
 
         thread = threading.Thread(target=_target, daemon=True)
         with service._state_lock:
-            service.state.register_manual_run(name, thread=thread, stop_event=stop_event)
+            service.state.register_manual_run(
+                name,
+                thread=thread,
+                runtime_stop_event=runtime_stop_event,
+                flow_stop_event=flow_stop_event,
+            )
         thread.start()
         if wait:
             thread.join()
@@ -168,9 +175,7 @@ class DaemonRuntimeCommandHandler:
                 return {"ok": True}
             service.state.stop_runtime(status="stopping")
             runtime_stop_event = service.state.engine_runtime_stop_event
-            flow_stop_event = service.state.engine_flow_stop_event
         runtime_stop_event.set()
-        flow_stop_event.set()
         return {"ok": True}
 
     def stop_flow(self, name: str) -> dict[str, Any]:
@@ -178,7 +183,7 @@ class DaemonRuntimeCommandHandler:
         if not service.state.workspace_owned:
             return {"ok": False, "error": lease_error_text(service)}
         with service._state_lock:
-            stop_event = service.state.manual_stop_events.get(name)
+            stop_event = service.state.manual_runtime_stop_events.get(name)
         if stop_event is None:
             return {"ok": False, "error": f"Flow {name} is not running."}
         stop_event.set()

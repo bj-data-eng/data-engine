@@ -469,6 +469,32 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border-color: {palette.button_disabled_border};
         color: {palette.button_disabled_text};
     }}
+    QPushButton#flowRunButton[flowRunState="run"] {{
+        background: {palette.button_bg};
+        border: 1px solid {palette.panel_border};
+        color: {palette.text};
+    }}
+    QPushButton#flowRunButton[flowRunState="run"]:hover {{
+        background: {palette.button_hover};
+    }}
+    QPushButton#flowRunButton[flowRunState="run"]:disabled {{
+        background: {palette.button_disabled_bg};
+        border-color: {palette.button_disabled_border};
+        color: {palette.button_disabled_text};
+    }}
+    QPushButton#flowRunButton[flowRunState="stop"] {{
+        background: {palette.engine_stop_bg};
+        border: 1px solid {palette.engine_stop_border};
+        color: #ffffff;
+    }}
+    QPushButton#flowRunButton[flowRunState="stop"]:hover {{
+        background: {palette.engine_stop_hover};
+    }}
+    QPushButton#flowRunButton[flowRunState="stop"]:disabled {{
+        background: {palette.button_disabled_bg};
+        border-color: {palette.button_disabled_border};
+        color: {palette.button_disabled_text};
+    }}
     QPushButton:checked {{
         background: {palette.button_checked_bg};
         border-color: {palette.button_checked_border};

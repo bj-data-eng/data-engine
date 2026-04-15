@@ -24,6 +24,7 @@ class FlowCatalogEntry:
     valid: bool
     category: str
     error: str = ""
+    parallelism: str = "1"
 
 
 class FlowCatalogLike(Protocol):
@@ -43,6 +44,7 @@ class FlowCatalogLike(Protocol):
     valid: bool
     category: str
     error: str
+    parallelism: str
 
 
 def flow_category(mode: str) -> str:

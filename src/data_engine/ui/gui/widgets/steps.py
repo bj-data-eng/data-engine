@@ -13,6 +13,13 @@ if TYPE_CHECKING:
 
 
 def set_operation_cards(window: "DataEngineWindow", operation_items: tuple[str, ...]) -> None:
+    current_operation_items = tuple(row_widgets.operation_name for row_widgets in window.operation_row_widgets)
+    if operation_items and current_operation_items == operation_items:
+        if window.selected_flow_name is not None:
+            window._refresh_operation_buttons(window.selected_flow_name)
+        window._update_operation_scroll_cues()
+        return
+
     for timer in list(window.operation_flash_timers):
         timer.stop()
     window.operation_flash_timers.clear()

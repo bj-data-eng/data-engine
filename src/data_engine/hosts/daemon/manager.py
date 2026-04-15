@@ -102,7 +102,7 @@ class WorkspaceDaemonManager:
             self._last_snapshot = snapshot
             return snapshot
         try:
-            response = daemon_request(self.paths, {"command": "daemon_status"}, timeout=0.5)
+            response = daemon_request(self.paths, {"command": "daemon_status"}, timeout=2.0)
         except DaemonClientError:
             self._sync_misses += 1
             if self._last_snapshot is not None:

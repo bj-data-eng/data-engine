@@ -68,7 +68,7 @@ class OperatorControlApplication:
                 requested=False,
                 status_text=f"{selected_flow_name} is invalid and cannot run.",
             )
-        if selected_flow_group_active or runtime_session.manual_run_active:
+        if selected_flow_group_active:
             return OperatorActionResult(requested=False)
         if not runtime_session.control_available:
             return OperatorActionResult(requested=False, status_text=blocked_status_text)
@@ -128,6 +128,19 @@ class OperatorControlApplication:
         timeout: float = 2.0,
     ) -> OperatorActionResult:
         """Validate and request stop for the engine or selected manual flow."""
+        manual_flow_name = runtime_session.active_manual_runs.get(selected_flow_group)
+        if manual_flow_name is None and len(runtime_session.manual_runs) == 1:
+            manual_flow_name = runtime_session.manual_runs[0].flow_name
+        if manual_flow_name is not None:
+            if not runtime_session.control_available:
+                return OperatorActionResult(requested=False, status_text=blocked_status_text)
+            result = self.runtime_application.stop_flow(paths, name=manual_flow_name, timeout=timeout)
+            if not result.ok:
+                return OperatorActionResult(
+                    requested=False,
+                    error_text=_verbose_action_error(f"stop {manual_flow_name}", result.error),
+                )
+            return OperatorActionResult(requested=True, sync_after=True, status_text="Stopping selected flow...")
         if runtime_session.runtime_active:
             result = self.runtime_application.stop_engine(paths, timeout=timeout)
             if not result.ok:
@@ -136,19 +149,6 @@ class OperatorControlApplication:
                     error_text=_verbose_action_error("stop the engine", result.error),
                 )
             return OperatorActionResult(requested=True, sync_after=True, status_text="Stopping engine...")
-        if runtime_session.manual_run_active:
-            if not runtime_session.control_available:
-                return OperatorActionResult(requested=False, status_text=blocked_status_text)
-            flow_name = runtime_session.active_manual_runs.get(selected_flow_group)
-            if flow_name is None:
-                return OperatorActionResult(requested=False)
-            result = self.runtime_application.stop_flow(paths, name=flow_name, timeout=timeout)
-            if not result.ok:
-                return OperatorActionResult(
-                    requested=False,
-                    error_text=_verbose_action_error(f"stop {flow_name}", result.error),
-                )
-            return OperatorActionResult(requested=True, sync_after=True, status_text="Stopping selected flow...")
         return OperatorActionResult(requested=False)
 
     def request_control(self, daemon_manager: WorkspaceDaemonManager) -> OperatorActionResult:

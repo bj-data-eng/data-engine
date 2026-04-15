@@ -483,6 +483,70 @@ def test_directory_poll_can_run_source_files_in_parallel_continuously(tmp_path):
     assert peak >= 2
 
 
+def test_runtime_stop_does_not_start_queued_source_jobs(tmp_path):
+    source_dir = tmp_path / "input"
+    source_dir.mkdir()
+    for index in range(4):
+        pl.DataFrame({"value": [index]}).write_parquet(source_dir / f"{index}.parquet")
+
+    runtime_stop = threading.Event()
+    release = threading.Event()
+    started_sources: list[str] = []
+    finished_sources: list[str] = []
+    lock = threading.Lock()
+
+    def read_source(context):
+        name = context.source.path.name
+        with lock:
+            started_sources.append(name)
+            if len(started_sources) == 2:
+                runtime_stop.set()
+        release.wait(timeout=1.0)
+        with lock:
+            finished_sources.append(name)
+        return pl.read_parquet(context.source.path)
+
+    runtime = FlowRuntime(
+        (
+            Flow(name="parallel_poll_stop_boundary", group="Claims")
+            .watch(mode="poll", source=source_dir, interval="5s", extensions=[".parquet"], max_parallel=2)
+            .step(read_source),
+        ),
+        continuous=False,
+        runtime_stop_event=runtime_stop,
+    )
+
+    thread = threading.Thread(target=lambda: release.wait(timeout=1.0) or None, daemon=True)
+    thread.start()
+    try:
+        results_holder: list[object] = []
+        errors: Queue[Exception] = Queue()
+
+        def _run():
+            try:
+                results_holder.extend(runtime.run())
+            except Exception as exc:  # pragma: no cover - defensive test capture
+                errors.put(exc)
+
+        runner = threading.Thread(target=_run, daemon=True)
+        runner.start()
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            with lock:
+                if len(started_sources) >= 2:
+                    break
+            time.sleep(0.01)
+        release.set()
+        runner.join(timeout=2.0)
+
+        assert errors.empty()
+        assert sorted(started_sources) == sorted(finished_sources)
+        assert len(started_sources) == 2
+        assert len(results_holder) == 2
+    finally:
+        release.set()
+
+
 def test_scheduled_flow_can_create_duckdb_in_missing_output_directory(tmp_path):
     source_dir = tmp_path / "input"
     target_file = tmp_path / "output" / "claims_summary" / "workflow_summary.parquet"

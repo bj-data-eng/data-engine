@@ -30,6 +30,7 @@ class QtFlowCard:
     valid: bool
     category: str
     error: str = ""
+    parallelism: str = "1"
 
 def qt_flow_card_from_entry(entry: FlowCatalogEntry) -> QtFlowCard:
     """Map one catalog entry into a shared surface card."""
@@ -42,6 +43,7 @@ def qt_flow_card_from_entry(entry: FlowCatalogEntry) -> QtFlowCard:
         target_root=entry.target_root,
         mode=entry.mode,
         interval=entry.interval,
+        parallelism=entry.parallelism,
         operations=entry.operations,
         operation_items=entry.operation_items,
         state=entry.state,
@@ -62,6 +64,7 @@ def flow_catalog_entry_from_qt_card(card: QtFlowCard) -> FlowCatalogEntry:
         target_root=card.target_root,
         mode=card.mode,
         interval=card.interval,
+        parallelism=card.parallelism,
         operations=card.operations,
         operation_items=card.operation_items,
         state=card.state,

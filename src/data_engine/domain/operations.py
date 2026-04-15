@@ -59,6 +59,19 @@ class OperationFlowState:
         """Return one row state by operation name."""
         return self.rows.get(operation_name)
 
+    @property
+    def has_running_rows(self) -> bool:
+        """Return whether any tracked step row is currently running."""
+        return any(row.status == "running" for row in self.rows.values())
+
+    @property
+    def has_observed_activity(self) -> bool:
+        """Return whether any tracked step row has observed runtime activity."""
+        return any(
+            row.status != "idle" or row.elapsed_seconds is not None or row.started_at is not None
+            for row in self.rows.values()
+        )
+
     def apply_event(
         self,
         operation_names: tuple[str, ...],

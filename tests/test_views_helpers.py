@@ -333,6 +333,7 @@ def test_action_state_builders_cover_control_and_runtime_branches():
     tui = TuiActionState.from_context(context)
 
     assert gui.flow_run_label == "Running..."
+    assert gui.flow_run_state == "run"
     assert gui.flow_run_enabled is False
     assert gui.engine_label == "Stop Engine"
     assert gui.refresh_enabled is False
@@ -360,6 +361,7 @@ def test_action_state_builders_cover_idle_control_available_branches():
     tui = TuiActionState.from_context(context)
 
     assert gui.flow_run_enabled is True
+    assert gui.flow_run_state == "run"
     assert gui.engine_enabled is False
     assert gui.engine_label == "Start Engine"
     assert gui.request_control_enabled is True
@@ -384,6 +386,7 @@ def test_action_state_builders_cover_no_selection_idle_branches():
     tui = TuiActionState.from_context(context)
 
     assert gui.flow_run_label == "Run Once"
+    assert gui.flow_run_state == "run"
     assert gui.flow_run_enabled is False
     assert gui.flow_config_enabled is False
     assert gui.clear_flow_log_enabled is False

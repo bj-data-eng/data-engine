@@ -342,6 +342,8 @@ def build_action_bar(window: "DataEngineWindow") -> QWidget:
 
     controls_group = QFrame()
     controls_group.setObjectName("actionBarGroup")
+    window.action_bar_controls_group = controls_group
+    controls_group.setVisible(False)
     controls_row = QHBoxLayout(controls_group)
     controls_row.setContentsMargins(10, 8, 10, 8)
     controls_row.setSpacing(6)
@@ -439,6 +441,7 @@ def build_center_panel(window: "DataEngineWindow") -> QWidget:
     title_row.setSpacing(6)
     window.flow_run_button = QPushButton("Run Once")
     window.flow_run_button.setObjectName("flowRunButton")
+    window.flow_run_button.setProperty("flowRunState", "run")
     window.flow_run_button.clicked.connect(window._run_selected_flow)
     title_row.addWidget(window.flow_run_button, 0, Qt.AlignmentFlag.AlignTop)
     window.flow_config_button = QPushButton("View Config")

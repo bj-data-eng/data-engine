@@ -55,10 +55,12 @@ class RuntimeExecutionService:
         flow: "CoreFlow",
         *,
         runtime_ledger: RuntimeCacheStore | None = None,
+        runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:
         """Run one flow as a one-shot execution."""
         return self._engine(
+            runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             runtime_ledger=runtime_ledger,
         ).run_once(flow)
@@ -69,10 +71,12 @@ class RuntimeExecutionService:
         source_path: str,
         *,
         runtime_ledger: RuntimeCacheStore | None = None,
+        runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:
         """Run one flow for a specific source path."""
         return self._engine(
+            runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             runtime_ledger=runtime_ledger,
         ).run_source(flow, source_path)
@@ -82,10 +86,12 @@ class RuntimeExecutionService:
         flow: "CoreFlow",
         *,
         runtime_ledger: RuntimeCacheStore | None = None,
+        runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
     ) -> object:
         """Run one flow once in batch mode."""
         return self._engine(
+            runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             runtime_ledger=runtime_ledger,
         ).run_batch(flow)
@@ -107,12 +113,14 @@ class RuntimeExecutionService:
         flow: "CoreFlow",
         *,
         runtime_ledger: RuntimeCacheStore,
-        flow_stop_event: Event,
+        runtime_stop_event: Event,
+        flow_stop_event: Event | None = None,
     ) -> object:
         """Run one flow as a manual one-shot execution."""
         return self.run_once(
             flow,
             runtime_ledger=runtime_ledger,
+            runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
         )
 

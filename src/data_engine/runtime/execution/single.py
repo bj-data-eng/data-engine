@@ -153,6 +153,8 @@ class FlowRuntime:
     def _run_once_all(self) -> list[FlowContext]:
         results: list[FlowContext] = []
         for flow in self.flows:
+            if self.runtime_stop_event is not None and self.runtime_stop_event.is_set():
+                break
             jobs: list[QueuedRunJob] = []
             for source_path in self.polling.startup_sources(flow):
                 batch_signatures = ()
@@ -184,24 +186,49 @@ class FlowRuntime:
             return []
         max_parallel = self.max_parallel_for_flow(jobs[0].flow)
         if max_parallel <= 1 or len(jobs) <= 1:
-            return [
-                self.run_executor.run_one(job.flow, job.source_path, batch_signatures=job.batch_signatures)
-                for job in jobs
-            ]
+            results: list[FlowContext] = []
+            for job in jobs:
+                if self.runtime_stop_event is not None and self.runtime_stop_event.is_set():
+                    break
+                results.append(
+                    self.run_executor.run_one(job.flow, job.source_path, batch_signatures=job.batch_signatures)
+                )
+            return results
         results_by_index: dict[int, FlowContext] = {}
+        job_iter = iter(enumerate(jobs))
         with ThreadPoolExecutor(max_workers=min(max_parallel, len(jobs))) as executor:
-            future_to_index: dict[Future[FlowContext], int] = {
-                executor.submit(self.run_executor.run_one, job.flow, job.source_path, batch_signatures=job.batch_signatures): index
-                for index, job in enumerate(jobs)
-            }
+            future_to_index: dict[Future[FlowContext], int] = {}
+
+            def _submit_next_job() -> bool:
+                if self.runtime_stop_event is not None and self.runtime_stop_event.is_set():
+                    return False
+                try:
+                    index, job = next(job_iter)
+                except StopIteration:
+                    return False
+                future = executor.submit(
+                    self.run_executor.run_one,
+                    job.flow,
+                    job.source_path,
+                    batch_signatures=job.batch_signatures,
+                )
+                future_to_index[future] = index
+                return True
+
+            for _ in range(min(max_parallel, len(jobs))):
+                if not _submit_next_job():
+                    break
             try:
-                for future in as_completed(future_to_index):
-                    results_by_index[future_to_index[future]] = future.result()
+                while future_to_index:
+                    future = next(as_completed(tuple(future_to_index)))
+                    index = future_to_index.pop(future)
+                    results_by_index[index] = future.result()
+                    _submit_next_job()
             except Exception:
                 for future in future_to_index:
                     future.cancel()
                 raise
-        return [results_by_index[index] for index in range(len(jobs))]
+        return [results_by_index[index] for index in range(len(results_by_index))]
 
     def dispatch_queued_jobs(
         self,
@@ -214,6 +241,8 @@ class FlowRuntime:
     ) -> None:
         """Submit queued source jobs up to each flow's bounded concurrency and drain completions."""
         self._drain_completed_jobs(pending_futures, results=results)
+        if self.runtime_stop_event is not None and self.runtime_stop_event.is_set():
+            return
         if queue:
             queue_length = len(queue)
             for _ in range(queue_length):

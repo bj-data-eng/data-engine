@@ -186,6 +186,35 @@ def test_compile_stale_flow_module_notebooks_mirrors_flow_helpers_package(tmp_pa
     assert (compiled_flow_modules_dir / "flow_helpers" / "labels.py").read_text(encoding="utf-8") == "FLOW_LABEL = 'Helper Demo'\n"
 
 
+def test_compile_stale_flow_module_notebooks_updates_flow_helpers_in_place_without_renaming_package_dir(tmp_path, monkeypatch):
+    flow_modules_dir = tmp_path / "workspace" / "flow_modules"
+    compiled_flow_modules_dir = resolve_workspace_paths(workspace_root=tmp_path / "workspace").compiled_flow_modules_dir
+    helper_modules_dir = flow_modules_dir / "flow_helpers"
+    helper_modules_dir.mkdir(parents=True)
+    compiled_helper_modules_dir = compiled_flow_modules_dir / "flow_helpers"
+    compiled_helper_modules_dir.mkdir(parents=True)
+
+    (helper_modules_dir / "labels.py").write_text("FLOW_LABEL = 'Updated Demo'\n", encoding="utf-8")
+    (compiled_helper_modules_dir / "labels.py").write_text("FLOW_LABEL = 'Original Demo'\n", encoding="utf-8")
+    (compiled_helper_modules_dir / "orphan.py").write_text("ORPHAN = True\n", encoding="utf-8")
+    (compiled_helper_modules_dir / "__init__.py").write_text('"""Existing helpers."""\n', encoding="utf-8")
+
+    original_rename = type(compiled_helper_modules_dir).rename
+
+    def _guarded_rename(path, target):
+        if path == compiled_helper_modules_dir:
+            raise AssertionError("flow_helpers package directory should not be renamed during mirroring")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(type(compiled_helper_modules_dir), "rename", _guarded_rename)
+
+    compile_stale_flow_module_notebooks(data_root=tmp_path / "workspace")
+
+    assert compiled_helper_modules_dir.exists() is True
+    assert (compiled_helper_modules_dir / "labels.py").read_text(encoding="utf-8") == "FLOW_LABEL = 'Updated Demo'\n"
+    assert (compiled_helper_modules_dir / "orphan.py").exists() is False
+
+
 def test_compile_stale_flow_module_notebooks_rejects_duplicate_notebook_and_python_stems(tmp_path):
     flow_modules_dir = tmp_path / "workspace" / "flow_modules"
     flow_modules_dir.mkdir(parents=True)

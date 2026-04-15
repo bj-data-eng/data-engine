@@ -57,12 +57,13 @@ class RuntimeSnapshotPresentation:
 
     operation_tracker: OperationSessionState
     flow_states: dict[str, str]
+    active_runtime_flow_names: tuple[str, ...] = ()
 
     def signature_for(self, runtime_session: RuntimeSessionState) -> tuple[object, ...]:
         """Return a stable signature for render-diff decisions."""
         return (
             tuple(sorted(self.flow_states.items())),
-            tuple(sorted(runtime_session.active_runtime_flow_names)),
+            tuple(sorted(self.active_runtime_flow_names or runtime_session.active_runtime_flow_names)),
             tuple(sorted(runtime_session.active_manual_runs.items())),
             runtime_session.workspace_owned,
             runtime_session.leased_by_machine_id,
@@ -133,7 +134,7 @@ class RuntimeApplication:
     ) -> RuntimeSyncState:
         """Return normalized daemon/runtime state for one host surface."""
         snapshot = self.daemon_state_service.sync(daemon_manager)
-        if snapshot.source == "lease":
+        if snapshot.source in {"lease", "cached"} and not snapshot.workspace_owned:
             self.shared_state_service.hydrate_local_runtime(paths, runtime_ledger)
         daemon_status = DaemonStatusState.from_snapshot(snapshot)
         return RuntimeSyncState(
@@ -184,7 +185,18 @@ class RuntimeApplication:
             )
         for flow_name in list(states):
             tracker = tracker.normalize_completed(flow_name)
-        for flow_name in runtime_session.active_runtime_flow_names:
+        active_runtime_flow_names = runtime_session.active_runtime_flow_names
+        if runtime_session.runtime_stopping:
+            active_runtime_flow_names = tuple(
+                flow_name
+                for flow_name in runtime_session.active_runtime_flow_names
+                if (
+                    (flow_state := tracker.state_for(flow_name)) is None
+                    or not flow_state.has_observed_activity
+                    or flow_state.has_running_rows
+                )
+            )
+        for flow_name in active_runtime_flow_names:
             card = cards_by_name.get(flow_name)
             if card is None or states.get(flow_name) == "failed":
                 continue
@@ -199,6 +211,7 @@ class RuntimeApplication:
         return RuntimeSnapshotPresentation(
             operation_tracker=tracker,
             flow_states=states,
+            active_runtime_flow_names=active_runtime_flow_names,
         )
 
     def plan_flow_state_refresh(

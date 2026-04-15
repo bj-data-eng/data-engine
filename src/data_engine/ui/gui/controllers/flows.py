@@ -10,6 +10,8 @@ from data_engine.application import FlowCatalogApplication, WorkspaceSessionAppl
 from data_engine.services import LogService
 from data_engine.services.reset import ResetService
 from data_engine.platform.identity import APP_DISPLAY_NAME
+from data_engine.ui.gui.helpers import start_worker_thread
+from data_engine.domain import WorkspaceControlState
 from data_engine.views import GuiActionState, QtFlowCard, surface_control_status_text
 
 if TYPE_CHECKING:
@@ -165,27 +167,56 @@ class _GuiWorkspaceCatalogController:
         QTimer.singleShot(0, _flush_pending_switch)
 
     def refresh_flows_requested(self, window: "DataEngineWindow", presentation: "_GuiFlowPresentationController") -> None:
-        result = window.control_application.refresh_flows(
-            paths=window.workspace_paths,
-            runtime_session=window.runtime_session,
-            has_authored_workspace=window._has_authored_workspace(),
-            timeout=5.0,
+        if "refresh_flows" in window._pending_control_actions or window.ui_closing:
+            return
+        window._pending_control_actions.add("refresh_flows")
+        presentation.refresh_action_buttons(window)
+        start_worker_thread(
+            window,
+            target=self._refresh_flows_worker,
+            args=(
+                window,
+                {
+                    "paths": window.workspace_paths,
+                    "runtime_session": window.runtime_session,
+                    "has_authored_workspace": window._has_authored_workspace(),
+                    "timeout": 5.0,
+                },
+            ),
         )
-        if result.error_text is not None:
+
+    def _refresh_flows_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
+        result = window.control_application.refresh_flows(**action_kwargs)
+        if window.ui_closing:
+            return
+        try:
+            window.signals.control_action_finished.emit("refresh_flows", result)
+        except RuntimeError:
+            pass
+
+    def finish_control_action(self, window: "DataEngineWindow", action_name: str, payload: object, presentation: "_GuiFlowPresentationController") -> None:
+        if action_name != "refresh_flows":
+            return
+        window._pending_control_actions.discard(action_name)
+        presentation.refresh_action_buttons(window)
+        if window.ui_closing:
+            return
+        result = payload
+        if getattr(result, "error_text", None) is not None:
             window._show_message_box_later(
                 title=APP_DISPLAY_NAME,
                 text=result.error_text,
                 tone="error",
             )
             return
-        if result.reload_catalog:
+        if getattr(result, "reload_catalog", False):
             self.reload_workspace_options(window)
             self.load_flows(window, presentation)
-        if result.sync_after:
+        if getattr(result, "sync_after", False):
             window._sync_from_daemon()
-        if result.status_text is not None and window.flow_cards:
+        if getattr(result, "status_text", None) is not None and window.flow_cards:
             window._append_log_line(result.status_text)
-        if result.warning_text is not None:
+        if getattr(result, "warning_text", None) is not None:
             window._append_log_line(f"Flow refresh warning: {result.warning_text}")
             if window.flow_cards:
                 window._show_message_box_later(
@@ -273,8 +304,70 @@ class _GuiFlowPresentationController:
             workspace_available=window._has_authored_workspace(),
         )
         action_state = GuiActionState.from_context(action_context)
+        selected_manual_running = bool(
+            card is not None
+            and card.name == window.runtime_session.manual_flow_name_for_group(card.group)
+            and not window.runtime_session.runtime_active
+        )
+        if "run_selected_flow" in window._pending_control_actions:
+            action_state = GuiActionState(
+                flow_run_label=action_state.flow_run_label,
+                flow_run_state=action_state.flow_run_state,
+                flow_run_enabled=False,
+                flow_config_enabled=action_state.flow_config_enabled,
+                engine_enabled=action_state.engine_enabled,
+                engine_label=action_state.engine_label,
+                engine_state=action_state.engine_state,
+                refresh_enabled=action_state.refresh_enabled,
+                clear_flow_log_enabled=action_state.clear_flow_log_enabled,
+                request_control_visible=action_state.request_control_visible,
+                request_control_enabled=action_state.request_control_enabled,
+            )
+        if "stop_pipeline" in window._pending_control_actions and selected_manual_running:
+            action_state = GuiActionState(
+                flow_run_label="Stopping...",
+                flow_run_state="stop",
+                flow_run_enabled=False,
+                flow_config_enabled=action_state.flow_config_enabled,
+                engine_enabled=action_state.engine_enabled,
+                engine_label=action_state.engine_label,
+                engine_state=action_state.engine_state,
+                refresh_enabled=action_state.refresh_enabled,
+                clear_flow_log_enabled=action_state.clear_flow_log_enabled,
+                request_control_visible=action_state.request_control_visible,
+                request_control_enabled=action_state.request_control_enabled,
+            )
+        if {"start_runtime", "stop_runtime", "stop_pipeline"} & window._pending_control_actions:
+            action_state = GuiActionState(
+                flow_run_label=action_state.flow_run_label,
+                flow_run_state=action_state.flow_run_state,
+                flow_run_enabled=action_state.flow_run_enabled,
+                flow_config_enabled=action_state.flow_config_enabled,
+                engine_enabled=False,
+                engine_label=action_state.engine_label,
+                engine_state=action_state.engine_state,
+                refresh_enabled=action_state.refresh_enabled,
+                clear_flow_log_enabled=action_state.clear_flow_log_enabled,
+                request_control_visible=action_state.request_control_visible,
+                request_control_enabled=action_state.request_control_enabled,
+            )
+        if "refresh_flows" in window._pending_control_actions:
+            action_state = GuiActionState(
+                flow_run_label=action_state.flow_run_label,
+                flow_run_state=action_state.flow_run_state,
+                flow_run_enabled=action_state.flow_run_enabled,
+                flow_config_enabled=action_state.flow_config_enabled,
+                engine_enabled=action_state.engine_enabled,
+                engine_label=action_state.engine_label,
+                engine_state=action_state.engine_state,
+                refresh_enabled=False,
+                clear_flow_log_enabled=action_state.clear_flow_log_enabled,
+                request_control_visible=action_state.request_control_visible,
+                request_control_enabled=action_state.request_control_enabled,
+            )
         window.flow_run_button.setText(action_state.flow_run_label)
         window.flow_run_button.setEnabled(action_state.flow_run_enabled)
+        window.flow_run_button.setProperty("flowRunState", action_state.flow_run_state)
         window.flow_config_button.setEnabled(action_state.flow_config_enabled)
         window.engine_button.setEnabled(action_state.engine_enabled)
         window.engine_button.setText(action_state.engine_label)
@@ -290,14 +383,19 @@ class _GuiFlowPresentationController:
         style.unpolish(window.engine_button)
         style.polish(window.engine_button)
         window.engine_button.update()
+        flow_run_style = window.flow_run_button.style()
+        flow_run_style.unpolish(window.flow_run_button)
+        flow_run_style.polish(window.flow_run_button)
+        window.flow_run_button.update()
 
     def refresh_lease_status(self, window: "DataEngineWindow") -> None:
-        snapshot = window.daemon_state_service.sync(window.runtime_binding.daemon_manager)
-        window.workspace_control_state = window.daemon_state_service.control_state(
-            window.runtime_binding.daemon_manager,
-            snapshot,
-            daemon_startup_in_progress=window._daemon_startup_in_progress,
-        )
+        if window.workspace_control_state == WorkspaceControlState.empty():
+            snapshot = window.daemon_state_service.sync(window.runtime_binding.daemon_manager)
+            window.workspace_control_state = window.daemon_state_service.control_state(
+                window.runtime_binding.daemon_manager,
+                snapshot,
+                daemon_startup_in_progress=window._daemon_startup_in_progress,
+            )
         status_text = surface_control_status_text(
             window.workspace_control_state.control_status_text,
             empty_flow_message=window.empty_flow_message,
@@ -410,6 +508,10 @@ class _GuiFlowPresentationController:
                 tone="error",
             )
             return
+        window.runtime_binding_service.invalidate_flow_history(
+            window.runtime_binding,
+            flow_name=window.selected_flow_name,
+        )
         window._rebuild_runtime_snapshot()
 
 
@@ -478,6 +580,9 @@ class GuiFlowController:
 
     def refresh_flows_requested(self, window: "DataEngineWindow") -> None:
         self.workspace.refresh_flows_requested(window, self.presentation)
+
+    def finish_control_action(self, window: "DataEngineWindow", action_name: str, payload: object) -> None:
+        self.workspace.finish_control_action(window, action_name, payload, self.presentation)
 
     def clear_logs(self, window: "DataEngineWindow") -> None:
         self.presentation.clear_logs(window)

@@ -225,7 +225,8 @@ def test_daemon_host_state_transitions_cover_core_mutators():
     flow_stop_event = threading.Event()
     engine_thread = threading.Thread(target=lambda: None)
     manual_thread = threading.Thread(target=lambda: None)
-    manual_stop_event = threading.Event()
+    manual_runtime_stop_event = threading.Event()
+    manual_flow_stop_event = threading.Event()
 
     assert state.status == "starting"
     assert state.workspace_owned is False
@@ -272,12 +273,19 @@ def test_daemon_host_state_transitions_cover_core_mutators():
     assert state.engine_flow_stop_event is flow_stop_event
     assert state.engine_thread is engine_thread
 
-    state.register_manual_run("demo", thread=manual_thread, stop_event=manual_stop_event)
+    state.register_manual_run(
+        "demo",
+        thread=manual_thread,
+        runtime_stop_event=manual_runtime_stop_event,
+        flow_stop_event=manual_flow_stop_event,
+    )
     assert state.manual_run_threads["demo"] is manual_thread
-    assert state.manual_stop_events["demo"] is manual_stop_event
+    assert state.manual_runtime_stop_events["demo"] is manual_runtime_stop_event
+    assert state.manual_flow_stop_events["demo"] is manual_flow_stop_event
     state.unregister_manual_run("demo")
     assert state.manual_run_threads == {}
-    assert state.manual_stop_events == {}
+    assert state.manual_runtime_stop_events == {}
+    assert state.manual_flow_stop_events == {}
 
     state.set_listener(object())
     assert state.listener is not None
@@ -342,7 +350,8 @@ def test_stop_active_work_signals_running_threads_and_resets_runtime_state():
             self.last_status = None
             self.engine_runtime_stop_event = threading.Event()
             self.engine_flow_stop_event = threading.Event()
-            self.manual_stop_events = {"manual": threading.Event()}
+            self.manual_runtime_stop_events = {"manual": threading.Event()}
+            self.manual_flow_stop_events = {"manual": threading.Event()}
             self.engine_thread = None
             self.manual_run_threads = {}
 
@@ -361,7 +370,7 @@ def test_stop_active_work_signals_running_threads_and_resets_runtime_state():
             self.state.engine_runtime_stop_event.wait(timeout=1.0)
 
         def _wait_for_manual_stop(self) -> None:
-            self.state.manual_stop_events["manual"].wait(timeout=1.0)
+            self.state.manual_runtime_stop_events["manual"].wait(timeout=1.0)
 
     service = _Service()
     service.state.engine_thread.start()
@@ -371,7 +380,8 @@ def test_stop_active_work_signals_running_threads_and_resets_runtime_state():
 
     assert service.state.engine_runtime_stop_event.is_set() is True
     assert service.state.engine_flow_stop_event.is_set() is True
-    assert service.state.manual_stop_events["manual"].is_set() is True
+    assert service.state.manual_runtime_stop_events["manual"].is_set() is True
+    assert service.state.manual_flow_stop_events["manual"].is_set() is True
     assert service.state.engine_thread.is_alive() is False
     assert service.state.manual_run_threads["manual"].is_alive() is False
     assert service.state.end_runtime_calls == 1
@@ -559,6 +569,101 @@ def test_serve_forever_processes_one_command_then_shuts_down(tmp_path, monkeypat
 
     assert service.initialize_calls == 1
     assert service.handle_calls == [{"command": "daemon_ping"}]
+    assert service.shutdown_calls == 1
+
+
+def test_serve_forever_handles_second_request_while_first_is_still_running(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    first_started = threading.Event()
+    release_first = threading.Event()
+    second_handled = threading.Event()
+
+    class _Connection:
+        def __init__(self, command: str) -> None:
+            self.command = command
+            self.sent_payloads: list[bytes] = []
+
+        def recv_bytes(self) -> bytes:
+            return _encode_message({"command": self.command})
+
+        def send_bytes(self, payload: bytes) -> None:
+            self.sent_payloads.append(payload)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Listener:
+        def __init__(self, *args, **kwargs) -> None:
+            self._connections = [_Connection("run_flow"), _Connection("daemon_status")]
+
+        def accept(self):
+            if self._connections:
+                return self._connections.pop(0)
+            while not service.host.shutdown_event.wait(0.01):
+                continue
+            raise OSError("listener closed")
+
+        def close(self):
+            return None
+
+    class _Service:
+        def __init__(self, paths) -> None:
+            self.paths = paths
+            self.initialize_calls = 0
+            self.shutdown_calls = 0
+            self.state = type("_State", (), {"checkpoint_thread": None})()
+            self.host = type(
+                "_Host",
+                (),
+                {"shutdown_event": threading.Event(), "listener": None},
+            )()
+
+        def initialize(self) -> None:
+            self.initialize_calls += 1
+
+        def _checkpoint_loop(self) -> None:
+            return None
+
+        def _debug_log(self, message: str) -> None:
+            del message
+
+        def _handle_command(self, payload):
+            command = payload.get("command")
+            if command == "run_flow":
+                first_started.set()
+                release_first.wait(timeout=1.0)
+                return {"ok": True, "command": command}
+            if command == "daemon_status":
+                second_handled.set()
+                self.host.shutdown_event.set()
+                return {"ok": True, "command": command}
+            return {"ok": True, "command": command}
+
+        def _shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+    service = _Service(paths)
+    monkeypatch.setattr("data_engine.hosts.daemon.server.Listener", _Listener)
+
+    server_thread = threading.Thread(target=serve_forever, args=(service,), daemon=True)
+    server_thread.start()
+    try:
+        assert first_started.wait(timeout=1.0) is True
+        assert second_handled.wait(timeout=1.0) is True
+    finally:
+        release_first.set()
+        service.host.shutdown_event.set()
+        server_thread.join(timeout=1.0)
+
+    assert service.initialize_calls == 1
     assert service.shutdown_calls == 1
 
 
@@ -1108,8 +1213,8 @@ def test_run_flow_rejects_second_manual_run_in_same_group(tmp_path, monkeypatch)
     release_gate = threading.Event()
     started = threading.Event()
 
-    def _run_manual(flow, *, runtime_ledger, flow_stop_event):
-        del flow, runtime_ledger, flow_stop_event
+    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event):
+        del flow, runtime_ledger, runtime_stop_event, flow_stop_event
         started.set()
         release_gate.wait(timeout=1.0)
 
@@ -1140,10 +1245,10 @@ def test_control_handoff_stops_in_flight_manual_run(tmp_path, monkeypatch):
     stop_seen = threading.Event()
     release_gate = threading.Event()
 
-    def _run_manual(flow, *, runtime_ledger, flow_stop_event):
+    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event):
         del flow, runtime_ledger
-        flow_stop_event.wait(timeout=1.0)
-        if flow_stop_event.is_set():
+        runtime_stop_event.wait(timeout=1.0)
+        if runtime_stop_event.is_set():
             stop_seen.set()
         release_gate.wait(timeout=1.0)
 
@@ -1337,8 +1442,8 @@ def test_run_flow_rejects_duplicate_start_while_first_start_is_loading(tmp_path,
         release_load.wait(timeout=1.0)
         return Flow(name="demo", group="Demo").step(lambda context: 1, label="Emit Value")
 
-    def _run_manual(flow, *, runtime_ledger, flow_stop_event):
-        del flow, runtime_ledger, flow_stop_event
+    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event):
+        del flow, runtime_ledger, runtime_stop_event, flow_stop_event
         execution_started.set()
 
     monkeypatch.setattr(service.flow_execution_service, "load_flow", _load_flow)
@@ -1480,6 +1585,32 @@ def test_start_engine_coalesces_duplicate_start_while_first_start_is_loading(tmp
         assert load_calls == [("demo_poll",)]
     finally:
         release_load.set()
+        service._shutdown()  # noqa: SLF001
+
+
+def test_stop_engine_requests_graceful_runtime_stop_without_flow_interrupt(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        with service._state_lock:
+            service.state.runtime_active = True
+            service.state.runtime_stopping = False
+            service.state.engine_runtime_stop_event.clear()
+            service.state.engine_flow_stop_event.clear()
+
+        response = service._handle_command({"command": "stop_engine"})  # noqa: SLF001
+
+        assert response["ok"] is True
+        assert service.state.engine_runtime_stop_event.is_set() is True
+        assert service.state.engine_flow_stop_event.is_set() is False
+        assert service.state.runtime_stopping is True
+    finally:
         service._shutdown()  # noqa: SLF001
 
 

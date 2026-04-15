@@ -244,6 +244,11 @@ class WorkspaceRuntimeBindingService:
         """Reload the binding log store from its runtime cache store."""
         self.log_service.reload(binding.log_store, binding.runtime_cache_ledger)
 
+    def invalidate_flow_history(self, binding: WorkspaceRuntimeBinding, *, flow_name: str) -> None:
+        """Drop one flow's cached logs and derived step-output state after destructive resets."""
+        self.log_service.clear_flow(binding.log_store, flow_name)
+        self._step_output_cache.pop(id(binding), None)
+
     def rebuild_step_outputs(
         self,
         binding: WorkspaceRuntimeBinding,

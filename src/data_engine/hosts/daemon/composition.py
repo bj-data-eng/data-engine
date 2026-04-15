@@ -103,7 +103,8 @@ class DaemonHostState:
     engine_flow_stop_event: threading.Event
     pending_manual_run_names: set[str]
     manual_run_threads: dict[str, threading.Thread]
-    manual_stop_events: dict[str, threading.Event]
+    manual_runtime_stop_events: dict[str, threading.Event]
+    manual_flow_stop_events: dict[str, threading.Event]
     shutdown_event: threading.Event
     checkpoint_thread: threading.Thread | None
     consecutive_checkpoint_failures: int
@@ -125,7 +126,8 @@ class DaemonHostState:
             engine_flow_stop_event=threading.Event(),
             pending_manual_run_names=set(),
             manual_run_threads={},
-            manual_stop_events={},
+            manual_runtime_stop_events={},
+            manual_flow_stop_events={},
             shutdown_event=threading.Event(),
             checkpoint_thread=None,
             consecutive_checkpoint_failures=0,
@@ -219,17 +221,26 @@ class DaemonHostState:
         """Clear one in-progress manual run reservation."""
         self.pending_manual_run_names.discard(name)
 
-    def register_manual_run(self, name: str, *, thread: threading.Thread, stop_event: threading.Event) -> None:
-        """Register one manual run and its stop signal."""
+    def register_manual_run(
+        self,
+        name: str,
+        *,
+        thread: threading.Thread,
+        runtime_stop_event: threading.Event,
+        flow_stop_event: threading.Event,
+    ) -> None:
+        """Register one manual run and its graceful and hard stop signals."""
         self.pending_manual_run_names.discard(name)
         self.manual_run_threads[name] = thread
-        self.manual_stop_events[name] = stop_event
+        self.manual_runtime_stop_events[name] = runtime_stop_event
+        self.manual_flow_stop_events[name] = flow_stop_event
 
     def unregister_manual_run(self, name: str) -> None:
         """Remove one completed manual run."""
         self.pending_manual_run_names.discard(name)
         self.manual_run_threads.pop(name, None)
-        self.manual_stop_events.pop(name, None)
+        self.manual_runtime_stop_events.pop(name, None)
+        self.manual_flow_stop_events.pop(name, None)
 
     def set_listener(self, listener: object | None) -> None:
         """Update the active listener object."""

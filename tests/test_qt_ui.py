@@ -361,10 +361,14 @@ class _FakeControlApplication:
     def __init__(self, *, request_control_result=None) -> None:
         self.request_control_result = request_control_result
         self.request_control_calls: list[object] = []
+        self.run_selected_flow_result = None
+        self.run_selected_flow_calls: list[dict[str, object]] = []
         self.refresh_flows_result = None
         self.refresh_flows_calls: list[dict[str, object]] = []
         self.start_engine_result = None
         self.start_engine_calls: list[dict[str, object]] = []
+        self.stop_pipeline_result = None
+        self.stop_pipeline_calls: list[dict[str, object]] = []
 
     def request_control(self, manager):
         self.request_control_calls.append(manager)
@@ -378,11 +382,23 @@ class _FakeControlApplication:
             raise AssertionError("refresh_flows_result was not configured for this fake control application.")
         return self.refresh_flows_result
 
+    def run_selected_flow(self, **kwargs):
+        self.run_selected_flow_calls.append(kwargs)
+        if self.run_selected_flow_result is None:
+            raise AssertionError("run_selected_flow_result was not configured for this fake control application.")
+        return self.run_selected_flow_result
+
     def start_engine(self, **kwargs):
         self.start_engine_calls.append(kwargs)
         if self.start_engine_result is None:
             raise AssertionError("start_engine_result was not configured for this fake control application.")
         return self.start_engine_result
+
+    def stop_pipeline(self, **kwargs):
+        self.stop_pipeline_calls.append(kwargs)
+        if self.stop_pipeline_result is None:
+            raise AssertionError("stop_pipeline_result was not configured for this fake control application.")
+        return self.stop_pipeline_result
 
 
 class _FakeSharedStateService:
@@ -457,6 +473,16 @@ def _click_flow_row(window: DataEngineWindow, flow_name: str) -> None:
 def _dispose_window(qapp, window: DataEngineWindow) -> None:
     if shiboken_is_valid(window):
         window.close()
+    qapp.processEvents()
+
+
+def _process_ui_until(qapp, predicate, *, timeout_ms: int = 1000) -> None:
+    deadline = datetime.now(UTC) + timedelta(milliseconds=timeout_ms)
+    while datetime.now(UTC) < deadline:
+        qapp.processEvents()
+        if predicate():
+            return
+        QTest.qWait(10)
     qapp.processEvents()
 
 
@@ -860,6 +886,7 @@ def test_refresh_button_reloads_flows(qapp, monkeypatch, tmp_path):
         assert "poller" in window.flow_cards
 
         window._refresh_flows_requested()
+        _process_ui_until(qapp, lambda: len(control_application.refresh_flows_calls) == 1)
         window._flush_deferred_ui_updates()
 
         assert len(control_application.refresh_flows_calls) == 1
@@ -877,6 +904,7 @@ def test_refresh_button_still_reloads_locally_when_daemon_refresh_fails(qapp, mo
     sync_calls = _attach_call_recorder(window, "_sync_from_daemon")
     try:
         window.refresh_button.click()
+        _process_ui_until(qapp, lambda: len(sync_calls) == 1)
         window._flush_deferred_ui_updates()
 
         assert len(sync_calls) == 1
@@ -908,6 +936,7 @@ def test_refresh_button_clears_flows_without_spawning_daemon_when_workspace_has_
         assert window.flow_cards == {}
 
         window.refresh_button.click()
+        _process_ui_until(qapp, lambda: len(sync_calls) == 1)
         window._flush_deferred_ui_updates()
 
         assert window.flow_cards == {}
@@ -1412,6 +1441,7 @@ def test_lease_status_shows_overdue_for_local_checkpoint_when_daemon_is_down(qap
     try:
         del monkeypatch
         window._daemon_startup_in_progress = False
+        window.workspace_control_state = WorkspaceControlState.empty()
         window._daemon_manager.snapshot = WorkspaceDaemonSnapshot(
             live=False,
             workspace_owned=True,
@@ -1430,11 +1460,138 @@ def test_lease_status_shows_overdue_for_local_checkpoint_when_daemon_is_down(qap
         _dispose_window(qapp, window)
 
 
+def test_manual_run_selected_flow_turns_run_button_into_graceful_stop_and_disables_engine_start(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window.flow_states["manual_review"] = "running"
+        window._select_flow("manual_review")
+        window._refresh_action_buttons()
+
+        assert window.flow_run_button.text() == "Stop Flow"
+        assert window.flow_run_button.property("flowRunState") == "stop"
+        assert window.flow_run_button.isEnabled() is True
+        assert window.engine_button.text() == "Start Engine"
+        assert window.engine_button.isEnabled() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_manual_run_selected_flow_turns_run_button_into_graceful_stop_while_engine_runs_elsewhere(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window(
+        snapshot=WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            manual_runs=("manual_review",),
+            last_checkpoint_at_utc=datetime.now(UTC).isoformat(),
+            source="daemon",
+        ),
+    )
+    try:
+        window.runtime_session = RuntimeSessionState(
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            active_runtime_flow_names=("poller",),
+            manual_runs=(),
+        ).with_manual_runs_map({"Manual": "manual_review"})
+        window.flow_states["manual_review"] = "running"
+        window._select_flow("manual_review")
+        window._refresh_action_buttons()
+
+        assert window.flow_run_button.text() == "Stop Flow"
+        assert window.flow_run_button.property("flowRunState") == "stop"
+        assert window.flow_run_button.isEnabled() is True
+        assert window.engine_button.text() == "Stop Engine"
+        assert window.engine_button.isEnabled() is True
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_manual_run_selected_flow_button_requests_graceful_stop_instead_of_new_run(qapp, monkeypatch):
+    del monkeypatch
+    control_application = _FakeControlApplication()
+    control_application.stop_pipeline_result = type(
+        "Result",
+        (),
+        {
+            "requested": True,
+            "sync_after": True,
+            "status_text": "Stopping selected flow...",
+            "error_text": None,
+        },
+    )()
+    window = _make_window(control_application=control_application)
+    try:
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window.flow_states["manual_review"] = "running"
+        window._select_flow("manual_review")
+        window._refresh_action_buttons()
+
+        window._run_selected_flow()
+        _process_ui_until(qapp, lambda: len(control_application.stop_pipeline_calls) == 1)
+
+        assert control_application.run_selected_flow_calls == []
+        assert control_application.stop_pipeline_calls[0]["selected_flow_group"] == "Manual"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_manual_run_selected_flow_button_shows_stopping_while_stop_request_is_pending(qapp, monkeypatch):
+    del monkeypatch
+    control_application = _FakeControlApplication()
+    release_result = threading.Event()
+    control_application.stop_pipeline_result = type(
+        "Result",
+        (),
+        {
+            "requested": True,
+            "sync_after": True,
+            "status_text": "Stopping selected flow...",
+            "error_text": None,
+        },
+    )()
+
+    original_stop_pipeline = control_application.stop_pipeline
+
+    def _delayed_stop_pipeline(**kwargs):
+        release_result.wait(timeout=1.0)
+        return original_stop_pipeline(**kwargs)
+
+    control_application.stop_pipeline = _delayed_stop_pipeline
+    window = _make_window(control_application=control_application)
+    try:
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window.flow_states["manual_review"] = "running"
+        window._select_flow("manual_review")
+        window._refresh_action_buttons()
+
+        window._run_selected_flow()
+        _process_ui_until(qapp, lambda: "stop_pipeline" in window._pending_control_actions)
+
+        assert window.flow_run_button.text() == "Stopping..."
+        assert window.flow_run_button.isEnabled() is False
+        assert window.flow_run_button.property("flowRunState") == "stop"
+
+        release_result.set()
+        _process_ui_until(qapp, lambda: "stop_pipeline" not in window._pending_control_actions)
+    finally:
+        release_result.set()
+        _dispose_window(qapp, window)
+
+
 def test_lease_status_shows_refresh_due_instead_of_zero_seconds(qapp, monkeypatch):
     window = _make_window()
     try:
         del monkeypatch
         window._daemon_startup_in_progress = False
+        window.workspace_control_state = WorkspaceControlState.empty()
         window._daemon_manager.snapshot = WorkspaceDaemonSnapshot(
             live=True,
             workspace_owned=True,
@@ -1444,6 +1601,42 @@ def test_lease_status_shows_refresh_due_instead_of_zero_seconds(qapp, monkeypatc
             manual_runs=(),
             last_checkpoint_at_utc=(datetime.now(UTC) - timedelta(seconds=45)).isoformat(),
             source="daemon",
+        )
+
+        window._refresh_lease_status()
+
+        assert window.lease_status_label.text() == "This Workstation has control"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_show_event_reveals_action_bar_controls_after_startup_paint(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        assert window.action_bar_controls_group.isHidden() is True
+
+        window.show()
+        qapp.processEvents()
+
+        assert window.action_bar_controls_group.isHidden() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_lease_status_uses_existing_control_state_without_syncing_again(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        window.workspace_control_state = WorkspaceControlState(
+            daemon_status=window.daemon_status.empty(),
+            control_status_text="This Workstation has control",
+            blocked_status_text="Takeover available.",
+        )
+
+        monkeypatch.setattr(
+            window.daemon_state_service,
+            "sync",
+            lambda manager: (_ for _ in ()).throw(AssertionError("refresh_lease_status should not resync")),
         )
 
         window._refresh_lease_status()
@@ -1930,6 +2123,7 @@ def test_start_runtime_reuses_loaded_flow_cards(qapp, monkeypatch, tmp_path):
         assert "poller" in window.flow_cards
 
         window._start_runtime()
+        _process_ui_until(qapp, lambda: len(control_application.start_engine_calls) == 1)
 
         assert window.runtime_session.runtime_active is True
         assert window.runtime_session.active_runtime_flow_names == ("poller",)
@@ -1976,6 +2170,7 @@ def test_stop_runtime_enters_stopping_transition_and_disables_engine_button(qapp
         window.runtime_session = replace(window.runtime_session, runtime_active=True).with_active_runtime_flow_names(("poller",))
 
         window._stop_runtime()
+        _process_ui_until(qapp, lambda: daemon_commands == ["stop_engine"])
 
         assert daemon_commands == ["stop_engine"]
         assert window.runtime_session.runtime_stopping is True
@@ -2146,6 +2341,52 @@ def test_reset_flow_button_calls_persistent_reset_path(qapp, monkeypatch):
 
         assert reset_service.flow_resets == [(window.workspace_paths, "poller")]
         assert len(rebuild_calls) == 1
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_reset_flow_button_clears_selected_flow_logs_before_rebuild(qapp, monkeypatch):
+    del monkeypatch
+    reset_service = _FakeResetService()
+    window = _make_window(reset_service=reset_service)
+    try:
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="poller success",
+                kind="flow",
+                flow_name="poller",
+                event=RuntimeStepEvent(
+                    run_id="run-1",
+                    flow_name="poller",
+                    step_name=None,
+                    source_label="claims.xlsx",
+                    status="success",
+                ),
+                persisted_id=10,
+            )
+        )
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="manual review success",
+                kind="flow",
+                flow_name="manual_review",
+                event=RuntimeStepEvent(
+                    run_id="run-2",
+                    flow_name="manual_review",
+                    step_name=None,
+                    source_label="claims.xlsx",
+                    status="success",
+                ),
+                persisted_id=11,
+            )
+        )
+        window.step_output_index = window.step_output_index.with_flow_outputs("poller", {"Write Parquet": Path("C:/tmp/out.parquet")})
+
+        window._clear_logs()
+
+        assert window.log_store.entries_for_flow("poller") == ()
+        assert len(window.log_store.entries_for_flow("manual_review")) == 1
+        assert window.step_output_index.outputs_for("poller").outputs == {}
     finally:
         _dispose_window(qapp, window)
 
@@ -2429,6 +2670,7 @@ def test_stop_runtime_updates_sidebar_in_place_without_rebuild(qapp, monkeypatch
         rebuild_calls = 0
 
         window._stop_runtime()
+        _process_ui_until(qapp, lambda: window.flow_states.get("poller") == "stopping runtime")
 
         assert rebuild_calls == 0
         assert window.flow_states["poller"] == "stopping runtime"
@@ -2635,6 +2877,100 @@ def test_refresh_log_view_skips_row_rebuild_when_visible_runs_are_unchanged(qapp
         assert add_calls == 1
         assert first_item is second_item
         assert window.log_view.count() == 1
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_selection_reuses_operation_rows_when_steps_are_unchanged(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        qapp.processEvents()
+
+        original_row_cards = tuple(row.row_card for row in window.operation_row_widgets)
+
+        window._refresh_selection(window.flow_cards["poller"])
+        qapp.processEvents()
+
+        assert tuple(row.row_card for row in window.operation_row_widgets) == original_row_cards
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_sync_from_daemon_coalesces_nested_refresh_requests(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        original_sync_runtime_state = window.runtime_binding_service.sync_runtime_state
+        sync_calls = 0
+        nested_requested = False
+
+        def wrapped_sync_runtime_state(*args, **kwargs):
+            nonlocal sync_calls, nested_requested
+            sync_calls += 1
+            if not nested_requested:
+                nested_requested = True
+                window._sync_from_daemon()
+            return original_sync_runtime_state(*args, **kwargs)
+
+        monkeypatch.setattr(window.runtime_binding_service, "sync_runtime_state", wrapped_sync_runtime_state)
+
+        window._sync_from_daemon()
+
+        assert sync_calls == 2
+        assert window._daemon_sync_in_progress is False
+        assert window._daemon_sync_pending is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_rebuild_runtime_snapshot_drops_stopping_runtime_state_for_completed_flows(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window(cards=_sample_multi_active_qt_flow_cards())
+    try:
+        window.runtime_session = (
+            window.runtime_session
+            .with_runtime_flags(active=True, stopping=True)
+            .with_active_runtime_flow_names(("poller_a", "poller_b"))
+        )
+        window.flow_states["poller_a"] = "stopping runtime"
+        window.flow_states["poller_b"] = "stopping runtime"
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="poller_a read started",
+                kind="flow",
+                flow_name="poller_a",
+                event=RuntimeStepEvent(
+                    run_id="run-a",
+                    flow_name="poller_a",
+                    step_name="Read Excel",
+                    source_label="a.xlsx",
+                    status="started",
+                ),
+            )
+        )
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="poller_b read success",
+                kind="flow",
+                flow_name="poller_b",
+                event=RuntimeStepEvent(
+                    run_id="run-b",
+                    flow_name="poller_b",
+                    step_name="Read Excel",
+                    source_label="b.xlsx",
+                    status="success",
+                    elapsed_seconds=0.2,
+                ),
+            )
+        )
+
+        window.runtime_controller.rebuild_runtime_snapshot(window)
+
+        assert window.runtime_session.active_runtime_flow_names == ("poller_a",)
+        assert window.flow_states["poller_a"] == "stopping runtime"
+        assert window.flow_states["poller_b"] == "schedule ready"
     finally:
         _dispose_window(qapp, window)
 

@@ -12,6 +12,7 @@ class GuiActionState:
     """Button and control state for the desktop GUI surface."""
 
     flow_run_label: str
+    flow_run_state: str
     flow_run_enabled: bool
     flow_config_enabled: bool
     engine_enabled: bool
@@ -27,20 +28,32 @@ class GuiActionState:
         """Return the GUI action state derived from one operator action context."""
         session = context.runtime_session
         selected = context.selected_flow
+        selected_group = selected.card.group if selected.card is not None else None
+        selected_manual_running = bool(
+            selected.card is not None
+            and selected.card.name == session.manual_flow_name_for_group(selected_group)
+        )
         active = session.runtime_active or session.runtime_stopping
         return cls(
-            flow_run_label="Running..." if selected.running else "Run Once",
+            flow_run_label="Stop Flow" if selected_manual_running else ("Running..." if selected.running else "Run Once"),
+            flow_run_state="stop" if selected_manual_running else "run",
             flow_run_enabled=(
-                selected.valid
-                and not selected.group_active
-                and not session.manual_run_active
+                (
+                    selected_manual_running
+                    or (selected.valid and not selected.group_active)
+                )
                 and session.control_available
                 and context.workspace_available
             ),
             flow_config_enabled=selected.present,
             engine_enabled=(
                 session.runtime_active
-                or (context.has_automated_flows and session.control_available and context.workspace_available)
+                or (
+                    context.has_automated_flows
+                    and session.control_available
+                    and context.workspace_available
+                    and not session.manual_run_active
+                )
             ) and not session.runtime_stopping,
             engine_label="Stopping..." if session.runtime_stopping else "Stop Engine" if active else "Start Engine",
             engine_state="running" if active else "stopped",
@@ -71,8 +84,7 @@ class TuiActionState:
         return cls(
             refresh_disabled=busy,
             run_once_disabled=(
-                session.manual_run_active
-                or context.selected_flow.group_active
+                context.selected_flow.group_active
                 or not session.control_available
                 or not context.workspace_available
             ),

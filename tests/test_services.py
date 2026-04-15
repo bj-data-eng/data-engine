@@ -477,9 +477,19 @@ def test_runtime_execution_service_constructs_runtime_objects():
     class _Runtime:
         instances: list["_Runtime"] = []
 
-        def __init__(self, flows, *, continuous, flow_stop_event=None, runtime_ledger=None, run_stop_controller=None):
+        def __init__(
+            self,
+            flows,
+            *,
+            continuous,
+            runtime_stop_event=None,
+            flow_stop_event=None,
+            runtime_ledger=None,
+            run_stop_controller=None,
+        ):
             self.flows = flows
             self.continuous = continuous
+            self.runtime_stop_event = runtime_stop_event
             self.flow_stop_event = flow_stop_event
             self.runtime_ledger = runtime_ledger
             self.run_stop_controller = run_stop_controller
@@ -520,9 +530,9 @@ def test_runtime_execution_service_constructs_runtime_objects():
     runtime_stop = Event()
     ledger = object()
 
-    assert service.run_once(flow, runtime_ledger=ledger, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": False}
+    assert service.run_once(flow, runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": False}
     assert service.preview(flow, use="csv", runtime_ledger=ledger) == {"preview": "csv", "continuous": False}
-    assert service.run_manual(flow, runtime_ledger=ledger, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": False}
+    assert service.run_manual(flow, runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": False}
     assert service.run_continuous(flow, runtime_ledger=ledger, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": True}
     assert service.run_grouped((flow,), runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"grouped": ("claims",), "continuous": True}
     assert service.run_grouped_continuous((flow,), runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"grouped": ("claims",), "continuous": True}
@@ -531,6 +541,8 @@ def test_runtime_execution_service_constructs_runtime_objects():
     assert _Runtime.instances[1].continuous is False
     assert _Runtime.instances[2].continuous is False
     assert _Runtime.instances[3].continuous is True
+    assert _Runtime.instances[0].runtime_stop_event is runtime_stop
+    assert _Runtime.instances[2].runtime_stop_event is runtime_stop
     assert _GroupedRuntime.instances[0].runtime_stop_event is runtime_stop
     assert _GroupedRuntime.instances[1].flow_stop_event is flow_stop
 

@@ -25,6 +25,21 @@ def build_default_gui_services(theme_name: str) -> GuiServices:
 def handle_show_event(window: "DataEngineWindow", event: "QShowEvent") -> None:
     """Run the GUI show-event side effects."""
     super(type(window), window).showEvent(event)
+    controls_group = getattr(window, "action_bar_controls_group", None)
+    if controls_group is not None:
+        controls_group.setVisible(False)
+
+        def _reveal_controls() -> None:
+            if window.ui_closing:
+                return
+            latest_controls_group = getattr(window, "action_bar_controls_group", None)
+            if latest_controls_group is None:
+                return
+            latest_controls_group.setVisible(True)
+            latest_controls_group.updateGeometry()
+            latest_controls_group.update()
+
+        QTimer.singleShot(0, _reveal_controls)
     if not window._auto_daemon_enabled:
         window._auto_daemon_enabled = True
         QTimer.singleShot(0, window._ensure_daemon_started)

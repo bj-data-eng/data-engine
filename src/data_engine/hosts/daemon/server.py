@@ -7,6 +7,7 @@ from multiprocessing.connection import Listener
 from pathlib import Path
 import threading
 import traceback
+import time
 from typing import TYPE_CHECKING
 
 from data_engine.domain import DaemonLifecyclePolicy
@@ -24,8 +25,24 @@ if TYPE_CHECKING:
     from data_engine.hosts.daemon.app import DataEngineDaemonService
 
 
+def _serve_connection(service: "DataEngineDaemonService", connection) -> None:
+    """Handle one accepted daemon connection without blocking the listener loop."""
+    with connection:
+        try:
+            payload = _decode_message(connection.recv_bytes())
+            response = service._handle_command(payload)
+        except Exception as exc:  # pragma: no cover - defensive daemon boundary
+            service._debug_log(f"command handling error: {exc!r}")
+            response = {"ok": False, "error": str(exc)}
+        try:
+            connection.send_bytes(_encode_message(response))
+        except (BrokenPipeError, EOFError, OSError) as exc:
+            service._debug_log(f"connection closed before response could be delivered: {exc!r}")
+
+
 def serve_forever(service: "DataEngineDaemonService") -> None:
     """Run the workspace daemon listener loop until shutdown."""
+    worker_threads: set[threading.Thread] = set()
     try:
         service.initialize()
         service.state.checkpoint_thread = threading.Thread(target=service._checkpoint_loop, daemon=True)
@@ -46,19 +63,21 @@ def serve_forever(service: "DataEngineDaemonService") -> None:
                     break
                 service._debug_log("listener accept failed but daemon remains alive")
                 continue
-            with connection:
-                try:
-                    payload = _decode_message(connection.recv_bytes())
-                    response = service._handle_command(payload)
-                except Exception as exc:  # pragma: no cover - defensive daemon boundary
-                    service._debug_log(f"command handling error: {exc!r}")
-                    response = {"ok": False, "error": str(exc)}
-                connection.send_bytes(_encode_message(response))
+            thread = threading.Thread(target=_serve_connection, args=(service, connection), daemon=True)
+            worker_threads.add(thread)
+            thread.start()
+            worker_threads = {worker for worker in worker_threads if worker.is_alive()}
     except Exception as exc:
         service._debug_log(f"serve_forever fatal error: {exc!r}")
         service._debug_log(traceback.format_exc().rstrip())
         raise
     finally:
+        deadline = time.monotonic() + 2.0
+        for thread in list(worker_threads):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(timeout=min(remaining, 0.2))
         service._shutdown()
 
 

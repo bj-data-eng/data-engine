@@ -888,6 +888,197 @@ def test_operator_control_application_allows_manual_run_while_engine_is_active_f
     assert result.sync_after is True
 
 
+def test_operator_control_application_allows_manual_run_while_other_group_manual_is_active(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    workspace_root = tmp_path / "workspace"
+    monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
+    (workspace_root / "flow_modules").mkdir(parents=True)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    class _RuntimeApplication:
+        def run_flow(self, paths, *, name: str, wait: bool = False, timeout: float = 2.0):
+            del paths, wait, timeout
+            return type("Result", (), {"ok": True, "error": None, "name": name})()
+
+    control_app = OperatorControlApplication(
+        runtime_application=_RuntimeApplication(),
+        daemon_state_service=_FakeDaemonStateService(
+            WorkspaceDaemonSnapshot(
+                live=True,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=False,
+                runtime_stopping=False,
+                manual_runs=("claims2_parallel_poll",),
+                last_checkpoint_at_utc=None,
+                source="runtime",
+            ),
+            control_state=object(),
+        ),
+    )
+
+    result = control_app.run_selected_flow(
+        paths=paths,
+        runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Imports": "claims2_parallel_poll"}),
+        selected_flow_name="example_manual",
+        selected_flow_valid=True,
+        selected_flow_group="Manual",
+        selected_flow_group_active=False,
+        blocked_status_text="blocked",
+    )
+
+    assert result.requested is True
+    assert result.sync_after is True
+
+
+def test_operator_control_application_blocks_manual_run_when_selected_group_is_already_active(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app_root = tmp_path / "app"
+    workspace_root = tmp_path / "workspace"
+    monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
+    (workspace_root / "flow_modules").mkdir(parents=True)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    run_calls: list[str] = []
+
+    class _RuntimeApplication:
+        def run_flow(self, paths, *, name: str, wait: bool = False, timeout: float = 2.0):
+            del paths, wait, timeout
+            run_calls.append(name)
+            return type("Result", (), {"ok": True, "error": None, "name": name})()
+
+    control_app = OperatorControlApplication(
+        runtime_application=_RuntimeApplication(),
+        daemon_state_service=_FakeDaemonStateService(
+            WorkspaceDaemonSnapshot(
+                live=True,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=False,
+                runtime_stopping=False,
+                manual_runs=("example_manual",),
+                last_checkpoint_at_utc=None,
+                source="runtime",
+            ),
+            control_state=object(),
+        ),
+    )
+
+    result = control_app.run_selected_flow(
+        paths=paths,
+        runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Manual": "example_manual"}),
+        selected_flow_name="other_manual_flow",
+        selected_flow_valid=True,
+        selected_flow_group="Manual",
+        selected_flow_group_active=True,
+        blocked_status_text="blocked",
+    )
+
+    assert result.requested is False
+    assert run_calls == []
+
+
+def test_operator_control_application_stop_pipeline_targets_only_active_manual_flow_when_selection_differs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app_root = tmp_path / "app"
+    workspace_root = tmp_path / "workspace"
+    monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
+    (workspace_root / "flow_modules").mkdir(parents=True)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    stop_calls: list[tuple[str, float]] = []
+
+    class _RuntimeApplication:
+        def stop_flow(self, paths, *, name: str, timeout: float = 2.0):
+            del paths
+            stop_calls.append((name, timeout))
+            return type("Result", (), {"ok": True, "error": None})()
+
+    control_app = OperatorControlApplication(
+        runtime_application=_RuntimeApplication(),
+        daemon_state_service=_FakeDaemonStateService(
+            WorkspaceDaemonSnapshot(
+                live=True,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=False,
+                runtime_stopping=False,
+                manual_runs=("example_manual",),
+                last_checkpoint_at_utc=None,
+                source="runtime",
+            ),
+            control_state=object(),
+        ),
+    )
+
+    result = control_app.stop_pipeline(
+        paths=paths,
+        runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Manual": "example_manual"}),
+        selected_flow_group="Different Group",
+        blocked_status_text="blocked",
+    )
+
+    assert result.requested is True
+    assert result.sync_after is True
+    assert result.status_text == "Stopping selected flow..."
+    assert stop_calls == [("example_manual", 2.0)]
+
+
+def test_operator_control_application_stop_pipeline_prefers_selected_manual_flow_over_engine_stop_when_engine_runs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app_root = tmp_path / "app"
+    workspace_root = tmp_path / "workspace"
+    monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
+    (workspace_root / "flow_modules").mkdir(parents=True)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    stop_flow_calls: list[tuple[str, float]] = []
+    stop_engine_calls: list[float] = []
+
+    class _RuntimeApplication:
+        def stop_flow(self, paths, *, name: str, timeout: float = 2.0):
+            del paths
+            stop_flow_calls.append((name, timeout))
+            return type("Result", (), {"ok": True, "error": None})()
+
+        def stop_engine(self, paths, *, timeout: float = 2.0):
+            del paths
+            stop_engine_calls.append(timeout)
+            return type("Result", (), {"ok": True, "error": None})()
+
+    control_app = OperatorControlApplication(
+        runtime_application=_RuntimeApplication(),
+        daemon_state_service=_FakeDaemonStateService(
+            WorkspaceDaemonSnapshot(
+                live=True,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=True,
+                runtime_stopping=False,
+                manual_runs=("manual_review",),
+                last_checkpoint_at_utc=None,
+                source="runtime",
+            ),
+            control_state=object(),
+        ),
+    )
+
+    result = control_app.stop_pipeline(
+        paths=paths,
+        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",)).with_manual_runs_map({"Manual": "manual_review"}),
+        selected_flow_group="Manual",
+        blocked_status_text="blocked",
+    )
+
+    assert result.requested is True
+    assert result.status_text == "Stopping selected flow..."
+    assert stop_flow_calls == [("manual_review", 2.0)]
+    assert stop_engine_calls == []
+
+
 def test_operator_control_application_blocks_refresh_while_active(tmp_path: Path, monkeypatch) -> None:
     app_root = tmp_path / "app"
     workspace_root = tmp_path / "workspace"
@@ -1215,6 +1406,95 @@ def test_runtime_application_builds_runtime_snapshot_from_logs() -> None:
     assert snapshot.flow_states["poller"] == "stopping runtime"
     assert snapshot.operation_tracker.state_for("poller") is not None
     assert snapshot.signature_for(resolve_runtime_session_with_engine(("poller",)))
+
+
+def test_runtime_application_stopping_snapshot_narrows_active_runtime_flows_to_running_work() -> None:
+    poller_card = FlowCatalogEntry(
+        name="poller_a",
+        group="Imports",
+        title="Poller A",
+        description="desc",
+        source_root="/tmp/source-a",
+        target_root="/tmp/target-a",
+        mode="poll",
+        interval="30s",
+        operations="Read -> Write",
+        operation_items=("Read", "Write"),
+        state="poll ready",
+        valid=True,
+        category="automated",
+    )
+    schedule_card = FlowCatalogEntry(
+        name="poller_b",
+        group="Imports",
+        title="Poller B",
+        description="desc",
+        source_root="/tmp/source-b",
+        target_root="/tmp/target-b",
+        mode="schedule",
+        interval="30s",
+        operations="Read -> Write",
+        operation_items=("Read", "Write"),
+        state="schedule ready",
+        valid=True,
+        category="automated",
+    )
+    runtime_app = RuntimeApplication(
+        daemon_service=_FakeDaemonService(),
+        daemon_state_service=_FakeDaemonStateService(
+            WorkspaceDaemonSnapshot(
+                live=False,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=False,
+                runtime_stopping=False,
+                manual_runs=(),
+                last_checkpoint_at_utc=None,
+                source="none",
+            ),
+            control_state=object(),
+        ),
+        shared_state_service=_FakeSharedStateService(),
+    )
+    entries = (
+        FlowLogEntry(
+            line="poller_a read started",
+            kind="flow",
+            flow_name="poller_a",
+            event=RuntimeStepEvent(
+                run_id="run-a",
+                flow_name="poller_a",
+                step_name="Read",
+                source_label="a.xlsx",
+                status="started",
+                elapsed_seconds=None,
+            ),
+        ),
+        FlowLogEntry(
+            line="poller_b read success",
+            kind="flow",
+            flow_name="poller_b",
+            event=RuntimeStepEvent(
+                run_id="run-b",
+                flow_name="poller_b",
+                step_name="Read",
+                source_label="b.xlsx",
+                status="success",
+                elapsed_seconds=0.2,
+            ),
+        ),
+    )
+
+    snapshot = runtime_app.build_runtime_snapshot(
+        flow_cards=(poller_card, schedule_card),
+        log_entries=entries,
+        runtime_session=resolve_runtime_session_with_engine(("poller_a", "poller_b")),
+        now=10.0,
+    )
+
+    assert snapshot.active_runtime_flow_names == ("poller_a",)
+    assert snapshot.flow_states["poller_a"] == "stopping runtime"
+    assert snapshot.flow_states["poller_b"] == "schedule ready"
 
 
 def test_runtime_application_plans_flow_state_refresh_diffs_and_signature() -> None:
