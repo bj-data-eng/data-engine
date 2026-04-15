@@ -215,6 +215,24 @@ def test_compile_stale_flow_module_notebooks_updates_flow_helpers_in_place_witho
     assert (compiled_helper_modules_dir / "orphan.py").exists() is False
 
 
+def test_compile_stale_flow_module_notebooks_removes_orphaned_helper_directories_even_when_not_empty(tmp_path):
+    flow_modules_dir = tmp_path / "workspace" / "flow_modules"
+    compiled_flow_modules_dir = resolve_workspace_paths(workspace_root=tmp_path / "workspace").compiled_flow_modules_dir
+    helper_modules_dir = flow_modules_dir / "flow_helpers"
+    helper_modules_dir.mkdir(parents=True)
+    compiled_helper_modules_dir = compiled_flow_modules_dir / "flow_helpers"
+    orphan_dir = compiled_helper_modules_dir / "stale_pkg"
+    orphan_dir.mkdir(parents=True)
+
+    (helper_modules_dir / "labels.py").write_text("FLOW_LABEL = 'Updated Demo'\n", encoding="utf-8")
+    (orphan_dir / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    compile_stale_flow_module_notebooks(data_root=tmp_path / "workspace")
+
+    assert (compiled_helper_modules_dir / "labels.py").read_text(encoding="utf-8") == "FLOW_LABEL = 'Updated Demo'\n"
+    assert orphan_dir.exists() is False
+
+
 def test_compile_stale_flow_module_notebooks_rejects_duplicate_notebook_and_python_stems(tmp_path):
     flow_modules_dir = tmp_path / "workspace" / "flow_modules"
     flow_modules_dir.mkdir(parents=True)

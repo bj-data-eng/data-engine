@@ -78,6 +78,7 @@ def rebind_workspace_context(
     window._daemon_sync_pending = False
     window._last_daemon_spawn_attempt = 0.0
     window.manual_flow_stop_events = {}
+    window.manual_flow_stopping_groups = set()
     window.step_output_index = StepOutputIndex.empty()
     window._reload_workspace_options()
     _sync_workspace_selector(window)

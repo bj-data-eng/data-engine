@@ -1424,6 +1424,58 @@ def test_run_flow_returns_build_failure_details_without_starting_thread(tmp_path
         service._shutdown()  # noqa: SLF001
 
 
+def test_run_flow_uses_cached_flow_cards_before_forcing_refresh(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        calls: list[bool] = []
+
+        def _fake_load_flow_cards(*, force: bool = False):
+            calls.append(force)
+            return (
+                QtFlowCard(
+                    name="demo",
+                    group="Demo",
+                    title="demo",
+                    description="Simple daemon test flow.",
+                    source_root="-",
+                    target_root="-",
+                    mode="manual",
+                    interval="-",
+                    operations="Emit Value",
+                    operation_items=("Emit Value",),
+                    state="manual",
+                    valid=True,
+                    category="manual",
+                ),
+            )
+
+        monkeypatch.setattr(service, "_load_flow_cards", _fake_load_flow_cards)
+        monkeypatch.setattr(
+            service.flow_execution_service,
+            "load_flow",
+            lambda name, workspace_root=None: Flow(name=name, group="Demo").step(lambda context: 1, label="Emit Value"),
+        )
+        monkeypatch.setattr(
+            service.runtime_execution_service,
+            "run_manual",
+            lambda flow, *, runtime_ledger, runtime_stop_event, flow_stop_event: [],
+        )
+
+        response = service._handle_command({"command": "run_flow", "name": "demo", "wait": False})  # noqa: SLF001
+
+        assert response["ok"] is True
+        assert calls == [False]
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
 def test_run_flow_rejects_duplicate_start_while_first_start_is_loading(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
@@ -1468,6 +1520,42 @@ def test_run_flow_rejects_duplicate_start_while_first_start_is_loading(tmp_path,
         assert second["ok"] is False
         assert second["error"] == "Flow demo is already running."
         assert execution_started.wait(timeout=1.0) is True
+    finally:
+        release_load.set()
+        service._shutdown()  # noqa: SLF001
+
+
+def test_run_flow_returns_before_slow_flow_load_finishes(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    load_started = threading.Event()
+    release_load = threading.Event()
+
+    def _load_flow(name, workspace_root=None):
+        del name, workspace_root
+        load_started.set()
+        release_load.wait(timeout=1.0)
+        return Flow(name="demo", group="Demo").step(lambda context: 1, label="Emit Value")
+
+    monkeypatch.setattr(service.flow_execution_service, "load_flow", _load_flow)
+    monkeypatch.setattr(
+        service.runtime_execution_service,
+        "run_manual",
+        lambda flow, *, runtime_ledger, runtime_stop_event, flow_stop_event: [],
+    )
+
+    service.initialize()
+    try:
+        response = service._handle_command({"command": "run_flow", "name": "demo", "wait": False})  # noqa: SLF001
+
+        assert response["ok"] is True
+        assert load_started.wait(timeout=1.0) is True
+        assert "demo" in service.state.manual_run_threads
     finally:
         release_load.set()
         service._shutdown()  # noqa: SLF001
@@ -1656,7 +1744,7 @@ def test_run_flow_refreshes_flow_cards_before_lookup(tmp_path, monkeypatch):
         response = service._handle_command({"command": "run_flow", "name": "demo", "wait": True})  # noqa: SLF001
 
         assert response["ok"] is True
-        assert calls == [True]
+        assert calls == [False]
     finally:
         service._shutdown()  # noqa: SLF001
 

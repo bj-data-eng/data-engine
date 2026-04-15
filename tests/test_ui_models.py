@@ -230,7 +230,7 @@ def test_shared_action_state_builders_cover_runtime_stopping_and_workspace_owned
     gui = GuiActionState.from_context(context)
     tui = TuiActionState.from_context(context)
 
-    assert gui.flow_run_label == "Running..."
+    assert gui.flow_run_label == "Stop Flow"
     assert gui.flow_run_enabled is False
     assert gui.engine_enabled is False
     assert gui.engine_label == "Stopping..."
@@ -327,11 +327,32 @@ def test_shared_action_state_builders_cover_control_unavailable_without_workspac
 
     assert gui.flow_run_enabled is False
     assert gui.engine_enabled is False
+    assert gui.clear_flow_log_enabled is False
     assert gui.request_control_enabled is True
     assert tui.run_once_disabled is True
     assert tui.start_engine_disabled is True
     assert tui.stop_engine_disabled is True
     assert tui.view_log_disabled is False
+
+
+def test_action_state_builders_disable_reset_and_request_control_while_request_is_pending():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
+    selected = SelectedFlowState(card=card, state="manual", group_active=False, has_logs=True)
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState(workspace_owned=False, leased_by_machine_id="remote-host"),
+        selected_flow=selected,
+        has_automated_flows=True,
+        workspace_available=True,
+        selected_run_group_present=False,
+        local_request_pending=True,
+    )
+
+    gui = GuiActionState.from_context(context)
+
+    assert gui.request_control_label == "Requesting..."
+    assert gui.request_control_enabled is False
+    assert gui.clear_flow_log_label == "Reset Flow"
+    assert gui.clear_flow_log_enabled is False
 
 
 def test_selected_flow_state_captures_group_activity_and_running_state():

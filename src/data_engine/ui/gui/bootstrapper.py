@@ -115,6 +115,7 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.engine_runtime_stop_event = threading.Event()
     window.engine_flow_stop_event = threading.Event()
     window.manual_flow_stop_events: dict[str, threading.Event] = {}
+    window.manual_flow_stopping_groups: set[str | None] = set()
     window.operation_row_widgets = []
     window.operation_tracker = OperationSessionState.empty()
     window.operation_flash_timers: list[QTimer] = []

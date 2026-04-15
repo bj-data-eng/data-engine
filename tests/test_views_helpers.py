@@ -337,7 +337,7 @@ def test_action_state_builders_cover_control_and_runtime_branches():
     assert gui.flow_run_enabled is False
     assert gui.engine_label == "Stop Engine"
     assert gui.refresh_enabled is False
-    assert gui.clear_flow_log_enabled is True
+    assert gui.clear_flow_log_enabled is False
     assert tui.refresh_disabled is True
     assert tui.run_once_disabled is True
     assert tui.start_engine_disabled is True

@@ -20,6 +20,7 @@ class ActionStateApplication:
         has_automated_flows: bool,
         workspace_available: bool = True,
         selected_run_group_present: bool = False,
+        local_request_pending: bool = False,
     ) -> OperatorActionContext:
         """Return one operator action context from current runtime and selection state."""
         selected_flow = SelectedFlowState.from_runtime(
@@ -36,6 +37,7 @@ class ActionStateApplication:
             has_automated_flows=has_automated_flows,
             workspace_available=workspace_available,
             selected_run_group_present=selected_run_group_present,
+            local_request_pending=local_request_pending,
         )
 
 

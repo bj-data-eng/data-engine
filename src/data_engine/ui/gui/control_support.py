@@ -76,8 +76,13 @@ class GuiControlMixin:
         present_finish_daemon_startup(self, success, error_text)
 
     def _finish_control_action(self: "DataEngineWindow", action_name: str, payload: object) -> None:
-        if action_name == "refresh_flows":
+        if action_name in {"refresh_flows", "request_control", "reset_flow"}:
             self.flow_controller.finish_control_action(self, action_name, payload)
+            return
+        if action_name in {"provision_workspace", "force_shutdown_daemon", "reset_workspace"}:
+            from data_engine.ui.gui.presenters.workspace_settings import finish_control_action as finish_workspace_settings_action
+
+            finish_workspace_settings_action(self, action_name, payload)
             return
         self.runtime_controller.finish_control_action(self, action_name, payload)
 

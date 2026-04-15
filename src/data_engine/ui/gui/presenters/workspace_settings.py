@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QFileDialog
 
+from data_engine.platform.identity import APP_DISPLAY_NAME
+from data_engine.ui.gui.helpers import start_worker_thread
+
 if TYPE_CHECKING:
     from data_engine.ui.gui.app import DataEngineWindow
 
@@ -55,93 +58,31 @@ def browse_workspace_collection_root_override(window: "DataEngineWindow") -> Non
 
 
 def provision_selected_workspace(window: "DataEngineWindow") -> None:
-    if not window.workspace_paths.workspace_configured:
-        window._show_message_box(
-            title="Workspace Folder Required",
-            text="Choose a workspace folder before provisioning a workspace.",
-            tone="error",
-        )
+    if not window.provision_workspace_button.isEnabled() or "provision_workspace" in window._pending_control_actions or window.ui_closing:
         return
-    try:
-        result = window.workspace_provisioning_service.provision_workspace(
-            window.workspace_paths,
-            interpreter_path=Path(sys.executable).expanduser(),
-        )
-    except Exception as exc:
-        window.workspace_provision_status_label.setText(f"Provisioning failed: {exc}")
-        window._show_message_box(
-            title="Provisioning Failed",
-            text=str(exc),
-            tone="error",
-        )
-        return
-    created_names = ", ".join(path.name for path in result.created_paths) if result.created_paths else "nothing new"
-    window._rebind_workspace_context(workspace_id=window.workspace_paths.workspace_id)
-    window.workspace_provision_status_label.setText(
-        f"Provisioned {result.workspace_root.name}: created {created_names}."
-    )
+    window._pending_control_actions.add("provision_workspace")
+    refresh_workspace_visibility_panel(window)
+    start_worker_thread(window, target=_provision_selected_workspace_worker, args=(window,))
 
 
 def force_shutdown_daemon(window: "DataEngineWindow") -> None:
-    result = window.runtime_application.force_shutdown_daemon(window.workspace_paths, timeout=0.5)
-    if not result.ok:
-        window.force_shutdown_daemon_status_label.setText(f"Force stop failed: {result.error}")
-        window._show_message_box(
-            title="Force Stop Failed",
-            text=result.error,
-            tone="error",
-        )
+    if not window.force_shutdown_daemon_button.isEnabled() or "force_shutdown_daemon" in window._pending_control_actions or window.ui_closing:
         return
-    window.force_shutdown_daemon_status_label.setText(
-        "Local daemon force-stopped. Any active engine or manual runs were terminated."
-    )
-    window._sync_from_daemon()
+    window._pending_control_actions.add("force_shutdown_daemon")
+    refresh_workspace_visibility_panel(window)
+    start_worker_thread(window, target=_force_shutdown_daemon_worker, args=(window,))
 
 
 def reset_workspace(window: "DataEngineWindow") -> None:
-    if not window.workspace_paths.workspace_configured:
-        window._show_message_box(
-            title="Workspace Required",
-            text="Choose a workspace before resetting workspace state.",
-            tone="error",
-        )
+    if not window.reset_workspace_button.isEnabled() or "reset_workspace" in window._pending_control_actions or window.ui_closing:
         return
-    if window.runtime_session.has_active_work or window.runtime_session.runtime_stopping:
-        window._show_message_box(
-            title="Stop Active Work First",
-            text="Stop the engine and any active manual runs before resetting the workspace.",
-            tone="error",
-        )
-        return
-    if not window.runtime_session.control_available:
-        window._show_message_box(
-            title="Control Required",
-            text=window.workspace_control_state.blocked_status_text,
-            tone="error",
-        )
-        return
-    workspace_id = window.workspace_paths.workspace_id
-    try:
-        window.reset_service.reset_workspace(
-            paths=window.workspace_paths,
-            runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
-            runtime_control_ledger=window.runtime_binding.runtime_control_ledger,
-        )
-    except Exception as exc:
-        window.reset_workspace_status_label.setText(f"Workspace reset failed: {exc}")
-        window._show_message_box(
-            title="Workspace Reset Failed",
-            text=str(exc),
-            tone="error",
-        )
-        return
-    window.reset_workspace_status_label.setText(
-        "Workspace runtime state reset. Local ledgers, daemon log, and shared workspace state were cleared."
-    )
-    window._rebind_workspace_context(workspace_id=workspace_id)
+    window._pending_control_actions.add("reset_workspace")
+    refresh_workspace_visibility_panel(window)
+    start_worker_thread(window, target=_reset_workspace_worker, args=(window,))
 
 
 def refresh_workspace_provisioning_controls(window: "DataEngineWindow") -> None:
+    provision_pending = "provision_workspace" in window._pending_control_actions
     if not window.workspace_paths.workspace_configured:
         window.workspace_target_label.setText(
             "Selected workspace: choose a workspace folder first, then choose a workspace to provision."
@@ -157,7 +98,7 @@ def refresh_workspace_provisioning_controls(window: "DataEngineWindow") -> None:
     window.workspace_target_label.setText(
         f"Selected workspace: {window.workspace_paths.workspace_id} ({workspace_root})"
     )
-    window.provision_workspace_button.setEnabled(True)
+    window.provision_workspace_button.setEnabled(not provision_pending)
     if workspace_ready:
         window.workspace_provision_status_label.setText(
             "Workspace already has flow modules. Provisioning the selected workspace will only add missing folders or VS Code settings."
@@ -171,8 +112,20 @@ def refresh_workspace_provisioning_controls(window: "DataEngineWindow") -> None:
 def refresh_workspace_visibility_panel(window: "DataEngineWindow") -> None:
     interpreter_path = Path(sys.executable).expanduser()
     interpreter_mode = "virtual environment" if sys.prefix != getattr(sys, "base_prefix", sys.prefix) else "system/global"
-    window.force_shutdown_daemon_button.setEnabled(window.workspace_paths.workspace_configured)
-    window.reset_workspace_button.setEnabled(window.workspace_paths.workspace_configured)
+    force_pending = "force_shutdown_daemon" in window._pending_control_actions
+    reset_pending = "reset_workspace" in window._pending_control_actions
+    provision_pending = "provision_workspace" in window._pending_control_actions
+    window.force_shutdown_daemon_button.setText("Force Stopping..." if force_pending else "Force Stop Daemon")
+    window.force_shutdown_daemon_button.setEnabled(window.workspace_paths.workspace_configured and not force_pending)
+    window.reset_workspace_button.setText("Resetting..." if reset_pending else "Reset Workspace")
+    window.reset_workspace_button.setEnabled(
+        window.workspace_paths.workspace_configured
+        and not reset_pending
+        and not window.runtime_session.has_active_work
+        and not window.runtime_session.runtime_stopping
+        and window.runtime_session.control_available
+    )
+    window.provision_workspace_button.setText("Provisioning..." if provision_pending else "Provision Selected Workspace")
     if not window.force_shutdown_daemon_status_label.text().strip():
         window.force_shutdown_daemon_status_label.setText(
             "Use only when normal stop does not return control."
@@ -184,6 +137,115 @@ def refresh_workspace_visibility_panel(window: "DataEngineWindow") -> None:
     window.visibility_interpreter_value.setText(str(interpreter_path))
     window.visibility_interpreter_mode_value.setText(interpreter_mode.title())
     window.workspace_counts_footer_label.setText(_workspace_counts_footer_text(window))
+
+
+def finish_control_action(window: "DataEngineWindow", action_name: str, payload: object) -> None:
+    if action_name not in {"provision_workspace", "force_shutdown_daemon", "reset_workspace"}:
+        return
+    window._pending_control_actions.discard(action_name)
+    refresh_workspace_visibility_panel(window)
+    if window.ui_closing:
+        return
+    assert isinstance(payload, dict)
+    error_text = payload.get("error_text")
+    if isinstance(error_text, str) and error_text.strip():
+        if action_name == "provision_workspace":
+            window.workspace_provision_status_label.setText(f"Provisioning failed: {error_text}")
+        elif action_name == "force_shutdown_daemon":
+            window.force_shutdown_daemon_status_label.setText(f"Force stop failed: {error_text}")
+        else:
+            window.reset_workspace_status_label.setText(f"Workspace reset failed: {error_text}")
+        window._show_message_box_later(
+            title=APP_DISPLAY_NAME,
+            text=error_text,
+            tone="error",
+        )
+        return
+    if action_name == "provision_workspace":
+        workspace_id = payload.get("workspace_id")
+        created_names = payload.get("created_names")
+        workspace_name = payload.get("workspace_name")
+        if isinstance(workspace_id, str):
+            window._rebind_workspace_context(workspace_id=workspace_id)
+        if isinstance(created_names, str) and isinstance(workspace_name, str):
+            window.workspace_provision_status_label.setText(
+                f"Provisioned {workspace_name}: created {created_names}."
+            )
+        return
+    if action_name == "force_shutdown_daemon":
+        window.force_shutdown_daemon_status_label.setText(
+            "Local daemon force-stopped. Any active engine or manual runs were terminated."
+        )
+        window._sync_from_daemon()
+        return
+    workspace_id = payload.get("workspace_id")
+    window.reset_workspace_status_label.setText(
+        "Workspace runtime state reset. Local ledgers, daemon log, and shared workspace state were cleared."
+    )
+    if isinstance(workspace_id, str):
+        window._rebind_workspace_context(workspace_id=workspace_id)
+
+
+def _emit_workspace_settings_action(window: "DataEngineWindow", action_name: str, payload: dict[str, object]) -> None:
+    if window.ui_closing:
+        return
+    try:
+        window.signals.control_action_finished.emit(action_name, payload)
+    except RuntimeError:
+        pass
+
+
+def _provision_selected_workspace_worker(window: "DataEngineWindow") -> None:
+    try:
+        result = window.workspace_provisioning_service.provision_workspace(
+            window.workspace_paths,
+            interpreter_path=Path(sys.executable).expanduser(),
+        )
+    except Exception as exc:
+        _emit_workspace_settings_action(window, "provision_workspace", {"error_text": str(exc)})
+        return
+    created_names = ", ".join(path.name for path in result.created_paths) if result.created_paths else "nothing new"
+    _emit_workspace_settings_action(
+        window,
+        "provision_workspace",
+        {
+            "workspace_id": window.workspace_paths.workspace_id,
+            "workspace_name": result.workspace_root.name,
+            "created_names": created_names,
+            "error_text": None,
+        },
+    )
+
+
+def _force_shutdown_daemon_worker(window: "DataEngineWindow") -> None:
+    result = window.runtime_application.force_shutdown_daemon(window.workspace_paths, timeout=0.5)
+    _emit_workspace_settings_action(
+        window,
+        "force_shutdown_daemon",
+        {"error_text": None if result.ok else result.error},
+    )
+
+
+def _reset_workspace_worker(window: "DataEngineWindow") -> None:
+    workspace_id = window.workspace_paths.workspace_id
+    try:
+        window.reset_service.reset_workspace(
+            paths=window.workspace_paths,
+            runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
+            runtime_control_ledger=window.runtime_binding.runtime_control_ledger,
+        )
+    except Exception as exc:
+        _emit_workspace_settings_action(
+            window,
+            "reset_workspace",
+            {"workspace_id": workspace_id, "error_text": str(exc)},
+        )
+        return
+    _emit_workspace_settings_action(
+        window,
+        "reset_workspace",
+        {"workspace_id": workspace_id, "error_text": None},
+    )
 
 
 def _workspace_module_count(flow_modules_dir: Path) -> int:
@@ -211,6 +273,7 @@ def _recent_workspace_run_count(window: "DataEngineWindow", *, days: int) -> int
 
 __all__ = [
     "browse_workspace_collection_root_override",
+    "finish_control_action",
     "force_shutdown_daemon",
     "provision_selected_workspace",
     "reset_workspace",

@@ -62,6 +62,7 @@ class OperatorActionContext:
     has_automated_flows: bool
     workspace_available: bool = True
     selected_run_group_present: bool = False
+    local_request_pending: bool = False
 
 __all__ = [
     "OperatorActionContext",

@@ -86,6 +86,7 @@ class DataEngineDaemonService:
         self.daemon_id = daemon_identity.daemon_id
         self.pid = daemon_identity.pid
         self._state_lock = threading.RLock()
+        self._cached_flow_cards: tuple[QtFlowCard, ...] | None = None
         self.command_handler = DaemonCommandHandler(self)
 
     def _workspace_root_is_available(self) -> bool:
@@ -129,8 +130,11 @@ class DataEngineDaemonService:
         return self.command_handler.handle(payload)
 
     def _load_flow_cards(self, *, force: bool = False) -> tuple[QtFlowCard, ...]:
-        del force
-        return load_qt_flow_cards(self.flow_catalog_service, workspace_root=self.paths.workspace_root)
+        if not force and self._cached_flow_cards is not None:
+            return self._cached_flow_cards
+        cards = load_qt_flow_cards(self.flow_catalog_service, workspace_root=self.paths.workspace_root)
+        self._cached_flow_cards = cards
+        return cards
 
     def _checkpoint_loop(self) -> None:
         checkpoint_loop(self)

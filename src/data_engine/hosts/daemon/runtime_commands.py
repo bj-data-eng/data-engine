@@ -30,8 +30,11 @@ class DaemonRuntimeCommandHandler:
         service = self.service
         if not service.state.workspace_owned and not try_claim_released_workspace(service):
             return {"ok": False, "error": lease_error_text(service)}
-        cards_by_name = {card.name: card for card in service._load_flow_cards(force=True)}
+        cards_by_name = {card.name: card for card in service._load_flow_cards()}
         card = cards_by_name.get(name)
+        if card is None or not card.valid:
+            cards_by_name = {card.name: card for card in service._load_flow_cards(force=True)}
+            card = cards_by_name.get(name)
         if card is None:
             return {"ok": False, "error": f"Unknown flow: {name}"}
         if not card.valid:
@@ -66,50 +69,49 @@ class DaemonRuntimeCommandHandler:
                 return {"ok": False, "error": f"Group {card.group} already has {active_same_group} running."}
             service.state.reserve_manual_run(name)
         try:
-            flow = service.flow_execution_service.load_flow(name, workspace_root=service.paths.workspace_root)
+            runtime_stop_event = threading.Event()
+            flow_stop_event = threading.Event()
+
+            def _target() -> None:
+                try:
+                    flow = service.flow_execution_service.load_flow(name, workspace_root=service.paths.workspace_root)
+                    service.runtime_execution_service.run_manual(
+                        flow,
+                        runtime_ledger=service.runtime_cache_ledger,
+                        runtime_stop_event=runtime_stop_event,
+                        flow_stop_event=flow_stop_event,
+                    )
+                    service._debug_log(f"manual flow completed name={name}")
+                except Exception as exc:
+                    service._debug_log(f"manual flow crashed name={name} error={exc!r}")
+                    service._debug_log(traceback.format_exc().rstrip())
+                    service.runtime_cache_ledger.logs.append(
+                        level="ERROR",
+                        message=str(exc),
+                        created_at_utc=utcnow_text(),
+                        flow_name=name,
+                    )
+                    raise
+                finally:
+                    with service._state_lock:
+                        service.state.unregister_manual_run(name)
+
+            thread = threading.Thread(target=_target, daemon=True)
+            with service._state_lock:
+                service.state.register_manual_run(
+                    name,
+                    thread=thread,
+                    runtime_stop_event=runtime_stop_event,
+                    flow_stop_event=flow_stop_event,
+                )
+            thread.start()
+            if wait:
+                thread.join()
+            return {"ok": True}
         except Exception as exc:
             with service._state_lock:
                 service.state.clear_manual_run_reservation(name)
             return {"ok": False, "error": str(exc)}
-
-        runtime_stop_event = threading.Event()
-        flow_stop_event = threading.Event()
-
-        def _target() -> None:
-            try:
-                service.runtime_execution_service.run_manual(
-                    flow,
-                    runtime_ledger=service.runtime_cache_ledger,
-                    runtime_stop_event=runtime_stop_event,
-                    flow_stop_event=flow_stop_event,
-                )
-                service._debug_log(f"manual flow completed name={name}")
-            except Exception as exc:
-                service._debug_log(f"manual flow crashed name={name} error={exc!r}")
-                service._debug_log(traceback.format_exc().rstrip())
-                service.runtime_cache_ledger.logs.append(
-                    level="ERROR",
-                    message=str(exc),
-                    created_at_utc=utcnow_text(),
-                    flow_name=name,
-                )
-                raise
-            finally:
-                with service._state_lock:
-                    service.state.unregister_manual_run(name)
-
-        thread = threading.Thread(target=_target, daemon=True)
-        with service._state_lock:
-            service.state.register_manual_run(
-                name,
-                thread=thread,
-                runtime_stop_event=runtime_stop_event,
-                flow_stop_event=flow_stop_event,
-            )
-        thread.start()
-        if wait:
-            thread.join()
-        return {"ok": True}
 
     def start_engine(self) -> dict[str, Any]:
         service = self.service

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
@@ -195,11 +196,46 @@ class _GuiWorkspaceCatalogController:
             pass
 
     def finish_control_action(self, window: "DataEngineWindow", action_name: str, payload: object, presentation: "_GuiFlowPresentationController") -> None:
-        if action_name != "refresh_flows":
+        if action_name not in {"refresh_flows", "request_control", "reset_flow"}:
             return
         window._pending_control_actions.discard(action_name)
         presentation.refresh_action_buttons(window)
         if window.ui_closing:
+            return
+        if action_name == "request_control":
+            result = payload
+            if getattr(result, "error_text", None) is not None:
+                window._append_log_line(result.error_text.replace("\n\n", ": "))
+                window._show_message_box_later(
+                    title=APP_DISPLAY_NAME,
+                    text=result.error_text,
+                    tone="error",
+                )
+                return
+            if getattr(result, "status_text", None) is not None:
+                window._append_log_line(result.status_text)
+            if getattr(result, "ensure_daemon_started", False):
+                window._ensure_daemon_started()
+            if getattr(result, "sync_after", False):
+                window._sync_from_daemon()
+            return
+        if action_name == "reset_flow":
+            assert isinstance(payload, dict)
+            error_text = payload.get("error_text")
+            flow_name = payload.get("flow_name")
+            if isinstance(error_text, str) and error_text.strip():
+                window._show_message_box_later(
+                    title=APP_DISPLAY_NAME,
+                    text=error_text,
+                    tone="error",
+                )
+                return
+            if isinstance(flow_name, str):
+                window.runtime_binding_service.invalidate_flow_history(
+                    window.runtime_binding,
+                    flow_name=flow_name,
+                )
+            window._rebuild_runtime_snapshot()
             return
         result = payload
         if getattr(result, "error_text", None) is not None:
@@ -302,68 +338,50 @@ class _GuiFlowPresentationController:
             ),
             has_automated_flows=any(flow_card.valid and flow_card.mode in {"poll", "schedule"} for flow_card in window.flow_cards.values()),
             workspace_available=window._has_authored_workspace(),
+            local_request_pending=window.workspace_control_state.local_request_pending,
         )
         action_state = GuiActionState.from_context(action_context)
         selected_manual_running = bool(
             card is not None
             and card.name == window.runtime_session.manual_flow_name_for_group(card.group)
-            and not window.runtime_session.runtime_active
+        )
+        selected_manual_stopping = bool(
+            selected_manual_running
+            and card is not None
+            and card.group in window.manual_flow_stopping_groups
         )
         if "run_selected_flow" in window._pending_control_actions:
-            action_state = GuiActionState(
-                flow_run_label=action_state.flow_run_label,
-                flow_run_state=action_state.flow_run_state,
+            action_state = replace(
+                action_state,
+                flow_run_label="Starting...",
                 flow_run_enabled=False,
-                flow_config_enabled=action_state.flow_config_enabled,
-                engine_enabled=action_state.engine_enabled,
-                engine_label=action_state.engine_label,
-                engine_state=action_state.engine_state,
-                refresh_enabled=action_state.refresh_enabled,
-                clear_flow_log_enabled=action_state.clear_flow_log_enabled,
-                request_control_visible=action_state.request_control_visible,
-                request_control_enabled=action_state.request_control_enabled,
             )
-        if "stop_pipeline" in window._pending_control_actions and selected_manual_running:
-            action_state = GuiActionState(
+        if selected_manual_stopping or ("stop_pipeline" in window._pending_control_actions and selected_manual_running):
+            action_state = replace(
+                action_state,
                 flow_run_label="Stopping...",
                 flow_run_state="stop",
                 flow_run_enabled=False,
-                flow_config_enabled=action_state.flow_config_enabled,
-                engine_enabled=action_state.engine_enabled,
-                engine_label=action_state.engine_label,
-                engine_state=action_state.engine_state,
-                refresh_enabled=action_state.refresh_enabled,
-                clear_flow_log_enabled=action_state.clear_flow_log_enabled,
-                request_control_visible=action_state.request_control_visible,
-                request_control_enabled=action_state.request_control_enabled,
+            )
+        if "request_control" in window._pending_control_actions:
+            action_state = replace(
+                action_state,
+                request_control_label="Requesting...",
+                request_control_enabled=False,
             )
         if {"start_runtime", "stop_runtime", "stop_pipeline"} & window._pending_control_actions:
-            action_state = GuiActionState(
-                flow_run_label=action_state.flow_run_label,
-                flow_run_state=action_state.flow_run_state,
-                flow_run_enabled=action_state.flow_run_enabled,
-                flow_config_enabled=action_state.flow_config_enabled,
+            action_state = replace(
+                action_state,
                 engine_enabled=False,
-                engine_label=action_state.engine_label,
-                engine_state=action_state.engine_state,
-                refresh_enabled=action_state.refresh_enabled,
-                clear_flow_log_enabled=action_state.clear_flow_log_enabled,
-                request_control_visible=action_state.request_control_visible,
-                request_control_enabled=action_state.request_control_enabled,
+                engine_label="Stopping..." if "stop_runtime" in window._pending_control_actions or "stop_pipeline" in window._pending_control_actions else "Starting...",
             )
         if "refresh_flows" in window._pending_control_actions:
-            action_state = GuiActionState(
-                flow_run_label=action_state.flow_run_label,
-                flow_run_state=action_state.flow_run_state,
-                flow_run_enabled=action_state.flow_run_enabled,
-                flow_config_enabled=action_state.flow_config_enabled,
-                engine_enabled=action_state.engine_enabled,
-                engine_label=action_state.engine_label,
-                engine_state=action_state.engine_state,
-                refresh_enabled=False,
-                clear_flow_log_enabled=action_state.clear_flow_log_enabled,
-                request_control_visible=action_state.request_control_visible,
-                request_control_enabled=action_state.request_control_enabled,
+            action_state = replace(action_state, refresh_enabled=False)
+        if "reset_flow" in window._pending_control_actions:
+            action_state = replace(
+                action_state,
+                clear_flow_log_label="Resetting...",
+                clear_flow_log_enabled=False,
             )
         window.flow_run_button.setText(action_state.flow_run_label)
         window.flow_run_button.setEnabled(action_state.flow_run_enabled)
@@ -373,7 +391,9 @@ class _GuiFlowPresentationController:
         window.engine_button.setText(action_state.engine_label)
         window.engine_button.setProperty("engineState", action_state.engine_state)
         window.refresh_button.setEnabled(action_state.refresh_enabled)
+        window.clear_flow_log_button.setText(action_state.clear_flow_log_label)
         window.clear_flow_log_button.setEnabled(action_state.clear_flow_log_enabled)
+        window.request_control_button.setText(action_state.request_control_label)
         window.request_control_button.setVisible(action_state.request_control_visible)
         window.request_control_button.setEnabled(action_state.request_control_enabled)
         for selector in _GuiWorkspaceCatalogController._workspace_selectors(window):
@@ -408,21 +428,20 @@ class _GuiFlowPresentationController:
         window.lease_status_label.setVisible(True)
 
     def request_control(self, window: "DataEngineWindow") -> None:
-        result = window.control_application.request_control(window.runtime_binding.daemon_manager)
-        if result.error_text is not None:
-            window._append_log_line(result.error_text.replace("\n\n", ": "))
-            window._show_message_box(
-                title=APP_DISPLAY_NAME,
-                text=result.error_text,
-                tone="error",
-            )
+        if "request_control" in window._pending_control_actions or window.ui_closing:
             return
-        if result.status_text is not None:
-            window._append_log_line(result.status_text)
-        if result.ensure_daemon_started:
-            window._ensure_daemon_started()
-        if result.sync_after:
-            window._sync_from_daemon()
+        window._pending_control_actions.add("request_control")
+        self.refresh_action_buttons(window)
+        start_worker_thread(window, target=self._request_control_worker, args=(window,))
+
+    def _request_control_worker(self, window: "DataEngineWindow") -> None:
+        result = window.control_application.request_control(window.runtime_binding.daemon_manager)
+        if window.ui_closing:
+            return
+        try:
+            window.signals.control_action_finished.emit("request_control", result)
+        except RuntimeError:
+            pass
 
     def update_engine_button(self, window: "DataEngineWindow") -> None:
         self.refresh_action_buttons(window)
@@ -481,38 +500,31 @@ class _GuiFlowPresentationController:
     def clear_logs(self, window: "DataEngineWindow") -> None:
         if window.selected_flow_name is None:
             return
-        if window.runtime_session.has_active_work or window.runtime_session.runtime_stopping:
-            window._show_message_box(
-                title=APP_DISPLAY_NAME,
-                text="Stop the engine and any active manual runs before resetting a flow.",
-                tone="error",
-            )
+        if not window.clear_flow_log_button.isEnabled() or "reset_flow" in window._pending_control_actions or window.ui_closing:
             return
-        if not window.runtime_session.control_available:
-            window._show_message_box(
-                title=APP_DISPLAY_NAME,
-                text=window.workspace_control_state.blocked_status_text,
-                tone="error",
-            )
-            return
+        window._pending_control_actions.add("reset_flow")
+        self.refresh_action_buttons(window)
+        start_worker_thread(window, target=self._reset_flow_worker, args=(window, window.selected_flow_name))
+
+    def _reset_flow_worker(self, window: "DataEngineWindow", flow_name: str) -> None:
+        error_text: str | None = None
         try:
             self.reset_service.reset_flow(
                 paths=window.workspace_paths,
                 runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
-                flow_name=window.selected_flow_name,
+                flow_name=flow_name,
             )
         except Exception as exc:
-            window._show_message_box(
-                title=APP_DISPLAY_NAME,
-                text=f"Flow reset failed.\n\n{exc}",
-                tone="error",
-            )
+            error_text = f"Flow reset failed.\n\n{exc}"
+        if window.ui_closing:
             return
-        window.runtime_binding_service.invalidate_flow_history(
-            window.runtime_binding,
-            flow_name=window.selected_flow_name,
-        )
-        window._rebuild_runtime_snapshot()
+        try:
+            window.signals.control_action_finished.emit(
+                "reset_flow",
+                {"flow_name": flow_name, "error_text": error_text},
+            )
+        except RuntimeError:
+            pass
 
 
 class GuiFlowController:

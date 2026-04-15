@@ -197,9 +197,9 @@ def _mirror_helper_modules(helper_modules_dir: Path, compiled_helper_modules_dir
         if relative_path in expected_paths:
             continue
         if existing_path.is_dir():
-            existing_path.rmdir()
+            shutil.rmtree(existing_path, ignore_errors=True)
         else:
-            existing_path.unlink()
+            existing_path.unlink(missing_ok=True)
 
 
 def _validate_unique_authored_flow_module_stems(notebook_paths: list[Path], python_paths: list[Path]) -> None:

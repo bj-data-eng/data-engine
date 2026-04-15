@@ -572,7 +572,6 @@ def test_settings_visibility_panel_reports_workspace_stats(qapp):
 
 
 def test_provision_workspace_button_creates_missing_workspace_assets(qapp, tmp_path, monkeypatch):
-    del qapp
     monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(tmp_path / "data_engine"))
 
     class _RecordingProvisioningService:
@@ -595,13 +594,21 @@ def test_provision_workspace_button_creates_missing_workspace_assets(qapp, tmp_p
     )
     selected_paths = window.workspace_paths
 
-    window._provision_selected_workspace()
+    try:
+        window._provision_selected_workspace()
+        _process_ui_until(
+            qapp,
+            lambda: provisioning_service.requested_paths is not None
+            and "provision_workspace" not in window._pending_control_actions,
+        )
 
-    assert provisioning_service.requested_paths is not None
-    assert provisioning_service.requested_paths.workspace_root == selected_paths.workspace_root
-    assert (selected_paths.workspace_root / "flow_modules").is_dir()
-    assert selected_paths.workspace_id in window.workspace_target_label.text()
-    assert f"Provisioned {selected_paths.workspace_root.name}" in window.workspace_provision_status_label.text()
+        assert provisioning_service.requested_paths is not None
+        assert provisioning_service.requested_paths.workspace_root == selected_paths.workspace_root
+        assert (selected_paths.workspace_root / "flow_modules").is_dir()
+        assert selected_paths.workspace_id in window.workspace_target_label.text()
+        assert f"Provisioned {selected_paths.workspace_root.name}" in window.workspace_provision_status_label.text()
+    finally:
+        _dispose_window(qapp, window)
 
 
 def test_icon_registry_loads_current_file_backed_svg():
@@ -886,7 +893,11 @@ def test_refresh_button_reloads_flows(qapp, monkeypatch, tmp_path):
         assert "poller" in window.flow_cards
 
         window._refresh_flows_requested()
-        _process_ui_until(qapp, lambda: len(control_application.refresh_flows_calls) == 1)
+        _process_ui_until(
+            qapp,
+            lambda: len(control_application.refresh_flows_calls) == 1
+            and "refresh_flows" not in window._pending_control_actions,
+        )
         window._flush_deferred_ui_updates()
 
         assert len(control_application.refresh_flows_calls) == 1
@@ -1586,6 +1597,47 @@ def test_manual_run_selected_flow_button_shows_stopping_while_stop_request_is_pe
         _dispose_window(qapp, window)
 
 
+def test_manual_run_selected_flow_button_stays_stopping_until_run_finishes(qapp, monkeypatch):
+    del monkeypatch
+    control_application = _FakeControlApplication()
+    control_application.stop_pipeline_result = type(
+        "Result",
+        (),
+        {
+            "requested": True,
+            "sync_after": False,
+            "status_text": "Stopping selected flow...",
+            "error_text": None,
+        },
+    )()
+    window = _make_window(control_application=control_application)
+    try:
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window.flow_states["manual_review"] = "running"
+        window._select_flow("manual_review")
+        window._refresh_action_buttons()
+
+        window._run_selected_flow()
+        _process_ui_until(
+            qapp,
+            lambda: len(control_application.stop_pipeline_calls) == 1
+            and "stop_pipeline" not in window._pending_control_actions,
+        )
+
+        assert window.flow_run_button.text() == "Stopping..."
+        assert window.flow_run_button.isEnabled() is False
+        assert "Manual" in window.manual_flow_stopping_groups
+
+        window.manual_flow_stop_events["Manual"] = threading.Event()
+        window._finish_run("manual_review", [], None)
+
+        assert window.flow_run_button.text() == "Run Once"
+        assert window.flow_run_button.isEnabled() is True
+        assert "Manual" not in window.manual_flow_stopping_groups
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_lease_status_shows_refresh_due_instead_of_zero_seconds(qapp, monkeypatch):
     window = _make_window()
     try:
@@ -1752,6 +1804,11 @@ def test_request_control_button_records_request_and_logs_result(qapp, monkeypatc
         assert window.request_control_button.isHidden() is False
 
         QTest.mouseClick(window.request_control_button, Qt.MouseButton.LeftButton)
+        _process_ui_until(
+            qapp,
+            lambda: len(control_application.request_control_calls) == 1
+            and "request_control" not in window._pending_control_actions,
+        )
 
         assert control_application.request_control_calls == [window._daemon_manager]
         assert any(entry.line == "Control request sent." for entry in window.log_store._entries)
@@ -1781,19 +1838,63 @@ def test_request_control_button_preserves_verbose_error_text(qapp, monkeypatch):
         window.runtime_session = replace(window.runtime_session, workspace_owned=False, leased_by_machine_id="other-host")
 
         window._request_control()
+        _process_ui_until(
+            qapp,
+            lambda: len(control_application.request_control_calls) == 1
+            and "request_control" not in window._pending_control_actions,
+        )
 
         assert control_application.request_control_calls == [window._daemon_manager]
         assert any(
             entry.line == "Failed to request workspace control. The daemon returned no additional detail."
             for entry in window.log_store._entries
         )
-        assert capture.shown_messages == [
+        assert capture.shown_later_messages == [
             (
                 APP_DISPLAY_NAME,
                 "Failed to request workspace control. The daemon returned no additional detail.",
                 "error",
             )
         ]
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_request_control_button_shows_requesting_while_request_is_pending(qapp, monkeypatch):
+    del monkeypatch
+    control_application = _FakeControlApplication(
+        request_control_result=type(
+            "Result",
+            (),
+            {
+                "requested": True,
+                "sync_after": False,
+                "ensure_daemon_started": False,
+                "status_text": "Control request sent.",
+                "error_text": None,
+            },
+        )(),
+    )
+    original_request_control = control_application.request_control
+
+    def _delayed_request_control(manager):
+        QTest.qWait(50)
+        return original_request_control(manager)
+
+    control_application.request_control = _delayed_request_control
+    window = _make_window(control_application=control_application)
+    try:
+        window.runtime_session = replace(window.runtime_session, workspace_owned=False, leased_by_machine_id="other-host")
+        window._refresh_action_buttons()
+
+        window._request_control()
+        _process_ui_until(qapp, lambda: "request_control" in window._pending_control_actions)
+
+        assert window.request_control_button.text() == "Requesting..."
+        assert window.request_control_button.isEnabled() is False
+
+        _process_ui_until(qapp, lambda: "request_control" not in window._pending_control_actions)
+        assert window.request_control_button.text() == "Request Control"
     finally:
         _dispose_window(qapp, window)
 
@@ -2325,6 +2426,11 @@ def test_force_shutdown_daemon_button_calls_force_stop_path(qapp, monkeypatch):
     )
     try:
         window._force_shutdown_daemon()
+        _process_ui_until(
+            qapp,
+            lambda: len(force_shutdown_calls) == 1
+            and "force_shutdown_daemon" not in window._pending_control_actions,
+        )
 
         assert force_shutdown_calls == [{"workspace": window.workspace_paths.workspace_root, "timeout": 0.5}]
         assert "force-stopped" in window.force_shutdown_daemon_status_label.text().lower()
@@ -2338,6 +2444,7 @@ def test_reset_flow_button_calls_persistent_reset_path(qapp, monkeypatch):
     rebuild_calls = _attach_call_recorder(window, "_rebuild_runtime_snapshot")
     try:
         window._clear_logs()
+        _process_ui_until(qapp, lambda: len(reset_service.flow_resets) == 1)
 
         assert reset_service.flow_resets == [(window.workspace_paths, "poller")]
         assert len(rebuild_calls) == 1
@@ -2383,10 +2490,48 @@ def test_reset_flow_button_clears_selected_flow_logs_before_rebuild(qapp, monkey
         window.step_output_index = window.step_output_index.with_flow_outputs("poller", {"Write Parquet": Path("C:/tmp/out.parquet")})
 
         window._clear_logs()
+        _process_ui_until(qapp, lambda: len(reset_service.flow_resets) == 1)
 
         assert window.log_store.entries_for_flow("poller") == ()
         assert len(window.log_store.entries_for_flow("manual_review")) == 1
         assert window.step_output_index.outputs_for("poller").outputs == {}
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_reset_flow_button_is_disabled_while_manual_run_is_active(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window._select_flow("poller")
+        window._refresh_action_buttons()
+
+        assert window.clear_flow_log_button.isEnabled() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_reset_flow_button_shows_resetting_while_request_is_pending(qapp, monkeypatch):
+    del monkeypatch
+    reset_service = _FakeResetService()
+    original_reset_flow = reset_service.reset_flow
+
+    def _delayed_reset_flow(*, paths, runtime_cache_ledger, flow_name):
+        QTest.qWait(50)
+        return original_reset_flow(paths=paths, runtime_cache_ledger=runtime_cache_ledger, flow_name=flow_name)
+
+    reset_service.reset_flow = _delayed_reset_flow
+    window = _make_window(reset_service=reset_service)
+    try:
+        window._clear_logs()
+        _process_ui_until(qapp, lambda: "reset_flow" in window._pending_control_actions)
+
+        assert window.clear_flow_log_button.text() == "Resetting..."
+        assert window.clear_flow_log_button.isEnabled() is False
+
+        _process_ui_until(qapp, lambda: "reset_flow" not in window._pending_control_actions)
+        assert window.clear_flow_log_button.text() == "Reset Flow"
     finally:
         _dispose_window(qapp, window)
 
@@ -2398,6 +2543,11 @@ def test_reset_workspace_button_calls_reset_service_and_rebinds(qapp, monkeypatc
     rebind_calls = _attach_call_recorder(window, "_rebind_workspace_context")
     try:
         window._reset_workspace()
+        _process_ui_until(
+            qapp,
+            lambda: len(reset_service.workspace_resets) == 1
+            and "reset_workspace" not in window._pending_control_actions,
+        )
 
         assert reset_service.workspace_resets == [window.workspace_paths]
         assert rebind_calls == [ ((), {"workspace_id": window.workspace_paths.workspace_id}) ]
@@ -2424,9 +2574,49 @@ def test_reset_workspace_button_allows_idle_live_daemon(qapp, monkeypatch):
     rebind_calls = _attach_call_recorder(window, "_rebind_workspace_context")
     try:
         window._reset_workspace()
+        _process_ui_until(
+            qapp,
+            lambda: len(reset_service.workspace_resets) == 1
+            and "reset_workspace" not in window._pending_control_actions,
+        )
 
         assert reset_service.workspace_resets == [window.workspace_paths]
         assert rebind_calls == [((), {"workspace_id": window.workspace_paths.workspace_id})]
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_reset_workspace_button_is_disabled_while_active_work_is_running(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window._refresh_workspace_visibility_panel()
+
+        assert window.reset_workspace_button.isEnabled() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_force_shutdown_button_shows_pending_label_while_request_is_in_flight(qapp, monkeypatch):
+    del monkeypatch
+    force_shutdown_calls: list[dict[str, object]] = []
+
+    def _delayed_force_shutdown(paths, timeout=0.5):
+        QTest.qWait(50)
+        force_shutdown_calls.append({"workspace": paths.workspace_root, "timeout": timeout})
+
+    window = _make_window(force_shutdown_func=_delayed_force_shutdown)
+    try:
+        window._force_shutdown_daemon()
+        _process_ui_until(qapp, lambda: "force_shutdown_daemon" in window._pending_control_actions)
+
+        assert window.force_shutdown_daemon_button.text() == "Force Stopping..."
+        assert window.force_shutdown_daemon_button.isEnabled() is False
+
+        _process_ui_until(qapp, lambda: "force_shutdown_daemon" not in window._pending_control_actions)
+        assert force_shutdown_calls == [{"workspace": window.workspace_paths.workspace_root, "timeout": 0.5}]
+        assert window.force_shutdown_daemon_button.text() == "Force Stop Daemon"
     finally:
         _dispose_window(qapp, window)
 

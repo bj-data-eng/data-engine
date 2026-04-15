@@ -52,6 +52,8 @@ class GuiRuntimeController:
             window.daemon_status = sync_state.daemon_status
             window.workspace_control_state = sync_state.workspace_control_state
             window.runtime_session = sync_state.runtime_session
+            active_manual_groups = {run.group_name for run in window.runtime_session.manual_runs}
+            window.manual_flow_stopping_groups.intersection_update(active_manual_groups)
             window._apply_daemon_snapshot(sync_state.snapshot)
             self.rebuild_runtime_snapshot(window)
         finally:
@@ -136,6 +138,16 @@ class GuiRuntimeController:
         refresh_plan = self.runtime_application.plan_flow_state_refresh(
             previous_states=window.flow_states,
             next_states=snapshot.flow_states,
+            runtime_session=window.runtime_session,
+        )
+        flow_states = dict(refresh_plan.flow_states)
+        for group_name in window.manual_flow_stopping_groups:
+            flow_name = window.runtime_session.manual_flow_name_for_group(group_name)
+            if flow_name is not None and flow_states.get(flow_name) != "failed":
+                flow_states[flow_name] = "stopping flow"
+        refresh_plan = self.runtime_application.plan_flow_state_refresh(
+            previous_states=window.flow_states,
+            next_states=flow_states,
             runtime_session=window.runtime_session,
         )
         window.operation_tracker = snapshot.operation_tracker
@@ -278,7 +290,12 @@ class GuiRuntimeController:
             "blocked_status_text": window.workspace_control_state.blocked_status_text,
             "timeout": 5.0,
         }
-        self._begin_control_action(window, "stop_pipeline", target=self._stop_pipeline_worker, args=(window, action_kwargs))
+        if self._begin_control_action(window, "stop_pipeline", target=self._stop_pipeline_worker, args=(window, action_kwargs)):
+            if selected_manual_running:
+                window.manual_flow_stopping_groups.add(card.group)
+                if card.name in window.flow_states and window.flow_states.get(card.name) != "failed":
+                    window.flow_controller.set_flow_state(window, card.name, "stopping flow")
+                window.flow_controller.refresh_action_buttons(window)
 
     def _stop_pipeline_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
         result = window.control_application.stop_pipeline(**action_kwargs)
@@ -308,6 +325,11 @@ class GuiRuntimeController:
             return
         result = payload
         if getattr(result, "error_text", None) is not None:
+            if action_name == "stop_pipeline":
+                card = window.flow_cards.get(window.selected_flow_name or "")
+                if card is not None:
+                    window.manual_flow_stopping_groups.discard(card.group)
+                    window.flow_controller.refresh_action_buttons(window)
             window._show_message_box_later(
                 title=APP_DISPLAY_NAME,
                 text=result.error_text,
@@ -341,6 +363,7 @@ class GuiRuntimeController:
             None,
         )
         stop_event = window.manual_flow_stop_events.pop(group_name, None)
+        window.manual_flow_stopping_groups.discard(group_name)
         stop_requested = stop_event.is_set() if stop_event is not None else False
         if stop_event is not None:
             stop_event.clear()

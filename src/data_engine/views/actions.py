@@ -19,7 +19,9 @@ class GuiActionState:
     engine_label: str
     engine_state: str
     refresh_enabled: bool
+    clear_flow_log_label: str
     clear_flow_log_enabled: bool
+    request_control_label: str
     request_control_visible: bool
     request_control_enabled: bool
 
@@ -58,9 +60,21 @@ class GuiActionState:
             engine_label="Stopping..." if session.runtime_stopping else "Stop Engine" if active else "Start Engine",
             engine_state="running" if active else "stopped",
             refresh_enabled=not session.runtime_active and not session.manual_run_active,
-            clear_flow_log_enabled=selected.present and selected.has_logs,
+            clear_flow_log_label="Reset Flow",
+            clear_flow_log_enabled=(
+                selected.present
+                and not session.has_active_work
+                and not session.runtime_stopping
+                and session.control_available
+                and context.workspace_available
+            ),
+            request_control_label="Requesting..." if context.local_request_pending else "Request Control",
             request_control_visible=True,
-            request_control_enabled=not session.workspace_owned,
+            request_control_enabled=(
+                not session.workspace_owned
+                and not context.local_request_pending
+                and context.workspace_available
+            ),
         )
 
 
