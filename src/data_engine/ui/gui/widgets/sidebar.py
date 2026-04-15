@@ -26,7 +26,7 @@ def flow_secondary_text(window: "DataEngineWindow", card: "QtFlowCard") -> str:
 
 
 def flow_primary_text(card: "QtFlowCard") -> str:
-    return card.name
+    return card.title
 
 
 def status_color_name(state: str) -> str:

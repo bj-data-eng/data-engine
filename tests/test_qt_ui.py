@@ -838,7 +838,7 @@ def test_data_engine_window_instantiates_and_loads_flow_cards(qapp, monkeypatch)
         assert set(window.sidebar_flow_widgets) == {"poller", "manual_review"}
         poller_widget = window.sidebar_flow_widgets["poller"]
         primary_label = next(label for label in poller_widget.findChildren(QLabel) if label.objectName() == "sidebarFlowCode")
-        assert primary_label.text() == "poller"
+        assert primary_label.text() == "Claims Poller"
 
         _click_flow_row(window, "manual_review")
         assert window.selected_flow_name == "manual_review"

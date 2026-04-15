@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None, *, dependencies: CliDependencies | None 
 
 
 def _apply_environment(args: argparse.Namespace) -> None:
-    os.environ.setdefault(DATA_ENGINE_DEV_INSTRUMENT_ENV_VAR, "1")
+    os.environ.setdefault(DATA_ENGINE_DEV_INSTRUMENT_ENV_VAR, "0")
     os.environ.setdefault(DATA_ENGINE_DEV_VIZTRACE_ENV_VAR, "0")
     if args.app_root is not None:
         os.environ[DATA_ENGINE_APP_ROOT_ENV_VAR] = str(args.app_root.expanduser().resolve())
