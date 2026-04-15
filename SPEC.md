@@ -14,6 +14,7 @@ Data Engine is a code-defined workflow runtime. A flow is the `Flow` object retu
 - `step_each(fn, use=..., save_as=..., label=...)`: readability-first alias for `map(...)`
 - `preview(use=...)`: notebook-style helper that returns one named saved object or the final current value
 - `FlowContext`: mutable per-run state shared across steps
+- `max_parallel`: optional source-scoped concurrency limit for eligible watched flows, defaulting to `1`
 
 ## Flow Module Source Model
 
@@ -60,6 +61,7 @@ def build():
             interval="5s",
             extensions=[".xlsx", ".xlsm"],
             settle=1,
+            max_parallel=4,
         )
         .mirror(root="../example_data/Output/example_poll")
         .step(read_claims, save_as="raw_df")
@@ -124,8 +126,14 @@ Path helper intent:
 - polling freshness compares the current source file signature against persisted runtime ledger state
 - output files are author-facing artifacts, not the freshness checkpoint
 - intermediate step outputs do not participate in freshness
-- groups run sequentially within a group and in parallel across groups
-- stop requests are cooperative and checked between steps
+- groups still coordinate at the group level, while eligible source-scoped watched flows may execute several source runs concurrently inside one flow via `watch(..., max_parallel=...)`
+- `max_parallel=1` preserves the existing sequential behavior
+- `max_parallel` applies to source-scoped watched runs such as `run_as="individual"` poll or schedule execution; it does not make one step callable internally multithreaded
+- stop requests are cooperative
+- engine stop preserves graceful-stop semantics:
+  - already-started work is allowed to finish
+  - queued-not-yet-started work must not begin after stop is requested
+- manual graceful stop follows the same intent for the targeted manual run
 - step callables use native libraries directly; Data Engine does not mirror Polars or DuckDB APIs
 - `map(...)` raises immediately when the current batch is empty
 - `preview(use="name")` executes only until the named `save_as="name"` object exists, then returns that object
@@ -137,6 +145,7 @@ The UI:
 - discovers flows from compiled flow modules
 - shows titles, descriptions, path bindings, runtime mode, and ordered steps
 - supports `Run Once`, `Start Engine`, `Stop Runtime`, `Stop Flow`, output inspection, and docs viewing
+- treats immediate control state and persisted runtime history as related but distinct surfaces
 - talks to the per-workspace daemon through the daemon-manager layer
 
 The UI does not:
