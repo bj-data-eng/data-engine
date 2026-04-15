@@ -3,7 +3,7 @@
 This page is generated from the current AST map and is intentionally inventory-shaped rather than explanatory.
 
 - package root: `src/data_engine`
-- module count: `183`
+- module count: `184`
 
 - module `data_engine`
   - attribute `__all__`
@@ -26,6 +26,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `has_automated_flows: bool`
       - param `workspace_available: bool=True`
       - param `selected_run_group_present: bool=False`
+      - param `local_request_pending: bool=False`
 - module `data_engine.application.catalog`
   - function `_first_grouped_entry_name`
     - param `entries: tuple[FlowCatalogEntry, ...]`
@@ -191,6 +192,7 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `RuntimeSnapshotPresentation`
     - attribute `operation_tracker`
     - attribute `flow_states`
+    - attribute `active_runtime_flow_names`
     - method `signature_for`
       - param `self`
       - param `runtime_session: RuntimeSessionState`
@@ -323,6 +325,10 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `payload: dict[str, Any]`
       - param `*`
       - param `timeout: float=0.0`
+    - method `_client_timing_log_path`
+      - param `paths: WorkspacePaths`
+    - method `_instrumented_payload`
+      - param `payload: dict[str, Any]`
 - module `data_engine.application.workspace`
   - class `WorkspaceBinding`
     - attribute `operator_session`
@@ -904,6 +910,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `has_automated_flows`
     - attribute `workspace_available`
     - attribute `selected_run_group_present`
+    - attribute `local_request_pending`
 - module `data_engine.domain.catalog`
   - attribute `__all__`
   - function `flow_category`
@@ -925,6 +932,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `valid`
     - attribute `category`
     - attribute `error`
+    - attribute `parallelism`
   - class `FlowCatalogLike`
     - attribute `name`
     - attribute `group`
@@ -940,6 +948,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `valid`
     - attribute `category`
     - attribute `error`
+    - attribute `parallelism`
   - class `FlowCatalogState`
     - attribute `entries`
     - attribute `flow_states`
@@ -1172,6 +1181,10 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `row_state`
       - param `self`
       - param `operation_name: str`
+    - method `has_running_rows`
+      - param `self`
+    - method `has_observed_activity`
+      - param `self`
     - method `apply_event`
       - param `self`
       - param `operation_names: tuple[str, ...]`
@@ -1485,6 +1498,9 @@ This page is generated from the current AST map and is intentionally inventory-s
   - function `_atomic_write_text`
     - param `path: Path`
     - param `text: str`
+  - function `_atomic_copy_file`
+    - param `source_path: Path`
+    - param `target_path: Path`
   - function `_mirror_helper_modules`
     - param `helper_modules_dir: Path`
     - param `compiled_helper_modules_dir: Path`
@@ -1661,6 +1677,50 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `PathLike`
   - attribute `ColumnNames`
   - attribute `ReturnMode`
+  - attribute `WeekMask`
+  - attribute `DateLike`
+  - attribute `ExprLike`
+  - attribute `IntExprLike`
+  - attribute `_DEFAULT_WEEK_MASK`
+  - function `networkdays`
+    - param `start: ExprLike`
+    - param `end: ExprLike`
+    - param `*`
+    - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+    - param `count_first_day: bool=False`
+    - param `mask: Iterable[bool] | None=None`
+  - function `workday`
+    - param `start: ExprLike`
+    - param `days: IntExprLike`
+    - param `*`
+    - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+    - param `count_first_day: bool=False`
+    - param `mask: Iterable[bool] | None=None`
+  - function `_coerce_week_mask`
+    - param `mask: Iterable[bool] | None`
+  - function `_coerce_holiday_dates`
+    - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None`
+  - function `_as_date_expr`
+    - param `value: ExprLike`
+  - function `_as_int_expr`
+    - param `value: IntExprLike`
+  - function `_is_business_day_expr`
+    - param `date_expr: pl.Expr`
+    - param `week_mask: WeekMask`
+    - param `holiday_dates: tuple[date, ...]`
+  - function `_forced_first_day_adjustment`
+    - param `start_expr: pl.Expr`
+    - param `end_expr: pl.Expr`
+    - param `week_mask: WeekMask`
+    - param `holiday_dates: tuple[date, ...]`
+  - function `_workday_result`
+    - param `start_expr: pl.Expr`
+    - param `days_expr: pl.Expr`
+    - param `week_mask: WeekMask`
+    - param `holiday_dates: tuple[date, ...]`
+    - param `*`
+    - param `count_first_day: bool`
+    - param `is_business: pl.Expr`
   - function `write_parquet_atomic`
     - param `df: pl.DataFrame`
     - param `path: PathLike`
@@ -1687,6 +1747,22 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `normalize_column_names`
       - param `self`
       - param `columns: Iterable[object] | None=None`
+    - method `networkdays`
+      - param `self`
+      - param `start: ExprLike`
+      - param `end: ExprLike`
+      - param `*`
+      - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+      - param `count_first_day: bool=False`
+      - param `mask: Iterable[bool] | None=None`
+    - method `workday`
+      - param `self`
+      - param `start: ExprLike`
+      - param `days: IntExprLike`
+      - param `*`
+      - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+      - param `count_first_day: bool=False`
+      - param `mask: Iterable[bool] | None=None`
     - method `write_parquet_atomic`
       - param `self`
       - param `path: PathLike`
@@ -1757,6 +1833,22 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `normalize_column_names`
       - param `self`
       - param `columns: Iterable[object] | None=None`
+    - method `networkdays`
+      - param `self`
+      - param `start: ExprLike`
+      - param `end: ExprLike`
+      - param `*`
+      - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+      - param `count_first_day: bool=False`
+      - param `mask: Iterable[bool] | None=None`
+    - method `workday`
+      - param `self`
+      - param `start: ExprLike`
+      - param `days: IntExprLike`
+      - param `*`
+      - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+      - param `count_first_day: bool=False`
+      - param `mask: Iterable[bool] | None=None`
     - method `sink_parquet_atomic`
       - param `self`
       - param `path: PathLike`
@@ -1907,6 +1999,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `daemon_id`
     - instance attribute `pid`
     - instance attribute `_state_lock`
+    - instance attribute `_cached_flow_cards`
+    - instance attribute `_timing_log_path`
     - instance attribute `command_handler`
     - method `__init__`
       - param `self`
@@ -1925,6 +2019,20 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `_debug_log`
       - param `self`
       - param `message: str`
+    - method `_instrument`
+      - param `self`
+      - param `scope: str`
+      - param `event: str`
+      - param `*`
+      - param `phase: str='mark'`
+      - param `elapsed_ms: float | None=None`
+      - param `fields: dict[str, object] | None=None`
+    - method `_timed_operation`
+      - param `self`
+      - param `scope: str`
+      - param `event: str`
+      - param `*`
+      - param `fields: dict[str, object] | None=None`
     - method `initialize`
       - param `self`
     - method `serve_forever`
@@ -2107,7 +2215,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `engine_flow_stop_event`
     - attribute `pending_manual_run_names`
     - attribute `manual_run_threads`
-    - attribute `manual_stop_events`
+    - attribute `manual_runtime_stop_events`
+    - attribute `manual_flow_stop_events`
     - attribute `shutdown_event`
     - attribute `checkpoint_thread`
     - attribute `consecutive_checkpoint_failures`
@@ -2180,7 +2289,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `name: str`
       - param `*`
       - param `thread: threading.Thread`
-      - param `stop_event: threading.Event`
+      - param `runtime_stop_event: threading.Event`
+      - param `flow_stop_event: threading.Event`
     - method `unregister_manual_run`
       - param `self`
       - param `name: str`
@@ -2305,6 +2415,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
     - method `sync`
       - param `self`
+    - method `_timing_log_path`
+      - param `self`
     - method `_lease_snapshot`
       - param `self`
     - method `control_status_text`
@@ -2356,19 +2468,28 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `*`
       - param `name: str`
       - param `wait: bool`
+      - param `request_id: str | None=None`
     - method `start_engine`
       - param `self`
+      - param `*`
+      - param `request_id: str | None=None`
     - method `stop_engine`
       - param `self`
+      - param `*`
+      - param `request_id: str | None=None`
     - method `stop_flow`
       - param `self`
       - param `name: str`
+      - param `request_id: str | None=None`
 - module `data_engine.hosts.daemon.runtime_control`
   - attribute `__all__`
   - function `stop_active_work`
     - param `service: 'DataEngineDaemonService'`
 - module `data_engine.hosts.daemon.server`
   - attribute `__all__`
+  - function `_serve_connection`
+    - param `service: 'DataEngineDaemonService'`
+    - param `connection`
   - function `serve_forever`
     - param `service: 'DataEngineDaemonService'`
   - function `serve_workspace_daemon`
@@ -2553,6 +2674,42 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `__all__`
   - function `env_var`
     - param `name: str`
+- module `data_engine.platform.instrumentation`
+  - attribute `DATA_ENGINE_DEV_INSTRUMENT_ENV_VAR`
+  - attribute `DATA_ENGINE_DEV_VIZTRACE_ENV_VAR`
+  - attribute `_TRUE_VALUES`
+  - attribute `_WRITE_LOCK`
+  - attribute `_VIZTRACER_LOCK`
+  - attribute `_ACTIVE_VIZTRACERS`
+  - attribute `_REGISTERED_VIZTRACERS`
+  - attribute `__all__`
+  - function `_env_enabled`
+    - param `name: str`
+  - function `dev_instrumentation_enabled`
+  - function `dev_viztrace_enabled`
+  - function `new_request_id`
+    - param `prefix: str='req'`
+  - function `append_timing_line`
+    - param `log_path: Path | None`
+    - param `*`
+    - param `scope: str`
+    - param `event: str`
+    - param `phase: str='mark'`
+    - param `elapsed_ms: float | None=None`
+    - param `fields: Mapping[str, object] | None=None`
+  - function `timed_operation`
+    - param `log_path: Path | None`
+    - param `*`
+    - param `scope: str`
+    - param `event: str`
+    - param `fields: Mapping[str, object] | None=None`
+    - param `threshold_ms: float=200.0`
+  - function `maybe_start_viztracer`
+    - param `output_path: Path | None`
+    - param `*`
+    - param `process_name: str`
+  - function `_stop_viztracer`
+    - param `key: str`
 - module `data_engine.platform.interpreters`
   - attribute `__all__`
   - function `host_concrete_path`
@@ -4123,6 +4280,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `flow: Flow`
   - function `_flow_interval`
     - param `flow: Flow`
+  - function `_flow_parallelism`
+    - param `flow: Flow`
   - function `flow_catalog_entry_from_flow`
     - param `flow: Flow`
     - param `*`
@@ -4395,6 +4554,11 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `reload_logs`
       - param `self`
       - param `binding: WorkspaceRuntimeBinding`
+    - method `invalidate_flow_history`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `flow_name: str`
     - method `rebuild_step_outputs`
       - param `self`
       - param `binding: WorkspaceRuntimeBinding`
@@ -4436,6 +4600,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `flow: 'CoreFlow'`
       - param `*`
       - param `runtime_ledger: RuntimeCacheStore | None=None`
+      - param `runtime_stop_event: Event | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `run_source`
       - param `self`
@@ -4443,12 +4608,14 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `source_path: str`
       - param `*`
       - param `runtime_ledger: RuntimeCacheStore | None=None`
+      - param `runtime_stop_event: Event | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `run_batch`
       - param `self`
       - param `flow: 'CoreFlow'`
       - param `*`
       - param `runtime_ledger: RuntimeCacheStore | None=None`
+      - param `runtime_stop_event: Event | None=None`
       - param `flow_stop_event: Event | None=None`
     - method `preview`
       - param `self`
@@ -4461,7 +4628,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `flow: 'CoreFlow'`
       - param `*`
       - param `runtime_ledger: RuntimeCacheStore`
-      - param `flow_stop_event: Event`
+      - param `runtime_stop_event: Event`
+      - param `flow_stop_event: Event | None=None`
     - method `run_continuous`
       - param `self`
       - param `flow: 'CoreFlow'`
@@ -5152,6 +5320,10 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self: 'DataEngineWindow'`
       - param `success: bool`
       - param `error_text: str`
+    - method `_finish_control_action`
+      - param `self: 'DataEngineWindow'`
+      - param `action_name: str`
+      - param `payload: object`
     - method `_apply_daemon_snapshot`
       - param `self: 'DataEngineWindow'`
       - param `snapshot`
@@ -5244,6 +5416,16 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `window: 'DataEngineWindow'`
       - param `presentation: '_GuiFlowPresentationController'`
+    - method `_refresh_flows_worker`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `action_kwargs: dict[str, object]`
+    - method `finish_control_action`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `action_name: str`
+      - param `payload: object`
+      - param `presentation: '_GuiFlowPresentationController'`
     - method `_workspace_selectors`
       - param `window: 'DataEngineWindow'`
   - class `_GuiFlowPresentationController`
@@ -5276,6 +5458,9 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `request_control`
       - param `self`
       - param `window: 'DataEngineWindow'`
+    - method `_request_control_worker`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
     - method `update_engine_button`
       - param `self`
       - param `window: 'DataEngineWindow'`
@@ -5294,6 +5479,10 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `clear_logs`
       - param `self`
       - param `window: 'DataEngineWindow'`
+    - method `_reset_flow_worker`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `flow_name: str`
   - class `GuiFlowController`
     - instance attribute `workspace`
     - instance attribute `presentation`
@@ -5356,6 +5545,11 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `refresh_flows_requested`
       - param `self`
       - param `window: 'DataEngineWindow'`
+    - method `finish_control_action`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `action_name: str`
+      - param `payload: object`
     - method `clear_logs`
       - param `self`
       - param `window: 'DataEngineWindow'`
@@ -5386,18 +5580,53 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `rebuild_runtime_snapshot`
       - param `self`
       - param `window: 'DataEngineWindow'`
+    - method `_begin_control_action`
+      - param `window: 'DataEngineWindow'`
+      - param `action_name: str`
+      - param `*`
+      - param `target`
+      - param `args: tuple[object, ...]=()`
+    - method `_emit_control_action_finished`
+      - param `window: 'DataEngineWindow'`
+      - param `action_name: str`
+      - param `payload: object`
+    - method `run_selected_flow`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+    - method `_run_selected_flow_worker`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `action_kwargs: dict[str, object]`
+      - param `card_name: str | None`
     - method `start_runtime`
       - param `self`
       - param `window: 'DataEngineWindow'`
+    - method `_start_runtime_worker`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `action_kwargs: dict[str, object]`
     - method `stop_runtime`
       - param `self`
       - param `window: 'DataEngineWindow'`
+    - method `_stop_runtime_worker`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `action_kwargs: dict[str, object]`
     - method `toggle_runtime`
       - param `self`
       - param `window: 'DataEngineWindow'`
     - method `stop_pipeline`
       - param `self`
       - param `window: 'DataEngineWindow'`
+    - method `_stop_pipeline_worker`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `action_kwargs: dict[str, object]`
+    - method `finish_control_action`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `action_name: str`
+      - param `payload: object`
     - method `finish_run`
       - param `self`
       - param `window: 'DataEngineWindow'`
@@ -5668,6 +5897,20 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `window: 'DataEngineWindow'`
   - function `refresh_workspace_visibility_panel`
     - param `window: 'DataEngineWindow'`
+  - function `finish_control_action`
+    - param `window: 'DataEngineWindow'`
+    - param `action_name: str`
+    - param `payload: object`
+  - function `_emit_workspace_settings_action`
+    - param `window: 'DataEngineWindow'`
+    - param `action_name: str`
+    - param `payload: dict[str, object]`
+  - function `_provision_selected_workspace_worker`
+    - param `window: 'DataEngineWindow'`
+  - function `_force_shutdown_daemon_worker`
+    - param `window: 'DataEngineWindow'`
+  - function `_reset_workspace_worker`
+    - param `window: 'DataEngineWindow'`
   - function `_workspace_module_count`
     - param `flow_modules_dir: Path`
   - function `_workspace_counts_footer_text`
@@ -5862,6 +6105,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `run_finished`
     - attribute `runtime_finished`
     - attribute `daemon_startup_finished`
+    - attribute `control_action_finished`
 - module `data_engine.ui.gui.state_support`
   - attribute `__all__`
   - class `GuiStateMixin`
@@ -6746,13 +6990,16 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `__all__`
   - class `GuiActionState`
     - attribute `flow_run_label`
+    - attribute `flow_run_state`
     - attribute `flow_run_enabled`
     - attribute `flow_config_enabled`
     - attribute `engine_enabled`
     - attribute `engine_label`
     - attribute `engine_state`
     - attribute `refresh_enabled`
+    - attribute `clear_flow_log_label`
     - attribute `clear_flow_log_enabled`
+    - attribute `request_control_label`
     - attribute `request_control_visible`
     - attribute `request_control_enabled`
     - method `from_context`
@@ -6876,6 +7123,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `valid`
     - attribute `category`
     - attribute `error`
+    - attribute `parallelism`
 - module `data_engine.views.presentation`
   - attribute `__all__`
   - function `flow_group_name`
