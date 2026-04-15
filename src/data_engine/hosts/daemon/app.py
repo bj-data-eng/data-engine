@@ -49,6 +49,11 @@ from data_engine.platform.workspace_models import (
     WorkspacePaths,
     authored_workspace_is_available,
 )
+from data_engine.platform.instrumentation import (
+    append_timing_line,
+    maybe_start_viztracer,
+    timed_operation,
+)
 from data_engine.views.models import QtFlowCard, load_qt_flow_cards
 
 if TYPE_CHECKING:
@@ -87,6 +92,11 @@ class DataEngineDaemonService:
         self.pid = daemon_identity.pid
         self._state_lock = threading.RLock()
         self._cached_flow_cards: tuple[QtFlowCard, ...] | None = None
+        self._timing_log_path = self.paths.runtime_state_dir / "daemon_timing.log"
+        maybe_start_viztracer(
+            self.paths.runtime_state_dir / "daemon_viztrace.json",
+            process_name=f"daemon:{self.paths.workspace_id}",
+        )
         self.command_handler = DaemonCommandHandler(self)
 
     def _workspace_root_is_available(self) -> bool:
@@ -120,6 +130,21 @@ class DataEngineDaemonService:
         except Exception:
             pass
 
+    def _instrument(self, scope: str, event: str, *, phase: str = "mark", elapsed_ms: float | None = None, fields: dict[str, object] | None = None) -> None:
+        """Append one dev-only structured timing line for daemon diagnostics."""
+        append_timing_line(
+            self._timing_log_path,
+            scope=scope,
+            event=event,
+            phase=phase,
+            elapsed_ms=elapsed_ms,
+            fields=fields,
+        )
+
+    def _timed_operation(self, scope: str, event: str, *, fields: dict[str, object] | None = None):
+        """Return one dev-only timing context manager for daemon work."""
+        return timed_operation(self._timing_log_path, scope=scope, event=event, fields=fields)
+
     def initialize(self) -> None:
         initialize_service(self)
 
@@ -130,11 +155,16 @@ class DataEngineDaemonService:
         return self.command_handler.handle(payload)
 
     def _load_flow_cards(self, *, force: bool = False) -> tuple[QtFlowCard, ...]:
-        if not force and self._cached_flow_cards is not None:
-            return self._cached_flow_cards
-        cards = load_qt_flow_cards(self.flow_catalog_service, workspace_root=self.paths.workspace_root)
-        self._cached_flow_cards = cards
-        return cards
+        with self._timed_operation(
+            "daemon.catalog",
+            "load_flow_cards",
+            fields={"workspace": self.paths.workspace_id, "force": force},
+        ):
+            if not force and self._cached_flow_cards is not None:
+                return self._cached_flow_cards
+            cards = load_qt_flow_cards(self.flow_catalog_service, workspace_root=self.paths.workspace_root)
+            self._cached_flow_cards = cards
+            return cards
 
     def _checkpoint_loop(self) -> None:
         checkpoint_loop(self)

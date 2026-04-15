@@ -14,6 +14,7 @@ from PySide6.QtGui import QGuiApplication
 
 from data_engine.domain import DaemonStatusState, FlowLogEntry, OperationSessionState, OperatorSessionState, StepOutputIndex
 from data_engine.platform.identity import APP_DISPLAY_NAME, APP_INTERNAL_ID
+from data_engine.platform.instrumentation import maybe_start_viztracer
 from data_engine.platform.workspace_models import DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR
 from data_engine.ui.gui.bootstrap import GuiServices
 from data_engine.ui.gui.controllers import GuiFlowController, GuiRuntimeController
@@ -124,6 +125,15 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.step_output_index = StepOutputIndex.empty()
     window.runtime_binding = window.runtime_binding_service.open_binding(window.workspace_paths)
     helper_register_client_session(window)
+    window._ui_timing_log_path = (
+        window.workspace_paths.runtime_state_dir / "ui_timing.log"
+        if window.workspace_paths.workspace_configured
+        else None
+    )
+    maybe_start_viztracer(
+        None if window._ui_timing_log_path is None else window.workspace_paths.runtime_state_dir / "ui_viztrace.json",
+        process_name=f"gui:{window.workspace_paths.workspace_id}",
+    )
     window.output_preview_dialog = None
     window.config_preview_dialog = None
     window.run_log_preview_dialog = None

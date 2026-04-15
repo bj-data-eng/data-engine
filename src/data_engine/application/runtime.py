@@ -19,6 +19,7 @@ from data_engine.domain import (
 )
 from data_engine.domain.catalog import FlowCatalogLike
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager
+from data_engine.platform.instrumentation import dev_instrumentation_enabled, new_request_id, timed_operation
 from data_engine.platform.workspace_models import WorkspacePaths, authored_workspace_is_available
 from data_engine.services import DaemonService, DaemonStateService, SharedStateService
 
@@ -379,13 +380,20 @@ class RuntimeApplication:
         *,
         timeout: float = 0.0,
     ) -> DaemonCommandResult:
-        spawn_result = self.spawn_daemon(paths)
-        if not spawn_result.ok:
-            return DaemonCommandResult(
-                ok=False,
-                error=_daemon_command_error_text(payload, spawn_result.error),
-            )
-        return self._request(paths, payload, timeout=timeout)
+        request_payload = self._instrumented_payload(payload)
+        with timed_operation(
+            self._client_timing_log_path(paths),
+            scope="client.daemon",
+            event=f"spawn_and_request:{request_payload.get('command', 'unknown')}",
+            fields={"request_id": request_payload.get("request_id"), "workspace": paths.workspace_id},
+        ):
+            spawn_result = self.spawn_daemon(paths)
+            if not spawn_result.ok:
+                return DaemonCommandResult(
+                    ok=False,
+                    error=_daemon_command_error_text(request_payload, spawn_result.error),
+                )
+            return self._request(paths, request_payload, timeout=timeout)
 
     def _request(
         self,
@@ -394,17 +402,38 @@ class RuntimeApplication:
         *,
         timeout: float = 0.0,
     ) -> DaemonCommandResult:
-        try:
-            response = self.daemon_service.request(paths, payload, timeout=timeout)
-        except self.daemon_service.client_error_type as exc:
-            return DaemonCommandResult(ok=False, error=_daemon_command_error_text(payload, exc))
-        if not response.get("ok"):
-            return DaemonCommandResult(
-                ok=False,
-                error=_daemon_command_error_text(payload, response.get("error")),
-                payload=response,
-            )
-        return DaemonCommandResult(ok=True, payload=response)
+        request_payload = self._instrumented_payload(payload)
+        with timed_operation(
+            self._client_timing_log_path(paths),
+            scope="client.daemon",
+            event=str(request_payload.get("command", "unknown")),
+            fields={"request_id": request_payload.get("request_id"), "timeout": timeout, "workspace": paths.workspace_id},
+        ):
+            try:
+                response = self.daemon_service.request(paths, request_payload, timeout=timeout)
+            except self.daemon_service.client_error_type as exc:
+                return DaemonCommandResult(ok=False, error=_daemon_command_error_text(request_payload, exc))
+            if not response.get("ok"):
+                return DaemonCommandResult(
+                    ok=False,
+                    error=_daemon_command_error_text(request_payload, response.get("error")),
+                    payload=response,
+                )
+            return DaemonCommandResult(ok=True, payload=response)
+
+    @staticmethod
+    def _client_timing_log_path(paths: WorkspacePaths):
+        if not paths.workspace_configured:
+            return None
+        return paths.runtime_state_dir / "client_timing.log"
+
+    @staticmethod
+    def _instrumented_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        if "request_id" in payload or not dev_instrumentation_enabled():
+            return dict(payload)
+        instrumented = dict(payload)
+        instrumented["request_id"] = new_request_id(str(payload.get("command", "cmd")))
+        return instrumented
 
 
 def _daemon_command_error_text(payload: dict[str, Any], detail: object | None) -> str:

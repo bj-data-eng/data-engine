@@ -25,33 +25,43 @@ class DaemonCommandHandler:
         if not isinstance(payload, dict):
             return {"ok": False, "error": "Invalid command payload."}
         command = str(payload.get("command", ""))
-        if command == "daemon_ping":
-            return {"ok": True, "workspace_id": self.service.paths.workspace_id}
-        if command == "daemon_status":
-            return {"ok": True, "status": self.state_sync.status_payload()}
-        if command == "list_flows":
-            return {"ok": True, "flows": [asdict(card) for card in self.state_sync.load_flow_cards()]}
-        if command == "get_flow":
-            name = str(payload.get("name", ""))
-            flow = next((card for card in self.state_sync.load_flow_cards() if card.name == name), None)
-            if flow is None:
-                return {"ok": False, "error": f"Unknown flow: {name}"}
-            return {"ok": True, "flow": asdict(flow)}
-        if command == "refresh_flows":
-            return {"ok": True, "flows": [asdict(card) for card in self.state_sync.load_flow_cards(force=True)]}
-        if command == "run_flow":
-            return self.runtime_commands.run_flow(name=str(payload.get("name", "")), wait=bool(payload.get("wait", False)))
-        if command == "start_engine":
-            return self.runtime_commands.start_engine()
-        if command == "stop_engine":
-            return self.runtime_commands.stop_engine()
-        if command == "stop_flow":
-            return self.runtime_commands.stop_flow(str(payload.get("name", "")))
-        if command == "shutdown_daemon":
-            self.service.host.shutdown_event.set()
-            threading.Thread(target=self.service._wake_listener, daemon=True).start()
-            return {"ok": True}
-        return {"ok": False, "error": f"Unknown command: {command}"}
+        request_id = str(payload.get("request_id", "")).strip() or None
+        with self.service._timed_operation(
+            "daemon.command",
+            command or "unknown",
+            fields={"workspace": self.service.paths.workspace_id, "request_id": request_id},
+        ):
+            if command == "daemon_ping":
+                return {"ok": True, "workspace_id": self.service.paths.workspace_id}
+            if command == "daemon_status":
+                return {"ok": True, "status": self.state_sync.status_payload()}
+            if command == "list_flows":
+                return {"ok": True, "flows": [asdict(card) for card in self.state_sync.load_flow_cards()]}
+            if command == "get_flow":
+                name = str(payload.get("name", ""))
+                flow = next((card for card in self.state_sync.load_flow_cards() if card.name == name), None)
+                if flow is None:
+                    return {"ok": False, "error": f"Unknown flow: {name}"}
+                return {"ok": True, "flow": asdict(flow)}
+            if command == "refresh_flows":
+                return {"ok": True, "flows": [asdict(card) for card in self.state_sync.load_flow_cards(force=True)]}
+            if command == "run_flow":
+                return self.runtime_commands.run_flow(
+                    name=str(payload.get("name", "")),
+                    wait=bool(payload.get("wait", False)),
+                    request_id=request_id,
+                )
+            if command == "start_engine":
+                return self.runtime_commands.start_engine(request_id=request_id)
+            if command == "stop_engine":
+                return self.runtime_commands.stop_engine(request_id=request_id)
+            if command == "stop_flow":
+                return self.runtime_commands.stop_flow(str(payload.get("name", "")), request_id=request_id)
+            if command == "shutdown_daemon":
+                self.service.host.shutdown_event.set()
+                threading.Thread(target=self.service._wake_listener, daemon=True).start()
+                return {"ok": True}
+            return {"ok": False, "error": f"Unknown command: {command}"}
 
     def checkpoint_once(self, *, status: str) -> None:
         self.state_sync.checkpoint_once(status=status)

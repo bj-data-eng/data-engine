@@ -5,6 +5,7 @@ from __future__ import annotations
 from multiprocessing import AuthenticationError
 from multiprocessing.connection import Listener
 from pathlib import Path
+from contextlib import nullcontext
 import threading
 import traceback
 import time
@@ -28,9 +29,23 @@ if TYPE_CHECKING:
 def _serve_connection(service: "DataEngineDaemonService", connection) -> None:
     """Handle one accepted daemon connection without blocking the listener loop."""
     with connection:
+        payload = None
         try:
             payload = _decode_message(connection.recv_bytes())
-            response = service._handle_command(payload)
+            request_id = str(payload.get("request_id", "")).strip() if isinstance(payload, dict) else ""
+            command = str(payload.get("command", "")).strip() if isinstance(payload, dict) else ""
+            timed_context = getattr(service, "_timed_operation", None)
+            context = (
+                timed_context(
+                    "daemon.ipc",
+                    command or "unknown",
+                    fields={"request_id": request_id or None},
+                )
+                if callable(timed_context)
+                else nullcontext()
+            )
+            with context:
+                response = service._handle_command(payload)
         except Exception as exc:  # pragma: no cover - defensive daemon boundary
             service._debug_log(f"command handling error: {exc!r}")
             response = {"ok": False, "error": str(exc)}

@@ -1399,7 +1399,7 @@ def test_start_engine_retries_after_empty_automated_flow_snapshot(tmp_path, monk
         service._shutdown()  # noqa: SLF001
 
 
-def test_run_flow_returns_build_failure_details_without_starting_thread(tmp_path, monkeypatch):
+def test_run_flow_returns_build_failure_details_after_async_start(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -1417,9 +1417,12 @@ def test_run_flow_returns_build_failure_details_without_starting_thread(tmp_path
 
         response = service._handle_command({"command": "run_flow", "name": "demo", "wait": False})  # noqa: SLF001
 
-        assert response["ok"] is False
-        assert response["error"] == "build boom"
+        assert response["ok"] is True
+        thread = service.state.manual_run_threads["demo"]
+        thread.join(timeout=1.0)
+        assert thread.is_alive() is False
         assert service.state.manual_run_threads == {}
+        assert "build boom" in service.paths.daemon_log_path.read_text(encoding="utf-8")
     finally:
         service._shutdown()  # noqa: SLF001
 

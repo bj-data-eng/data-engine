@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from data_engine.domain import StepOutputIndex, WorkspaceControlState
+from data_engine.platform.instrumentation import maybe_start_viztracer
 from data_engine.ui.gui.helpers import register_client_session
 from data_engine.ui.gui.presenters.workspace_settings import refresh_workspace_root_controls
 
@@ -71,6 +72,15 @@ def rebind_workspace_context(
     window._operator_session_state = binding.operator_session
     window.runtime_binding = window.runtime_binding_service.open_binding(window.workspace_paths)
     register_client_session(window)
+    window._ui_timing_log_path = (
+        window.workspace_paths.runtime_state_dir / "ui_timing.log"
+        if window.workspace_paths.workspace_configured
+        else None
+    )
+    maybe_start_viztracer(
+        None if window._ui_timing_log_path is None else window.workspace_paths.runtime_state_dir / "ui_viztrace.json",
+        process_name=f"gui:{window.workspace_paths.workspace_id}",
+    )
     window.daemon_status = window.daemon_status.empty()
     window.workspace_control_state = WorkspaceControlState.empty()
     window._daemon_startup_in_progress = False

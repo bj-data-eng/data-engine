@@ -10,6 +10,7 @@ from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.app import DaemonClientError, daemon_request, is_daemon_live
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.domain import WorkspaceControlState
+from data_engine.platform.instrumentation import new_request_id, timed_operation
 from data_engine.platform.processes import process_is_running as _pid_is_live
 from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
 
@@ -66,80 +67,96 @@ class WorkspaceDaemonManager:
 
     def sync(self) -> WorkspaceDaemonSnapshot:
         """Return the latest normalized daemon snapshot for one workspace."""
-        if not self.workspace_configured:
-            self._daemon_live = False
+        with timed_operation(
+            self._timing_log_path(),
+            scope="client.daemon",
+            event="sync_snapshot",
+            fields={"workspace": self.paths.workspace_id},
+        ):
+            if not self.workspace_configured:
+                self._daemon_live = False
+                snapshot = WorkspaceDaemonSnapshot(
+                    live=False,
+                    workspace_owned=True,
+                    leased_by_machine_id=None,
+                    runtime_active=False,
+                    runtime_stopping=False,
+                    manual_runs=(),
+                    last_checkpoint_at_utc=None,
+                    source="none",
+                )
+                self._last_snapshot = snapshot
+                return snapshot
+            try:
+                live = is_daemon_live(self.paths)
+            except Exception:
+                live = False
+            self._daemon_live = live
+            if not live:
+                self._sync_misses += 1
+                if self._sync_misses < self.max_sync_misses and self._last_snapshot is not None:
+                    return WorkspaceDaemonSnapshot(
+                        live=False,
+                        workspace_owned=self._last_snapshot.workspace_owned,
+                        leased_by_machine_id=self._last_snapshot.leased_by_machine_id,
+                        runtime_active=self._last_snapshot.runtime_active,
+                        runtime_stopping=self._last_snapshot.runtime_stopping,
+                        manual_runs=self._last_snapshot.manual_runs,
+                        last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
+                        source="cached",
+                    )
+                snapshot = self._lease_snapshot()
+                self._last_snapshot = snapshot
+                return snapshot
+            request_id = new_request_id("status")
+            try:
+                response = daemon_request(
+                    self.paths,
+                    {"command": "daemon_status", "request_id": request_id},
+                    timeout=2.0,
+                )
+            except DaemonClientError:
+                self._sync_misses += 1
+                if self._last_snapshot is not None:
+                    return WorkspaceDaemonSnapshot(
+                        live=False,
+                        workspace_owned=self._last_snapshot.workspace_owned,
+                        leased_by_machine_id=self._last_snapshot.leased_by_machine_id,
+                        runtime_active=self._last_snapshot.runtime_active,
+                        runtime_stopping=self._last_snapshot.runtime_stopping,
+                        manual_runs=self._last_snapshot.manual_runs,
+                        last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
+                        source="cached",
+                    )
+                snapshot = self._lease_snapshot()
+                self._last_snapshot = snapshot
+                return snapshot
+            status = response.get("status") if response.get("ok") else None
+            if not isinstance(status, dict):
+                snapshot = self._lease_snapshot()
+                self._last_snapshot = snapshot
+                return snapshot
+            self._sync_misses = 0
+            manual_runs = tuple(name for name in status.get("manual_runs", []) if isinstance(name, str))
+            leased_by = status.get("leased_by_machine_id")
+            checkpoint = status.get("last_checkpoint_at_utc")
             snapshot = WorkspaceDaemonSnapshot(
-                live=False,
-                workspace_owned=True,
-                leased_by_machine_id=None,
-                runtime_active=False,
-                runtime_stopping=False,
-                manual_runs=(),
-                last_checkpoint_at_utc=None,
-                source="none",
+                live=True,
+                workspace_owned=bool(status.get("workspace_owned", True)),
+                leased_by_machine_id=str(leased_by) if isinstance(leased_by, str) and leased_by.strip() else None,
+                runtime_active=bool(status.get("engine_active")),
+                runtime_stopping=bool(status.get("engine_stopping")),
+                manual_runs=manual_runs,
+                last_checkpoint_at_utc=str(checkpoint) if isinstance(checkpoint, str) and checkpoint.strip() else None,
+                source="daemon",
             )
             self._last_snapshot = snapshot
             return snapshot
-        try:
-            live = is_daemon_live(self.paths)
-        except Exception:
-            live = False
-        self._daemon_live = live
-        if not live:
-            self._sync_misses += 1
-            if self._sync_misses < self.max_sync_misses and self._last_snapshot is not None:
-                return WorkspaceDaemonSnapshot(
-                    live=False,
-                    workspace_owned=self._last_snapshot.workspace_owned,
-                    leased_by_machine_id=self._last_snapshot.leased_by_machine_id,
-                    runtime_active=self._last_snapshot.runtime_active,
-                    runtime_stopping=self._last_snapshot.runtime_stopping,
-                    manual_runs=self._last_snapshot.manual_runs,
-                    last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
-                    source="cached",
-                )
-            snapshot = self._lease_snapshot()
-            self._last_snapshot = snapshot
-            return snapshot
-        try:
-            response = daemon_request(self.paths, {"command": "daemon_status"}, timeout=2.0)
-        except DaemonClientError:
-            self._sync_misses += 1
-            if self._last_snapshot is not None:
-                return WorkspaceDaemonSnapshot(
-                    live=False,
-                    workspace_owned=self._last_snapshot.workspace_owned,
-                    leased_by_machine_id=self._last_snapshot.leased_by_machine_id,
-                    runtime_active=self._last_snapshot.runtime_active,
-                    runtime_stopping=self._last_snapshot.runtime_stopping,
-                    manual_runs=self._last_snapshot.manual_runs,
-                    last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
-                    source="cached",
-                )
-            snapshot = self._lease_snapshot()
-            self._last_snapshot = snapshot
-            return snapshot
-        status = response.get("status") if response.get("ok") else None
-        if not isinstance(status, dict):
-            snapshot = self._lease_snapshot()
-            self._last_snapshot = snapshot
-            return snapshot
-        self._sync_misses = 0
-        manual_runs = tuple(name for name in status.get("manual_runs", []) if isinstance(name, str))
-        leased_by = status.get("leased_by_machine_id")
-        checkpoint = status.get("last_checkpoint_at_utc")
-        snapshot = WorkspaceDaemonSnapshot(
-            live=True,
-            workspace_owned=bool(status.get("workspace_owned", True)),
-            leased_by_machine_id=str(leased_by) if isinstance(leased_by, str) and leased_by.strip() else None,
-            runtime_active=bool(status.get("engine_active")),
-            runtime_stopping=bool(status.get("engine_stopping")),
-            manual_runs=manual_runs,
-            last_checkpoint_at_utc=str(checkpoint) if isinstance(checkpoint, str) and checkpoint.strip() else None,
-            source="daemon",
-        )
-        self._last_snapshot = snapshot
-        return snapshot
+
+    def _timing_log_path(self):
+        if not self.workspace_configured:
+            return None
+        return self.paths.runtime_state_dir / "client_timing.log"
 
     def _lease_snapshot(self) -> WorkspaceDaemonSnapshot:
         metadata = self.shared_state_adapter.read_lease_metadata(self.paths)

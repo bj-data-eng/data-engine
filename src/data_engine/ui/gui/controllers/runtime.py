@@ -8,6 +8,7 @@ from data_engine.application import RuntimeApplication
 from data_engine.services import DaemonService, LogService
 from data_engine.domain import DaemonStatusState, RuntimeSessionState, WorkspaceControlState
 from data_engine.platform.identity import APP_DISPLAY_NAME
+from data_engine.platform.instrumentation import append_timing_line, timed_operation
 from data_engine.ui.gui.helpers import start_worker_thread
 if TYPE_CHECKING:
     from data_engine.ui.gui.app import DataEngineWindow
@@ -34,28 +35,34 @@ class GuiRuntimeController:
         window._daemon_sync_in_progress = True
         rerun_requested = False
         try:
-            if not window._has_authored_workspace():
-                window.daemon_status = DaemonStatusState.empty()
-                window.workspace_control_state = WorkspaceControlState.empty()
-                window.runtime_session = RuntimeSessionState.empty()
-                window.flow_controller.reload_workspace_options(window)
-                window.flow_controller.load_flows(window)
-                return
-            sync_state = window.runtime_binding_service.sync_runtime_state(
-                window.runtime_binding,
-                runtime_application=self.runtime_application,
-                flow_cards=window.flow_cards.values(),
-                daemon_startup_in_progress=window._daemon_startup_in_progress,
-            )
-            if not bool(getattr(sync_state.snapshot, "live", False)) and window._auto_daemon_enabled:
-                self.ensure_daemon_started(window)
-            window.daemon_status = sync_state.daemon_status
-            window.workspace_control_state = sync_state.workspace_control_state
-            window.runtime_session = sync_state.runtime_session
-            active_manual_groups = {run.group_name for run in window.runtime_session.manual_runs}
-            window.manual_flow_stopping_groups.intersection_update(active_manual_groups)
-            window._apply_daemon_snapshot(sync_state.snapshot)
-            self.rebuild_runtime_snapshot(window)
+            with timed_operation(
+                window._ui_timing_log_path,
+                scope="gui.sync",
+                event="sync_from_daemon",
+                fields={"workspace": window.workspace_paths.workspace_id},
+            ):
+                if not window._has_authored_workspace():
+                    window.daemon_status = DaemonStatusState.empty()
+                    window.workspace_control_state = WorkspaceControlState.empty()
+                    window.runtime_session = RuntimeSessionState.empty()
+                    window.flow_controller.reload_workspace_options(window)
+                    window.flow_controller.load_flows(window)
+                    return
+                sync_state = window.runtime_binding_service.sync_runtime_state(
+                    window.runtime_binding,
+                    runtime_application=self.runtime_application,
+                    flow_cards=window.flow_cards.values(),
+                    daemon_startup_in_progress=window._daemon_startup_in_progress,
+                )
+                if not bool(getattr(sync_state.snapshot, "live", False)) and window._auto_daemon_enabled:
+                    self.ensure_daemon_started(window)
+                window.daemon_status = sync_state.daemon_status
+                window.workspace_control_state = sync_state.workspace_control_state
+                window.runtime_session = sync_state.runtime_session
+                active_manual_groups = {run.group_name for run in window.runtime_session.manual_runs}
+                window.manual_flow_stopping_groups.intersection_update(active_manual_groups)
+                window._apply_daemon_snapshot(sync_state.snapshot)
+                self.rebuild_runtime_snapshot(window)
         finally:
             window._daemon_sync_in_progress = False
             rerun_requested = window._daemon_sync_pending and not window.ui_closing
@@ -120,17 +127,26 @@ class GuiRuntimeController:
             return
 
     def rebuild_runtime_snapshot(self, window: "DataEngineWindow") -> None:
-        window.runtime_binding_service.reload_logs(window.runtime_binding)
-        window.step_output_index = window.runtime_binding_service.rebuild_step_outputs(
-            window.runtime_binding,
-            window.flow_cards,
-        )
-        snapshot = self.runtime_application.build_runtime_snapshot(
-            flow_cards=window.flow_cards.values(),
-            log_entries=self.log_service.all_entries(window.runtime_binding.log_store),
-            runtime_session=window.runtime_session,
-            now=window._monotonic(),
-        )
+        with timed_operation(
+            window._ui_timing_log_path,
+            scope="gui.sync",
+            event="rebuild_runtime_snapshot",
+            fields={"workspace": window.workspace_paths.workspace_id},
+        ):
+            with timed_operation(window._ui_timing_log_path, scope="gui.sync", event="reload_logs"):
+                window.runtime_binding_service.reload_logs(window.runtime_binding)
+            with timed_operation(window._ui_timing_log_path, scope="gui.sync", event="rebuild_step_outputs"):
+                window.step_output_index = window.runtime_binding_service.rebuild_step_outputs(
+                    window.runtime_binding,
+                    window.flow_cards,
+                )
+            with timed_operation(window._ui_timing_log_path, scope="gui.sync", event="build_runtime_snapshot"):
+                snapshot = self.runtime_application.build_runtime_snapshot(
+                    flow_cards=window.flow_cards.values(),
+                    log_entries=self.log_service.all_entries(window.runtime_binding.log_store),
+                    runtime_session=window.runtime_session,
+                    now=window._monotonic(),
+                )
         if window.runtime_session.runtime_active or window.runtime_session.runtime_stopping:
             window.runtime_session = window.runtime_session.with_active_runtime_flow_names(
                 snapshot.active_runtime_flow_names
@@ -211,7 +227,13 @@ class GuiRuntimeController:
         action_kwargs: dict[str, object],
         card_name: str | None,
     ) -> None:
-        result = window.control_application.run_selected_flow(**action_kwargs)
+        with timed_operation(
+            window._ui_timing_log_path,
+            scope="gui.action",
+            event="run_selected_flow",
+            fields={"flow": card_name},
+        ):
+            result = window.control_application.run_selected_flow(**action_kwargs)
         self._emit_control_action_finished(
             window,
             "run_selected_flow",
@@ -232,7 +254,8 @@ class GuiRuntimeController:
         self._begin_control_action(window, "start_runtime", target=self._start_runtime_worker, args=(window, action_kwargs))
 
     def _start_runtime_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
-        result = window.control_application.start_engine(**action_kwargs)
+        with timed_operation(window._ui_timing_log_path, scope="gui.action", event="start_engine"):
+            result = window.control_application.start_engine(**action_kwargs)
         self._emit_control_action_finished(window, "start_runtime", result)
 
     def stop_runtime(self, window: "DataEngineWindow") -> None:
@@ -255,7 +278,8 @@ class GuiRuntimeController:
         self._begin_control_action(window, "stop_runtime", target=self._stop_runtime_worker, args=(window, action_kwargs))
 
     def _stop_runtime_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
-        result = window.control_application.stop_pipeline(**action_kwargs)
+        with timed_operation(window._ui_timing_log_path, scope="gui.action", event="stop_engine"):
+            result = window.control_application.stop_pipeline(**action_kwargs)
         self._emit_control_action_finished(window, "stop_runtime", result)
 
     def toggle_runtime(self, window: "DataEngineWindow") -> None:
@@ -298,7 +322,8 @@ class GuiRuntimeController:
                 window.flow_controller.refresh_action_buttons(window)
 
     def _stop_pipeline_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
-        result = window.control_application.stop_pipeline(**action_kwargs)
+        with timed_operation(window._ui_timing_log_path, scope="gui.action", event="stop_pipeline"):
+            result = window.control_application.stop_pipeline(**action_kwargs)
         self._emit_control_action_finished(window, "stop_pipeline", result)
 
     def finish_control_action(self, window: "DataEngineWindow", action_name: str, payload: object) -> None:
@@ -319,6 +344,13 @@ class GuiRuntimeController:
                 return
             if not getattr(result, "requested", False) or not isinstance(card_name, str):
                 return
+            append_timing_line(
+                window._ui_timing_log_path,
+                scope="gui.action",
+                event="run_selected_flow",
+                phase="accepted",
+                fields={"flow": card_name},
+            )
             window._append_log_line(f"Starting one-time flow run: {card_name}", flow_name=card_name)
             if getattr(result, "sync_after", False):
                 window._sync_from_daemon()

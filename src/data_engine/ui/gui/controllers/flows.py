@@ -11,6 +11,7 @@ from data_engine.application import FlowCatalogApplication, WorkspaceSessionAppl
 from data_engine.services import LogService
 from data_engine.services.reset import ResetService
 from data_engine.platform.identity import APP_DISPLAY_NAME
+from data_engine.platform.instrumentation import timed_operation
 from data_engine.ui.gui.helpers import start_worker_thread
 from data_engine.domain import WorkspaceControlState
 from data_engine.views import GuiActionState, QtFlowCard, surface_control_status_text
@@ -187,7 +188,8 @@ class _GuiWorkspaceCatalogController:
         )
 
     def _refresh_flows_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
-        result = window.control_application.refresh_flows(**action_kwargs)
+        with timed_operation(window._ui_timing_log_path, scope="gui.action", event="refresh_flows"):
+            result = window.control_application.refresh_flows(**action_kwargs)
         if window.ui_closing:
             return
         try:
@@ -435,7 +437,8 @@ class _GuiFlowPresentationController:
         start_worker_thread(window, target=self._request_control_worker, args=(window,))
 
     def _request_control_worker(self, window: "DataEngineWindow") -> None:
-        result = window.control_application.request_control(window.runtime_binding.daemon_manager)
+        with timed_operation(window._ui_timing_log_path, scope="gui.action", event="request_control"):
+            result = window.control_application.request_control(window.runtime_binding.daemon_manager)
         if window.ui_closing:
             return
         try:
@@ -509,11 +512,17 @@ class _GuiFlowPresentationController:
     def _reset_flow_worker(self, window: "DataEngineWindow", flow_name: str) -> None:
         error_text: str | None = None
         try:
-            self.reset_service.reset_flow(
-                paths=window.workspace_paths,
-                runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
-                flow_name=flow_name,
-            )
+            with timed_operation(
+                window._ui_timing_log_path,
+                scope="gui.action",
+                event="reset_flow",
+                fields={"flow": flow_name},
+            ):
+                self.reset_service.reset_flow(
+                    paths=window.workspace_paths,
+                    runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
+                    flow_name=flow_name,
+                )
         except Exception as exc:
             error_text = f"Flow reset failed.\n\n{exc}"
         if window.ui_closing:

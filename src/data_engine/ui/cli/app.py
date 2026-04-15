@@ -8,6 +8,10 @@ from pathlib import Path
 import sys
 
 from data_engine.core.model import FlowValidationError
+from data_engine.platform.instrumentation import (
+    DATA_ENGINE_DEV_INSTRUMENT_ENV_VAR,
+    DATA_ENGINE_DEV_VIZTRACE_ENV_VAR,
+)
 from data_engine.platform.workspace_models import (
     DATA_ENGINE_APP_ROOT_ENV_VAR,
     DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR,
@@ -66,6 +70,8 @@ def main(argv: list[str] | None = None, *, dependencies: CliDependencies | None 
 
 
 def _apply_environment(args: argparse.Namespace) -> None:
+    os.environ.setdefault(DATA_ENGINE_DEV_INSTRUMENT_ENV_VAR, "1")
+    os.environ.setdefault(DATA_ENGINE_DEV_VIZTRACE_ENV_VAR, "0")
     if args.app_root is not None:
         os.environ[DATA_ENGINE_APP_ROOT_ENV_VAR] = str(args.app_root.expanduser().resolve())
     else:
