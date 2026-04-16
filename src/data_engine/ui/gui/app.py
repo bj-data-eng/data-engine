@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from data_engine.platform.identity import APP_VERSION
 from data_engine.ui.gui.bootstrap import GuiServices
 from data_engine.ui.gui.bootstrapper import bootstrap_gui_window
 from data_engine.ui.gui.control_support import GuiControlMixin
@@ -90,6 +91,8 @@ class DataEngineWindow(GuiWindowSupportMixin, GuiRenderingMixin, GuiControlMixin
 
         self.workspace_counts_footer_label = QLabel("")
         self.workspace_counts_footer_label.setObjectName("workspaceCountsFooter")
+        self.app_version_footer_label = QLabel(f"v{APP_VERSION}")
+        self.app_version_footer_label.setObjectName("workspaceCountsFooter")
 
         self.view_stack = QTabWidget()
         self.view_stack.setObjectName("viewStack")
@@ -106,9 +109,11 @@ class DataEngineWindow(GuiWindowSupportMixin, GuiRenderingMixin, GuiControlMixin
         footer_row.setSpacing(0)
         footer_row.addWidget(self.workspace_counts_footer_label, 0)
         footer_row.addStretch(1)
+        footer_row.addWidget(self.app_version_footer_label, 0)
 
         root_layout.addLayout(shell, 1)
         root_layout.addLayout(footer_row, 0)
         self.workspace_counts_footer_label.setVisible(True)
+        self.app_version_footer_label.setVisible(True)
 
 __all__ = ["DataEngineWindow", "QFileDialog", "helper_is_last_process_ui_window", "pl"]

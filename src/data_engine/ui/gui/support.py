@@ -112,6 +112,8 @@ class GuiWindowSupportMixin:
         self.view_stack.setCurrentIndex(index)
         if hasattr(self, "workspace_counts_footer_label"):
             self.workspace_counts_footer_label.setVisible(index == 0)
+        if hasattr(self, "app_version_footer_label"):
+            self.app_version_footer_label.setVisible(index == 0)
 
     def _monotonic(self: "DataEngineWindow") -> float:
         """Return the current monotonic clock value."""

@@ -18,7 +18,7 @@ from shiboken6 import isValid as shiboken_is_valid
 from data_engine.core.model import FlowValidationError
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot
 from data_engine.domain import FlowCatalogEntry, FlowRunState, RuntimeSessionState, WorkspaceControlState
-from data_engine.platform.identity import APP_DISPLAY_NAME
+from data_engine.platform.identity import APP_DISPLAY_NAME, APP_VERSION
 from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_models import DiscoveredWorkspace, machine_id_text
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
@@ -568,6 +568,8 @@ def test_settings_visibility_panel_reports_workspace_stats(qapp):
     window._refresh_workspace_visibility_panel()
 
     assert window.workspace_counts_footer_label.text() == "0 modules - 1 groups - 2 flows - 1 runs last 7 days"
+    assert window.app_version_footer_label.text() == f"v{APP_VERSION}"
+    assert not window.app_version_footer_label.isHidden()
     assert window.visibility_interpreter_mode_value.text() == "Virtual Environment"
 
 
