@@ -60,8 +60,9 @@ def networkdays(
         Whether to force the first day into the count when it would normally be
         excluded by the weekday mask or holiday list.
     mask : Iterable[bool] | None
-        Monday-first seven-item business-day mask. ``None`` uses the Excel
-        default: Monday-Friday counted, Saturday-Sunday excluded.
+        Monday-first seven-item business-day mask. Every item must be a real
+        ``bool``. ``None`` uses the Excel default: Monday-Friday counted,
+        Saturday-Sunday excluded.
 
     Returns
     -------
@@ -187,8 +188,9 @@ def workday(
         Whether the start date itself can count as day 1 when moving forward or
         backward through business days.
     mask : Iterable[bool] | None
-        Monday-first seven-item business-day mask. ``None`` uses the Excel
-        default: Monday-Friday counted, Saturday-Sunday excluded.
+        Monday-first seven-item business-day mask. Every item must be a real
+        ``bool``. ``None`` uses the Excel default: Monday-Friday counted,
+        Saturday-Sunday excluded.
 
     Returns
     -------
@@ -273,9 +275,11 @@ def workday(
 def _coerce_week_mask(mask: Iterable[bool] | None) -> WeekMask:
     if mask is None:
         return _DEFAULT_WEEK_MASK
-    values = tuple(bool(value) for value in mask)
+    values = tuple(mask)
     if len(values) != 7:
         raise ValueError("mask must contain exactly seven Monday-first boolean values.")
+    if not all(isinstance(value, bool) for value in values):
+        raise TypeError("mask must contain exactly seven Monday-first boolean values.")
     return values  # type: ignore[return-value]
 
 

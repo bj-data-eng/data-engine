@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import polars as pl
@@ -136,6 +136,27 @@ def test_networkdays_excludes_holidays_from_list_inputs():
     assert result["days"].to_list() == [2]
 
 
+def test_networkdays_accepts_string_and_datetime_holidays_with_deduping():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 13)],
+            "end": [date(2026, 4, 15)],
+        }
+    ).select(
+        networkdays(
+            "start",
+            "end",
+            holidays=[
+                "2026-04-14",
+                datetime(2026, 4, 14, 8, 30),
+                date(2026, 4, 14),
+            ],
+        ).alias("days")
+    )
+
+    assert result["days"].to_list() == [2]
+
+
 def test_networkdays_count_first_day_forces_masked_or_holiday_start_into_count():
     result = pl.DataFrame(
         {
@@ -187,6 +208,33 @@ def test_networkdays_returns_null_when_endpoint_is_null():
 def test_networkdays_rejects_invalid_mask_length():
     with pytest.raises(ValueError, match="exactly seven"):
         networkdays(date(2026, 4, 13), date(2026, 4, 14), mask=(True, False))
+
+
+def test_networkdays_rejects_non_boolean_mask_values():
+    with pytest.raises(TypeError, match="exactly seven"):
+        networkdays(
+            date(2026, 4, 13),
+            date(2026, 4, 14),
+            mask=("True", "True", "True", "True", "True", "False", "False"),
+        )
+
+
+def test_networkdays_rejects_invalid_holiday_values():
+    with pytest.raises(TypeError, match="holidays must contain"):
+        networkdays(
+            date(2026, 4, 13),
+            date(2026, 4, 14),
+            holidays=[123],
+        )
+
+
+def test_networkdays_rejects_invalid_holiday_strings():
+    with pytest.raises(ValueError):
+        networkdays(
+            date(2026, 4, 13),
+            date(2026, 4, 14),
+            holidays=["04/14/2026"],
+        )
 
 
 def test_workday_matches_excel_style_offsets_for_business_and_weekend_starts():
@@ -263,6 +311,36 @@ def test_workday_returns_null_when_input_is_null():
     ).select(workday("start", "days").alias("target"))
 
     assert result["target"].to_list() == [None, None]
+
+
+def test_workday_rejects_non_boolean_mask_values():
+    with pytest.raises(TypeError, match="exactly seven"):
+        workday(
+            date(2026, 4, 13),
+            1,
+            mask=(1, 1, 1, 1, 1, 0, 0),
+        )
+
+
+def test_workday_accepts_string_and_datetime_holidays_with_deduping():
+    result = pl.DataFrame(
+        {
+            "start": [date(2026, 4, 13)],
+            "days": [2],
+        }
+    ).select(
+        workday(
+            "start",
+            "days",
+            holidays=[
+                "2026-04-14",
+                datetime(2026, 4, 14, 12, 0),
+                date(2026, 4, 14),
+            ],
+        ).alias("target")
+    )
+
+    assert result["target"].to_list() == [date(2026, 4, 16)]
 
 
 def test_atomic_write_cleans_temporary_file_and_preserves_target_on_replace_failure(
