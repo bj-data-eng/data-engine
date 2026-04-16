@@ -204,9 +204,4 @@ Behavior:
 - if a poll flow has several startup source files, preview uses the first deterministic source candidate for notebook inspection
 
 `preview(...)` is especially useful while authoring notebook-backed flows because it lets you stop at a meaningful intermediate and inspect it directly.
-
-## `show()`
-
-Preview the single current result from a one-off flow.
-
-Use this for quick interactive inspection when the final current value itself is the thing you want to see.
+If you want the final one-off result itself, use `preview()` without `use=`.

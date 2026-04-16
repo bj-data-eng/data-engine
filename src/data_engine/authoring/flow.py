@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,6 +35,51 @@ def _resolve_authoring_services(
     )
 
 
+def _infer_authoring_flow_origin() -> tuple[str, Path] | None:
+    """Return ``(flow_name, workspace_root)`` for direct authored module execution.
+
+    This is a narrow authoring convenience for calls such as ``build().preview()``
+    executed directly inside ``workspaces/<id>/flow_modules/*.py``. It should not
+    affect compiled runtime execution or ad hoc inline flows outside a workspace
+    ``flow_modules`` tree.
+    """
+    current = inspect.currentframe()
+    if current is None:
+        return None
+    try:
+        frame = current.f_back
+        while frame is not None:
+            filename = frame.f_code.co_filename
+            try:
+                path = Path(filename).resolve()
+            except (OSError, RuntimeError):
+                frame = frame.f_back
+                continue
+            if path.name == __file__:
+                frame = frame.f_back
+                continue
+            if path.parent.name == "flow_modules":
+                return path.stem, path.parent.parent.resolve()
+            frame = frame.f_back
+    finally:
+        del current
+    return None
+
+
+def _with_inferred_authoring_metadata(flow: "Flow") -> "Flow":
+    """Fill in missing direct-authoring metadata when executing from flow_modules."""
+    if flow.name is not None and flow._workspace_root is not None:
+        return flow
+    inferred = _infer_authoring_flow_origin()
+    if inferred is None:
+        return flow
+    inferred_name, inferred_workspace_root = inferred
+    return flow._clone(
+        name=flow.name or inferred_name,
+        _workspace_root=flow._workspace_root or inferred_workspace_root,
+    )
+
+
 class Flow(_CoreFlow):
     """Public authoring flow with execution conveniences layered over core definitions."""
 
@@ -57,11 +103,12 @@ class Flow(_CoreFlow):
         list[FlowContext]
             One context per executed source.
         """
+        flow = _with_inferred_authoring_metadata(self)
         service = _resolve_authoring_services(
             authoring_services=authoring_services,
             runtime_execution_service=runtime_execution_service,
         ).runtime_execution_service
-        return service.run_once(self)
+        return service.run_once(flow)
 
     def preview(
         self,
@@ -96,35 +143,13 @@ class Flow(_CoreFlow):
 
         if in_compiled_flow_module_context():
             raise FlowValidationError("preview() is not available inside compiled flow modules.")
+        flow = _with_inferred_authoring_metadata(self)
         normalized_use = _validate_slot_name(method_name="preview", slot_name="use", value=use)
         service = _resolve_authoring_services(
             authoring_services=authoring_services,
             runtime_execution_service=runtime_execution_service,
         ).runtime_execution_service
-        return service.preview(self, use=normalized_use)
-
-    def show(self) -> object:
-        """Run this flow once and return the single final current value.
-
-        Returns
-        -------
-        object
-            Final ``context.current`` value.
-
-        Raises
-        ------
-        FlowValidationError
-            If called from a compiled flow module or the flow produces anything
-            other than one result.
-        """
-        from data_engine.flow_modules.flow_module_loader import in_compiled_flow_module_context
-
-        if in_compiled_flow_module_context():
-            raise FlowValidationError("show() is not available inside compiled flow modules.")
-        results = self.run_once()
-        if len(results) != 1:
-            raise FlowValidationError(f"show() requires exactly one result, found {len(results)}.")
-        return results[0].current
+        return service.preview(flow, use=normalized_use)
 
     def run(
         self,
@@ -146,11 +171,12 @@ class Flow(_CoreFlow):
         list[FlowContext]
             Completed contexts collected before the runtime exits.
         """
+        flow = _with_inferred_authoring_metadata(self)
         service = _resolve_authoring_services(
             authoring_services=authoring_services,
             runtime_execution_service=runtime_execution_service,
         ).runtime_execution_service
-        return service.run_continuous(self)
+        return service.run_continuous(flow)
 
 
 def load_flow(

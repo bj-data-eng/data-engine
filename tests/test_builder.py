@@ -7,6 +7,7 @@ import threading
 import polars as pl
 import pytest
 
+import data_engine.authoring.flow as authoring_flow_module
 from data_engine.authoring.flow import Flow, discover_flows, load_flow, run
 from data_engine.core.model import FlowStoppedError, FlowValidationError
 from data_engine.core.primitives import Batch, FileRef, MirrorContext, SourceContext
@@ -439,16 +440,8 @@ def test_step_can_iterate_batch_directly_from_context_current(tmp_path):
     assert result == ("claims_a.pdf", "claims_b.pdf")
 
 
-def test_show_returns_single_current_value_and_is_disabled_in_compiled_context():
+def test_preview_is_disabled_in_compiled_context():
     flow = Flow(name="preview", group="Manual").step(lambda context: pl.DataFrame({"x": [1]}))
-
-    frame = flow.show()
-    assert isinstance(frame, pl.DataFrame)
-    assert frame.height == 1
-
-    with compiled_flow_module_context():
-        with pytest.raises(FlowValidationError, match="not available inside compiled flow modules"):
-            flow.show()
 
     with compiled_flow_module_context():
         with pytest.raises(FlowValidationError, match="not available inside compiled flow modules"):
@@ -525,6 +518,41 @@ def test_preview_uses_first_deterministic_poll_source_when_directory_has_many_fi
 
     assert isinstance(frame, pl.DataFrame)
     assert frame.to_dict(as_series=False) == {"source_name": ["a.xlsx"]}
+
+
+def test_preview_infers_missing_name_and_workspace_root_for_direct_flow_modules(monkeypatch, tmp_path):
+    workspace_root = tmp_path / "workspace"
+    inferred_name = "_draft_claims"
+    flow = Flow(group="Claims").step(lambda context: context.database("claims/warehouse.duckdb"))
+
+    monkeypatch.setattr(
+        authoring_flow_module,
+        "_infer_authoring_flow_origin",
+        lambda: (inferred_name, workspace_root),
+    )
+
+    result = flow.preview()
+
+    assert result == (workspace_root / "databases" / "claims" / "warehouse.duckdb").resolve()
+
+
+def test_run_once_infers_missing_name_and_workspace_root_for_direct_flow_modules(monkeypatch, tmp_path):
+    workspace_root = tmp_path / "workspace"
+    inferred_name = "_draft_claims"
+    flow = Flow(group="Claims").step(lambda context: {"flow_name": context.flow_name, "db": context.database("claims/warehouse.duckdb")})
+
+    monkeypatch.setattr(
+        authoring_flow_module,
+        "_infer_authoring_flow_origin",
+        lambda: (inferred_name, workspace_root),
+    )
+
+    result = flow.run_once()[0].current
+
+    assert result == {
+        "flow_name": inferred_name,
+        "db": (workspace_root / "databases" / "claims" / "warehouse.duckdb").resolve(),
+    }
 
 
 def test_runtime_uses_saved_objects_and_collects_step_output_paths(tmp_path):
