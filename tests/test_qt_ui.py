@@ -2271,7 +2271,12 @@ def test_start_runtime_reuses_loaded_flow_cards(qapp, monkeypatch, tmp_path):
         assert "poller" in window.flow_cards
 
         window._start_runtime()
-        _process_ui_until(qapp, lambda: len(control_application.start_engine_calls) == 1)
+        _process_ui_until(
+            qapp,
+            lambda: len(control_application.start_engine_calls) == 1
+            and window.runtime_session.runtime_active is True
+            and window.runtime_session.active_runtime_flow_names == ("poller",),
+        )
 
         assert window.runtime_session.runtime_active is True
         assert window.runtime_session.active_runtime_flow_names == ("poller",)

@@ -18,12 +18,12 @@ class FlowCatalogEntry:
     target_root: str
     mode: str
     interval: str
-    settle: str
-    operations: str
-    operation_items: tuple[str, ...]
-    state: str
-    valid: bool
-    category: str
+    settle: str = "-"
+    operations: str = ""
+    operation_items: tuple[str, ...] = ()
+    state: str = ""
+    valid: bool = False
+    category: str = ""
     error: str = ""
     parallelism: str = "1"
 

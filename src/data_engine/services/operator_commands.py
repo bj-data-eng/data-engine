@@ -115,11 +115,11 @@ class OperatorCommandService:
     @staticmethod
     def _command_result(result: OperatorActionResult) -> OperatorCommandResult:
         return OperatorCommandResult(
-            requested=result.requested,
-            sync_after=result.sync_after,
-            ensure_daemon_started=result.ensure_daemon_started,
-            status_text=result.status_text,
-            error_text=result.error_text,
+            requested=getattr(result, "requested", False),
+            sync_after=getattr(result, "sync_after", False),
+            ensure_daemon_started=getattr(result, "ensure_daemon_started", False),
+            status_text=getattr(result, "status_text", None),
+            error_text=getattr(result, "error_text", None),
         )
 
     @staticmethod
