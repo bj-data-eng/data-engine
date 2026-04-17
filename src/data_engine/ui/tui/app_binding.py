@@ -68,6 +68,7 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
     app.ledger_service = app.services.ledger_service
     app.log_service = app.services.log_service
     app.runtime_binding_service = app.services.runtime_binding_service
+    app.runtime_state_service = app.services.runtime_state_service
     app.shared_state_service = app.services.shared_state_service
     app.reset_service = app.services.reset_service
     app.settings_service = app.services.settings_service
@@ -85,6 +86,7 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
         runtime_application=app.services.runtime_application,
         daemon_service=app.daemon_service,
         log_service=app.log_service,
+        runtime_state_service=app.runtime_state_service,
     )
     app.theme_name = app.theme_service.resolve_name(theme_name)
     app.CSS = tui_stylesheet(app.theme_name)

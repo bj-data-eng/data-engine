@@ -7,7 +7,6 @@ from data_engine.ui.gui.presenters.docs import (
     load_docs_page,
 )
 from data_engine.ui.gui.presenters.runtime_projection import (
-    apply_daemon_snapshot,
     finish_daemon_startup,
 )
 from data_engine.ui.gui.presenters.sidebar import refresh_sidebar_selection, refresh_sidebar_state_views, repolish_widget_tree, set_hovered
@@ -36,7 +35,6 @@ from data_engine.ui.gui.presenters.workspace_settings import (
 __all__ = [
     "add_log_run_item",
     "apply_runtime_event",
-    "apply_daemon_snapshot",
     "browse_workspace_collection_root_override",
     "create_docs_browser",
     "duration_text",

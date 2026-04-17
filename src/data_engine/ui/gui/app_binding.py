@@ -69,6 +69,7 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.ledger_service = window.services.ledger_service
     window.log_service = window.services.log_service
     window.runtime_binding_service = window.services.runtime_binding_service
+    window.runtime_state_service = window.services.runtime_state_service
     window.runtime_history_service = window.services.runtime_history_service
     window.reset_service = window.services.reset_service
     window.shared_state_service = window.services.shared_state_service
@@ -87,6 +88,7 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
         runtime_application=window.runtime_application,
         daemon_service=window.daemon_service,
         log_service=window.log_service,
+        runtime_state_service=window.runtime_state_service,
     )
     window.theme_name = window.theme_service.resolve_name(theme_name)
     env_collection_root = os.environ.get(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR)

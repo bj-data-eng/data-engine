@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from data_engine.application import RuntimeApplication
-from data_engine.services import DaemonService, LogService
+from data_engine.services import DaemonService, LogService, RuntimeStateService
 from data_engine.domain import DaemonStatusState, RuntimeSessionState, WorkspaceControlState
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.platform.instrumentation import append_timing_line, timed_operation
@@ -23,10 +23,42 @@ class GuiRuntimeController:
         runtime_application: RuntimeApplication,
         daemon_service: DaemonService,
         log_service: LogService,
+        runtime_state_service: RuntimeStateService,
     ) -> None:
         self.runtime_application = runtime_application
         self.daemon_service = daemon_service
         self.log_service = log_service
+        self.runtime_state_service = runtime_state_service
+
+    def _apply_runtime_projection(self, window: "DataEngineWindow", *, runtime_session, operation_tracker, flow_states, step_output_index) -> None:
+        active_manual_groups = {run.group_name for run in runtime_session.manual_runs}
+        window.manual_flow_stopping_groups.intersection_update(active_manual_groups)
+        refresh_plan = self.runtime_application.plan_flow_state_refresh(
+            previous_states=window.flow_states,
+            next_states=flow_states,
+            runtime_session=runtime_session,
+        )
+        next_flow_states = dict(refresh_plan.flow_states)
+        for group_name in window.manual_flow_stopping_groups:
+            flow_name = runtime_session.manual_flow_name_for_group(group_name)
+            if flow_name is not None and next_flow_states.get(flow_name) != "failed":
+                next_flow_states[flow_name] = "stopping flow"
+        refresh_plan = self.runtime_application.plan_flow_state_refresh(
+            previous_states=window.flow_states,
+            next_states=next_flow_states,
+            runtime_session=runtime_session,
+        )
+        window.runtime_session = runtime_session
+        window.step_output_index = step_output_index
+        window.operation_tracker = operation_tracker
+        window.flow_states = refresh_plan.flow_states
+        window._refresh_sidebar_state_views(set(refresh_plan.changed_flow_names))
+        if window.selected_flow_name is not None and window.selected_flow_name in window.flow_cards:
+            window.flow_controller.refresh_selection(window, window.flow_cards[window.selected_flow_name])
+        window.flow_controller.refresh_summary(window)
+        window._refresh_workspace_visibility_panel()
+        window._refresh_log_view()
+        window.flow_controller.refresh_action_buttons(window)
 
     def sync_from_daemon(self, window: "DataEngineWindow") -> None:
         if window._daemon_sync_in_progress:
@@ -48,21 +80,25 @@ class GuiRuntimeController:
                     window.flow_controller.reload_workspace_options(window)
                     window.flow_controller.load_flows(window)
                     return
-                sync_state = window.runtime_binding_service.sync_runtime_state(
+                surface_state = self.runtime_state_service.current_surface_state(
                     window.runtime_binding,
                     runtime_application=self.runtime_application,
                     flow_cards=window.flow_cards.values(),
+                    now=window._monotonic(),
                     daemon_startup_in_progress=window._daemon_startup_in_progress,
                 )
-                if not bool(getattr(sync_state.snapshot, "live", False)) and window._auto_daemon_enabled:
+                if not surface_state.daemon_live and window._auto_daemon_enabled:
                     self.ensure_daemon_started(window)
-                window.daemon_status = sync_state.daemon_status
-                window.workspace_control_state = sync_state.workspace_control_state
-                window.runtime_session = sync_state.runtime_session
-                active_manual_groups = {run.group_name for run in window.runtime_session.manual_runs}
-                window.manual_flow_stopping_groups.intersection_update(active_manual_groups)
-                window._apply_daemon_snapshot(sync_state.snapshot)
-                self.rebuild_runtime_snapshot(window)
+                window.workspace_snapshot = surface_state.snapshot
+                window.daemon_status = surface_state.daemon_status
+                window.workspace_control_state = surface_state.workspace_control_state
+                self._apply_runtime_projection(
+                    window,
+                    runtime_session=surface_state.runtime_session,
+                    operation_tracker=surface_state.operation_tracker,
+                    flow_states=surface_state.flow_states,
+                    step_output_index=surface_state.step_output_index,
+                )
         finally:
             window._daemon_sync_in_progress = False
             rerun_requested = window._daemon_sync_pending and not window.ui_closing
@@ -133,48 +169,20 @@ class GuiRuntimeController:
             event="rebuild_runtime_snapshot",
             fields={"workspace": window.workspace_paths.workspace_id},
         ):
-            with timed_operation(window._ui_timing_log_path, scope="gui.sync", event="reload_logs"):
-                window.runtime_binding_service.reload_logs(window.runtime_binding)
-            with timed_operation(window._ui_timing_log_path, scope="gui.sync", event="rebuild_step_outputs"):
-                window.step_output_index = window.runtime_binding_service.rebuild_step_outputs(
-                    window.runtime_binding,
-                    window.flow_cards,
-                )
-            with timed_operation(window._ui_timing_log_path, scope="gui.sync", event="build_runtime_snapshot"):
-                snapshot = self.runtime_application.build_runtime_snapshot(
-                    flow_cards=window.flow_cards.values(),
-                    log_entries=self.log_service.all_entries(window.runtime_binding.log_store),
-                    runtime_session=window.runtime_session,
-                    now=window._monotonic(),
-                )
-        if window.runtime_session.runtime_active or window.runtime_session.runtime_stopping:
-            window.runtime_session = window.runtime_session.with_active_runtime_flow_names(
-                snapshot.active_runtime_flow_names
+            projection = self.runtime_state_service.rebuild_projection(
+                window.runtime_binding,
+                runtime_application=self.runtime_application,
+                flow_cards=window.flow_cards.values(),
+                runtime_session=window.runtime_session,
+                now=window._monotonic(),
             )
-        refresh_plan = self.runtime_application.plan_flow_state_refresh(
-            previous_states=window.flow_states,
-            next_states=snapshot.flow_states,
-            runtime_session=window.runtime_session,
+        self._apply_runtime_projection(
+            window,
+            runtime_session=projection.runtime_session,
+            operation_tracker=projection.operation_tracker,
+            flow_states=projection.flow_states,
+            step_output_index=projection.step_output_index,
         )
-        flow_states = dict(refresh_plan.flow_states)
-        for group_name in window.manual_flow_stopping_groups:
-            flow_name = window.runtime_session.manual_flow_name_for_group(group_name)
-            if flow_name is not None and flow_states.get(flow_name) != "failed":
-                flow_states[flow_name] = "stopping flow"
-        refresh_plan = self.runtime_application.plan_flow_state_refresh(
-            previous_states=window.flow_states,
-            next_states=flow_states,
-            runtime_session=window.runtime_session,
-        )
-        window.operation_tracker = snapshot.operation_tracker
-        window.flow_states = refresh_plan.flow_states
-        window._refresh_sidebar_state_views(set(refresh_plan.changed_flow_names))
-        if window.selected_flow_name is not None and window.selected_flow_name in window.flow_cards:
-            window.flow_controller.refresh_selection(window, window.flow_cards[window.selected_flow_name])
-        window.flow_controller.refresh_summary(window)
-        window._refresh_workspace_visibility_panel()
-        window._refresh_log_view()
-        window.flow_controller.refresh_action_buttons(window)
 
     @staticmethod
     def _begin_control_action(window: "DataEngineWindow", action_name: str, *, target, args: tuple[object, ...] = ()) -> bool:

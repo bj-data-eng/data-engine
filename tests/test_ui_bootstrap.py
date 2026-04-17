@@ -15,7 +15,7 @@ from data_engine.ui.gui.bootstrap import (
     build_gui_services,
     default_gui_service_kwargs,
 )
-from data_engine.ui.gui.bootstrapper import initial_window_size_for_screen
+from data_engine.ui.gui.app_binding import initial_window_size_for_screen
 from data_engine.ui.tui.bootstrap import (
     TuiDependencyFactories,
     TuiServices,
@@ -248,6 +248,11 @@ def test_build_default_gui_services_uses_injected_factories():
             daemon_state_service,
             runtime_history_service,
         ),
+        runtime_state_service_factory=lambda runtime_binding_service, log_service: (
+            "runtime-state",
+            runtime_binding_service,
+            log_service,
+        ),
         runtime_history_service_factory=lambda: "runtime-history",
         reset_service_factory=lambda shared_state_service: ("reset-service", shared_state_service),
         shared_state_service_factory=lambda: "shared-state",
@@ -308,6 +313,11 @@ def test_build_default_tui_services_uses_injected_factories():
             log_service,
             daemon_state_service,
             runtime_history_service,
+        ),
+        runtime_state_service_factory=lambda runtime_binding_service, log_service: (
+            "runtime-state",
+            runtime_binding_service,
+            log_service,
         ),
         runtime_history_service_factory=lambda: "runtime-history",
         reset_service_factory=lambda shared_state_service: ("reset-service", shared_state_service),

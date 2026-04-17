@@ -17,7 +17,7 @@ from data_engine.domain import (
 from data_engine.core.model import FlowValidationError
 from data_engine.views.text import render_run_group_lines
 from data_engine.ui.tui.bootstrap import TuiServices
-from data_engine.ui.tui.bootstrapper import bootstrap_tui_app
+from data_engine.ui.tui.app_binding import bootstrap_tui_app
 from data_engine.ui.tui.theme import DEFAULT_THEME, stylesheet as tui_stylesheet
 from data_engine.ui.tui.state_support import TuiStateMixin
 from data_engine.ui.tui.support import TuiWindowSupportMixin

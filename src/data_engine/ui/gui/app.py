@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from data_engine.platform.identity import APP_VERSION
 from data_engine.ui.gui.bootstrap import GuiServices
-from data_engine.ui.gui.bootstrapper import bootstrap_gui_window
+from data_engine.ui.gui.app_binding import bootstrap_gui_window
 from data_engine.ui.gui.control_support import GuiControlMixin
 from data_engine.ui.gui.helpers import is_last_process_ui_window as helper_is_last_process_ui_window
 from data_engine.ui.gui.render_support import GuiRenderingMixin

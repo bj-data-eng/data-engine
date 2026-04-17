@@ -5250,7 +5250,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `control_application_factory`
     - attribute `theme_service_factory`
     - attribute `workspace_provisioning_service_factory`
-- module `data_engine.ui.gui.bootstrapper`
+- module `data_engine.ui.gui.app_binding`
   - attribute `_DEFAULT_WINDOW_SIZE`
   - attribute `_MINIMUM_WINDOW_SIZE`
   - attribute `_STARTUP_SCREEN_WIDTH_RATIO`
@@ -6668,7 +6668,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `runtime_application_factory`
     - attribute `control_application_factory`
     - attribute `theme_service_factory`
-- module `data_engine.ui.tui.bootstrapper`
+- module `data_engine.ui.tui.app_binding`
   - attribute `__all__`
   - function `resolve_initial_tui_workspace_collection_root_override`
     - param `settings_service`

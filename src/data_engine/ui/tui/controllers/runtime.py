@@ -9,7 +9,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Button, ListView, Select, Static
 
 from data_engine.application import RuntimeApplication
-from data_engine.services import DaemonService, LogService
+from data_engine.services import DaemonService, LogService, RuntimeStateService
 from data_engine.domain import RuntimeSessionState, WorkspaceControlState
 from data_engine.views import TuiActionState, WORKSPACE_UNAVAILABLE_TEXT, surface_control_status_text
 from data_engine.ui.tui.widgets import FlowListItem
@@ -27,10 +27,12 @@ class TuiRuntimeController:
         runtime_application: RuntimeApplication,
         daemon_service: DaemonService,
         log_service: LogService,
+        runtime_state_service: RuntimeStateService,
     ) -> None:
         self.runtime_application = runtime_application
         self.daemon_service = daemon_service
         self.log_service = log_service
+        self.runtime_state_service = runtime_state_service
 
     def refresh_flow_list_items(self, window: "DataEngineTui") -> None:
         list_view = window.query_one("#flow-list", ListView)
@@ -75,27 +77,39 @@ class TuiRuntimeController:
             except NoMatches:
                 return
             return
-        try:
-            live = self.daemon_service.is_live(window.workspace_paths)
-        except Exception:
-            live = False
-        if not live:
-            self.ensure_daemon_started(window)
-        sync_state = window.runtime_binding_service.sync_runtime_state(
+        surface_state = self.runtime_state_service.current_surface_state(
             window.runtime_binding,
             runtime_application=self.runtime_application,
             flow_cards=window.flow_cards,
+            now=window._monotonic(),
             daemon_startup_in_progress=window._daemon_startup_in_progress,
         )
-        window.runtime_session = sync_state.runtime_session
-        window.workspace_control_state = sync_state.workspace_control_state
+        window.workspace_snapshot = surface_state.snapshot
+        if not surface_state.daemon_live:
+            self.ensure_daemon_started(window)
+        window.runtime_session = surface_state.runtime_session
+        window.workspace_control_state = surface_state.workspace_control_state
         try:
             window.query_one("#control-status", Static).update(
                 surface_control_status_text(window.workspace_control_state.control_status_text)
             )
         except NoMatches:
             return
-        self.rebuild_runtime_snapshot(window)
+        window.operation_tracker = surface_state.operation_tracker
+        refresh_plan = self.runtime_application.plan_flow_state_refresh(
+            previous_states=window.flow_states,
+            next_states=surface_state.flow_states,
+            runtime_session=window.runtime_session,
+        )
+        states_changed = refresh_plan.signature != window._last_rendered_flow_signature
+        window.flow_states = refresh_plan.flow_states
+        if not window.runtime_session.workspace_owned:
+            window._set_status(window.workspace_control_state.blocked_status_text)
+        if states_changed:
+            self.refresh_flow_list_items(window)
+            window._last_rendered_flow_signature = refresh_plan.signature
+        self.refresh_buttons(window)
+        window.flow_controller.render_selected_flow(window)
 
     def ensure_daemon_started(self, window: "DataEngineTui") -> bool:
         if not window._has_authored_workspace():
@@ -139,19 +153,20 @@ class TuiRuntimeController:
         self.sync_daemon_state(window)
 
     def rebuild_runtime_snapshot(self, window: "DataEngineTui") -> None:
-        window.runtime_binding_service.reload_logs(window.runtime_binding)
-        snapshot = self.runtime_application.build_runtime_snapshot(
+        projection = self.runtime_state_service.rebuild_projection(
+            window.runtime_binding,
+            runtime_application=self.runtime_application,
             flow_cards=window.flow_cards,
-            log_entries=self.log_service.all_entries(window.runtime_binding.log_store),
             runtime_session=window.runtime_session,
             now=window._monotonic(),
         )
         refresh_plan = self.runtime_application.plan_flow_state_refresh(
             previous_states=window.flow_states,
-            next_states=snapshot.flow_states,
-            runtime_session=window.runtime_session,
+            next_states=projection.flow_states,
+            runtime_session=projection.runtime_session,
         )
-        window.operation_tracker = snapshot.operation_tracker
+        window.runtime_session = projection.runtime_session
+        window.operation_tracker = projection.operation_tracker
         states_changed = refresh_plan.signature != window._last_rendered_flow_signature
         window.flow_states = refresh_plan.flow_states
         if not window.runtime_session.workspace_owned:

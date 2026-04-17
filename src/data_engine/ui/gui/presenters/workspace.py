@@ -6,7 +6,6 @@ from data_engine.ui.gui.presenters.docs import (
     load_docs_page,
 )
 from data_engine.ui.gui.presenters.runtime_projection import (
-    apply_daemon_snapshot,
     finish_daemon_startup,
 )
 from data_engine.ui.gui.presenters.workspace_binding import rebind_workspace_context
@@ -18,7 +17,6 @@ from data_engine.ui.gui.presenters.workspace_settings import (
 )
 
 __all__ = [
-    "apply_daemon_snapshot",
     "browse_workspace_collection_root_override",
     "create_docs_browser",
     "finish_daemon_startup",

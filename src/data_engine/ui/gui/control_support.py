@@ -9,7 +9,6 @@ from data_engine.ui.gui.dialogs import show_run_log_preview
 from data_engine.ui.gui.preview_models import RunLogPreviewRequest
 from data_engine.ui.gui.presenters import (
     add_log_run_item as present_add_log_run_item,
-    apply_daemon_snapshot as present_apply_daemon_snapshot,
     finish_daemon_startup as present_finish_daemon_startup,
     refresh_log_view as present_refresh_log_view,
 )
@@ -85,9 +84,6 @@ class GuiControlMixin:
             finish_workspace_settings_action(self, action_name, payload)
             return
         self.runtime_controller.finish_control_action(self, action_name, payload)
-
-    def _apply_daemon_snapshot(self: "DataEngineWindow", snapshot) -> None:
-        present_apply_daemon_snapshot(self, snapshot)
 
     def _rebuild_runtime_snapshot(self: "DataEngineWindow") -> None:
         self.runtime_controller.rebuild_runtime_snapshot(self)
