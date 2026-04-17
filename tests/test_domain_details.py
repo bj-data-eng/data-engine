@@ -92,10 +92,11 @@ def test_run_detail_state_collects_step_rows():
 def test_flow_summary_rows_expose_core_flow_config_fields_in_display_order():
     rows = FlowSummaryRow.rows_for_flow(_sample_card(), {"claims_summary": "running"})
 
-    assert [(row.label, row.value) for row in rows][:4] == [
+    assert [(row.label, row.value) for row in rows][:5] == [
         ("Flow", "claims_summary"),
         ("Mode", "manual"),
         ("Interval", "-"),
+        ("Settle", "-"),
         ("Max Parallel", "1"),
     ]
 

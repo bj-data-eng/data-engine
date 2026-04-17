@@ -15,6 +15,7 @@ from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
 from data_engine.domain import FlowCatalogEntry, RuntimeSessionState, WorkspaceControlState
 from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.services import DaemonService
+from data_engine.services.operator_commands import OperatorCommandService
 from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, WorkspaceSnapshot
 from data_engine.application.catalog import FlowCatalogLoadResult, FlowCatalogPresentation
 from data_engine.ui.tui.bootstrap import build_tui_services
@@ -72,6 +73,7 @@ def _sample_qt_flow_cards() -> tuple[QtFlowCard, ...]:
             target_root="/tmp/output",
             mode="poll",
             interval="30s",
+            settle="1",
             operations="Read Excel -> Write Parquet",
             operation_items=("Read Excel", "Write Parquet"),
             state="poll ready",
@@ -87,6 +89,7 @@ def _sample_qt_flow_cards() -> tuple[QtFlowCard, ...]:
             target_root="/tmp/manual-output",
             mode="manual",
             interval="-",
+            settle="-",
             operations="Build Report",
             operation_items=("Build Report",),
             state="manual",
@@ -244,6 +247,41 @@ class _FakeResetService:
         self.flow_resets.append((paths, flow_name))
 
 
+def _command_service_for_test(*, reset_service):
+    class _RuntimeApplicationForCommands:
+        def force_shutdown_daemon(self, paths, timeout=0.5):
+            del paths, timeout
+            return type("_Result", (), {"ok": True, "error": None})()
+
+    class _UnusedControlApplication:
+        def run_selected_flow(self, **kwargs):
+            del kwargs
+            raise AssertionError("run_selected_flow should not be called in this TUI test helper path.")
+
+        def start_engine(self, **kwargs):
+            del kwargs
+            raise AssertionError("start_engine should not be called in this TUI test helper path.")
+
+        def stop_pipeline(self, **kwargs):
+            del kwargs
+            raise AssertionError("stop_pipeline should not be called in this TUI test helper path.")
+
+        def request_control(self, manager):
+            del manager
+            raise AssertionError("request_control should not be called in this TUI test helper path.")
+
+        def refresh_flows(self, **kwargs):
+            del kwargs
+            raise AssertionError("refresh_flows should not be called in this TUI test helper path.")
+
+    return OperatorCommandService(
+        control_application=_UnusedControlApplication(),
+        runtime_application=_RuntimeApplicationForCommands(),
+        reset_service=reset_service,
+        workspace_provisioning_service=None,
+    )
+
+
 class _SyncingDaemonManager(_FakeDaemonManager):
     def __init__(self, snapshot: WorkspaceDaemonSnapshot) -> None:
         super().__init__(snapshot=snapshot)
@@ -317,10 +355,10 @@ def _make_tui(
     resolve_workspace_paths_func=None,
     settings_store: LocalSettingsStore | None = None,
     log_service=None,
+    command_service=None,
     shared_state_service=None,
     daemon_state_service=None,
     flow_catalog_application=None,
-    reset_service=None,
     app_cls=DataEngineTui,
 ) -> DataEngineTui:
     manager = _FakeDaemonManager(snapshot=snapshot)
@@ -335,9 +373,9 @@ def _make_tui(
         ),
         daemon_state_service=daemon_state_service or _FakeDaemonStateService(manager),
         log_service=log_service,
+        command_service=command_service,
         shared_state_service=shared_state_service,
         flow_catalog_application=flow_catalog_application,
-        reset_service=reset_service,
         discover_workspaces_func=discover_workspaces_func or (lambda **kwargs: ()),
         resolve_workspace_paths_func=resolve_workspace_paths_func or resolve_workspace_paths,
     )
@@ -354,6 +392,7 @@ def test_flow_list_item_refresh_view_updates_label():
         target_root="/tmp/out",
         mode="schedule",
         interval="5s",
+        settle="-",
         operations="Read -> Write",
         operation_items=("Read", "Write"),
         state="schedule ready",
@@ -719,7 +758,7 @@ async def test_tui_empty_workspace_reload_clears_stale_flow_rows():
 @pytest.mark.anyio
 async def test_tui_reset_flow_calls_persistent_reset_path():
     reset_service = _FakeResetService()
-    app = _make_tui(reset_service=reset_service, app_cls=_RecordingStatusTui)
+    app = _make_tui(command_service=_command_service_for_test(reset_service=reset_service), app_cls=_RecordingStatusTui)
     async with app.run_test():
         app.action_clear_flow_log()
 

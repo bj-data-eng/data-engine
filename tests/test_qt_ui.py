@@ -25,6 +25,7 @@ from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, WorkspaceSnapshot
 from data_engine.services import DaemonService
+from data_engine.services.operator_commands import OperatorCommandService
 from data_engine.services.workspace_provisioning import WorkspaceProvisioningResult
 from data_engine.ui.gui.bootstrap import build_gui_services
 from data_engine.views import flow_category
@@ -115,6 +116,7 @@ def _sample_qt_flow_cards() -> tuple[QtFlowCard, ...]:
             target_root="/tmp/output",
             mode="poll",
             interval="30s",
+            settle="1",
             operations="Read Excel -> Write Parquet",
             operation_items=("Read Excel", "Write Parquet"),
             state="poll ready",
@@ -130,6 +132,7 @@ def _sample_qt_flow_cards() -> tuple[QtFlowCard, ...]:
             target_root="/tmp/manual-output",
             mode="manual",
             interval="-",
+            settle="-",
             operations="Build Report",
             operation_items=("Build Report",),
             state="manual",
@@ -150,6 +153,7 @@ def _sample_multi_active_qt_flow_cards() -> tuple[QtFlowCard, ...]:
             target_root="/tmp/output-a",
             mode="poll",
             interval="30s",
+            settle="1",
             operations="Read Excel -> Write Parquet",
             operation_items=("Read Excel", "Write Parquet"),
             state="poll ready",
@@ -165,6 +169,7 @@ def _sample_multi_active_qt_flow_cards() -> tuple[QtFlowCard, ...]:
             target_root="/tmp/output-b",
             mode="schedule",
             interval="30s",
+            settle="-",
             operations="Read Excel -> Write Parquet",
             operation_items=("Read Excel", "Write Parquet"),
             state="schedule ready",
@@ -439,6 +444,30 @@ class _FakeResetService:
         self.workspace_resets.append(paths)
 
 
+def _command_service_for_test(
+    *,
+    control_application=None,
+    reset_service=None,
+    workspace_provisioning_service=None,
+    force_shutdown_func=None,
+):
+    class _RuntimeApplicationForCommands:
+        def force_shutdown_daemon(self, paths, timeout=0.5):
+            try:
+                if force_shutdown_func is not None:
+                    force_shutdown_func(paths, timeout=timeout)
+                return type("_Result", (), {"ok": True, "error": None})()
+            except Exception as exc:  # pragma: no cover - defensive test hook
+                return type("_Result", (), {"ok": False, "error": str(exc)})()
+
+    return OperatorCommandService(
+        control_application=control_application or _FakeControlApplication(),
+        runtime_application=_RuntimeApplicationForCommands(),
+        reset_service=reset_service or _FakeResetService(),
+        workspace_provisioning_service=workspace_provisioning_service,
+    )
+
+
 def _make_window(
     *,
     cards: tuple[QtFlowCard, ...] | None = None,
@@ -451,10 +480,8 @@ def _make_window(
     settings_store: LocalSettingsStore | None = None,
     ledger_service=None,
     log_service=None,
-    control_application=None,
+    command_service=None,
     shared_state_service=None,
-    workspace_provisioning_service=None,
-    reset_service=None,
 ) -> DataEngineWindow:
     manager = _FakeDaemonManager(snapshot=snapshot)
     log_service = log_service or _FakeLogService()
@@ -471,10 +498,8 @@ def _make_window(
         daemon_state_service=_FakeDaemonStateService(manager),
         ledger_service=ledger_service,
         log_service=log_service,
-        control_application=control_application,
+        command_service=command_service,
         shared_state_service=shared_state_service,
-        workspace_provisioning_service=workspace_provisioning_service,
-        reset_service=reset_service,
         discover_workspaces_func=discover_workspaces_func or (lambda **kwargs: ()),
         resolve_workspace_paths_func=resolve_workspace_paths_func or resolve_workspace_paths,
     )
@@ -608,7 +633,7 @@ def test_provision_workspace_button_creates_missing_workspace_assets(qapp, tmp_p
 
     provisioning_service = _RecordingProvisioningService()
     window = _make_window(
-        workspace_provisioning_service=provisioning_service,
+        command_service=_command_service_for_test(workspace_provisioning_service=provisioning_service),
     )
     selected_paths = window.workspace_paths
 
@@ -899,7 +924,7 @@ def test_refresh_button_reloads_flows(qapp, monkeypatch, tmp_path):
         },
     )()
     window = _make_window(
-        control_application=control_application,
+        command_service=_command_service_for_test(control_application=control_application),
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: resolve_workspace_paths(
             workspace_root=workspace_root,
             workspace_id=workspace_id or "claims",
@@ -1562,7 +1587,7 @@ def test_manual_run_selected_flow_button_requests_graceful_stop_instead_of_new_r
             "error_text": None,
         },
     )()
-    window = _make_window(control_application=control_application)
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
     try:
         window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
         window.flow_states["manual_review"] = "running"
@@ -1600,7 +1625,7 @@ def test_manual_run_selected_flow_button_shows_stopping_while_stop_request_is_pe
         return original_stop_pipeline(**kwargs)
 
     control_application.stop_pipeline = _delayed_stop_pipeline
-    window = _make_window(control_application=control_application)
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
     try:
         window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
         window.flow_states["manual_review"] = "running"
@@ -1634,7 +1659,7 @@ def test_manual_run_selected_flow_button_stays_stopping_until_run_finishes(qapp,
             "error_text": None,
         },
     )()
-    window = _make_window(control_application=control_application)
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
     try:
         window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
         window.flow_states["manual_review"] = "running"
@@ -1815,7 +1840,7 @@ def test_request_control_button_records_request_and_logs_result(qapp, monkeypatc
             },
         )(),
     )
-    window = _make_window(control_application=control_application)
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
     del monkeypatch
     daemon_bootstrap_requests = _attach_call_recorder(window, "_ensure_daemon_started")
     sync_calls = _attach_call_recorder(window, "_sync_from_daemon")
@@ -1854,7 +1879,7 @@ def test_request_control_button_preserves_verbose_error_text(qapp, monkeypatch):
             },
         )(),
     )
-    window = _make_window(control_application=control_application)
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
     capture = _attach_message_capture(window)
     try:
         window.runtime_session = replace(window.runtime_session, workspace_owned=False, leased_by_machine_id="other-host")
@@ -1904,7 +1929,7 @@ def test_request_control_button_shows_requesting_while_request_is_pending(qapp, 
         return original_request_control(manager)
 
     control_application.request_control = _delayed_request_control
-    window = _make_window(control_application=control_application)
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
     try:
         window.runtime_session = replace(window.runtime_session, workspace_owned=False, leased_by_machine_id="other-host")
         window._refresh_action_buttons()
@@ -2234,7 +2259,7 @@ def test_start_runtime_reuses_loaded_flow_cards(qapp, monkeypatch, tmp_path):
             last_checkpoint_at_utc=datetime.now(UTC).isoformat(),
             source="daemon",
         ),
-        control_application=control_application,
+        command_service=_command_service_for_test(control_application=control_application),
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: resolve_workspace_paths(
             workspace_root=workspace_root,
             workspace_id=workspace_id or "claims",
@@ -2462,7 +2487,7 @@ def test_force_shutdown_daemon_button_calls_force_stop_path(qapp, monkeypatch):
 
 def test_reset_flow_button_calls_persistent_reset_path(qapp, monkeypatch):
     reset_service = _FakeResetService()
-    window = _make_window(reset_service=reset_service)
+    window = _make_window(command_service=_command_service_for_test(reset_service=reset_service))
     rebuild_calls = _attach_call_recorder(window, "_rebuild_runtime_snapshot")
     try:
         window._clear_logs()
@@ -2477,7 +2502,7 @@ def test_reset_flow_button_calls_persistent_reset_path(qapp, monkeypatch):
 def test_reset_flow_button_clears_selected_flow_logs_before_rebuild(qapp, monkeypatch):
     del monkeypatch
     reset_service = _FakeResetService()
-    window = _make_window(reset_service=reset_service)
+    window = _make_window(command_service=_command_service_for_test(reset_service=reset_service))
     try:
         window.log_store.append_entry(
             FlowLogEntry(
@@ -2544,7 +2569,7 @@ def test_reset_flow_button_shows_resetting_while_request_is_pending(qapp, monkey
         return original_reset_flow(paths=paths, runtime_cache_ledger=runtime_cache_ledger, flow_name=flow_name)
 
     reset_service.reset_flow = _delayed_reset_flow
-    window = _make_window(reset_service=reset_service)
+    window = _make_window(command_service=_command_service_for_test(reset_service=reset_service))
     try:
         window._clear_logs()
         _process_ui_until(qapp, lambda: "reset_flow" in window._pending_control_actions)
@@ -2561,7 +2586,7 @@ def test_reset_flow_button_shows_resetting_while_request_is_pending(qapp, monkey
 def test_reset_workspace_button_calls_reset_service_and_rebinds(qapp, monkeypatch):
     del monkeypatch
     reset_service = _FakeResetService()
-    window = _make_window(reset_service=reset_service)
+    window = _make_window(command_service=_command_service_for_test(reset_service=reset_service))
     rebind_calls = _attach_call_recorder(window, "_rebind_workspace_context")
     try:
         window._reset_workspace()
@@ -2581,7 +2606,7 @@ def test_reset_workspace_button_allows_idle_live_daemon(qapp, monkeypatch):
     del monkeypatch
     reset_service = _FakeResetService()
     window = _make_window(
-        reset_service=reset_service,
+        command_service=_command_service_for_test(reset_service=reset_service),
         snapshot=WorkspaceDaemonSnapshot(
             live=True,
             workspace_owned=True,

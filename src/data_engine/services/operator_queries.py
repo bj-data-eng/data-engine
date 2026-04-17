@@ -21,6 +21,7 @@ class FlowCatalogItem:
     group_name: str
     title: str
     runtime_kind: Literal["manual", "poll", "schedule"]
+    settle: int | None
     max_parallel: int
 
 
@@ -114,6 +115,7 @@ class CatalogQueryService:
                 group_name=entry.group or "",
                 title=entry.title,
                 runtime_kind=entry.mode if entry.mode in {"manual", "poll", "schedule"} else "manual",
+                settle=(int(entry.settle) if entry.settle != "-" else None),
                 max_parallel=max(int(entry.parallelism), 1),
             )
             for entry in entries

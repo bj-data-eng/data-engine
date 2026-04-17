@@ -331,6 +331,7 @@ def test_runtime_state_service_returns_unified_workspace_snapshot():
         target_root="outbox",
         mode="poll",
         interval="5s",
+        settle="1",
         operations="Read -> Write",
         operation_items=("Read", "Write"),
         state="poll ready",
@@ -461,6 +462,7 @@ def test_runtime_state_service_emits_snapshot_events_to_subscribers():
         target_root="outbox",
         mode="poll",
         interval="5s",
+        settle="1",
         operations="Read -> Write",
         operation_items=("Read", "Write"),
         state="poll ready",
@@ -512,7 +514,7 @@ def test_catalog_query_service_returns_catalog_items_and_preview_rows(tmp_path):
                     "description": "Poll claims",
                     "build": staticmethod(
                         lambda: Flow(name="claims_poll", group="Claims", label="Claims Poll")
-                        .watch(mode="poll", source=source, interval="5s", max_parallel=4)
+                        .watch(mode="poll", source=source, interval="5s", settle=2, max_parallel=4)
                         .step(lambda context: context.current)
                     ),
                 },
@@ -528,12 +530,14 @@ def test_catalog_query_service_returns_catalog_items_and_preview_rows(tmp_path):
     assert items[0].flow_name == "claims_poll"
     assert items[0].group_name == "Claims"
     assert items[0].runtime_kind == "poll"
+    assert items[0].settle == 2
     assert items[0].max_parallel == 4
 
     card = flow_catalog_service.load_entries(workspace_root=tmp_path)[0]
     preview = query_service.get_flow_preview(card=card, flow_states={"claims_poll": "polling"})
 
     assert preview.flow_name == "claims_poll"
+    assert ("Settle", "2") in preview.rows
     assert ("State", "polling") in preview.rows
     assert ("Max Parallel", "4") in preview.rows
 
@@ -873,6 +877,7 @@ def test_flow_catalog_entry_from_flow_builds_expected_metadata():
         target_root="(not set)",
         mode="manual",
         interval="-",
+        settle="-",
         operations="Read Claims",
         operation_items=("Read Claims",),
         state="manual",

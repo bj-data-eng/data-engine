@@ -18,6 +18,7 @@ class FlowCatalogEntry:
     target_root: str
     mode: str
     interval: str
+    settle: str
     operations: str
     operation_items: tuple[str, ...]
     state: str
@@ -38,6 +39,7 @@ class FlowCatalogLike(Protocol):
     target_root: str
     mode: str
     interval: str
+    settle: str
     operations: str
     operation_items: tuple[str, ...]
     state: str

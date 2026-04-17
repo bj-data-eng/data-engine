@@ -22,6 +22,7 @@ def _sample_parallel_card():
                 mode="poll",
                 source="/tmp/incoming",
                 interval="5s",
+                settle=3,
                 max_parallel=4,
             ),
             description="Poll claims",
@@ -50,3 +51,4 @@ def test_config_preview_state_exposes_configured_parallelism():
     preview = ConfigPreviewState.from_flow(_sample_parallel_card(), {"claims_poll": "poll ready"})
 
     assert ("Max Parallel", "4") in tuple((row.label, row.value) for row in preview.summary.rows)
+    assert ("Settle", "3") in tuple((row.label, row.value) for row in preview.summary.rows)

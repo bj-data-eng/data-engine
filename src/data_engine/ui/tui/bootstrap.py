@@ -66,14 +66,12 @@ class TuiServices:
     daemon_service: DaemonService
     daemon_state_service: DaemonStateService
     runtime_application: RuntimeApplication
-    control_application: OperatorControlApplication
     command_service: CommandPort
     ledger_service: LedgerService
     log_service: LogService
     runtime_binding_service: WorkspaceRuntimeBindingService
     runtime_state_service: RuntimeStateService
     runtime_history_service: RuntimeHistoryService
-    reset_service: ResetService
     shared_state_service: SharedStateService
     theme_service: ThemeService
 
@@ -98,17 +96,18 @@ class TuiDependencyFactories:
     runtime_binding_service_factory: Callable[[LedgerService, LogService, DaemonStateService, RuntimeHistoryService], WorkspaceRuntimeBindingService]
     runtime_state_service_factory: Callable[[WorkspaceRuntimeBindingService, LogService], RuntimeStateService]
     runtime_history_service_factory: Callable[[], RuntimeHistoryService]
-    reset_service_factory: Callable[[SharedStateService], ResetService]
     shared_state_service_factory: Callable[[], SharedStateService]
     runtime_application_factory: Callable[[DaemonService, DaemonStateService, SharedStateService], RuntimeApplication]
-    control_application_factory: Callable[[RuntimeApplication, DaemonStateService], OperatorControlApplication]
     theme_service_factory: Callable[[object, str, object, object, object, object], ThemeService]
-    command_service_factory: Callable[[OperatorControlApplication, RuntimeApplication, ResetService, object], CommandPort] = field(
+    command_service_factory: Callable[[RuntimeApplication, DaemonStateService, SharedStateService], CommandPort] = field(
         default_factory=lambda: (
-            lambda control_application, runtime_application, reset_service, _workspace_provisioning_service: OperatorCommandService(
-                control_application=control_application,
+            lambda runtime_application, daemon_state_service, shared_state_service: OperatorCommandService(
+                control_application=OperatorControlApplication(
+                    runtime_application=runtime_application,
+                    daemon_state_service=daemon_state_service,
+                ),
                 runtime_application=runtime_application,
-                reset_service=reset_service,
+                reset_service=ResetService(shared_state_service=shared_state_service),
                 workspace_provisioning_service=None,
             )
         )
@@ -168,16 +167,11 @@ def default_tui_dependency_factories() -> TuiDependencyFactories:
             log_service=log_service,
         ),
         runtime_history_service_factory=RuntimeHistoryService,
-        reset_service_factory=lambda shared_state_service: ResetService(shared_state_service=shared_state_service),
         shared_state_service_factory=SharedStateService,
         runtime_application_factory=lambda daemon_service, daemon_state_service, shared_state_service: RuntimeApplication(
             daemon_service=daemon_service,
             daemon_state_service=daemon_state_service,
             shared_state_service=shared_state_service,
-        ),
-        control_application_factory=lambda runtime_application, daemon_state_service: OperatorControlApplication(
-            runtime_application=runtime_application,
-            daemon_state_service=daemon_state_service,
         ),
         theme_service_factory=lambda themes, default_theme_name, resolve, system, toggle, button_text: ThemeService(
             themes=themes,
@@ -219,14 +213,12 @@ def _tui_services_from_kwargs(service_kwargs: dict[str, object]) -> TuiServices:
         daemon_service=service_kwargs["daemon_service"],
         daemon_state_service=service_kwargs["daemon_state_service"],
         runtime_application=service_kwargs["runtime_application"],
-        control_application=service_kwargs["control_application"],
         command_service=service_kwargs["command_service"],
         ledger_service=service_kwargs["ledger_service"],
         log_service=service_kwargs["log_service"],
         runtime_binding_service=service_kwargs["runtime_binding_service"],
         runtime_state_service=service_kwargs["runtime_state_service"],
         runtime_history_service=service_kwargs["runtime_history_service"],
-        reset_service=service_kwargs["reset_service"],
         shared_state_service=service_kwargs["shared_state_service"],
         theme_service=service_kwargs["theme_service"],
     )
@@ -247,14 +239,12 @@ def build_tui_service_kwargs(
     daemon_service: DaemonService | None = None,
     daemon_state_service: DaemonStateService | None = None,
     runtime_application: RuntimeApplication | None = None,
-    control_application: OperatorControlApplication | None = None,
     command_service: CommandPort | None = None,
     ledger_service: LedgerService | None = None,
     log_service: LogService | None = None,
     runtime_binding_service: WorkspaceRuntimeBindingService | None = None,
     runtime_state_service: RuntimeStateService | None = None,
     runtime_history_service: RuntimeHistoryService | None = None,
-    reset_service: ResetService | None = None,
     shared_state_service: SharedStateService | None = None,
     theme_service: ThemeService | None = None,
     settings_store: LocalSettingsStore | None = None,
@@ -325,21 +315,15 @@ def build_tui_service_kwargs(
         log_service,
     )
     shared_state_service = shared_state_service or factories.shared_state_service_factory()
-    reset_service = reset_service or factories.reset_service_factory(shared_state_service)
     runtime_application = runtime_application or factories.runtime_application_factory(
         daemon_service,
         daemon_state_service,
         shared_state_service,
     )
-    control_application = control_application or factories.control_application_factory(
+    command_service = command_service or factories.command_service_factory(
         runtime_application,
         daemon_state_service,
-    )
-    command_service = command_service or factories.command_service_factory(
-        control_application,
-        runtime_application,
-        reset_service,
-        None,
+        shared_state_service,
     )
     theme_service = theme_service or factories.theme_service_factory(
         themes,
@@ -363,14 +347,12 @@ def build_tui_service_kwargs(
         "daemon_service": daemon_service,
         "daemon_state_service": daemon_state_service,
         "runtime_application": runtime_application,
-        "control_application": control_application,
         "command_service": command_service,
         "ledger_service": ledger_service,
         "log_service": log_service,
         "runtime_binding_service": runtime_binding_service,
         "runtime_state_service": runtime_state_service,
         "runtime_history_service": runtime_history_service,
-        "reset_service": reset_service,
         "shared_state_service": shared_state_service,
         "theme_service": theme_service,
     }
@@ -389,14 +371,12 @@ def build_default_tui_services(
     daemon_service: DaemonService | None = None,
     daemon_state_service: DaemonStateService | None = None,
     runtime_application: RuntimeApplication | None = None,
-    control_application: OperatorControlApplication | None = None,
     command_service: CommandPort | None = None,
     ledger_service: LedgerService | None = None,
     log_service: LogService | None = None,
     runtime_binding_service: WorkspaceRuntimeBindingService | None = None,
     runtime_state_service: RuntimeStateService | None = None,
     runtime_history_service: RuntimeHistoryService | None = None,
-    reset_service: ResetService | None = None,
     shared_state_service: SharedStateService | None = None,
     theme_service: ThemeService | None = None,
     settings_store: LocalSettingsStore | None = None,
@@ -430,14 +410,12 @@ def build_default_tui_services(
         daemon_service=daemon_service,
         daemon_state_service=daemon_state_service,
         runtime_application=runtime_application,
-        control_application=control_application,
         command_service=command_service,
         ledger_service=ledger_service,
         log_service=log_service,
         runtime_binding_service=runtime_binding_service,
         runtime_state_service=runtime_state_service,
         runtime_history_service=runtime_history_service,
-        reset_service=reset_service,
         shared_state_service=shared_state_service,
         theme_service=theme_service,
         settings_store=settings_store,
@@ -474,14 +452,12 @@ def build_tui_services(
     daemon_service: DaemonService | None = None,
     daemon_state_service: DaemonStateService | None = None,
     runtime_application: RuntimeApplication | None = None,
-    control_application: OperatorControlApplication | None = None,
     command_service: CommandPort | None = None,
     ledger_service: LedgerService | None = None,
     log_service: LogService | None = None,
     runtime_binding_service: WorkspaceRuntimeBindingService | None = None,
     runtime_state_service: RuntimeStateService | None = None,
     runtime_history_service: RuntimeHistoryService | None = None,
-    reset_service: ResetService | None = None,
     shared_state_service: SharedStateService | None = None,
     theme_service: ThemeService | None = None,
     settings_store: LocalSettingsStore | None = None,
@@ -515,14 +491,12 @@ def build_tui_services(
         daemon_service=daemon_service,
         daemon_state_service=daemon_state_service,
         runtime_application=runtime_application,
-        control_application=control_application,
         command_service=command_service,
         ledger_service=ledger_service,
         log_service=log_service,
         runtime_binding_service=runtime_binding_service,
         runtime_state_service=runtime_state_service,
         runtime_history_service=runtime_history_service,
-        reset_service=reset_service,
         shared_state_service=shared_state_service,
         theme_service=theme_service,
         settings_store=settings_store,

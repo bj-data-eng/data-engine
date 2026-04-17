@@ -24,6 +24,7 @@ class QtFlowCard:
     target_root: str
     mode: str
     interval: str
+    settle: str
     operations: str
     operation_items: tuple[str, ...]
     state: str
@@ -43,6 +44,7 @@ def qt_flow_card_from_entry(entry: FlowCatalogEntry) -> QtFlowCard:
         target_root=entry.target_root,
         mode=entry.mode,
         interval=entry.interval,
+        settle=entry.settle,
         parallelism=entry.parallelism,
         operations=entry.operations,
         operation_items=entry.operation_items,
@@ -64,6 +66,7 @@ def flow_catalog_entry_from_qt_card(card: QtFlowCard) -> FlowCatalogEntry:
         target_root=card.target_root,
         mode=card.mode,
         interval=card.interval,
+        settle=card.settle,
         parallelism=card.parallelism,
         operations=card.operations,
         operation_items=card.operation_items,

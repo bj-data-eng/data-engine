@@ -254,7 +254,6 @@ def test_build_default_gui_services_uses_injected_factories():
             log_service,
         ),
         runtime_history_service_factory=lambda: "runtime-history",
-        reset_service_factory=lambda shared_state_service: ("reset-service", shared_state_service),
         shared_state_service_factory=lambda: "shared-state",
         runtime_application_factory=lambda daemon_service, daemon_state_service, shared_state_service: (
             "runtime-app",
@@ -262,17 +261,11 @@ def test_build_default_gui_services_uses_injected_factories():
             daemon_state_service,
             shared_state_service,
         ),
-        control_application_factory=lambda runtime_application, daemon_state_service: (
-            "control-app",
+        command_service_factory=lambda runtime_application, daemon_state_service, shared_state_service: (
+            "command",
             runtime_application,
             daemon_state_service,
-        ),
-        command_service_factory=lambda control_application, runtime_application, reset_service, workspace_provisioning_service: (
-            "command",
-            control_application,
-            runtime_application,
-            reset_service,
-            workspace_provisioning_service,
+            shared_state_service,
         ),
         theme_service_factory=lambda themes, default_theme_name, resolve, system, toggle, button_text: (
             "theme",
@@ -328,7 +321,6 @@ def test_build_default_tui_services_uses_injected_factories():
             log_service,
         ),
         runtime_history_service_factory=lambda: "runtime-history",
-        reset_service_factory=lambda shared_state_service: ("reset-service", shared_state_service),
         shared_state_service_factory=lambda: "shared-state",
         runtime_application_factory=lambda daemon_service, daemon_state_service, shared_state_service: (
             "runtime-app",
@@ -336,17 +328,11 @@ def test_build_default_tui_services_uses_injected_factories():
             daemon_state_service,
             shared_state_service,
         ),
-        control_application_factory=lambda runtime_application, daemon_state_service: (
-            "control-app",
+        command_service_factory=lambda runtime_application, daemon_state_service, shared_state_service: (
+            "command",
             runtime_application,
             daemon_state_service,
-        ),
-        command_service_factory=lambda control_application, runtime_application, reset_service, workspace_provisioning_service: (
-            "command",
-            control_application,
-            runtime_application,
-            reset_service,
-            workspace_provisioning_service,
+            shared_state_service,
         ),
         theme_service_factory=lambda themes, default_theme_name, resolve, system, toggle, button_text: (
             "theme",
