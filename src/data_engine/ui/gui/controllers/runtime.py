@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from data_engine.application import RuntimeApplication
-from data_engine.services import DaemonService, RuntimeStateService
+from data_engine.services import CommandPort, DaemonService, RuntimeStateService
 from data_engine.domain import DaemonStatusState, RuntimeSessionState
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.platform.instrumentation import append_timing_line, timed_operation
@@ -23,10 +23,12 @@ class GuiRuntimeController:
         runtime_application: RuntimeApplication,
         daemon_service: DaemonService,
         runtime_state_service: RuntimeStateService,
+        command_service: CommandPort,
     ) -> None:
         self.runtime_application = runtime_application
         self.daemon_service = daemon_service
         self.runtime_state_service = runtime_state_service
+        self.command_service = command_service
 
     def _apply_runtime_projection(self, window: "DataEngineWindow", *, runtime_session, operation_tracker, flow_states, step_output_index) -> None:
         active_manual_groups = {run.group_name for run in runtime_session.manual_runs}
@@ -258,7 +260,7 @@ class GuiRuntimeController:
             event="run_selected_flow",
             fields={"flow": card_name},
         ):
-            result = window.control_application.run_selected_flow(**action_kwargs)
+            result = self.command_service.run_selected_flow(**action_kwargs)
         self._emit_control_action_finished(
             window,
             "run_selected_flow",
@@ -280,7 +282,7 @@ class GuiRuntimeController:
 
     def _start_runtime_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
         with timed_operation(window._ui_timing_log_path, scope="gui.action", event="start_engine"):
-            result = window.control_application.start_engine(**action_kwargs)
+            result = self.command_service.start_engine(**action_kwargs)
         self._emit_control_action_finished(window, "start_runtime", result)
 
     def stop_runtime(self, window: "DataEngineWindow") -> None:
@@ -304,7 +306,7 @@ class GuiRuntimeController:
 
     def _stop_runtime_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
         with timed_operation(window._ui_timing_log_path, scope="gui.action", event="stop_engine"):
-            result = window.control_application.stop_pipeline(**action_kwargs)
+            result = self.command_service.stop_pipeline(**action_kwargs)
         self._emit_control_action_finished(window, "stop_runtime", result)
 
     def toggle_runtime(self, window: "DataEngineWindow") -> None:
@@ -348,7 +350,7 @@ class GuiRuntimeController:
 
     def _stop_pipeline_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
         with timed_operation(window._ui_timing_log_path, scope="gui.action", event="stop_pipeline"):
-            result = window.control_application.stop_pipeline(**action_kwargs)
+            result = self.command_service.stop_pipeline(**action_kwargs)
         self._emit_control_action_finished(window, "stop_pipeline", result)
 
     def finish_control_action(self, window: "DataEngineWindow", action_name: str, payload: object) -> None:

@@ -6,9 +6,8 @@ from typing import TYPE_CHECKING
 
 from textual.widgets import ListView, Select, Static
 
-from data_engine.application import FlowCatalogApplication, OperatorControlApplication, WorkspaceSessionApplication
-from data_engine.services import LogService
-from data_engine.services.reset import ResetService
+from data_engine.application import FlowCatalogApplication, WorkspaceSessionApplication
+from data_engine.services import CommandPort, LogService
 from data_engine.domain import FlowRunState
 from data_engine.views.text import render_selected_flow_lines
 from data_engine.ui.tui.widgets import FlowListItem, GroupHeaderListItem, InfoModal, RunGroupListItem
@@ -25,19 +24,17 @@ class TuiFlowController:
         *,
         workspace_session_application: WorkspaceSessionApplication,
         flow_catalog_application: FlowCatalogApplication,
-        control_application: OperatorControlApplication,
         log_service: LogService,
-        reset_service: ResetService,
+        command_service: CommandPort,
     ) -> None:
         self.workspace = _TuiWorkspaceCatalogController(
             workspace_session_application=workspace_session_application,
             flow_catalog_application=flow_catalog_application,
-            control_application=control_application,
+            command_service=command_service,
         )
         self.presentation = _TuiFlowPresentationController(
-            control_application=control_application,
+            command_service=command_service,
             log_service=log_service,
-            reset_service=reset_service,
         )
 
     def action_refresh_flows(self, window: "DataEngineTui") -> None:
@@ -85,14 +82,14 @@ class _TuiWorkspaceCatalogController:
         *,
         workspace_session_application: WorkspaceSessionApplication,
         flow_catalog_application: FlowCatalogApplication,
-        control_application: OperatorControlApplication,
+        command_service: CommandPort,
     ) -> None:
         self.workspace_session_application = workspace_session_application
         self.flow_catalog_application = flow_catalog_application
-        self.control_application = control_application
+        self.command_service = command_service
 
     def action_refresh_flows(self, window: "DataEngineTui", presentation: "_TuiFlowPresentationController") -> None:
-        result = self.control_application.refresh_flows(
+        result = self.command_service.refresh_flows(
             paths=window.workspace_paths,
             runtime_session=window.runtime_session,
             has_authored_workspace=window._has_authored_workspace(),
@@ -216,13 +213,11 @@ class _TuiFlowPresentationController:
     def __init__(
         self,
         *,
-        control_application: OperatorControlApplication,
+        command_service: CommandPort,
         log_service: LogService,
-        reset_service: ResetService,
     ) -> None:
-        self.control_application = control_application
+        self.command_service = command_service
         self.log_service = log_service
-        self.reset_service = reset_service
 
     @staticmethod
     def _blocked_status_text(window: "DataEngineTui") -> str:
@@ -234,7 +229,7 @@ class _TuiFlowPresentationController:
     def action_run_selected(self, window: "DataEngineTui") -> None:
         window._sync_daemon_state()
         card = window._selected_card()
-        result = self.control_application.run_selected_flow(
+        result = self.command_service.run_selected_flow(
             paths=window.workspace_paths,
             runtime_session=window.runtime_session,
             selected_flow_name=card.name if card is not None else None,
@@ -242,7 +237,7 @@ class _TuiFlowPresentationController:
             selected_flow_group=card.group if card is not None else None,
             selected_flow_group_active=bool(card is not None and window.runtime_session.is_group_active(card.group, {flow.name: flow.group for flow in window.flow_cards})),
             blocked_status_text=self._blocked_status_text(window),
-            timeout=2.0,
+            timeout=5.0,
         )
         if result.error_text is not None:
             window._set_status(result.error_text)
@@ -254,12 +249,12 @@ class _TuiFlowPresentationController:
 
     def action_start_engine(self, window: "DataEngineTui") -> None:
         window._sync_daemon_state()
-        result = self.control_application.start_engine(
+        result = self.command_service.start_engine(
             paths=window.workspace_paths,
             runtime_session=window.runtime_session,
             has_automated_flows=any(card.valid and card.mode in {"poll", "schedule"} for card in window.flow_cards),
             blocked_status_text=self._blocked_status_text(window),
-            timeout=2.0,
+            timeout=5.0,
         )
         if result.error_text is not None:
             window._set_status(result.error_text)
@@ -272,12 +267,12 @@ class _TuiFlowPresentationController:
     def action_stop_engine(self, window: "DataEngineTui") -> None:
         window._sync_daemon_state()
         card = window._selected_card()
-        result = self.control_application.stop_pipeline(
+        result = self.command_service.stop_pipeline(
             paths=window.workspace_paths,
             runtime_session=window.runtime_session,
             selected_flow_group=card.group if card is not None else None,
             blocked_status_text=self._blocked_status_text(window),
-            timeout=2.0,
+            timeout=5.0,
         )
         if result.error_text is not None:
             window._set_status(result.error_text)
@@ -309,14 +304,13 @@ class _TuiFlowPresentationController:
         if not window.runtime_session.control_available:
             window._set_status(self._blocked_status_text(window))
             return
-        try:
-            self.reset_service.reset_flow(
-                paths=window.workspace_paths,
-                runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
-                flow_name=window.selected_flow_name,
-            )
-        except Exception as exc:
-            window._set_status(f"Flow reset failed: {exc}")
+        result = self.command_service.reset_flow(
+            paths=window.workspace_paths,
+            runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
+            flow_name=window.selected_flow_name,
+        )
+        if result.error_text is not None:
+            window._set_status(f"Flow reset failed: {result.error_text}")
             return
         window._rebuild_runtime_snapshot()
         window._set_status(f"Reset flow history for {window.selected_flow_name}.")

@@ -64,32 +64,31 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.detail_application = window.services.detail_application
     window.catalog_query_service = window.services.catalog_query_service
     window.history_query_service = window.services.history_query_service
+    window.command_service = window.services.command_service
     window.daemon_service = window.services.daemon_service
     window.daemon_state_service = window.services.daemon_state_service
     window.runtime_application = window.services.runtime_application
-    window.control_application = window.services.control_application
     window.ledger_service = window.services.ledger_service
     window.log_service = window.services.log_service
     window.runtime_binding_service = window.services.runtime_binding_service
     window.runtime_state_service = window.services.runtime_state_service
     window.runtime_history_service = window.services.runtime_history_service
-    window.reset_service = window.services.reset_service
     window.shared_state_service = window.services.shared_state_service
     window.settings_service = window.services.settings_service
     window.theme_service = window.services.theme_service
-    window.workspace_provisioning_service = window.services.workspace_provisioning_service
     window.workspace_session_application = window.services.workspace_session_application
     window.flow_catalog_application = window.services.flow_catalog_application
     window.flow_controller = GuiFlowController(
         workspace_session_application=window.workspace_session_application,
         flow_catalog_application=window.flow_catalog_application,
         history_query_service=window.history_query_service,
-        reset_service=window.reset_service,
+        command_service=window.command_service,
     )
     window.runtime_controller = GuiRuntimeController(
         runtime_application=window.runtime_application,
         daemon_service=window.daemon_service,
         runtime_state_service=window.runtime_state_service,
+        command_service=window.command_service,
     )
     window.theme_name = window.theme_service.resolve_name(theme_name)
     env_collection_root = os.environ.get(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR)

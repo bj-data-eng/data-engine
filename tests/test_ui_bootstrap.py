@@ -267,6 +267,13 @@ def test_build_default_gui_services_uses_injected_factories():
             runtime_application,
             daemon_state_service,
         ),
+        command_service_factory=lambda control_application, runtime_application, reset_service, workspace_provisioning_service: (
+            "command",
+            control_application,
+            runtime_application,
+            reset_service,
+            workspace_provisioning_service,
+        ),
         theme_service_factory=lambda themes, default_theme_name, resolve, system, toggle, button_text: (
             "theme",
             default_theme_name,
@@ -281,6 +288,7 @@ def test_build_default_gui_services_uses_injected_factories():
     assert services.ledger_service == "ledger"
     assert services.runtime_binding_service[0] == "runtime-binding"
     assert services.runtime_application[0] == "runtime-app"
+    assert services.command_service[0] == "command"
 
 
 def test_build_default_tui_services_uses_injected_factories():
@@ -333,6 +341,13 @@ def test_build_default_tui_services_uses_injected_factories():
             runtime_application,
             daemon_state_service,
         ),
+        command_service_factory=lambda control_application, runtime_application, reset_service, workspace_provisioning_service: (
+            "command",
+            control_application,
+            runtime_application,
+            reset_service,
+            workspace_provisioning_service,
+        ),
         theme_service_factory=lambda themes, default_theme_name, resolve, system, toggle, button_text: (
             "theme",
             default_theme_name,
@@ -347,6 +362,7 @@ def test_build_default_tui_services_uses_injected_factories():
     assert services.ledger_service == "ledger"
     assert services.runtime_binding_service[0] == "runtime-binding"
     assert services.runtime_application[0] == "runtime-app"
+    assert services.command_service[0] == "command"
 
 
 def test_build_default_gui_and_tui_services_use_separate_surface_roots():

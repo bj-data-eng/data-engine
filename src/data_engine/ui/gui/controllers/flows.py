@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QTimer
 
 from data_engine.application import FlowCatalogApplication, WorkspaceSessionApplication
-from data_engine.services import HistoryQueryService
-from data_engine.services.reset import ResetService
+from data_engine.services import CommandPort, HistoryQueryService
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.platform.instrumentation import timed_operation
 from data_engine.ui.gui.helpers import start_worker_thread
@@ -188,7 +187,7 @@ class _GuiWorkspaceCatalogController:
 
     def _refresh_flows_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
         with timed_operation(window._ui_timing_log_path, scope="gui.action", event="refresh_flows"):
-            result = window.control_application.refresh_flows(**action_kwargs)
+            result = window.command_service.refresh_flows(**action_kwargs)
         if window.ui_closing:
             return
         try:
@@ -280,11 +279,11 @@ class _GuiFlowPresentationController:
         *,
         flow_catalog_application: FlowCatalogApplication,
         history_query_service: HistoryQueryService,
-        reset_service: ResetService,
+        command_service: CommandPort,
     ) -> None:
         self.flow_catalog_application = flow_catalog_application
         self.history_query_service = history_query_service
-        self.reset_service = reset_service
+        self.command_service = command_service
 
     @staticmethod
     def _control_snapshot(window: "DataEngineWindow"):
@@ -441,7 +440,7 @@ class _GuiFlowPresentationController:
 
     def _request_control_worker(self, window: "DataEngineWindow") -> None:
         with timed_operation(window._ui_timing_log_path, scope="gui.action", event="request_control"):
-            result = window.control_application.request_control(window.runtime_binding.daemon_manager)
+            result = self.command_service.request_control(window.runtime_binding.daemon_manager)
         if window.ui_closing:
             return
         try:
@@ -474,7 +473,7 @@ class _GuiFlowPresentationController:
         self.refresh_summary(window)
 
     def refresh_flows_requested(self, window: "DataEngineWindow") -> None:
-        result = window.control_application.refresh_flows(
+        result = self.command_service.refresh_flows(
             paths=window.workspace_paths,
             runtime_session=window.runtime_session,
             has_authored_workspace=window._has_authored_workspace(),
@@ -521,11 +520,12 @@ class _GuiFlowPresentationController:
                 event="reset_flow",
                 fields={"flow": flow_name},
             ):
-                self.reset_service.reset_flow(
+                result = self.command_service.reset_flow(
                     paths=window.workspace_paths,
                     runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
                     flow_name=flow_name,
                 )
+            error_text = result.error_text
         except Exception as exc:
             error_text = f"Flow reset failed.\n\n{exc}"
         if window.ui_closing:
@@ -548,7 +548,7 @@ class GuiFlowController:
         workspace_session_application: WorkspaceSessionApplication,
         flow_catalog_application: FlowCatalogApplication,
         history_query_service: HistoryQueryService,
-        reset_service: ResetService,
+        command_service: CommandPort,
     ) -> None:
         self.workspace = _GuiWorkspaceCatalogController(
             workspace_session_application=workspace_session_application,
@@ -557,7 +557,7 @@ class GuiFlowController:
         self.presentation = _GuiFlowPresentationController(
             flow_catalog_application=flow_catalog_application,
             history_query_service=history_query_service,
-            reset_service=reset_service,
+            command_service=command_service,
         )
 
     def load_flows(self, window: "DataEngineWindow") -> None:

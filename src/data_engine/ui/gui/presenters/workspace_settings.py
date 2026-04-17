@@ -196,55 +196,35 @@ def _emit_workspace_settings_action(window: "DataEngineWindow", action_name: str
 
 
 def _provision_selected_workspace_worker(window: "DataEngineWindow") -> None:
-    try:
-        result = window.workspace_provisioning_service.provision_workspace(
-            window.workspace_paths,
-            interpreter_path=Path(sys.executable).expanduser(),
-        )
-    except Exception as exc:
-        _emit_workspace_settings_action(window, "provision_workspace", {"error_text": str(exc)})
-        return
-    created_names = ", ".join(path.name for path in result.created_paths) if result.created_paths else "nothing new"
     _emit_workspace_settings_action(
         window,
         "provision_workspace",
-        {
-            "workspace_id": window.workspace_paths.workspace_id,
-            "workspace_name": result.workspace_root.name,
-            "created_names": created_names,
-            "error_text": None,
-        },
+        window.command_service.provision_workspace(
+            window.workspace_paths,
+            interpreter_path=Path(sys.executable).expanduser(),
+        ).__dict__,
     )
 
 
 def _force_shutdown_daemon_worker(window: "DataEngineWindow") -> None:
-    result = window.runtime_application.force_shutdown_daemon(window.workspace_paths, timeout=0.5)
+    result = window.command_service.force_shutdown_daemon(window.workspace_paths, timeout=0.5)
     _emit_workspace_settings_action(
         window,
         "force_shutdown_daemon",
-        {"error_text": None if result.ok else result.error},
+        result.__dict__,
     )
 
 
 def _reset_workspace_worker(window: "DataEngineWindow") -> None:
-    workspace_id = window.workspace_paths.workspace_id
-    try:
-        window.reset_service.reset_workspace(
-            paths=window.workspace_paths,
-            runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
-            runtime_control_ledger=window.runtime_binding.runtime_control_ledger,
-        )
-    except Exception as exc:
-        _emit_workspace_settings_action(
-            window,
-            "reset_workspace",
-            {"workspace_id": workspace_id, "error_text": str(exc)},
-        )
-        return
+    result = window.command_service.reset_workspace(
+        paths=window.workspace_paths,
+        runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
+        runtime_control_ledger=window.runtime_binding.runtime_control_ledger,
+    )
     _emit_workspace_settings_action(
         window,
         "reset_workspace",
-        {"workspace_id": workspace_id, "error_text": None},
+        result.__dict__,
     )
 
 

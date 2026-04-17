@@ -29,6 +29,8 @@ from data_engine.platform.theme import (
 )
 from data_engine.services import (
     CatalogQueryService,
+    CommandPort,
+    OperatorCommandService,
     DaemonService,
     DaemonStateService,
     FlowCatalogService,
@@ -66,6 +68,7 @@ class GuiServices:
     daemon_state_service: DaemonStateService
     runtime_application: RuntimeApplication
     control_application: OperatorControlApplication
+    command_service: CommandPort
     ledger_service: LedgerService
     log_service: LogService
     runtime_binding_service: WorkspaceRuntimeBindingService
@@ -102,6 +105,16 @@ class GuiDependencyFactories:
     runtime_application_factory: Callable[[DaemonService, DaemonStateService, SharedStateService], RuntimeApplication]
     control_application_factory: Callable[[RuntimeApplication, DaemonStateService], OperatorControlApplication]
     theme_service_factory: Callable[[object, str, object, object, object, object], ThemeService]
+    command_service_factory: Callable[[OperatorControlApplication, RuntimeApplication, ResetService, WorkspaceProvisioningService], CommandPort] = field(
+        default_factory=lambda: (
+            lambda control_application, runtime_application, reset_service, workspace_provisioning_service: OperatorCommandService(
+                control_application=control_application,
+                runtime_application=runtime_application,
+                reset_service=reset_service,
+                workspace_provisioning_service=workspace_provisioning_service,
+            )
+        )
+    )
     catalog_query_service_factory: Callable[[FlowCatalogService], CatalogQueryService] = field(
         default_factory=lambda: (
             lambda flow_catalog_service: CatalogQueryService(flow_catalog_service=flow_catalog_service)
@@ -213,6 +226,7 @@ def _gui_services_from_kwargs(service_kwargs: dict[str, object]) -> GuiServices:
         daemon_state_service=service_kwargs["daemon_state_service"],
         runtime_application=service_kwargs["runtime_application"],
         control_application=service_kwargs["control_application"],
+        command_service=service_kwargs["command_service"],
         ledger_service=service_kwargs["ledger_service"],
         log_service=service_kwargs["log_service"],
         runtime_binding_service=service_kwargs["runtime_binding_service"],
@@ -241,6 +255,7 @@ def build_gui_service_kwargs(
     daemon_state_service: DaemonStateService | None = None,
     runtime_application: RuntimeApplication | None = None,
     control_application: OperatorControlApplication | None = None,
+    command_service: CommandPort | None = None,
     ledger_service: LedgerService | None = None,
     log_service: LogService | None = None,
     runtime_binding_service: WorkspaceRuntimeBindingService | None = None,
@@ -329,6 +344,12 @@ def build_gui_service_kwargs(
         runtime_application,
         daemon_state_service,
     )
+    command_service = command_service or factories.command_service_factory(
+        control_application,
+        runtime_application,
+        reset_service,
+        workspace_provisioning_service,
+    )
     theme_service = theme_service or factories.theme_service_factory(
         themes,
         default_theme_name,
@@ -352,6 +373,7 @@ def build_gui_service_kwargs(
         "daemon_state_service": daemon_state_service,
         "runtime_application": runtime_application,
         "control_application": control_application,
+        "command_service": command_service,
         "ledger_service": ledger_service,
         "log_service": log_service,
         "runtime_binding_service": runtime_binding_service,
@@ -378,6 +400,7 @@ def build_default_gui_services(
     daemon_state_service: DaemonStateService | None = None,
     runtime_application: RuntimeApplication | None = None,
     control_application: OperatorControlApplication | None = None,
+    command_service: CommandPort | None = None,
     ledger_service: LedgerService | None = None,
     log_service: LogService | None = None,
     runtime_binding_service: WorkspaceRuntimeBindingService | None = None,
@@ -419,6 +442,7 @@ def build_default_gui_services(
         daemon_state_service=daemon_state_service,
         runtime_application=runtime_application,
         control_application=control_application,
+        command_service=command_service,
         ledger_service=ledger_service,
         log_service=log_service,
         runtime_binding_service=runtime_binding_service,
@@ -463,6 +487,7 @@ def build_gui_services(
     daemon_state_service: DaemonStateService | None = None,
     runtime_application: RuntimeApplication | None = None,
     control_application: OperatorControlApplication | None = None,
+    command_service: CommandPort | None = None,
     ledger_service: LedgerService | None = None,
     log_service: LogService | None = None,
     runtime_binding_service: WorkspaceRuntimeBindingService | None = None,
@@ -504,6 +529,7 @@ def build_gui_services(
         daemon_state_service=daemon_state_service,
         runtime_application=runtime_application,
         control_application=control_application,
+        command_service=command_service,
         ledger_service=ledger_service,
         log_service=log_service,
         runtime_binding_service=runtime_binding_service,
