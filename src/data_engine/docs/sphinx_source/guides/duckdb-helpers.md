@@ -29,6 +29,7 @@ They are designed for flow code that wants less repeated SQL plumbing without hi
 ```python
 from data_engine.helpers.duckdb import build_dimension
 from data_engine.helpers.duckdb import attach_dimension
+from data_engine.helpers.duckdb import compact_database
 from data_engine.helpers.duckdb import denormalize_columns
 from data_engine.helpers.duckdb import normalize_columns
 from data_engine.helpers.duckdb import read_rows_by_values
@@ -311,6 +312,44 @@ updated = replace_rows_by_values(
 ```
 
 That says: "replace every persisted `status` slice represented by this batch, then insert this batch."
+
+## `compact_database(...)`
+
+Use this helper for explicit maintenance flows when you want to clean one DuckDB
+file after a period of ingestion.
+
+Signature:
+
+```python
+compact_database(
+    db_path,
+    *,
+    tables=None,
+    drop_all_null_columns=True,
+    vacuum=True,
+)
+```
+
+Behavior:
+
+- inspects one or more user tables in the database
+- drops columns whose persisted values are entirely null
+- preserves at least one column per table
+- optionally runs `VACUUM` after schema cleanup
+- returns a Polars summary dataframe with dropped-column and file-size metadata
+
+Example:
+
+```python
+summary = compact_database(
+    context.database("warehouse.duckdb"),
+    tables=["mart.fact_claim", "mart.fact_member"],
+    vacuum=True,
+)
+```
+
+This is a good fit for manual maintenance flows where you want a simple
+one-liner per database.
 
 ## `read_rows_by_values(...)`
 

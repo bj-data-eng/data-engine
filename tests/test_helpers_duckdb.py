@@ -8,6 +8,7 @@ import pytest
 from data_engine.helpers import duckdb as duckdb_helpers
 from data_engine.helpers.duckdb import attach_dimension
 from data_engine.helpers.duckdb import build_dimension
+from data_engine.helpers.duckdb import compact_database
 from data_engine.helpers.duckdb import denormalize_columns
 from data_engine.helpers.duckdb import normalize_columns
 from data_engine.helpers.duckdb import read_rows_by_values
@@ -535,6 +536,46 @@ def test_replace_rows_by_values_is_not_dependent_on_df_column_order(tmp_path):
     }
 
 
+def test_replace_rows_by_values_replaces_null_value_slice(tmp_path):
+    db_path = tmp_path / "claims.duckdb"
+
+    replace_rows_by_values(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [1], "status": ["open"], "amount": [10]}),
+        column="status",
+    )
+    replace_rows_by_values(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [2], "status": [None], "amount": [20]}),
+        column="status",
+    )
+    replace_rows_by_values(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [3], "status": ["ready"], "amount": [30]}),
+        column="status",
+    )
+    replace_rows_by_values(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [4], "status": [None], "amount": [40]}),
+        column="status",
+    )
+
+    with duckdb.connect(db_path) as connection:
+        persisted = connection.execute(
+            'SELECT "claim_id", "status", "amount" FROM "fact_claim" ORDER BY "claim_id"'
+        ).pl()
+
+    assert persisted.to_dict(as_series=False) == {
+        "claim_id": [1, 3, 4],
+        "status": ["open", "ready", None],
+        "amount": [10, 30, 40],
+    }
+
+
 def test_replace_rows_by_values_rolls_back_and_closes_connection_on_failure(monkeypatch, tmp_path):
     real_connect = duckdb.connect
     events: list[str] = []
@@ -832,6 +873,95 @@ def test_read_table_supports_select_where_and_limit(tmp_path):
         "claim_id": [2],
         "amount": [20],
     }
+
+
+def test_compact_database_drops_all_null_columns_and_can_target_specific_tables(tmp_path):
+    db_path = tmp_path / "claims.duckdb"
+
+    with duckdb.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE fact_claim AS
+            SELECT *
+            FROM (
+                VALUES
+                    (1, 'open', NULL, NULL),
+                    (2, 'ready', NULL, NULL)
+            ) AS t(claim_id, status, empty_text, empty_number)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE fact_other AS
+            SELECT *
+            FROM (
+                VALUES
+                    (10, NULL),
+                    (11, NULL)
+            ) AS t(other_id, notes)
+            """
+        )
+
+    size_before = db_path.stat().st_size
+    summary = compact_database(db_path, tables="fact_claim", vacuum=False)
+    size_after = db_path.stat().st_size
+
+    assert summary.to_dict(as_series=False) == {
+        "db_path": [str(db_path.resolve())],
+        "table": ["fact_claim"],
+        "dropped_column_count": [2],
+        "dropped_columns": [["empty_text", "empty_number"]],
+        "vacuum_requested": [False],
+        "vacuumed": [False],
+        "size_before_bytes": [size_before],
+        "size_after_bytes": [size_after],
+    }
+
+    with duckdb.connect(db_path) as connection:
+        fact_claim = connection.execute("PRAGMA table_info('fact_claim')").fetchall()
+        fact_other = connection.execute("PRAGMA table_info('fact_other')").fetchall()
+
+    assert [row[1] for row in fact_claim] == ["claim_id", "status"]
+    assert [row[1] for row in fact_other] == ["other_id", "notes"]
+
+
+def test_compact_database_preserves_at_least_one_all_null_column_and_reports_vacuum(tmp_path):
+    db_path = tmp_path / "claims.duckdb"
+
+    with duckdb.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE fact_empty AS
+            SELECT *
+            FROM (
+                VALUES
+                    (NULL, NULL),
+                    (NULL, NULL)
+            ) AS t(empty_a, empty_b)
+            """
+        )
+
+    summary = compact_database(db_path)
+
+    assert summary.get_column("table").to_list() == ["fact_empty"]
+    assert summary.get_column("dropped_column_count").to_list() == [1]
+    assert summary.get_column("dropped_columns").to_list() == [["empty_b"]]
+    assert summary.get_column("vacuumed").to_list() == [True]
+
+    with duckdb.connect(db_path) as connection:
+        fact_empty = connection.execute("PRAGMA table_info('fact_empty')").fetchall()
+
+    assert [row[1] for row in fact_empty] == ["empty_a"]
+
+
+def test_compact_database_rejects_missing_tables(tmp_path):
+    db_path = tmp_path / "claims.duckdb"
+
+    with duckdb.connect(db_path) as connection:
+        connection.execute("CREATE TABLE fact_claim AS SELECT 1 AS claim_id")
+
+    with pytest.raises(ValueError, match="must exist in database"):
+        compact_database(db_path, tables=["fact_claim", "missing_table"], vacuum=False)
 
 
 def test_replace_table_replaces_existing_rows_and_can_return_df(tmp_path):

@@ -2,6 +2,7 @@
 
 from data_engine.helpers.duckdb import attach_dimension
 from data_engine.helpers.duckdb import build_dimension
+from data_engine.helpers.duckdb import compact_database
 from data_engine.helpers.duckdb import denormalize_columns
 from data_engine.helpers.duckdb import normalize_columns
 from data_engine.helpers.duckdb import read_rows_by_values
@@ -28,6 +29,7 @@ __all__ = [
     "DataEngineLazyFrameNamespace",
     "attach_dimension",
     "build_dimension",
+    "compact_database",
     "denormalize_columns",
     "networkdays",
     "normalize_columns",
