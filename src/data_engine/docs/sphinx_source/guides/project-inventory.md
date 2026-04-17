@@ -3,7 +3,7 @@
 This page is generated from the current AST map and is intentionally inventory-shaped rather than explanatory.
 
 - package root: `src/data_engine`
-- module count: `184`
+- module count: `192`
 
 - module `data_engine`
   - attribute `__all__`
@@ -360,6 +360,9 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `authoring_services: AuthoringServices | None=None`
     - param `runtime_execution_service: RuntimeExecutionService | None=None`
     - param `flow_execution_service: FlowExecutionService | None=None`
+  - function `_infer_authoring_flow_origin`
+  - function `_with_inferred_authoring_metadata`
+    - param `flow: 'Flow'`
   - function `load_flow`
     - param `name: str`
     - param `*`
@@ -387,8 +390,6 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `use: str | None=None`
       - param `authoring_services: AuthoringServices | None=None`
       - param `runtime_execution_service: RuntimeExecutionService | None=None`
-    - method `show`
-      - param `self`
     - method `run`
       - param `self`
       - param `*`
@@ -926,6 +927,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `target_root`
     - attribute `mode`
     - attribute `interval`
+    - attribute `settle`
     - attribute `operations`
     - attribute `operation_items`
     - attribute `state`
@@ -942,6 +944,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `target_root`
     - attribute `mode`
     - attribute `interval`
+    - attribute `settle`
     - attribute `operations`
     - attribute `operation_items`
     - attribute `state`
@@ -1566,8 +1569,9 @@ This page is generated from the current AST map and is intentionally inventory-s
 - module `data_engine.helpers`
   - attribute `__all__`
 - module `data_engine.helpers.duckdb`
-  - attribute `FrameLike`
   - attribute `__all__`
+- module `data_engine.helpers.duckdb._common`
+  - attribute `FrameLike`
   - function `_quote_identifier`
     - param `value: str`
   - function `_quote_table_ref`
@@ -1594,6 +1598,10 @@ This page is generated from the current AST map and is intentionally inventory-s
   - function `_table_column_names`
     - param `connection`
     - param `table: str`
+  - function `_normalize_table_names`
+    - param `tables: str | list[str] | tuple[str, ...] | None`
+  - function `_list_base_tables`
+    - param `connection`
   - function `_normalize_selected_columns`
     - param `select: str | list[str] | tuple[str, ...]`
   - function `_normalize_key_columns`
@@ -1602,27 +1610,15 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `limit: int | None`
   - function `_materialize_frame`
     - param `df: FrameLike`
+  - function `_resolved_db_path`
+    - param `db_path: str | Path`
+- module `data_engine.helpers.duckdb._dimensions`
   - function `build_dimension`
     - param `db_path: str | Path`
     - param `table: str`
     - param `*`
     - param `df: FrameLike`
     - param `key_column: str='dimension_key'`
-    - param `return_df: bool=True`
-  - function `replace_rows_by_file`
-    - param `db_path: str | Path`
-    - param `table: str`
-    - param `*`
-    - param `df: FrameLike`
-    - param `file_hash: str`
-    - param `file_hash_column: str='file_key'`
-    - param `return_df: bool=True`
-  - function `replace_rows_by_values`
-    - param `db_path: str | Path`
-    - param `table: str`
-    - param `*`
-    - param `df: FrameLike`
-    - param `column: str`
     - param `return_df: bool=True`
   - function `attach_dimension`
     - param `db_path: str | Path`
@@ -1649,6 +1645,14 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `key_column: str='dimension_key'`
     - param `drop_key: bool=True`
     - param `returns: str | None='df'`
+- module `data_engine.helpers.duckdb._maintenance`
+  - function `compact_database`
+    - param `db_path: str | Path`
+    - param `*`
+    - param `tables: str | list[str] | tuple[str, ...] | None=None`
+    - param `drop_all_null_columns: bool=True`
+    - param `vacuum: bool=True`
+- module `data_engine.helpers.duckdb._read`
   - function `read_rows_by_values`
     - param `db_path: str | Path`
     - param `table: str`
@@ -1667,6 +1671,22 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `select: str | list[str] | tuple[str, ...]='*'`
     - param `where: str | None=None`
     - param `limit: int | None=None`
+- module `data_engine.helpers.duckdb._replace`
+  - function `replace_rows_by_file`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `df: FrameLike`
+    - param `file_hash: str`
+    - param `file_hash_column: str='file_key'`
+    - param `return_df: bool=True`
+  - function `replace_rows_by_values`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `df: FrameLike`
+    - param `column: str`
+    - param `return_df: bool=True`
   - function `replace_table`
     - param `db_path: str | Path`
     - param `table: str`
@@ -4280,6 +4300,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `flow: Flow`
   - function `_flow_interval`
     - param `flow: Flow`
+  - function `_flow_settle`
+    - param `flow: Flow`
   - function `_flow_parallelism`
     - param `flow: Flow`
   - function `flow_catalog_entry_from_flow`
@@ -4409,6 +4431,228 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `runtime_cache_ledger: RuntimeCacheStore | None`
       - param `*`
       - param `after_id: int | None=None`
+- module `data_engine.services.operator_commands`
+  - attribute `__all__`
+  - class `OperatorCommandResult`
+    - attribute `requested`
+    - attribute `sync_after`
+    - attribute `ensure_daemon_started`
+    - attribute `status_text`
+    - attribute `error_text`
+  - class `RefreshFlowsCommandResult`
+    - attribute `reload_catalog`
+    - attribute `sync_after`
+    - attribute `status_text`
+    - attribute `warning_text`
+    - attribute `error_text`
+  - class `ProvisionWorkspaceCommandResult`
+    - attribute `workspace_id`
+    - attribute `workspace_name`
+    - attribute `created_names`
+    - attribute `error_text`
+  - class `ResetWorkspaceCommandResult`
+    - attribute `workspace_id`
+    - attribute `error_text`
+  - class `ResetFlowCommandResult`
+    - attribute `flow_name`
+    - attribute `error_text`
+  - class `ForceShutdownCommandResult`
+    - attribute `error_text`
+  - class `CommandPort`
+    - method `run_selected_flow`
+      - param `self`
+      - param `**kwargs`
+    - method `start_engine`
+      - param `self`
+      - param `**kwargs`
+    - method `stop_pipeline`
+      - param `self`
+      - param `**kwargs`
+    - method `request_control`
+      - param `self`
+      - param `daemon_manager: WorkspaceDaemonManager`
+    - method `refresh_flows`
+      - param `self`
+      - param `**kwargs`
+    - method `provision_workspace`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `interpreter_path: Path | None=None`
+    - method `force_shutdown_daemon`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `timeout: float=0.5`
+    - method `reset_workspace`
+      - param `self`
+      - param `*`
+      - param `paths: WorkspacePaths`
+      - param `runtime_cache_ledger: RuntimeCacheLedger`
+      - param `runtime_control_ledger: RuntimeControlLedger`
+    - method `reset_flow`
+      - param `self`
+      - param `*`
+      - param `paths: WorkspacePaths`
+      - param `runtime_cache_ledger: RuntimeCacheLedger`
+      - param `flow_name: str`
+  - class `OperatorCommandService`
+    - instance attribute `control_application`
+    - instance attribute `runtime_application`
+    - instance attribute `reset_service`
+    - instance attribute `workspace_provisioning_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `control_application: OperatorControlApplication`
+      - param `runtime_application: RuntimeApplication`
+      - param `reset_service: ResetService`
+      - param `workspace_provisioning_service: WorkspaceProvisioningService | None`
+    - method `_command_result`
+      - param `result: OperatorActionResult`
+    - method `_refresh_result`
+      - param `result: FlowRefreshResult`
+    - method `run_selected_flow`
+      - param `self`
+      - param `**kwargs`
+    - method `start_engine`
+      - param `self`
+      - param `**kwargs`
+    - method `stop_pipeline`
+      - param `self`
+      - param `**kwargs`
+    - method `request_control`
+      - param `self`
+      - param `daemon_manager: WorkspaceDaemonManager`
+    - method `refresh_flows`
+      - param `self`
+      - param `**kwargs`
+    - method `provision_workspace`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `interpreter_path: Path | None=None`
+    - method `force_shutdown_daemon`
+      - param `self`
+      - param `paths: WorkspacePaths`
+      - param `*`
+      - param `timeout: float=0.5`
+    - method `reset_workspace`
+      - param `self`
+      - param `*`
+      - param `paths: WorkspacePaths`
+      - param `runtime_cache_ledger: RuntimeCacheLedger`
+      - param `runtime_control_ledger: RuntimeControlLedger`
+    - method `reset_flow`
+      - param `self`
+      - param `*`
+      - param `paths: WorkspacePaths`
+      - param `runtime_cache_ledger: RuntimeCacheLedger`
+      - param `flow_name: str`
+- module `data_engine.services.operator_queries`
+  - attribute `__all__`
+  - class `FlowCatalogItem`
+    - attribute `flow_name`
+    - attribute `group_name`
+    - attribute `title`
+    - attribute `runtime_kind`
+    - attribute `settle`
+    - attribute `max_parallel`
+  - class `FlowConfigPreview`
+    - attribute `flow_name`
+    - attribute `rows`
+  - class `RunGroupSummary`
+    - attribute `flow_name`
+    - attribute `run_id`
+    - attribute `source_label`
+    - attribute `state`
+    - attribute `started_at_utc`
+    - attribute `finished_at_utc`
+    - attribute `elapsed_seconds`
+    - attribute `error_text`
+  - class `RunStepDetail`
+    - attribute `run_id`
+    - attribute `step_name`
+    - attribute `state`
+    - attribute `elapsed_seconds`
+    - attribute `output_path`
+    - attribute `error_text`
+  - class `RunLogEntry`
+    - attribute `run_id`
+    - attribute `flow_name`
+    - attribute `level`
+    - attribute `created_at_utc`
+    - attribute `text`
+  - class `CatalogPort`
+    - method `list_flows`
+      - param `self`
+      - param `*`
+      - param `workspace_root: Path | None`
+    - method `get_flow_preview`
+      - param `self`
+      - param `*`
+      - param `card: FlowCatalogLike | None`
+      - param `flow_states: dict[str, str]`
+  - class `HistoryPort`
+    - method `list_run_groups`
+      - param `self`
+      - param `store: FlowLogStore`
+      - param `*`
+      - param `flow_name: str | None`
+      - param `limit: int=50`
+    - method `get_run_steps`
+      - param `self`
+      - param `ledger: RuntimeCacheStore`
+      - param `*`
+      - param `run_id: str`
+    - method `get_run_logs`
+      - param `self`
+      - param `store: FlowLogStore`
+      - param `*`
+      - param `run_id: str`
+      - param `flow_name: str | None=None`
+      - param `limit: int=500`
+  - class `CatalogQueryService`
+    - instance attribute `flow_catalog_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `flow_catalog_service: FlowCatalogService`
+    - method `list_flows`
+      - param `self`
+      - param `*`
+      - param `workspace_root: Path | None`
+    - method `get_flow_preview`
+      - param `self`
+      - param `*`
+      - param `card: FlowCatalogLike | None`
+      - param `flow_states: dict[str, str]`
+  - class `HistoryQueryService`
+    - instance attribute `log_service`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `log_service: LogService`
+    - method `_run_group_summary`
+      - param `run_group: FlowRunState`
+    - method `list_run_groups`
+      - param `self`
+      - param `store: FlowLogStore`
+      - param `*`
+      - param `flow_name: str | None`
+      - param `limit: int=50`
+    - method `get_run_steps`
+      - param `self`
+      - param `ledger: RuntimeCacheStore`
+      - param `*`
+      - param `run_id: str`
+    - method `get_run_logs`
+      - param `self`
+      - param `store: FlowLogStore`
+      - param `*`
+      - param `run_id: str`
+      - param `flow_name: str | None=None`
+      - param `limit: int=500`
 - module `data_engine.services.reset`
   - attribute `__all__`
   - function `_clear_text_file_if_exists`
@@ -4768,6 +5012,185 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `client_sessions`
     - method `close`
       - param `self`
+- module `data_engine.services.runtime_state`
+  - attribute `ControlAvailability`
+  - attribute `EngineStateName`
+  - attribute `FlowStateName`
+  - attribute `RunStateName`
+  - attribute `__all__`
+  - class `ControlSnapshot`
+    - attribute `state`
+    - attribute `leased_by_machine_id`
+    - attribute `request_pending`
+    - attribute `control_status_text`
+    - attribute `blocked_status_text`
+    - attribute `takeover_remaining_seconds`
+  - class `EngineSnapshot`
+    - attribute `state`
+    - attribute `daemon_live`
+    - attribute `stop_requested`
+    - attribute `active_flow_names`
+  - class `FlowLiveSummary`
+    - attribute `flow_name`
+    - attribute `group_name`
+    - attribute `state`
+    - attribute `stop_requested`
+    - attribute `active_run_count`
+    - attribute `queued_run_count`
+    - attribute `running_step_counts`
+    - attribute `last_started_at_utc`
+    - attribute `last_finished_at_utc`
+    - attribute `last_error_text`
+  - class `RunLiveSnapshot`
+    - attribute `run_id`
+    - attribute `flow_name`
+    - attribute `group_name`
+    - attribute `source_path`
+    - attribute `state`
+    - attribute `current_step_name`
+    - attribute `started_at_utc`
+    - attribute `finished_at_utc`
+    - attribute `elapsed_seconds`
+    - attribute `error_text`
+  - class `OperatorNotice`
+    - attribute `notice_id`
+    - attribute `level`
+    - attribute `text`
+    - attribute `created_at_utc`
+  - class `WorkspaceSnapshot`
+    - attribute `workspace_id`
+    - attribute `version`
+    - attribute `control`
+    - attribute `engine`
+    - attribute `flows`
+    - attribute `active_runs`
+    - attribute `notices`
+  - class `RuntimeEvent`
+    - attribute `workspace_id`
+    - attribute `event_type`
+    - attribute `version`
+    - attribute `timestamp_utc`
+    - attribute `correlation_id`
+    - attribute `payload`
+  - class `RuntimeStateSubscriber`
+    - method `__call__`
+      - param `self`
+      - param `event: RuntimeEvent`
+  - class `RuntimeStatePort`
+    - method `current_snapshot`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `runtime_application: RuntimeApplication`
+      - param `flow_cards: Iterable[FlowCatalogLike]`
+      - param `now: float`
+      - param `daemon_startup_in_progress: bool=False`
+    - method `subscribe`
+      - param `self`
+      - param `*`
+      - param `workspace_id: str`
+      - param `callback: RuntimeStateSubscriber`
+    - method `unsubscribe`
+      - param `self`
+      - param `token: object`
+  - class `WorkspaceRuntimeProjection`
+    - attribute `runtime_session`
+    - attribute `operation_tracker`
+    - attribute `flow_states`
+    - attribute `active_runtime_flow_names`
+    - attribute `step_output_index`
+  - class `RuntimeStateService`
+    - instance attribute `runtime_binding_service`
+    - instance attribute `log_service`
+    - instance attribute `_snapshot_versions`
+    - instance attribute `_last_workspace_snapshots`
+    - instance attribute `_subscribers_by_workspace`
+    - instance attribute `_subscription_workspace_by_token`
+    - method `__init__`
+      - param `self`
+      - param `*`
+      - param `runtime_binding_service: WorkspaceRuntimeBindingService`
+      - param `log_service: LogService`
+    - method `_effective_runtime_session`
+      - param `runtime_session: RuntimeSessionState`
+      - param `*`
+      - param `active_runtime_flow_names: tuple[str, ...]`
+    - method `_control_snapshot`
+      - param `control_state: WorkspaceControlState`
+      - param `runtime_session: RuntimeSessionState`
+    - method `_engine_snapshot`
+      - param `runtime_session: RuntimeSessionState`
+      - param `*`
+      - param `daemon_live: bool`
+      - param `daemon_startup_in_progress: bool`
+    - method `_flow_state_name`
+      - param `state_text: str`
+    - method `_run_state_name`
+      - param `run_group: FlowRunState`
+      - param `*`
+      - param `flow_state: FlowStateName`
+    - method `_current_step_name`
+      - param `run_group: FlowRunState`
+    - method `_run_started_at`
+      - param `run_group: FlowRunState`
+    - method `_run_finished_at`
+      - param `run_group: FlowRunState`
+    - method `_run_error_text`
+      - param `run_group: FlowRunState`
+    - method `_running_step_counts`
+      - param `flow_state: OperationFlowState | None`
+    - method `_latest_run_times`
+      - param `run_groups: tuple[FlowRunState, ...]`
+    - method `_snapshot_signature`
+      - param `snapshot: WorkspaceSnapshot`
+    - method `subscribe`
+      - param `self`
+      - param `*`
+      - param `workspace_id: str`
+      - param `callback: RuntimeStateSubscriber`
+    - method `unsubscribe`
+      - param `self`
+      - param `token: object`
+    - method `rebuild_projection`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `runtime_application: RuntimeApplication`
+      - param `flow_cards: Iterable[FlowCatalogLike]`
+      - param `runtime_session: RuntimeSessionState`
+      - param `now: float`
+    - method `_build_workspace_snapshot`
+      - param `self`
+      - param `*`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `flow_cards: tuple[FlowCatalogLike, ...]`
+      - param `runtime_session: RuntimeSessionState`
+      - param `workspace_control_state: WorkspaceControlState`
+      - param `daemon_live: bool`
+      - param `daemon_startup_in_progress: bool`
+      - param `operation_tracker: OperationSessionState`
+      - param `flow_states: dict[str, str]`
+    - method `_publish_snapshot_events`
+      - param `self`
+      - param `previous: WorkspaceSnapshot | None`
+      - param `current: WorkspaceSnapshot`
+    - method `current_snapshot`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `runtime_application: RuntimeApplication`
+      - param `flow_cards: Iterable[FlowCatalogLike]`
+      - param `now: float`
+      - param `daemon_startup_in_progress: bool=False`
+    - method `snapshot_from_projection`
+      - param `self`
+      - param `*`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `flow_cards: Iterable[FlowCatalogLike]`
+      - param `projection: WorkspaceRuntimeProjection`
+      - param `workspace_control_state: WorkspaceControlState`
+      - param `daemon_live: bool`
+      - param `daemon_startup_in_progress: bool=False`
 - module `data_engine.services.settings`
   - attribute `__all__`
   - class `SettingsService`
@@ -5070,6 +5493,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `_LOG_ICON_NAMES`
     - attribute `_LOG_ICON_COLORS`
     - instance attribute `workspace_counts_footer_label`
+    - instance attribute `app_version_footer_label`
     - instance attribute `view_stack`
     - method `__init__`
       - param `self`
@@ -5084,6 +5508,19 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `event`
     - method `_build_window`
       - param `self`
+- module `data_engine.ui.gui.app_binding`
+  - attribute `_DEFAULT_WINDOW_SIZE`
+  - attribute `_MINIMUM_WINDOW_SIZE`
+  - attribute `_STARTUP_SCREEN_WIDTH_RATIO`
+  - attribute `_STARTUP_SCREEN_HEIGHT_RATIO`
+  - attribute `__all__`
+  - function `initial_window_size_for_screen`
+    - param `screen: object | None`
+  - function `bootstrap_gui_window`
+    - param `window: 'DataEngineWindow'`
+    - param `*`
+    - param `theme_name: str`
+    - param `services: GuiServices | None=None`
 - module `data_engine.ui.gui.bootstrap`
   - attribute `__all__`
   - function `default_gui_dependency_factories`
@@ -5098,21 +5535,22 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `workspace_session_application: WorkspaceSessionApplication | None=None`
     - param `action_state_application: ActionStateApplication | None=None`
     - param `detail_application: DetailApplication | None=None`
+    - param `catalog_query_service: CatalogQueryService | None=None`
+    - param `history_query_service: HistoryQueryService | None=None`
     - param `flow_catalog_service: FlowCatalogService | None=None`
     - param `flow_catalog_application: FlowCatalogApplication | None=None`
     - param `flow_execution_service: FlowExecutionService | None=None`
     - param `daemon_service: DaemonService | None=None`
     - param `daemon_state_service: DaemonStateService | None=None`
     - param `runtime_application: RuntimeApplication | None=None`
-    - param `control_application: OperatorControlApplication | None=None`
+    - param `command_service: CommandPort | None=None`
     - param `ledger_service: LedgerService | None=None`
     - param `log_service: LogService | None=None`
     - param `runtime_binding_service: WorkspaceRuntimeBindingService | None=None`
+    - param `runtime_state_service: RuntimeStateService | None=None`
     - param `runtime_history_service: RuntimeHistoryService | None=None`
-    - param `reset_service: ResetService | None=None`
     - param `shared_state_service: SharedStateService | None=None`
     - param `theme_service: ThemeService | None=None`
-    - param `workspace_provisioning_service: WorkspaceProvisioningService | None=None`
     - param `settings_store: LocalSettingsStore | None=None`
     - param `factories: GuiDependencyFactories | None=None`
     - param `app_root: Path | None=None`
@@ -5143,15 +5581,14 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `daemon_service: DaemonService | None=None`
     - param `daemon_state_service: DaemonStateService | None=None`
     - param `runtime_application: RuntimeApplication | None=None`
-    - param `control_application: OperatorControlApplication | None=None`
+    - param `command_service: CommandPort | None=None`
     - param `ledger_service: LedgerService | None=None`
     - param `log_service: LogService | None=None`
     - param `runtime_binding_service: WorkspaceRuntimeBindingService | None=None`
+    - param `runtime_state_service: RuntimeStateService | None=None`
     - param `runtime_history_service: RuntimeHistoryService | None=None`
-    - param `reset_service: ResetService | None=None`
     - param `shared_state_service: SharedStateService | None=None`
     - param `theme_service: ThemeService | None=None`
-    - param `workspace_provisioning_service: WorkspaceProvisioningService | None=None`
     - param `settings_store: LocalSettingsStore | None=None`
     - param `factories: GuiDependencyFactories | None=None`
     - param `app_root: Path | None=None`
@@ -5182,14 +5619,14 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `daemon_service: DaemonService | None=None`
     - param `daemon_state_service: DaemonStateService | None=None`
     - param `runtime_application: RuntimeApplication | None=None`
-    - param `control_application: OperatorControlApplication | None=None`
+    - param `command_service: CommandPort | None=None`
     - param `ledger_service: LedgerService | None=None`
     - param `log_service: LogService | None=None`
+    - param `runtime_binding_service: WorkspaceRuntimeBindingService | None=None`
+    - param `runtime_state_service: RuntimeStateService | None=None`
     - param `runtime_history_service: RuntimeHistoryService | None=None`
-    - param `reset_service: ResetService | None=None`
     - param `shared_state_service: SharedStateService | None=None`
     - param `theme_service: ThemeService | None=None`
-    - param `workspace_provisioning_service: WorkspaceProvisioningService | None=None`
     - param `settings_store: LocalSettingsStore | None=None`
     - param `factories: GuiDependencyFactories | None=None`
     - param `app_root: Path | None=None`
@@ -5213,21 +5650,22 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `workspace_session_application`
     - attribute `action_state_application`
     - attribute `detail_application`
+    - attribute `catalog_query_service`
+    - attribute `history_query_service`
     - attribute `flow_catalog_service`
     - attribute `flow_catalog_application`
     - attribute `flow_execution_service`
     - attribute `daemon_service`
     - attribute `daemon_state_service`
     - attribute `runtime_application`
-    - attribute `control_application`
+    - attribute `command_service`
     - attribute `ledger_service`
     - attribute `log_service`
     - attribute `runtime_binding_service`
+    - attribute `runtime_state_service`
     - attribute `runtime_history_service`
-    - attribute `reset_service`
     - attribute `shared_state_service`
     - attribute `theme_service`
-    - attribute `workspace_provisioning_service`
   - class `GuiDependencyFactories`
     - attribute `settings_store_factory`
     - attribute `settings_service_factory`
@@ -5243,26 +5681,14 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `ledger_service_factory`
     - attribute `log_service_factory`
     - attribute `runtime_binding_service_factory`
+    - attribute `runtime_state_service_factory`
     - attribute `runtime_history_service_factory`
-    - attribute `reset_service_factory`
     - attribute `shared_state_service_factory`
     - attribute `runtime_application_factory`
-    - attribute `control_application_factory`
     - attribute `theme_service_factory`
-    - attribute `workspace_provisioning_service_factory`
-- module `data_engine.ui.gui.app_binding`
-  - attribute `_DEFAULT_WINDOW_SIZE`
-  - attribute `_MINIMUM_WINDOW_SIZE`
-  - attribute `_STARTUP_SCREEN_WIDTH_RATIO`
-  - attribute `_STARTUP_SCREEN_HEIGHT_RATIO`
-  - attribute `__all__`
-  - function `initial_window_size_for_screen`
-    - param `screen: object | None`
-  - function `bootstrap_gui_window`
-    - param `window: 'DataEngineWindow'`
-    - param `*`
-    - param `theme_name: str`
-    - param `services: GuiServices | None=None`
+    - attribute `command_service_factory`
+    - attribute `catalog_query_service_factory`
+    - attribute `history_query_service_factory`
 - module `data_engine.ui.gui.cache_models`
   - attribute `__all__`
   - class `OperationRowWidgets`
@@ -5324,9 +5750,6 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self: 'DataEngineWindow'`
       - param `action_name: str`
       - param `payload: object`
-    - method `_apply_daemon_snapshot`
-      - param `self: 'DataEngineWindow'`
-      - param `snapshot`
     - method `_rebuild_runtime_snapshot`
       - param `self: 'DataEngineWindow'`
     - method `_refresh_log_view`
@@ -5430,14 +5853,16 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `window: 'DataEngineWindow'`
   - class `_GuiFlowPresentationController`
     - instance attribute `flow_catalog_application`
-    - instance attribute `log_service`
-    - instance attribute `reset_service`
+    - instance attribute `history_query_service`
+    - instance attribute `command_service`
     - method `__init__`
       - param `self`
       - param `*`
       - param `flow_catalog_application: FlowCatalogApplication`
-      - param `log_service: LogService`
-      - param `reset_service: ResetService`
+      - param `history_query_service: HistoryQueryService`
+      - param `command_service: CommandPort`
+    - method `_control_snapshot`
+      - param `window: 'DataEngineWindow'`
     - method `select_flow`
       - param `self`
       - param `window: 'DataEngineWindow'`
@@ -5491,8 +5916,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `*`
       - param `workspace_session_application: WorkspaceSessionApplication`
       - param `flow_catalog_application: FlowCatalogApplication`
-      - param `log_service: LogService`
-      - param `reset_service: ResetService`
+      - param `history_query_service: HistoryQueryService`
+      - param `command_service: CommandPort`
     - method `load_flows`
       - param `self`
       - param `window: 'DataEngineWindow'`
@@ -5558,13 +5983,25 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `GuiRuntimeController`
     - instance attribute `runtime_application`
     - instance attribute `daemon_service`
-    - instance attribute `log_service`
+    - instance attribute `runtime_state_service`
+    - instance attribute `command_service`
     - method `__init__`
       - param `self`
       - param `*`
       - param `runtime_application: RuntimeApplication`
       - param `daemon_service: DaemonService`
-      - param `log_service: LogService`
+      - param `runtime_state_service: RuntimeStateService`
+      - param `command_service: CommandPort`
+    - method `_apply_runtime_projection`
+      - param `self`
+      - param `window: 'DataEngineWindow'`
+      - param `*`
+      - param `runtime_session`
+      - param `operation_tracker`
+      - param `flow_states`
+      - param `step_output_index`
+    - method `_blocked_status_text`
+      - param `window: 'DataEngineWindow'`
     - method `sync_from_daemon`
       - param `self`
       - param `window: 'DataEngineWindow'`
@@ -5823,9 +6260,6 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `window: 'DataEngineWindow'`
     - param `success: bool`
     - param `error_text: str`
-  - function `apply_daemon_snapshot`
-    - param `window: 'DataEngineWindow'`
-    - param `snapshot`
 - module `data_engine.ui.gui.presenters.sidebar`
   - attribute `__all__`
   - function `refresh_sidebar_selection`
@@ -6507,6 +6941,21 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `error_text: str`
     - method `_rebuild_runtime_snapshot`
       - param `self`
+- module `data_engine.ui.tui.app_binding`
+  - attribute `__all__`
+  - function `resolve_initial_tui_workspace_collection_root_override`
+    - param `settings_service`
+  - function `build_initial_tui_app_state`
+    - param `*`
+    - param `workspace_service`
+    - param `workspace_session_application`
+    - param `runtime_binding_service`
+    - param `settings_service`
+  - function `bootstrap_tui_app`
+    - param `app: 'DataEngineTui'`
+    - param `*`
+    - param `theme_name: str`
+    - param `services: TuiServices | None=None`
 - module `data_engine.ui.tui.bootstrap`
   - attribute `__all__`
   - function `default_tui_dependency_factories`
@@ -6521,18 +6970,20 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `workspace_session_application: WorkspaceSessionApplication | None=None`
     - param `action_state_application: ActionStateApplication | None=None`
     - param `detail_application: DetailApplication | None=None`
+    - param `catalog_query_service: CatalogQueryService | None=None`
+    - param `history_query_service: HistoryQueryService | None=None`
     - param `flow_catalog_service: FlowCatalogService | None=None`
     - param `flow_catalog_application: FlowCatalogApplication | None=None`
     - param `flow_execution_service: FlowExecutionService | None=None`
     - param `daemon_service: DaemonService | None=None`
     - param `daemon_state_service: DaemonStateService | None=None`
     - param `runtime_application: RuntimeApplication | None=None`
-    - param `control_application: OperatorControlApplication | None=None`
+    - param `command_service: CommandPort | None=None`
     - param `ledger_service: LedgerService | None=None`
     - param `log_service: LogService | None=None`
     - param `runtime_binding_service: WorkspaceRuntimeBindingService | None=None`
+    - param `runtime_state_service: RuntimeStateService | None=None`
     - param `runtime_history_service: RuntimeHistoryService | None=None`
-    - param `reset_service: ResetService | None=None`
     - param `shared_state_service: SharedStateService | None=None`
     - param `theme_service: ThemeService | None=None`
     - param `settings_store: LocalSettingsStore | None=None`
@@ -6565,12 +7016,12 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `daemon_service: DaemonService | None=None`
     - param `daemon_state_service: DaemonStateService | None=None`
     - param `runtime_application: RuntimeApplication | None=None`
-    - param `control_application: OperatorControlApplication | None=None`
+    - param `command_service: CommandPort | None=None`
     - param `ledger_service: LedgerService | None=None`
     - param `log_service: LogService | None=None`
     - param `runtime_binding_service: WorkspaceRuntimeBindingService | None=None`
+    - param `runtime_state_service: RuntimeStateService | None=None`
     - param `runtime_history_service: RuntimeHistoryService | None=None`
-    - param `reset_service: ResetService | None=None`
     - param `shared_state_service: SharedStateService | None=None`
     - param `theme_service: ThemeService | None=None`
     - param `settings_store: LocalSettingsStore | None=None`
@@ -6603,11 +7054,12 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `daemon_service: DaemonService | None=None`
     - param `daemon_state_service: DaemonStateService | None=None`
     - param `runtime_application: RuntimeApplication | None=None`
-    - param `control_application: OperatorControlApplication | None=None`
+    - param `command_service: CommandPort | None=None`
     - param `ledger_service: LedgerService | None=None`
     - param `log_service: LogService | None=None`
+    - param `runtime_binding_service: WorkspaceRuntimeBindingService | None=None`
+    - param `runtime_state_service: RuntimeStateService | None=None`
     - param `runtime_history_service: RuntimeHistoryService | None=None`
-    - param `reset_service: ResetService | None=None`
     - param `shared_state_service: SharedStateService | None=None`
     - param `theme_service: ThemeService | None=None`
     - param `settings_store: LocalSettingsStore | None=None`
@@ -6633,18 +7085,20 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `workspace_session_application`
     - attribute `action_state_application`
     - attribute `detail_application`
+    - attribute `catalog_query_service`
+    - attribute `history_query_service`
     - attribute `flow_catalog_service`
     - attribute `flow_catalog_application`
     - attribute `flow_execution_service`
     - attribute `daemon_service`
     - attribute `daemon_state_service`
     - attribute `runtime_application`
-    - attribute `control_application`
+    - attribute `command_service`
     - attribute `ledger_service`
     - attribute `log_service`
     - attribute `runtime_binding_service`
+    - attribute `runtime_state_service`
     - attribute `runtime_history_service`
-    - attribute `reset_service`
     - attribute `shared_state_service`
     - attribute `theme_service`
   - class `TuiDependencyFactories`
@@ -6662,27 +7116,14 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `ledger_service_factory`
     - attribute `log_service_factory`
     - attribute `runtime_binding_service_factory`
+    - attribute `runtime_state_service_factory`
     - attribute `runtime_history_service_factory`
-    - attribute `reset_service_factory`
     - attribute `shared_state_service_factory`
     - attribute `runtime_application_factory`
-    - attribute `control_application_factory`
     - attribute `theme_service_factory`
-- module `data_engine.ui.tui.app_binding`
-  - attribute `__all__`
-  - function `resolve_initial_tui_workspace_collection_root_override`
-    - param `settings_service`
-  - function `build_initial_tui_app_state`
-    - param `*`
-    - param `workspace_service`
-    - param `workspace_session_application`
-    - param `runtime_binding_service`
-    - param `settings_service`
-  - function `bootstrap_tui_app`
-    - param `app: 'DataEngineTui'`
-    - param `*`
-    - param `theme_name: str`
-    - param `services: TuiServices | None=None`
+    - attribute `command_service_factory`
+    - attribute `catalog_query_service_factory`
+    - attribute `history_query_service_factory`
 - module `data_engine.ui.tui.controllers`
   - attribute `__all__`
 - module `data_engine.ui.tui.controllers.flows`
@@ -6695,9 +7136,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `*`
       - param `workspace_session_application: WorkspaceSessionApplication`
       - param `flow_catalog_application: FlowCatalogApplication`
-      - param `control_application: OperatorControlApplication`
       - param `log_service: LogService`
-      - param `reset_service: ResetService`
+      - param `command_service: CommandPort`
     - method `action_refresh_flows`
       - param `self`
       - param `window: 'DataEngineTui'`
@@ -6738,13 +7178,13 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `_TuiWorkspaceCatalogController`
     - instance attribute `workspace_session_application`
     - instance attribute `flow_catalog_application`
-    - instance attribute `control_application`
+    - instance attribute `command_service`
     - method `__init__`
       - param `self`
       - param `*`
       - param `workspace_session_application: WorkspaceSessionApplication`
       - param `flow_catalog_application: FlowCatalogApplication`
-      - param `control_application: OperatorControlApplication`
+      - param `command_service: CommandPort`
     - method `action_refresh_flows`
       - param `self`
       - param `window: 'DataEngineTui'`
@@ -6762,15 +7202,15 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `workspace_id: str`
       - param `presentation: '_TuiFlowPresentationController'`
   - class `_TuiFlowPresentationController`
-    - instance attribute `control_application`
+    - instance attribute `command_service`
     - instance attribute `log_service`
-    - instance attribute `reset_service`
     - method `__init__`
       - param `self`
       - param `*`
-      - param `control_application: OperatorControlApplication`
+      - param `command_service: CommandPort`
       - param `log_service: LogService`
-      - param `reset_service: ResetService`
+    - method `_blocked_status_text`
+      - param `window: 'DataEngineTui'`
     - method `action_run_selected`
       - param `self`
       - param `window: 'DataEngineTui'`
@@ -6800,15 +7240,19 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `TuiRuntimeController`
     - instance attribute `runtime_application`
     - instance attribute `daemon_service`
-    - instance attribute `log_service`
+    - instance attribute `history_query_service`
+    - instance attribute `runtime_state_service`
     - method `__init__`
       - param `self`
       - param `*`
       - param `runtime_application: RuntimeApplication`
       - param `daemon_service: DaemonService`
-      - param `log_service: LogService`
+      - param `history_query_service: HistoryQueryService`
+      - param `runtime_state_service: RuntimeStateService`
     - method `refresh_flow_list_items`
       - param `self`
+      - param `window: 'DataEngineTui'`
+    - method `_blocked_status_text`
       - param `window: 'DataEngineTui'`
     - method `refresh_buttons`
       - param `self`
@@ -7117,6 +7561,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `target_root`
     - attribute `mode`
     - attribute `interval`
+    - attribute `settle`
     - attribute `operations`
     - attribute `operation_items`
     - attribute `state`

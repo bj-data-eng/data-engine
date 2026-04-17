@@ -7,7 +7,7 @@ from queue import Queue
 from uuid import uuid4
 from typing import TYPE_CHECKING
 
-from data_engine.domain import FlowLogEntry, OperationSessionState, OperatorSessionState
+from data_engine.domain import FlowLogEntry, OperationSessionState, OperatorSessionState, WorkspaceSessionState
 from data_engine.platform.workspace_models import DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR
 from data_engine.ui.tui.bootstrap import TuiServices, build_tui_services, default_tui_service_kwargs
 from data_engine.ui.tui.controllers import TuiFlowController, TuiRuntimeController
@@ -27,7 +27,6 @@ def resolve_initial_tui_workspace_collection_root_override(settings_service):
 def build_initial_tui_app_state(
     *,
     workspace_service,
-    workspace_session_application,
     runtime_binding_service,
     settings_service,
 ) -> dict[str, object]:
@@ -37,9 +36,14 @@ def build_initial_tui_app_state(
         workspace_collection_root=initial_override,
     )
     operator_session_state = OperatorSessionState.from_paths(workspace_paths, override_root=initial_override)
-    workspace_session_state = workspace_session_application.refresh_session(
-        workspace_paths=workspace_paths,
+    discovered = workspace_service.discover(
+        app_root=workspace_paths.app_root,
+        workspace_collection_root=initial_override,
+    )
+    workspace_session_state = WorkspaceSessionState.from_paths(
+        workspace_paths,
         override_root=initial_override,
+        discovered_workspace_ids=(item.workspace_id for item in discovered),
     )
     client_session_id = uuid4().hex
     runtime_binding = runtime_binding_service.open_binding(workspace_paths)
@@ -59,9 +63,6 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
         **default_tui_service_kwargs(theme_name),
         client_error_type=Exception,
     )
-    app.workspace_service = app.services.workspace_service
-    app.action_state_application = app.services.action_state_application
-    app.detail_application = app.services.detail_application
     app.catalog_query_service = app.services.catalog_query_service
     app.history_query_service = app.services.history_query_service
     app.command_service = app.services.command_service
@@ -74,12 +75,10 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
     app.shared_state_service = app.services.shared_state_service
     app.settings_service = app.services.settings_service
     app.theme_service = app.services.theme_service
-    app.workspace_session_application = app.services.workspace_session_application
-    app.flow_catalog_application = app.services.flow_catalog_application
     app.flow_controller = TuiFlowController(
-        workspace_session_application=app.workspace_session_application,
-        flow_catalog_application=app.flow_catalog_application,
-        log_service=app.log_service,
+        workspace_service=app.services.workspace_service,
+        catalog_query_service=app.catalog_query_service,
+        history_query_service=app.history_query_service,
         command_service=app.command_service,
     )
     app.runtime_controller = TuiRuntimeController(
@@ -91,8 +90,7 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
     app.theme_name = app.theme_service.resolve_name(theme_name)
     app.CSS = tui_stylesheet(app.theme_name)
     initial_state = build_initial_tui_app_state(
-        workspace_service=app.workspace_service,
-        workspace_session_application=app.workspace_session_application,
+        workspace_service=app.services.workspace_service,
         runtime_binding_service=app.runtime_binding_service,
         settings_service=app.settings_service,
     )

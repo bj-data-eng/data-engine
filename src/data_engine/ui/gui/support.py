@@ -46,7 +46,7 @@ class GuiWindowSupportMixin:
         """Resolve workspace paths using the current machine-local collection-root override."""
         if workspace_collection_root is ...:
             workspace_collection_root = self.workspace_collection_root_override
-        return self.workspace_service.resolve_paths(
+        return self.services.workspace_service.resolve_paths(
             workspace_id=workspace_id,
             workspace_collection_root=workspace_collection_root,
         )

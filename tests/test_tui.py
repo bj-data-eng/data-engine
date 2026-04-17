@@ -17,7 +17,7 @@ from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.services import DaemonService
 from data_engine.services.operator_commands import OperatorCommandService
 from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, WorkspaceSnapshot
-from data_engine.application.catalog import FlowCatalogLoadResult, FlowCatalogPresentation
+from data_engine.services.operator_queries import WorkspaceCatalogLoadResult, WorkspaceCatalogPresentation
 from data_engine.ui.tui.bootstrap import build_tui_services
 from data_engine.ui.tui.app import FlowListItem
 from data_engine.ui.tui.app import RunGroupListItem
@@ -311,18 +311,18 @@ class _RecordingStatusTui(DataEngineTui):
         self.status_messages.append(message)
 
 
-class _EmptyCatalogApplication:
-    def load_workspace_catalog(self, *, workspace_paths, current_state=None, missing_message="No flow modules discovered."):
-        del workspace_paths, missing_message
-        return FlowCatalogLoadResult(
+class _EmptyCatalogQueryService:
+    def load_workspace_catalog(self, *, workspace_root, current_state=None, missing_message="No flow modules discovered."):
+        del workspace_root, missing_message
+        return WorkspaceCatalogLoadResult(
             catalog_state=current_state.with_entries(()).with_empty_message("No flow modules discovered."),
             loaded=False,
             error_text="No flow modules discovered.",
         )
 
-    def build_presentation(self, *, catalog_state):
+    def build_catalog_presentation(self, *, catalog_state):
         del catalog_state
-        return FlowCatalogPresentation(entries=(), grouped_entries=(), selected_flow_name=None)
+        return WorkspaceCatalogPresentation(entries=(), grouped_entries=(), selected_flow_name=None)
 
 
 class _FakeRuntimeController:
@@ -358,7 +358,7 @@ def _make_tui(
     command_service=None,
     shared_state_service=None,
     daemon_state_service=None,
-    flow_catalog_application=None,
+    catalog_query_service=None,
     app_cls=DataEngineTui,
 ) -> DataEngineTui:
     manager = _FakeDaemonManager(snapshot=snapshot)
@@ -375,7 +375,7 @@ def _make_tui(
         log_service=log_service,
         command_service=command_service,
         shared_state_service=shared_state_service,
-        flow_catalog_application=flow_catalog_application,
+        catalog_query_service=catalog_query_service,
         discover_workspaces_func=discover_workspaces_func or (lambda **kwargs: ()),
         resolve_workspace_paths_func=resolve_workspace_paths_func or resolve_workspace_paths,
     )
@@ -745,8 +745,8 @@ async def test_tui_empty_workspace_reload_clears_stale_flow_rows():
         list_view = app.query_one("#flow-list")
         initial_count = len(list_view.children)
         assert initial_count > 0
-        app.flow_catalog_application = _EmptyCatalogApplication()
-        app.flow_controller.workspace.flow_catalog_application = app.flow_catalog_application
+        app.catalog_query_service = _EmptyCatalogQueryService()
+        app.flow_controller.workspace.catalog_query_service = app.catalog_query_service
 
         app._load_flows()
         await _wait_for_tui_condition(pilot, lambda: len(list_view.children) == 0)

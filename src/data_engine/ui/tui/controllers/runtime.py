@@ -11,7 +11,12 @@ from textual.widgets import Button, ListView, Select, Static
 from data_engine.application import RuntimeApplication
 from data_engine.services import DaemonService, HistoryQueryService, RuntimeStateService
 from data_engine.domain import RuntimeSessionState
-from data_engine.views import TuiActionState, WORKSPACE_UNAVAILABLE_TEXT, surface_control_status_text
+from data_engine.views import (
+    TuiActionState,
+    WORKSPACE_UNAVAILABLE_TEXT,
+    build_operator_action_context,
+    surface_control_status_text,
+)
 from data_engine.ui.tui.widgets import FlowListItem
 
 if TYPE_CHECKING:
@@ -49,7 +54,7 @@ class TuiRuntimeController:
 
     def refresh_buttons(self, window: "DataEngineTui") -> None:
         action_state = TuiActionState.from_context(
-            window.action_state_application.build_action_context(
+            build_operator_action_context(
                 card=window._selected_card(),
                 flow_states=window.flow_states,
                 runtime_session=window.runtime_session,

@@ -2175,7 +2175,7 @@ def test_load_flows_clears_visible_log_runs_when_reload_fails(qapp, monkeypatch)
         qapp.processEvents()
         assert window.log_view.count() == 1
 
-        window.flow_catalog_application.flow_catalog_service = _RaisingFlowCatalogService("boom")
+        window.catalog_query_service.flow_catalog_service = _RaisingFlowCatalogService("boom")
 
         window._load_flows()
         qapp.processEvents()

@@ -6,7 +6,11 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QListWidgetItem
 
-from data_engine.views import RunGroupDisplay, format_raw_log_message as shared_format_raw_log_message
+from data_engine.views import (
+    RunGroupDisplay,
+    build_selected_flow_presentation,
+    format_raw_log_message as shared_format_raw_log_message,
+)
 from data_engine.ui.gui.widgets.logs import build_log_run_widget
 
 if TYPE_CHECKING:
@@ -34,8 +38,8 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
     previous_maximum = scrollbar.maximum()
 
     card = window.flow_cards.get(window.selected_flow_name or "")
-    run_groups = window.log_service.runs_for_flow(window.runtime_binding.log_store, card.name) if card is not None else ()
-    presentation = window.detail_application.build_selected_flow_presentation(
+    run_groups = window.history_query_service.list_flow_runs(window.runtime_binding.log_store, flow_name=(card.name if card is not None else None))
+    presentation = build_selected_flow_presentation(
         card=card,
         tracker=window.operation_tracker,
         flow_states=window.flow_states,

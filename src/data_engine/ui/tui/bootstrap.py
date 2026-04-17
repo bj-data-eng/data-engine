@@ -6,14 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from data_engine.application import (
-    ActionStateApplication,
-    DetailApplication,
-    FlowCatalogApplication,
-    OperatorControlApplication,
-    RuntimeApplication,
-    WorkspaceSessionApplication,
-)
+from data_engine.application import OperatorControlApplication, RuntimeApplication
 from data_engine.authoring.flow import load_flow
 from data_engine.flow_modules.flow_module_loader import discover_flow_module_definitions
 from data_engine.hosts.daemon.app import DaemonClientError
@@ -55,14 +48,8 @@ class TuiServices:
 
     settings_service: SettingsService
     workspace_service: WorkspaceService
-    workspace_session_application: WorkspaceSessionApplication
-    action_state_application: ActionStateApplication
-    detail_application: DetailApplication
     catalog_query_service: CatalogQueryService
     history_query_service: HistoryQueryService
-    flow_catalog_service: FlowCatalogService
-    flow_catalog_application: FlowCatalogApplication
-    flow_execution_service: FlowExecutionService
     daemon_service: DaemonService
     daemon_state_service: DaemonStateService
     runtime_application: RuntimeApplication
@@ -83,11 +70,7 @@ class TuiDependencyFactories:
     settings_store_factory: Callable[[Path | None], LocalSettingsStore]
     settings_service_factory: Callable[[LocalSettingsStore], SettingsService]
     workspace_service_factory: Callable[[object | None, object | None], WorkspaceService]
-    workspace_session_application_factory: Callable[[WorkspaceService], WorkspaceSessionApplication]
-    action_state_application_factory: Callable[[], ActionStateApplication]
-    detail_application_factory: Callable[[], DetailApplication]
     flow_catalog_service_factory: Callable[[object], FlowCatalogService]
-    flow_catalog_application_factory: Callable[[FlowCatalogService], FlowCatalogApplication]
     flow_execution_service_factory: Callable[[object], FlowExecutionService]
     daemon_service_factory: Callable[[object, object, object, type[Exception]], DaemonService]
     daemon_state_service_factory: Callable[[], DaemonStateService]
@@ -133,16 +116,8 @@ def default_tui_dependency_factories() -> TuiDependencyFactories:
         )
         if discover is not None or resolve is not None
         else WorkspaceService(),
-        workspace_session_application_factory=lambda workspace_service: WorkspaceSessionApplication(
-            workspace_service=workspace_service,
-        ),
-        action_state_application_factory=ActionStateApplication,
-        detail_application_factory=DetailApplication,
         flow_catalog_service_factory=lambda discover_definitions: FlowCatalogService(
             discover_definitions_func=discover_definitions,
-        ),
-        flow_catalog_application_factory=lambda flow_catalog_service: FlowCatalogApplication(
-            flow_catalog_service=flow_catalog_service,
         ),
         flow_execution_service_factory=lambda load_flow_func: FlowExecutionService(
             load_flow_func=load_flow_func,
@@ -202,14 +177,8 @@ def _tui_services_from_kwargs(service_kwargs: dict[str, object]) -> TuiServices:
     return TuiServices(
         settings_service=service_kwargs["settings_service"],
         workspace_service=service_kwargs["workspace_service"],
-        workspace_session_application=service_kwargs["workspace_session_application"],
-        action_state_application=service_kwargs["action_state_application"],
-        detail_application=service_kwargs["detail_application"],
         catalog_query_service=service_kwargs["catalog_query_service"],
         history_query_service=service_kwargs["history_query_service"],
-        flow_catalog_service=service_kwargs["flow_catalog_service"],
-        flow_catalog_application=service_kwargs["flow_catalog_application"],
-        flow_execution_service=service_kwargs["flow_execution_service"],
         daemon_service=service_kwargs["daemon_service"],
         daemon_state_service=service_kwargs["daemon_state_service"],
         runtime_application=service_kwargs["runtime_application"],
@@ -228,14 +197,9 @@ def build_tui_service_kwargs(
     *,
     settings_service: SettingsService | None = None,
     workspace_service: WorkspaceService | None = None,
-    workspace_session_application: WorkspaceSessionApplication | None = None,
-    action_state_application: ActionStateApplication | None = None,
-    detail_application: DetailApplication | None = None,
     catalog_query_service: CatalogQueryService | None = None,
     history_query_service: HistoryQueryService | None = None,
     flow_catalog_service: FlowCatalogService | None = None,
-    flow_catalog_application: FlowCatalogApplication | None = None,
-    flow_execution_service: FlowExecutionService | None = None,
     daemon_service: DaemonService | None = None,
     daemon_state_service: DaemonStateService | None = None,
     runtime_application: RuntimeApplication | None = None,
@@ -284,15 +248,9 @@ def build_tui_service_kwargs(
         discover_workspaces_func,
         resolve_workspace_paths_func,
     )
-    workspace_session_application = workspace_session_application or factories.workspace_session_application_factory(
-        workspace_service,
-    )
-    action_state_application = action_state_application or factories.action_state_application_factory()
-    detail_application = detail_application or factories.detail_application_factory()
     flow_catalog_service = flow_catalog_service or factories.flow_catalog_service_factory(discover_definitions_func)
     catalog_query_service = catalog_query_service or factories.catalog_query_service_factory(flow_catalog_service)
-    flow_catalog_application = flow_catalog_application or factories.flow_catalog_application_factory(flow_catalog_service)
-    flow_execution_service = flow_execution_service or factories.flow_execution_service_factory(load_flow_func)
+    flow_execution_service = factories.flow_execution_service_factory(load_flow_func)
     daemon_service = daemon_service or factories.daemon_service_factory(
         spawn_process_func,
         request_func,
@@ -336,13 +294,9 @@ def build_tui_service_kwargs(
     return {
         "settings_service": settings_service,
         "workspace_service": workspace_service,
-        "workspace_session_application": workspace_session_application,
-        "action_state_application": action_state_application,
-        "detail_application": detail_application,
         "catalog_query_service": catalog_query_service,
         "history_query_service": history_query_service,
         "flow_catalog_service": flow_catalog_service,
-        "flow_catalog_application": flow_catalog_application,
         "flow_execution_service": flow_execution_service,
         "daemon_service": daemon_service,
         "daemon_state_service": daemon_state_service,
@@ -362,12 +316,9 @@ def build_default_tui_services(
     *,
     settings_service: SettingsService | None = None,
     workspace_service: WorkspaceService | None = None,
-    workspace_session_application: WorkspaceSessionApplication | None = None,
-    action_state_application: ActionStateApplication | None = None,
-    detail_application: DetailApplication | None = None,
+    catalog_query_service: CatalogQueryService | None = None,
+    history_query_service: HistoryQueryService | None = None,
     flow_catalog_service: FlowCatalogService | None = None,
-    flow_catalog_application: FlowCatalogApplication | None = None,
-    flow_execution_service: FlowExecutionService | None = None,
     daemon_service: DaemonService | None = None,
     daemon_state_service: DaemonStateService | None = None,
     runtime_application: RuntimeApplication | None = None,
@@ -401,12 +352,9 @@ def build_default_tui_services(
     service_kwargs = build_tui_service_kwargs(
         settings_service=settings_service,
         workspace_service=workspace_service,
-        workspace_session_application=workspace_session_application,
-        action_state_application=action_state_application,
-        detail_application=detail_application,
+        catalog_query_service=catalog_query_service,
+        history_query_service=history_query_service,
         flow_catalog_service=flow_catalog_service,
-        flow_catalog_application=flow_catalog_application,
-        flow_execution_service=flow_execution_service,
         daemon_service=daemon_service,
         daemon_state_service=daemon_state_service,
         runtime_application=runtime_application,
@@ -443,12 +391,9 @@ def build_tui_services(
     *,
     settings_service: SettingsService | None = None,
     workspace_service: WorkspaceService | None = None,
-    workspace_session_application: WorkspaceSessionApplication | None = None,
-    action_state_application: ActionStateApplication | None = None,
-    detail_application: DetailApplication | None = None,
+    catalog_query_service: CatalogQueryService | None = None,
+    history_query_service: HistoryQueryService | None = None,
     flow_catalog_service: FlowCatalogService | None = None,
-    flow_catalog_application: FlowCatalogApplication | None = None,
-    flow_execution_service: FlowExecutionService | None = None,
     daemon_service: DaemonService | None = None,
     daemon_state_service: DaemonStateService | None = None,
     runtime_application: RuntimeApplication | None = None,
@@ -482,12 +427,9 @@ def build_tui_services(
     return build_default_tui_services(
         settings_service=settings_service,
         workspace_service=workspace_service,
-        workspace_session_application=workspace_session_application,
-        action_state_application=action_state_application,
-        detail_application=detail_application,
+        catalog_query_service=catalog_query_service,
+        history_query_service=history_query_service,
         flow_catalog_service=flow_catalog_service,
-        flow_catalog_application=flow_catalog_application,
-        flow_execution_service=flow_execution_service,
         daemon_service=daemon_service,
         daemon_state_service=daemon_state_service,
         runtime_application=runtime_application,

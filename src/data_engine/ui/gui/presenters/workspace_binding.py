@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from data_engine.domain import StepOutputIndex
+from data_engine.domain import OperatorSessionState, StepOutputIndex, WorkspaceSessionState
 from data_engine.platform.instrumentation import maybe_start_viztracer
 from data_engine.ui.gui.helpers import register_client_session
 from data_engine.ui.gui.presenters.workspace_settings import refresh_workspace_root_controls
@@ -65,11 +65,19 @@ def rebind_workspace_context(
         workspace_id=workspace_id,
         workspace_collection_root=override_root,
     )
-    binding = window.workspace_session_application.bind_workspace(
-        workspace_paths=window.workspace_paths,
-        override_root=override_root,
+    discovered = window.services.workspace_service.discover(
+        app_root=window.workspace_paths.app_root,
+        workspace_collection_root=override_root,
     )
-    window._operator_session_state = binding.operator_session
+    window.workspace_session_state = WorkspaceSessionState.from_paths(
+        window.workspace_paths,
+        override_root=override_root,
+        discovered_workspace_ids=(item.workspace_id for item in discovered),
+    )
+    window._operator_session_state = OperatorSessionState.from_paths(
+        window.workspace_paths,
+        override_root=override_root,
+    ).with_workspace(window.workspace_session_state)
     window.runtime_binding = window.runtime_binding_service.open_binding(window.workspace_paths)
     register_client_session(window)
     window._ui_timing_log_path = (

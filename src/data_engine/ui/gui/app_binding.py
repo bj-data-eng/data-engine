@@ -13,6 +13,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QGuiApplication
 
 from data_engine.domain import DaemonStatusState, FlowLogEntry, OperationSessionState, OperatorSessionState, StepOutputIndex
+from data_engine.domain import WorkspaceSessionState
 from data_engine.platform.identity import APP_DISPLAY_NAME, APP_INTERNAL_ID
 from data_engine.platform.instrumentation import maybe_start_viztracer
 from data_engine.platform.workspace_models import DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR
@@ -59,9 +60,6 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.resize(*initial_window_size_for_screen(QGuiApplication.primaryScreen()))
     window.setMinimumSize(*_MINIMUM_WINDOW_SIZE)
     window.services = services or build_default_gui_services(theme_name)
-    window.workspace_service = window.services.workspace_service
-    window.action_state_application = window.services.action_state_application
-    window.detail_application = window.services.detail_application
     window.catalog_query_service = window.services.catalog_query_service
     window.history_query_service = window.services.history_query_service
     window.command_service = window.services.command_service
@@ -76,11 +74,9 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.shared_state_service = window.services.shared_state_service
     window.settings_service = window.services.settings_service
     window.theme_service = window.services.theme_service
-    window.workspace_session_application = window.services.workspace_session_application
-    window.flow_catalog_application = window.services.flow_catalog_application
     window.flow_controller = GuiFlowController(
-        workspace_session_application=window.workspace_session_application,
-        flow_catalog_application=window.flow_catalog_application,
+        workspace_service=window.services.workspace_service,
+        catalog_query_service=window.catalog_query_service,
         history_query_service=window.history_query_service,
         command_service=window.command_service,
     )
@@ -93,13 +89,18 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.theme_name = window.theme_service.resolve_name(theme_name)
     env_collection_root = os.environ.get(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR)
     initial_override = None if env_collection_root and env_collection_root.strip() else window.settings_service.workspace_collection_root()
-    window.workspace_paths = window.workspace_service.resolve_paths(
+    window.workspace_paths = window.services.workspace_service.resolve_paths(
         workspace_collection_root=initial_override,
     )
     window._operator_session_state = OperatorSessionState.from_paths(window.workspace_paths, override_root=initial_override)
-    window.workspace_session_state = window.workspace_session_application.refresh_session(
-        workspace_paths=window.workspace_paths,
+    discovered = window.services.workspace_service.discover(
+        app_root=window.workspace_paths.app_root,
+        workspace_collection_root=initial_override,
+    )
+    window.workspace_session_state = WorkspaceSessionState.from_paths(
+        window.workspace_paths,
         override_root=initial_override,
+        discovered_workspace_ids=(item.workspace_id for item in discovered),
     )
     window.client_session_id = uuid4().hex
 

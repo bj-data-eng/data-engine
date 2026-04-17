@@ -7,12 +7,18 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
 
-from data_engine.application import FlowCatalogApplication, WorkspaceSessionApplication
-from data_engine.services import CommandPort, HistoryQueryService
+from data_engine.domain import WorkspaceSessionState
+from data_engine.services import CatalogPort, CommandPort, HistoryPort, WorkspaceService
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.platform.instrumentation import timed_operation
 from data_engine.ui.gui.helpers import start_worker_thread
-from data_engine.views import GuiActionState, QtFlowCard, surface_control_status_text
+from data_engine.views import (
+    GuiActionState,
+    QtFlowCard,
+    build_operator_action_context,
+    build_selected_flow_presentation,
+    surface_control_status_text,
+)
 
 if TYPE_CHECKING:
     from data_engine.ui.gui.app import DataEngineWindow
@@ -24,11 +30,11 @@ class _GuiWorkspaceCatalogController:
     def __init__(
         self,
         *,
-        workspace_session_application: WorkspaceSessionApplication,
-        flow_catalog_application: FlowCatalogApplication,
+        workspace_service: WorkspaceService,
+        catalog_query_service: CatalogPort,
     ) -> None:
-        self.workspace_session_application = workspace_session_application
-        self.flow_catalog_application = flow_catalog_application
+        self.workspace_service = workspace_service
+        self.catalog_query_service = catalog_query_service
 
     def load_flows(self, window: "DataEngineWindow", presentation: "_GuiFlowPresentationController") -> None:
         missing_message = (
@@ -36,8 +42,8 @@ class _GuiWorkspaceCatalogController:
             if not window.workspace_paths.workspace_configured
             else "No flow modules discovered."
         )
-        result = self.flow_catalog_application.load_workspace_catalog(
-            workspace_paths=window.workspace_paths,
+        result = self.catalog_query_service.load_workspace_catalog(
+            workspace_root=window.workspace_paths.workspace_root,
             current_state=window.flow_catalog_state,
             missing_message=missing_message,
         )
@@ -80,7 +86,7 @@ class _GuiWorkspaceCatalogController:
         window._rebuild_runtime_snapshot()
 
     def populate_flow_tree(self, window: "DataEngineWindow") -> None:
-        presentation = self.flow_catalog_application.build_presentation(
+        presentation = self.catalog_query_service.build_catalog_presentation(
             catalog_state=window.flow_catalog_state,
         )
         window.sidebar_flow_widgets = {}
@@ -107,9 +113,14 @@ class _GuiWorkspaceCatalogController:
         window._update_sidebar_scroll_cues()
 
     def reload_workspace_options(self, window: "DataEngineWindow") -> None:
-        window.workspace_session_state = self.workspace_session_application.refresh_session(
-            workspace_paths=window.workspace_paths,
+        discovered = self.workspace_service.discover(
+            app_root=window.workspace_paths.app_root,
+            workspace_collection_root=window.workspace_collection_root_override,
+        )
+        window.workspace_session_state = WorkspaceSessionState.from_paths(
+            window.workspace_paths,
             override_root=window.workspace_collection_root_override,
+            discovered_workspace_ids=(item.workspace_id for item in discovered),
         )
         current_id = window.workspace_session_state.current_workspace_id
         workspace_ids = window.workspace_session_state.discovered_workspace_ids
@@ -277,11 +288,11 @@ class _GuiFlowPresentationController:
     def __init__(
         self,
         *,
-        flow_catalog_application: FlowCatalogApplication,
-        history_query_service: HistoryQueryService,
+        catalog_query_service: CatalogPort,
+        history_query_service: HistoryPort,
         command_service: CommandPort,
     ) -> None:
-        self.flow_catalog_application = flow_catalog_application
+        self.catalog_query_service = catalog_query_service
         self.history_query_service = history_query_service
         self.command_service = command_service
 
@@ -291,11 +302,11 @@ class _GuiFlowPresentationController:
         return None if snapshot is None else snapshot.control
 
     def select_flow(self, window: "DataEngineWindow", flow_name: str | None) -> None:
-        window.flow_catalog_state = self.flow_catalog_application.select_flow(
+        window.flow_catalog_state = self.catalog_query_service.select_flow(
             catalog_state=window.flow_catalog_state,
             flow_name=flow_name,
         )
-        presentation = self.flow_catalog_application.build_presentation(
+        presentation = self.catalog_query_service.build_catalog_presentation(
             catalog_state=window.flow_catalog_state,
         )
         if presentation.selected_card is None:
@@ -310,7 +321,7 @@ class _GuiFlowPresentationController:
         window._refresh_log_view(force_scroll_to_bottom=True)
 
     def refresh_selection(self, window: "DataEngineWindow", card: QtFlowCard | None) -> None:
-        presentation = window.detail_application.build_selected_flow_presentation(
+        presentation = build_selected_flow_presentation(
             card=card,
             tracker=window.operation_tracker,
             flow_states=window.flow_states,
@@ -332,7 +343,7 @@ class _GuiFlowPresentationController:
 
     def refresh_action_buttons(self, window: "DataEngineWindow") -> None:
         card = window.flow_cards.get(window.selected_flow_name or "")
-        action_context = window.action_state_application.build_action_context(
+        action_context = build_operator_action_context(
             card=card,
             flow_states=window.flow_states,
             runtime_session=window.runtime_session,
@@ -545,17 +556,17 @@ class GuiFlowController:
     def __init__(
         self,
         *,
-        workspace_session_application: WorkspaceSessionApplication,
-        flow_catalog_application: FlowCatalogApplication,
-        history_query_service: HistoryQueryService,
+        workspace_service: WorkspaceService,
+        catalog_query_service: CatalogPort,
+        history_query_service: HistoryPort,
         command_service: CommandPort,
     ) -> None:
         self.workspace = _GuiWorkspaceCatalogController(
-            workspace_session_application=workspace_session_application,
-            flow_catalog_application=flow_catalog_application,
+            workspace_service=workspace_service,
+            catalog_query_service=catalog_query_service,
         )
         self.presentation = _GuiFlowPresentationController(
-            flow_catalog_application=flow_catalog_application,
+            catalog_query_service=catalog_query_service,
             history_query_service=history_query_service,
             command_service=command_service,
         )

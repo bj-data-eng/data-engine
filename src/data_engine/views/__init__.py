@@ -13,7 +13,7 @@ from data_engine.domain import (
     short_source_label,
 )
 from data_engine.views.logs import FlowLogStore
-from data_engine.views.actions import GuiActionState, TuiActionState
+from data_engine.views.actions import GuiActionState, TuiActionState, build_operator_action_context
 from data_engine.views.artifacts import ArtifactPreviewSpec, classify_artifact_preview, is_text_artifact
 from data_engine.views.flow_display import FlowRowDisplay, GroupRowDisplay
 from data_engine.views.models import (
@@ -45,6 +45,7 @@ from data_engine.views.state import (
 )
 from data_engine.views.status import WORKSPACE_UNAVAILABLE_TEXT, surface_control_status_text
 from data_engine.views.runs import RunGroupDisplay, format_raw_log_message
+from data_engine.views.selection import SelectedFlowPresentation, build_selected_flow_presentation
 from data_engine.views.text import (
     format_optional_seconds,
     pad,
@@ -63,6 +64,7 @@ __all__ = [
     "GroupRowDisplay",
     "GuiActionState",
     "ArtifactPreviewSpec",
+    "build_operator_action_context",
     "LogKind",
     "OperationDisplayState",
     "OperationRowState",
@@ -98,12 +100,14 @@ __all__ = [
     "render_run_group_lines",
     "render_selected_flow_lines",
     "run_group_row_text",
+    "SelectedFlowPresentation",
     "short_datetime",
     "short_source_label",
     "surface_control_status_text",
     "state_dot",
     "status_color_name",
     "WORKSPACE_UNAVAILABLE_TEXT",
+    "build_selected_flow_presentation",
     "qt_flow_card_from_entry",
     "qt_flow_cards_from_entries",
 ]

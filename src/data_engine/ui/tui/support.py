@@ -26,7 +26,7 @@ class TuiWindowSupportMixin:
         return self.daemon_service.is_live(paths)
 
     def _resolve_workspace_paths(self: "DataEngineTui", *, workspace_id: str | None = None):
-        return self.workspace_service.resolve_paths(
+        return self.services.workspace_service.resolve_paths(
             workspace_id=workspace_id,
             workspace_collection_root=self.workspace_collection_root_override,
         )

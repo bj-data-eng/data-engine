@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING
 
 from textual.widgets import ListView, Select, Static
 
-from data_engine.application import FlowCatalogApplication, WorkspaceSessionApplication
-from data_engine.services import CommandPort, LogService
-from data_engine.domain import FlowRunState
+from data_engine.domain import FlowRunState, OperatorSessionState, WorkspaceSessionState
+from data_engine.services import CatalogPort, CommandPort, HistoryPort, WorkspaceService
+from data_engine.views import build_selected_flow_presentation
 from data_engine.views.text import render_selected_flow_lines
 from data_engine.ui.tui.widgets import FlowListItem, GroupHeaderListItem, InfoModal, RunGroupListItem
 
@@ -22,19 +22,20 @@ class TuiFlowController:
     def __init__(
         self,
         *,
-        workspace_session_application: WorkspaceSessionApplication,
-        flow_catalog_application: FlowCatalogApplication,
-        log_service: LogService,
+        workspace_service: WorkspaceService,
+        catalog_query_service: CatalogPort,
+        history_query_service: HistoryPort,
         command_service: CommandPort,
     ) -> None:
         self.workspace = _TuiWorkspaceCatalogController(
-            workspace_session_application=workspace_session_application,
-            flow_catalog_application=flow_catalog_application,
+            workspace_service=workspace_service,
+            catalog_query_service=catalog_query_service,
             command_service=command_service,
         )
         self.presentation = _TuiFlowPresentationController(
             command_service=command_service,
-            log_service=log_service,
+            catalog_query_service=catalog_query_service,
+            history_query_service=history_query_service,
         )
 
     def action_refresh_flows(self, window: "DataEngineTui") -> None:
@@ -80,12 +81,12 @@ class _TuiWorkspaceCatalogController:
     def __init__(
         self,
         *,
-        workspace_session_application: WorkspaceSessionApplication,
-        flow_catalog_application: FlowCatalogApplication,
+        workspace_service: WorkspaceService,
+        catalog_query_service: CatalogPort,
         command_service: CommandPort,
     ) -> None:
-        self.workspace_session_application = workspace_session_application
-        self.flow_catalog_application = flow_catalog_application
+        self.workspace_service = workspace_service
+        self.catalog_query_service = catalog_query_service
         self.command_service = command_service
 
     def action_refresh_flows(self, window: "DataEngineTui", presentation: "_TuiFlowPresentationController") -> None:
@@ -117,13 +118,13 @@ class _TuiWorkspaceCatalogController:
             if not window.workspace_paths.workspace_configured
             else "No flow modules discovered."
         )
-        result = self.flow_catalog_application.load_workspace_catalog(
-            workspace_paths=window.workspace_paths,
+        result = self.catalog_query_service.load_workspace_catalog(
+            workspace_root=window.workspace_paths.workspace_root,
             current_state=window.flow_catalog_state,
             missing_message=missing_message,
         )
         window.flow_catalog_state = result.catalog_state
-        presentation = self.flow_catalog_application.build_presentation(
+        presentation = self.catalog_query_service.build_catalog_presentation(
             catalog_state=window.flow_catalog_state,
         )
         if not result.loaded:
@@ -150,9 +151,14 @@ class _TuiWorkspaceCatalogController:
         window._rebuild_runtime_snapshot()
 
     def reload_workspace_options(self, window: "DataEngineTui") -> None:
-        window.workspace_session_state = self.workspace_session_application.refresh_session(
-            workspace_paths=window.workspace_paths,
+        discovered = self.workspace_service.discover(
+            app_root=window.workspace_paths.app_root,
+            workspace_collection_root=window.workspace_collection_root_override,
+        )
+        window.workspace_session_state = WorkspaceSessionState.from_paths(
+            window.workspace_paths,
             override_root=window.workspace_collection_root_override,
+            discovered_workspace_ids=(item.workspace_id for item in discovered),
         )
         current_id = window.workspace_session_state.current_workspace_id
         workspace_ids = window.workspace_session_state.discovered_workspace_ids
@@ -179,15 +185,22 @@ class _TuiWorkspaceCatalogController:
         except Exception:
             pass
         window.runtime_binding_service.close_binding(window.runtime_binding)
-        window.workspace_paths = window.workspace_service.resolve_paths(
+        window.workspace_paths = self.workspace_service.resolve_paths(
             workspace_id=workspace_id,
             workspace_collection_root=window.workspace_collection_root_override,
         )
-        binding = self.workspace_session_application.bind_workspace(
-            workspace_paths=window.workspace_paths,
+        window.workspace_session_state = WorkspaceSessionState.from_paths(
+            window.workspace_paths,
             override_root=window.workspace_collection_root_override,
+            discovered_workspace_ids=(item.workspace_id for item in self.workspace_service.discover(
+                app_root=window.workspace_paths.app_root,
+                workspace_collection_root=window.workspace_collection_root_override,
+            )),
         )
-        window._operator_session_state = binding.operator_session
+        window._operator_session_state = OperatorSessionState.from_paths(
+            window.workspace_paths,
+            override_root=window.workspace_collection_root_override,
+        ).with_workspace(window.workspace_session_state)
         window.runtime_binding = window.runtime_binding_service.open_binding(window.workspace_paths)
         window._register_client_session()
         window.flow_cards = ()
@@ -214,10 +227,12 @@ class _TuiFlowPresentationController:
         self,
         *,
         command_service: CommandPort,
-        log_service: LogService,
+        catalog_query_service: CatalogPort,
+        history_query_service: HistoryPort,
     ) -> None:
         self.command_service = command_service
-        self.log_service = log_service
+        self.catalog_query_service = catalog_query_service
+        self.history_query_service = history_query_service
 
     @staticmethod
     def _blocked_status_text(window: "DataEngineTui") -> str:
@@ -287,7 +302,7 @@ class _TuiFlowPresentationController:
         if card is None:
             window._set_status("Select one flow first.")
             return
-        preview = window.catalog_query_service.get_flow_preview(card=card, flow_states=window.flow_states)
+        preview = self.catalog_query_service.get_flow_preview(card=card, flow_states=window.flow_states)
         lines = [card.title]
         if card.description:
             lines.extend(["", card.description])
@@ -326,8 +341,8 @@ class _TuiFlowPresentationController:
         card = window._selected_card()
         detail = window.query_one("#detail-view", Static)
         run_list = window.query_one("#log-run-list", ListView)
-        run_groups = self.log_service.runs_for_flow(window.runtime_binding.log_store, card.name) if card is not None else ()
-        presentation = window.detail_application.build_selected_flow_presentation(
+        run_groups = self.history_query_service.list_flow_runs(window.runtime_binding.log_store, flow_name=(card.name if card is not None else None))
+        presentation = build_selected_flow_presentation(
             card=card,
             tracker=window.operation_tracker,
             flow_states=window.flow_states,
@@ -355,8 +370,8 @@ class _TuiFlowPresentationController:
 
     def selected_run_group(self, window: "DataEngineTui") -> "FlowRunState | None":
         card = window._selected_card()
-        run_groups = self.log_service.runs_for_flow(window.runtime_binding.log_store, card.name) if card is not None else ()
-        presentation = window.detail_application.build_selected_flow_presentation(
+        run_groups = self.history_query_service.list_flow_runs(window.runtime_binding.log_store, flow_name=(card.name if card is not None else None))
+        presentation = build_selected_flow_presentation(
             card=card,
             tracker=window.operation_tracker,
             flow_states=window.flow_states,

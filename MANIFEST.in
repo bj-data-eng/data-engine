@@ -1,0 +1,4 @@
+prune tests
+prune data
+prune data2
+prune workspaces
