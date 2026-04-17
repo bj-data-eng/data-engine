@@ -62,6 +62,8 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.workspace_service = window.services.workspace_service
     window.action_state_application = window.services.action_state_application
     window.detail_application = window.services.detail_application
+    window.catalog_query_service = window.services.catalog_query_service
+    window.history_query_service = window.services.history_query_service
     window.daemon_service = window.services.daemon_service
     window.daemon_state_service = window.services.daemon_state_service
     window.runtime_application = window.services.runtime_application
@@ -81,13 +83,12 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.flow_controller = GuiFlowController(
         workspace_session_application=window.workspace_session_application,
         flow_catalog_application=window.flow_catalog_application,
-        log_service=window.log_service,
+        history_query_service=window.history_query_service,
         reset_service=window.reset_service,
     )
     window.runtime_controller = GuiRuntimeController(
         runtime_application=window.runtime_application,
         daemon_service=window.daemon_service,
-        log_service=window.log_service,
         runtime_state_service=window.runtime_state_service,
     )
     window.theme_name = window.theme_service.resolve_name(theme_name)
@@ -121,6 +122,7 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.manual_flow_stopping_groups: set[str | None] = set()
     window.operation_row_widgets = []
     window.operation_tracker = OperationSessionState.empty()
+    window.workspace_snapshot = None
     window.operation_flash_timers: list[QTimer] = []
     window.sidebar_flow_widgets: dict[str, QFrame] = {}
     window.sidebar_group_widgets: dict[str, QFrame] = {}

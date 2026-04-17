@@ -28,10 +28,12 @@ from data_engine.platform.theme import (
     toggle_theme_name,
 )
 from data_engine.services import (
+    CatalogQueryService,
     DaemonService,
     DaemonStateService,
     FlowCatalogService,
     FlowExecutionService,
+    HistoryQueryService,
     LedgerService,
     LogService,
     RuntimeHistoryService,
@@ -55,6 +57,8 @@ class GuiServices:
     workspace_session_application: WorkspaceSessionApplication
     action_state_application: ActionStateApplication
     detail_application: DetailApplication
+    catalog_query_service: CatalogQueryService
+    history_query_service: HistoryQueryService
     flow_catalog_service: FlowCatalogService
     flow_catalog_application: FlowCatalogApplication
     flow_execution_service: FlowExecutionService
@@ -98,6 +102,14 @@ class GuiDependencyFactories:
     runtime_application_factory: Callable[[DaemonService, DaemonStateService, SharedStateService], RuntimeApplication]
     control_application_factory: Callable[[RuntimeApplication, DaemonStateService], OperatorControlApplication]
     theme_service_factory: Callable[[object, str, object, object, object, object], ThemeService]
+    catalog_query_service_factory: Callable[[FlowCatalogService], CatalogQueryService] = field(
+        default_factory=lambda: (
+            lambda flow_catalog_service: CatalogQueryService(flow_catalog_service=flow_catalog_service)
+        )
+    )
+    history_query_service_factory: Callable[[LogService], HistoryQueryService] = field(
+        default_factory=lambda: (lambda log_service: HistoryQueryService(log_service=log_service))
+    )
     workspace_provisioning_service_factory: Callable[[], WorkspaceProvisioningService] = field(
         default=WorkspaceProvisioningService
     )
@@ -192,6 +204,8 @@ def _gui_services_from_kwargs(service_kwargs: dict[str, object]) -> GuiServices:
         workspace_session_application=service_kwargs["workspace_session_application"],
         action_state_application=service_kwargs["action_state_application"],
         detail_application=service_kwargs["detail_application"],
+        catalog_query_service=service_kwargs["catalog_query_service"],
+        history_query_service=service_kwargs["history_query_service"],
         flow_catalog_service=service_kwargs["flow_catalog_service"],
         flow_catalog_application=service_kwargs["flow_catalog_application"],
         flow_execution_service=service_kwargs["flow_execution_service"],
@@ -218,6 +232,8 @@ def build_gui_service_kwargs(
     workspace_session_application: WorkspaceSessionApplication | None = None,
     action_state_application: ActionStateApplication | None = None,
     detail_application: DetailApplication | None = None,
+    catalog_query_service: CatalogQueryService | None = None,
+    history_query_service: HistoryQueryService | None = None,
     flow_catalog_service: FlowCatalogService | None = None,
     flow_catalog_application: FlowCatalogApplication | None = None,
     flow_execution_service: FlowExecutionService | None = None,
@@ -277,6 +293,7 @@ def build_gui_service_kwargs(
     action_state_application = action_state_application or factories.action_state_application_factory()
     detail_application = detail_application or factories.detail_application_factory()
     flow_catalog_service = flow_catalog_service or factories.flow_catalog_service_factory(discover_definitions_func)
+    catalog_query_service = catalog_query_service or factories.catalog_query_service_factory(flow_catalog_service)
     flow_catalog_application = flow_catalog_application or factories.flow_catalog_application_factory(flow_catalog_service)
     flow_execution_service = flow_execution_service or factories.flow_execution_service_factory(load_flow_func)
     daemon_service = daemon_service or factories.daemon_service_factory(
@@ -288,6 +305,7 @@ def build_gui_service_kwargs(
     daemon_state_service = daemon_state_service or factories.daemon_state_service_factory()
     ledger_service = ledger_service or factories.ledger_service_factory()
     log_service = log_service or factories.log_service_factory()
+    history_query_service = history_query_service or factories.history_query_service_factory(log_service)
     runtime_history_service = runtime_history_service or factories.runtime_history_service_factory()
     runtime_binding_service = runtime_binding_service or factories.runtime_binding_service_factory(
         ledger_service,
@@ -325,6 +343,8 @@ def build_gui_service_kwargs(
         "workspace_session_application": workspace_session_application,
         "action_state_application": action_state_application,
         "detail_application": detail_application,
+        "catalog_query_service": catalog_query_service,
+        "history_query_service": history_query_service,
         "flow_catalog_service": flow_catalog_service,
         "flow_catalog_application": flow_catalog_application,
         "flow_execution_service": flow_execution_service,

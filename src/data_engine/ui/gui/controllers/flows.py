@@ -8,12 +8,11 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QTimer
 
 from data_engine.application import FlowCatalogApplication, WorkspaceSessionApplication
-from data_engine.services import LogService
+from data_engine.services import HistoryQueryService
 from data_engine.services.reset import ResetService
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.platform.instrumentation import timed_operation
 from data_engine.ui.gui.helpers import start_worker_thread
-from data_engine.domain import WorkspaceControlState
 from data_engine.views import GuiActionState, QtFlowCard, surface_control_status_text
 
 if TYPE_CHECKING:
@@ -280,12 +279,17 @@ class _GuiFlowPresentationController:
         self,
         *,
         flow_catalog_application: FlowCatalogApplication,
-        log_service: LogService,
+        history_query_service: HistoryQueryService,
         reset_service: ResetService,
     ) -> None:
         self.flow_catalog_application = flow_catalog_application
-        self.log_service = log_service
+        self.history_query_service = history_query_service
         self.reset_service = reset_service
+
+    @staticmethod
+    def _control_snapshot(window: "DataEngineWindow"):
+        snapshot = getattr(window, "workspace_snapshot", None)
+        return None if snapshot is None else snapshot.control
 
     def select_flow(self, window: "DataEngineWindow", flow_name: str | None) -> None:
         window.flow_catalog_state = self.flow_catalog_application.select_flow(
@@ -336,11 +340,16 @@ class _GuiFlowPresentationController:
             flow_groups_by_name={flow_name: flow_card.group for flow_name, flow_card in window.flow_cards.items()},
             active_flow_states=window._ACTIVE_FLOW_STATES,
             has_logs=bool(
-                card is not None and self.log_service.entries_for_flow(window.runtime_binding.log_store, card.name)
+                card is not None
+                and self.history_query_service.list_run_groups(
+                    window.runtime_binding.log_store,
+                    flow_name=card.name,
+                    limit=1,
+                )
             ),
             has_automated_flows=any(flow_card.valid and flow_card.mode in {"poll", "schedule"} for flow_card in window.flow_cards.values()),
             workspace_available=window._has_authored_workspace(),
-            local_request_pending=window.workspace_control_state.local_request_pending,
+            local_request_pending=bool(self._control_snapshot(window) and self._control_snapshot(window).request_pending),
         )
         action_state = GuiActionState.from_context(action_context)
         selected_manual_running = bool(
@@ -411,15 +420,9 @@ class _GuiFlowPresentationController:
         window.flow_run_button.update()
 
     def refresh_lease_status(self, window: "DataEngineWindow") -> None:
-        if window.workspace_control_state == WorkspaceControlState.empty():
-            snapshot = window.daemon_state_service.sync(window.runtime_binding.daemon_manager)
-            window.workspace_control_state = window.daemon_state_service.control_state(
-                window.runtime_binding.daemon_manager,
-                snapshot,
-                daemon_startup_in_progress=window._daemon_startup_in_progress,
-            )
+        control = self._control_snapshot(window)
         status_text = surface_control_status_text(
-            window.workspace_control_state.control_status_text,
+            None if control is None else control.control_status_text,
             empty_flow_message=window.empty_flow_message,
         )
         if not status_text:
@@ -544,7 +547,7 @@ class GuiFlowController:
         *,
         workspace_session_application: WorkspaceSessionApplication,
         flow_catalog_application: FlowCatalogApplication,
-        log_service: LogService,
+        history_query_service: HistoryQueryService,
         reset_service: ResetService,
     ) -> None:
         self.workspace = _GuiWorkspaceCatalogController(
@@ -553,7 +556,7 @@ class GuiFlowController:
         )
         self.presentation = _GuiFlowPresentationController(
             flow_catalog_application=flow_catalog_application,
-            log_service=log_service,
+            history_query_service=history_query_service,
             reset_service=reset_service,
         )
 

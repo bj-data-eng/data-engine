@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from data_engine.domain import StepOutputIndex, WorkspaceControlState
+from data_engine.domain import StepOutputIndex
 from data_engine.platform.instrumentation import maybe_start_viztracer
 from data_engine.ui.gui.helpers import register_client_session
 from data_engine.ui.gui.presenters.workspace_settings import refresh_workspace_root_controls
@@ -82,7 +82,7 @@ def rebind_workspace_context(
         process_name=f"gui:{window.workspace_paths.workspace_id}",
     )
     window.daemon_status = window.daemon_status.empty()
-    window.workspace_control_state = WorkspaceControlState.empty()
+    window.workspace_snapshot = None
     window._daemon_startup_in_progress = False
     window._daemon_sync_in_progress = False
     window._daemon_sync_pending = False

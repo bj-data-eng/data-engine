@@ -15,6 +15,7 @@ from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
 from data_engine.domain import FlowCatalogEntry, RuntimeSessionState, WorkspaceControlState
 from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.services import DaemonService
+from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, WorkspaceSnapshot
 from data_engine.application.catalog import FlowCatalogLoadResult, FlowCatalogPresentation
 from data_engine.ui.tui.bootstrap import build_tui_services
 from data_engine.ui.tui.app import FlowListItem
@@ -29,6 +30,21 @@ from data_engine.views.logs import FlowLogStore
 
 
 resolve_workspace_paths = RuntimeLayoutPolicy().resolve_paths
+
+
+def _workspace_snapshot_for_test(
+    workspace_id: str,
+    *,
+    control: ControlSnapshot | None = None,
+) -> WorkspaceSnapshot:
+    return WorkspaceSnapshot(
+        workspace_id=workspace_id,
+        version=0,
+        control=control or ControlSnapshot(state="available"),
+        engine=EngineSnapshot(state="idle"),
+        flows={},
+        active_runs={},
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -730,14 +746,13 @@ async def test_tui_sync_daemon_state_stops_pinging_when_workspace_root_is_missin
     missing_root = tmp_path / "missing_workspace"
     app.workspace_paths = resolve_workspace_paths(workspace_root=missing_root)
     app.runtime_session = replace(app.runtime_session, runtime_active=True, workspace_owned=False)
-    app.workspace_control_state = replace(app.workspace_control_state, blocked_status_text="stale")
 
     async with app.run_test():
         app._sync_daemon_state()
 
         assert live_calls == []
         assert app.runtime_session == RuntimeSessionState.empty()
-        assert app.workspace_control_state == WorkspaceControlState.empty()
+        assert app.workspace_snapshot is None
 
 
 def test_tui_daemon_startup_uses_verbose_fallback_when_error_text_is_blank():

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from data_engine.views.state import artifact_key_for_operation as artifact_key_for_operation_helper
 from data_engine.views.state import capture_step_outputs as capture_step_outputs_helper
 from data_engine.views.state import is_inspectable_operation as is_inspectable_operation_helper
-from data_engine.domain import ConfigPreviewState
+from data_engine.domain import ConfigPreviewState, FlowSummaryRow, FlowSummaryState
 from data_engine.ui.gui.dialogs import show_config_preview as show_config_preview_dialog
 from data_engine.ui.gui.dialogs import show_output_preview as show_output_preview_dialog
 from data_engine.ui.gui.preview_models import ConfigPreviewRequest, OutputPreviewRequest
@@ -67,7 +67,12 @@ def show_output_preview(window: "DataEngineWindow", operation_name: str, output_
 
 def show_config_preview(window: "DataEngineWindow") -> None:
     card = window.flow_cards.get(window.selected_flow_name or "")
-    preview_state = ConfigPreviewState.from_flow(card, window.flow_states)
+    preview = window.catalog_query_service.get_flow_preview(card=card, flow_states=window.flow_states)
+    preview_state = ConfigPreviewState(
+        title=card.title if card is not None else "No flow selected",
+        description=(card.description or "No flow description provided.") if card is not None else "",
+        summary=FlowSummaryState(rows=tuple(FlowSummaryRow(label=label, value=value) for label, value in preview.rows)),
+    )
     window.config_preview_dialog = show_config_preview_dialog(window, ConfigPreviewRequest(preview=preview_state))
 
 

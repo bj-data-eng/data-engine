@@ -9,7 +9,6 @@ from typing import Any, Literal, Protocol
 
 from data_engine.application.runtime import RuntimeApplication
 from data_engine.domain import (
-    DaemonStatusState,
     FlowRunState,
     OperationFlowState,
     OperationSessionState,
@@ -34,6 +33,9 @@ class ControlSnapshot:
     state: ControlAvailability
     leased_by_machine_id: str | None = None
     request_pending: bool = False
+    control_status_text: str | None = None
+    blocked_status_text: str = "Takeover available."
+    takeover_remaining_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ class EngineSnapshot:
     """Live engine state for one workspace."""
 
     state: EngineStateName
+    daemon_live: bool = False
     stop_requested: bool = False
     active_flow_names: tuple[str, ...] = ()
 
@@ -147,21 +150,6 @@ class WorkspaceRuntimeProjection:
     step_output_index: StepOutputIndex
 
 
-@dataclass(frozen=True)
-class WorkspaceSurfaceState:
-    """Transitional surface bundle used while UIs migrate onto WorkspaceSnapshot."""
-
-    snapshot: WorkspaceSnapshot
-    daemon_live: bool
-    daemon_status: DaemonStatusState
-    workspace_control_state: WorkspaceControlState
-    runtime_session: RuntimeSessionState
-    operation_tracker: OperationSessionState
-    flow_states: dict[str, str]
-    active_runtime_flow_names: tuple[str, ...]
-    step_output_index: StepOutputIndex
-
-
 class RuntimeStateService:
     """Own the live-state read boundary and transitional surface projection bundle."""
 
@@ -202,6 +190,9 @@ class RuntimeStateService:
             state=state,
             leased_by_machine_id=runtime_session.leased_by_machine_id,
             request_pending=control_state.local_request_pending,
+            control_status_text=control_state.control_status_text,
+            blocked_status_text=control_state.blocked_status_text,
+            takeover_remaining_seconds=control_state.takeover_remaining_seconds,
         )
 
     @staticmethod
@@ -221,6 +212,7 @@ class RuntimeStateService:
             state = "idle"
         return EngineSnapshot(
             state=state,
+            daemon_live=daemon_live,
             stop_requested=runtime_session.runtime_stopping,
             active_flow_names=runtime_session.active_runtime_flow_names,
         )
@@ -592,64 +584,37 @@ class RuntimeStateService:
             now=now,
         )
         daemon_live = bool(getattr(sync_state.snapshot, "live", False))
+        return self.snapshot_from_projection(
+            binding=binding,
+            flow_cards=flow_cards_tuple,
+            projection=projection,
+            workspace_control_state=sync_state.workspace_control_state,
+            daemon_live=daemon_live,
+            daemon_startup_in_progress=daemon_startup_in_progress,
+        )
+
+    def snapshot_from_projection(
+        self,
+        *,
+        binding: WorkspaceRuntimeBinding,
+        flow_cards: Iterable[FlowCatalogLike],
+        projection: WorkspaceRuntimeProjection,
+        workspace_control_state: WorkspaceControlState,
+        daemon_live: bool,
+        daemon_startup_in_progress: bool = False,
+    ) -> WorkspaceSnapshot:
+        """Build one authoritative workspace snapshot from an explicit projection."""
+        flow_cards_tuple = tuple(flow_cards)
         return self._build_workspace_snapshot(
             binding=binding,
             flow_cards=flow_cards_tuple,
             runtime_session=projection.runtime_session,
-            workspace_control_state=sync_state.workspace_control_state,
+            workspace_control_state=workspace_control_state,
             daemon_live=daemon_live,
             daemon_startup_in_progress=daemon_startup_in_progress,
             operation_tracker=projection.operation_tracker,
             flow_states=projection.flow_states,
         )
-
-    def current_surface_state(
-        self,
-        binding: WorkspaceRuntimeBinding,
-        *,
-        runtime_application: RuntimeApplication,
-        flow_cards: Iterable[FlowCatalogLike],
-        now: float,
-        daemon_startup_in_progress: bool = False,
-    ) -> WorkspaceSurfaceState:
-        """Return the transitional UI surface bundle built from the live workspace snapshot."""
-        flow_cards_tuple = tuple(flow_cards)
-        sync_state = self.runtime_binding_service.sync_runtime_state(
-            binding,
-            runtime_application=runtime_application,
-            flow_cards=flow_cards_tuple,
-            daemon_startup_in_progress=daemon_startup_in_progress,
-        )
-        projection = self.rebuild_projection(
-            binding,
-            runtime_application=runtime_application,
-            flow_cards=flow_cards_tuple,
-            runtime_session=sync_state.runtime_session,
-            now=now,
-        )
-        daemon_live = bool(getattr(sync_state.snapshot, "live", False))
-        snapshot = self._build_workspace_snapshot(
-            binding=binding,
-            flow_cards=flow_cards_tuple,
-            runtime_session=projection.runtime_session,
-            workspace_control_state=sync_state.workspace_control_state,
-            daemon_live=daemon_live,
-            daemon_startup_in_progress=daemon_startup_in_progress,
-            operation_tracker=projection.operation_tracker,
-            flow_states=projection.flow_states,
-        )
-        return WorkspaceSurfaceState(
-            snapshot=snapshot,
-            daemon_live=daemon_live,
-            daemon_status=sync_state.daemon_status,
-            workspace_control_state=sync_state.workspace_control_state,
-            runtime_session=projection.runtime_session,
-            operation_tracker=projection.operation_tracker,
-            flow_states=projection.flow_states,
-            active_runtime_flow_names=projection.active_runtime_flow_names,
-            step_output_index=projection.step_output_index,
-        )
-
 
 __all__ = [
     "ControlSnapshot",
@@ -663,5 +628,4 @@ __all__ = [
     "RuntimeStateSubscriber",
     "WorkspaceRuntimeProjection",
     "WorkspaceSnapshot",
-    "WorkspaceSurfaceState",
 ]

@@ -23,6 +23,7 @@ from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_models import DiscoveredWorkspace, machine_id_text
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
+from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, WorkspaceSnapshot
 from data_engine.services import DaemonService
 from data_engine.services.workspace_provisioning import WorkspaceProvisioningResult
 from data_engine.ui.gui.bootstrap import build_gui_services
@@ -39,6 +40,21 @@ from data_engine.ui.gui.theme import stylesheet, theme_button_text, toggle_theme
 
 
 resolve_workspace_paths = RuntimeLayoutPolicy().resolve_paths
+
+
+def _workspace_snapshot_for_test(
+    workspace_id: str,
+    *,
+    control: ControlSnapshot | None = None,
+) -> WorkspaceSnapshot:
+    return WorkspaceSnapshot(
+        workspace_id=workspace_id,
+        version=0,
+        control=control or ControlSnapshot(state="available"),
+        engine=EngineSnapshot(state="idle"),
+        flows={},
+        active_runs={},
+    )
 
 
 @pytest.fixture
@@ -1435,6 +1451,16 @@ def test_lease_status_shows_countdown_and_disables_run_controls(qapp, monkeypatc
     )
     try:
         window.runtime_session = replace(window.runtime_session, workspace_owned=False, leased_by_machine_id="other-host")
+        window.workspace_snapshot = _workspace_snapshot_for_test(
+            window.workspace_paths.workspace_id,
+            control=ControlSnapshot(
+                state="leased",
+                leased_by_machine_id="other-host",
+                control_status_text="other-host has control · takeover available in 30s",
+                blocked_status_text="other-host currently has control of this workspace.",
+                takeover_remaining_seconds=30,
+            ),
+        )
         window._refresh_lease_status()
         window._refresh_summary()
         window._refresh_action_buttons()
@@ -1453,17 +1479,13 @@ def test_lease_status_shows_overdue_for_local_checkpoint_when_daemon_is_down(qap
     window = _make_window()
     try:
         del monkeypatch
-        window._daemon_startup_in_progress = False
-        window.workspace_control_state = WorkspaceControlState.empty()
-        window._daemon_manager.snapshot = WorkspaceDaemonSnapshot(
-            live=False,
-            workspace_owned=True,
-            leased_by_machine_id="example-machine",
-            runtime_active=False,
-            runtime_stopping=False,
-            manual_runs=(),
-            last_checkpoint_at_utc=(datetime.now(UTC) - timedelta(seconds=45)).isoformat(),
-            source="lease",
+        window.workspace_snapshot = _workspace_snapshot_for_test(
+            window.workspace_paths.workspace_id,
+            control=ControlSnapshot(
+                state="available",
+                control_status_text="Local engine is not responding",
+                blocked_status_text="Takeover available.",
+            ),
         )
 
         window._refresh_lease_status()
@@ -1644,17 +1666,13 @@ def test_lease_status_shows_refresh_due_instead_of_zero_seconds(qapp, monkeypatc
     window = _make_window()
     try:
         del monkeypatch
-        window._daemon_startup_in_progress = False
-        window.workspace_control_state = WorkspaceControlState.empty()
-        window._daemon_manager.snapshot = WorkspaceDaemonSnapshot(
-            live=True,
-            workspace_owned=True,
-            leased_by_machine_id="example-machine",
-            runtime_active=False,
-            runtime_stopping=False,
-            manual_runs=(),
-            last_checkpoint_at_utc=(datetime.now(UTC) - timedelta(seconds=45)).isoformat(),
-            source="daemon",
+        window.workspace_snapshot = _workspace_snapshot_for_test(
+            window.workspace_paths.workspace_id,
+            control=ControlSnapshot(
+                state="available",
+                control_status_text="This Workstation has control",
+                blocked_status_text="Takeover available.",
+            ),
         )
 
         window._refresh_lease_status()
@@ -1681,10 +1699,13 @@ def test_show_event_reveals_action_bar_controls_after_startup_paint(qapp, monkey
 def test_refresh_lease_status_uses_existing_control_state_without_syncing_again(qapp, monkeypatch):
     window = _make_window()
     try:
-        window.workspace_control_state = WorkspaceControlState(
-            daemon_status=window.daemon_status.empty(),
-            control_status_text="This Workstation has control",
-            blocked_status_text="Takeover available.",
+        window.workspace_snapshot = _workspace_snapshot_for_test(
+            window.workspace_paths.workspace_id,
+            control=ControlSnapshot(
+                state="available",
+                control_status_text="This Workstation has control",
+                blocked_status_text="Takeover available.",
+            ),
         )
 
         monkeypatch.setattr(
@@ -1741,7 +1762,6 @@ def test_gui_sync_from_daemon_skips_liveness_when_workspace_root_is_missing(qapp
     missing_root = tmp_path / "missing_workspace"
     window.workspace_paths = resolve_workspace_paths(workspace_root=missing_root)
     window.runtime_session = replace(window.runtime_session, runtime_active=True, workspace_owned=False)
-    window.workspace_control_state = replace(window.workspace_control_state, blocked_status_text="stale")
     del monkeypatch
 
     try:
@@ -1749,7 +1769,7 @@ def test_gui_sync_from_daemon_skips_liveness_when_workspace_root_is_missing(qapp
 
         assert live_calls == []
         assert window.runtime_session == RuntimeSessionState.empty()
-        assert window.workspace_control_state == WorkspaceControlState.empty()
+        assert window.workspace_snapshot is None
     finally:
         _dispose_window(qapp, window)
 

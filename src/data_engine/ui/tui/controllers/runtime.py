@@ -9,8 +9,8 @@ from textual.css.query import NoMatches
 from textual.widgets import Button, ListView, Select, Static
 
 from data_engine.application import RuntimeApplication
-from data_engine.services import DaemonService, LogService, RuntimeStateService
-from data_engine.domain import RuntimeSessionState, WorkspaceControlState
+from data_engine.services import DaemonService, HistoryQueryService, RuntimeStateService
+from data_engine.domain import RuntimeSessionState
 from data_engine.views import TuiActionState, WORKSPACE_UNAVAILABLE_TEXT, surface_control_status_text
 from data_engine.ui.tui.widgets import FlowListItem
 
@@ -26,12 +26,12 @@ class TuiRuntimeController:
         *,
         runtime_application: RuntimeApplication,
         daemon_service: DaemonService,
-        log_service: LogService,
+        history_query_service: HistoryQueryService,
         runtime_state_service: RuntimeStateService,
     ) -> None:
         self.runtime_application = runtime_application
         self.daemon_service = daemon_service
-        self.log_service = log_service
+        self.history_query_service = history_query_service
         self.runtime_state_service = runtime_state_service
 
     def refresh_flow_list_items(self, window: "DataEngineTui") -> None:
@@ -39,6 +39,13 @@ class TuiRuntimeController:
         for child in list_view.children:
             if isinstance(child, FlowListItem):
                 child.refresh_view(window.flow_states.get(child.card.name, child.card.state))
+
+    @staticmethod
+    def _blocked_status_text(window: "DataEngineTui") -> str:
+        snapshot = getattr(window, "workspace_snapshot", None)
+        if snapshot is None:
+            return "Takeover available."
+        return snapshot.control.blocked_status_text
 
     def refresh_buttons(self, window: "DataEngineTui") -> None:
         action_state = TuiActionState.from_context(
@@ -50,7 +57,11 @@ class TuiRuntimeController:
                 active_flow_states=window._ACTIVE_FLOW_STATES,
                 has_logs=bool(
                     window.selected_flow_name is not None
-                    and self.log_service.entries_for_flow(window.runtime_binding.log_store, window.selected_flow_name)
+                    and self.history_query_service.list_run_groups(
+                        window.runtime_binding.log_store,
+                        flow_name=window.selected_flow_name,
+                        limit=1,
+                    )
                 ),
                 has_automated_flows=any(card.valid and card.mode in {"poll", "schedule"} for card in window.flow_cards),
                 workspace_available=window._has_authored_workspace(),
@@ -68,8 +79,8 @@ class TuiRuntimeController:
 
     def sync_daemon_state(self, window: "DataEngineTui") -> None:
         if not window._has_authored_workspace():
+            window.workspace_snapshot = None
             window.runtime_session = RuntimeSessionState.empty()
-            window.workspace_control_state = WorkspaceControlState.empty()
             window.flow_controller.reload_workspace_options(window)
             window.flow_controller.load_flows(window)
             try:
@@ -77,34 +88,46 @@ class TuiRuntimeController:
             except NoMatches:
                 return
             return
-        surface_state = self.runtime_state_service.current_surface_state(
+        sync_state = window.runtime_binding_service.sync_runtime_state(
+            window.runtime_binding,
+            runtime_application=self.runtime_application,
+            flow_cards=tuple(window.flow_cards),
+            daemon_startup_in_progress=window._daemon_startup_in_progress,
+        )
+        projection = self.runtime_state_service.rebuild_projection(
             window.runtime_binding,
             runtime_application=self.runtime_application,
             flow_cards=window.flow_cards,
+            runtime_session=sync_state.runtime_session,
             now=window._monotonic(),
+        )
+        window.workspace_snapshot = self.runtime_state_service.snapshot_from_projection(
+            binding=window.runtime_binding,
+            flow_cards=window.flow_cards,
+            projection=projection,
+            workspace_control_state=sync_state.workspace_control_state,
+            daemon_live=bool(getattr(sync_state.snapshot, "live", False)),
             daemon_startup_in_progress=window._daemon_startup_in_progress,
         )
-        window.workspace_snapshot = surface_state.snapshot
-        if not surface_state.daemon_live:
+        if not window.workspace_snapshot.engine.daemon_live:
             self.ensure_daemon_started(window)
-        window.runtime_session = surface_state.runtime_session
-        window.workspace_control_state = surface_state.workspace_control_state
+        window.runtime_session = projection.runtime_session
         try:
             window.query_one("#control-status", Static).update(
-                surface_control_status_text(window.workspace_control_state.control_status_text)
+                surface_control_status_text(window.workspace_snapshot.control.control_status_text)
             )
         except NoMatches:
             return
-        window.operation_tracker = surface_state.operation_tracker
+        window.operation_tracker = projection.operation_tracker
         refresh_plan = self.runtime_application.plan_flow_state_refresh(
             previous_states=window.flow_states,
-            next_states=surface_state.flow_states,
+            next_states=projection.flow_states,
             runtime_session=window.runtime_session,
         )
         states_changed = refresh_plan.signature != window._last_rendered_flow_signature
         window.flow_states = refresh_plan.flow_states
         if not window.runtime_session.workspace_owned:
-            window._set_status(window.workspace_control_state.blocked_status_text)
+            window._set_status(self._blocked_status_text(window))
         if states_changed:
             self.refresh_flow_list_items(window)
             window._last_rendered_flow_signature = refresh_plan.signature
@@ -170,7 +193,7 @@ class TuiRuntimeController:
         states_changed = refresh_plan.signature != window._last_rendered_flow_signature
         window.flow_states = refresh_plan.flow_states
         if not window.runtime_session.workspace_owned:
-            window._set_status(window.workspace_control_state.blocked_status_text)
+            window._set_status(self._blocked_status_text(window))
         if states_changed:
             self.refresh_flow_list_items(window)
             window._last_rendered_flow_signature = refresh_plan.signature

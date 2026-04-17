@@ -7,7 +7,7 @@ from queue import Queue
 from uuid import uuid4
 from typing import TYPE_CHECKING
 
-from data_engine.domain import FlowLogEntry, OperationSessionState, OperatorSessionState, WorkspaceControlState
+from data_engine.domain import FlowLogEntry, OperationSessionState, OperatorSessionState
 from data_engine.platform.workspace_models import DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR
 from data_engine.ui.tui.bootstrap import TuiServices, build_tui_services, default_tui_service_kwargs
 from data_engine.ui.tui.controllers import TuiFlowController, TuiRuntimeController
@@ -47,7 +47,6 @@ def build_initial_tui_app_state(
         "workspace_paths": workspace_paths,
         "operator_session_state": operator_session_state,
         "workspace_session_state": workspace_session_state,
-        "workspace_control_state": WorkspaceControlState.empty(),
         "operation_tracker": OperationSessionState.empty(),
         "runtime_binding": runtime_binding,
         "client_session_id": client_session_id,
@@ -63,6 +62,8 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
     app.workspace_service = app.services.workspace_service
     app.action_state_application = app.services.action_state_application
     app.detail_application = app.services.detail_application
+    app.catalog_query_service = app.services.catalog_query_service
+    app.history_query_service = app.services.history_query_service
     app.daemon_service = app.services.daemon_service
     app.daemon_state_service = app.services.daemon_state_service
     app.ledger_service = app.services.ledger_service
@@ -85,7 +86,7 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
     app.runtime_controller = TuiRuntimeController(
         runtime_application=app.services.runtime_application,
         daemon_service=app.daemon_service,
-        log_service=app.log_service,
+        history_query_service=app.history_query_service,
         runtime_state_service=app.runtime_state_service,
     )
     app.theme_name = app.theme_service.resolve_name(theme_name)
@@ -102,9 +103,9 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
     app.runtime_binding = initial_state["runtime_binding"]
     app.client_session_id = initial_state["client_session_id"]
     app.operation_tracker = initial_state["operation_tracker"]
+    app.workspace_snapshot = None
     app.log_queue: Queue[FlowLogEntry] = Queue()
     app.log_handler = QueueLogHandler(app.log_queue)
-    app.workspace_control_state = initial_state["workspace_control_state"]
     app._last_daemon_spawn_attempt = 0.0
     app._daemon_startup_in_progress = False
     app._workspace_switch_suppressed = False

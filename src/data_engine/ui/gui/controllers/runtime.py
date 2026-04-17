@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from data_engine.application import RuntimeApplication
-from data_engine.services import DaemonService, LogService, RuntimeStateService
-from data_engine.domain import DaemonStatusState, RuntimeSessionState, WorkspaceControlState
+from data_engine.services import DaemonService, RuntimeStateService
+from data_engine.domain import DaemonStatusState, RuntimeSessionState
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.platform.instrumentation import append_timing_line, timed_operation
 from data_engine.ui.gui.helpers import start_worker_thread
@@ -22,12 +22,10 @@ class GuiRuntimeController:
         *,
         runtime_application: RuntimeApplication,
         daemon_service: DaemonService,
-        log_service: LogService,
         runtime_state_service: RuntimeStateService,
     ) -> None:
         self.runtime_application = runtime_application
         self.daemon_service = daemon_service
-        self.log_service = log_service
         self.runtime_state_service = runtime_state_service
 
     def _apply_runtime_projection(self, window: "DataEngineWindow", *, runtime_session, operation_tracker, flow_states, step_output_index) -> None:
@@ -60,6 +58,13 @@ class GuiRuntimeController:
         window._refresh_log_view()
         window.flow_controller.refresh_action_buttons(window)
 
+    @staticmethod
+    def _blocked_status_text(window: "DataEngineWindow") -> str:
+        snapshot = getattr(window, "workspace_snapshot", None)
+        if snapshot is None:
+            return "Takeover available."
+        return snapshot.control.blocked_status_text
+
     def sync_from_daemon(self, window: "DataEngineWindow") -> None:
         if window._daemon_sync_in_progress:
             window._daemon_sync_pending = True
@@ -74,30 +79,42 @@ class GuiRuntimeController:
                 fields={"workspace": window.workspace_paths.workspace_id},
             ):
                 if not window._has_authored_workspace():
+                    window.workspace_snapshot = None
                     window.daemon_status = DaemonStatusState.empty()
-                    window.workspace_control_state = WorkspaceControlState.empty()
                     window.runtime_session = RuntimeSessionState.empty()
                     window.flow_controller.reload_workspace_options(window)
                     window.flow_controller.load_flows(window)
                     return
-                surface_state = self.runtime_state_service.current_surface_state(
+                sync_state = window.runtime_binding_service.sync_runtime_state(
+                    window.runtime_binding,
+                    runtime_application=self.runtime_application,
+                    flow_cards=tuple(window.flow_cards.values()),
+                    daemon_startup_in_progress=window._daemon_startup_in_progress,
+                )
+                projection = self.runtime_state_service.rebuild_projection(
                     window.runtime_binding,
                     runtime_application=self.runtime_application,
                     flow_cards=window.flow_cards.values(),
+                    runtime_session=sync_state.runtime_session,
                     now=window._monotonic(),
+                )
+                window.workspace_snapshot = self.runtime_state_service.snapshot_from_projection(
+                    binding=window.runtime_binding,
+                    flow_cards=window.flow_cards.values(),
+                    projection=projection,
+                    workspace_control_state=sync_state.workspace_control_state,
+                    daemon_live=bool(getattr(sync_state.snapshot, "live", False)),
                     daemon_startup_in_progress=window._daemon_startup_in_progress,
                 )
-                if not surface_state.daemon_live and window._auto_daemon_enabled:
+                if not window.workspace_snapshot.engine.daemon_live and window._auto_daemon_enabled:
                     self.ensure_daemon_started(window)
-                window.workspace_snapshot = surface_state.snapshot
-                window.daemon_status = surface_state.daemon_status
-                window.workspace_control_state = surface_state.workspace_control_state
+                window.daemon_status = sync_state.daemon_status
                 self._apply_runtime_projection(
                     window,
-                    runtime_session=surface_state.runtime_session,
-                    operation_tracker=surface_state.operation_tracker,
-                    flow_states=surface_state.flow_states,
-                    step_output_index=surface_state.step_output_index,
+                    runtime_session=projection.runtime_session,
+                    operation_tracker=projection.operation_tracker,
+                    flow_states=projection.flow_states,
+                    step_output_index=projection.step_output_index,
                 )
         finally:
             window._daemon_sync_in_progress = False
@@ -222,7 +239,7 @@ class GuiRuntimeController:
                 "selected_flow_valid": bool(card is not None and card.valid),
                 "selected_flow_group": card.group if card is not None else None,
                 "selected_flow_group_active": bool(card is not None and self.is_group_active(window, card.group)) if card is not None else False,
-                "blocked_status_text": window.workspace_control_state.blocked_status_text,
+                "blocked_status_text": self._blocked_status_text(window),
                 "timeout": 5.0,
             },
             card.name if card is not None else None,
@@ -256,7 +273,7 @@ class GuiRuntimeController:
             "paths": window.workspace_paths,
             "runtime_session": window.runtime_session,
             "has_automated_flows": any(card.valid and card.mode in {"poll", "schedule"} for card in window.flow_cards.values()),
-            "blocked_status_text": window.workspace_control_state.blocked_status_text,
+            "blocked_status_text": self._blocked_status_text(window),
             "timeout": 5.0,
         }
         self._begin_control_action(window, "start_runtime", target=self._start_runtime_worker, args=(window, action_kwargs))
@@ -280,7 +297,7 @@ class GuiRuntimeController:
             "paths": window.workspace_paths,
             "runtime_session": window.runtime_session,
             "selected_flow_group": None,
-            "blocked_status_text": window.workspace_control_state.blocked_status_text,
+            "blocked_status_text": self._blocked_status_text(window),
             "timeout": 5.0,
         }
         self._begin_control_action(window, "stop_runtime", target=self._stop_runtime_worker, args=(window, action_kwargs))
@@ -319,7 +336,7 @@ class GuiRuntimeController:
             "paths": window.workspace_paths,
             "runtime_session": window.runtime_session,
             "selected_flow_group": card.group if card is not None else None,
-            "blocked_status_text": window.workspace_control_state.blocked_status_text,
+            "blocked_status_text": self._blocked_status_text(window),
             "timeout": 5.0,
         }
         if self._begin_control_action(window, "stop_pipeline", target=self._stop_pipeline_worker, args=(window, action_kwargs)):

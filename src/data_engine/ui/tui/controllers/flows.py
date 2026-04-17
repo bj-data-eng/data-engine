@@ -9,7 +9,7 @@ from textual.widgets import ListView, Select, Static
 from data_engine.application import FlowCatalogApplication, OperatorControlApplication, WorkspaceSessionApplication
 from data_engine.services import LogService
 from data_engine.services.reset import ResetService
-from data_engine.domain import FlowRunState, FlowSummaryRow
+from data_engine.domain import FlowRunState
 from data_engine.views.text import render_selected_flow_lines
 from data_engine.ui.tui.widgets import FlowListItem, GroupHeaderListItem, InfoModal, RunGroupListItem
 
@@ -224,6 +224,13 @@ class _TuiFlowPresentationController:
         self.log_service = log_service
         self.reset_service = reset_service
 
+    @staticmethod
+    def _blocked_status_text(window: "DataEngineTui") -> str:
+        snapshot = getattr(window, "workspace_snapshot", None)
+        if snapshot is None:
+            return "Takeover available."
+        return snapshot.control.blocked_status_text
+
     def action_run_selected(self, window: "DataEngineTui") -> None:
         window._sync_daemon_state()
         card = window._selected_card()
@@ -234,7 +241,7 @@ class _TuiFlowPresentationController:
             selected_flow_valid=bool(card is not None and card.valid),
             selected_flow_group=card.group if card is not None else None,
             selected_flow_group_active=bool(card is not None and window.runtime_session.is_group_active(card.group, {flow.name: flow.group for flow in window.flow_cards})),
-            blocked_status_text=window.workspace_control_state.blocked_status_text,
+            blocked_status_text=self._blocked_status_text(window),
             timeout=2.0,
         )
         if result.error_text is not None:
@@ -251,7 +258,7 @@ class _TuiFlowPresentationController:
             paths=window.workspace_paths,
             runtime_session=window.runtime_session,
             has_automated_flows=any(card.valid and card.mode in {"poll", "schedule"} for card in window.flow_cards),
-            blocked_status_text=window.workspace_control_state.blocked_status_text,
+            blocked_status_text=self._blocked_status_text(window),
             timeout=2.0,
         )
         if result.error_text is not None:
@@ -269,7 +276,7 @@ class _TuiFlowPresentationController:
             paths=window.workspace_paths,
             runtime_session=window.runtime_session,
             selected_flow_group=card.group if card is not None else None,
-            blocked_status_text=window.workspace_control_state.blocked_status_text,
+            blocked_status_text=self._blocked_status_text(window),
             timeout=2.0,
         )
         if result.error_text is not None:
@@ -285,11 +292,12 @@ class _TuiFlowPresentationController:
         if card is None:
             window._set_status("Select one flow first.")
             return
+        preview = window.catalog_query_service.get_flow_preview(card=card, flow_states=window.flow_states)
         lines = [card.title]
         if card.description:
             lines.extend(["", card.description])
         lines.extend([""])
-        lines.extend(f"{row.label}: {row.value}" for row in FlowSummaryRow.rows_for_flow(card, window.flow_states))
+        lines.extend(f"{label}: {value}" for label, value in preview.rows)
         window.push_screen(InfoModal(title=card.title, body="\n".join(lines)))
 
     def action_clear_flow_log(self, window: "DataEngineTui") -> None:
@@ -299,7 +307,7 @@ class _TuiFlowPresentationController:
             window._set_status("Stop the engine and any active manual runs before resetting a flow.")
             return
         if not window.runtime_session.control_available:
-            window._set_status(window.workspace_control_state.blocked_status_text)
+            window._set_status(self._blocked_status_text(window))
             return
         try:
             self.reset_service.reset_flow(
