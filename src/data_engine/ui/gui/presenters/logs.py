@@ -39,6 +39,7 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
 
     card = window.flow_cards.get(window.selected_flow_name or "")
     run_groups = window.history_query_service.list_flow_runs(window.runtime_binding.log_store, flow_name=(card.name if card is not None else None))
+    workspace_snapshot = getattr(window, "workspace_snapshot", None)
     presentation = build_selected_flow_presentation(
         card=card,
         tracker=window.operation_tracker,
@@ -46,6 +47,14 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
         run_groups=tuple(run_groups),
         selected_run_key=None,
         max_visible_runs=window._MAX_VISIBLE_LOG_RUNS,
+        live_runs=(
+            workspace_snapshot.active_runs
+            if workspace_snapshot is not None and workspace_snapshot.engine.daemon_live
+            else None
+        ),
+        live_truth_authoritative=bool(
+            workspace_snapshot is not None and workspace_snapshot.engine.daemon_live
+        ),
     )
     visible_run_key_signature = presentation.run_group_signature
     visible_row_signature = tuple(_row_signature(run_group) for run_group in presentation.visible_run_groups)

@@ -4,6 +4,7 @@ import pytest
 from textual.widgets import ListView
 
 from data_engine.domain import FlowLogEntry, RuntimeStepEvent
+from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, RunLiveSnapshot, WorkspaceSnapshot
 from data_engine.ui.tui.app import RunGroupListItem
 
 from tests.tui.support import FakeLogService, RecordingTui, make_tui
@@ -166,3 +167,51 @@ async def test_tui_run_group_row_refreshes_when_same_run_finishes(monkeypatch):
         run_item = next(child for child in run_list.children if isinstance(child, RunGroupListItem))
         assert run_item.run_group.status == "success"
 
+
+@pytest.mark.anyio
+async def test_tui_run_list_prefers_daemon_live_runs_for_parallel_flow():
+    app = make_tui(log_service=FakeLogService())
+    async with app.run_test():
+        flow_name = app.flow_cards[0].name
+        app.selected_flow_name = flow_name
+        for index in range(8):
+            app.log_store.append_entry(
+                FlowLogEntry(
+                    line=f"run-{index} started",
+                    kind="flow",
+                    flow_name=flow_name,
+                    event=RuntimeStepEvent(
+                        run_id=f"run-{index}",
+                        flow_name=flow_name,
+                        step_name=None,
+                        source_label=f"claims_{index}.xlsx",
+                        status="started",
+                    ),
+                )
+            )
+        app.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=app.workspace_paths.workspace_id,
+            version=3,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, active_flow_names=(flow_name,)),
+            flows={},
+            active_runs={
+                f"run-{index}": RunLiveSnapshot(
+                    run_id=f"run-{index}",
+                    flow_name=flow_name,
+                    group_name="Imports",
+                    source_path=f"claims_{index}.xlsx",
+                    state="running",
+                    current_step_name="Normalize",
+                    current_step_started_at_utc="2026-04-18T12:00:00+00:00",
+                    started_at_utc="2026-04-18T11:59:00+00:00",
+                    elapsed_seconds=60.0,
+                )
+                for index in range(4)
+            },
+        )
+
+        app._render_selected_flow()
+        run_list = app.query_one("#log-run-list", ListView)
+
+        assert len([child for child in run_list.children if isinstance(child, RunGroupListItem)]) == 4

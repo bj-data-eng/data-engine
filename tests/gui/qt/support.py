@@ -17,13 +17,20 @@ from shiboken6 import isValid as shiboken_is_valid
 
 from data_engine.core.model import FlowValidationError
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot
-from data_engine.domain import FlowCatalogEntry, FlowRunState, RuntimeSessionState, WorkspaceControlState
+from data_engine.domain import (
+    ActiveRunState,
+    FlowActivityState,
+    FlowCatalogEntry,
+    FlowRunState,
+    RuntimeSessionState,
+    WorkspaceControlState,
+)
 from data_engine.platform.identity import APP_DISPLAY_NAME, APP_VERSION
 from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_models import DiscoveredWorkspace, machine_id_text
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
-from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, WorkspaceSnapshot
+from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, RunLiveSnapshot, WorkspaceSnapshot
 from data_engine.services import DaemonService
 from data_engine.services.operator_commands import OperatorCommandService
 from data_engine.services.workspace_provisioning import WorkspaceProvisioningResult
@@ -3191,6 +3198,112 @@ def test_sync_from_daemon_coalesces_nested_refresh_requests(qapp, monkeypatch):
         assert sync_calls == 2
         assert window._daemon_sync_in_progress is False
         assert window._daemon_sync_pending is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_sync_from_daemon_preserves_daemon_owned_runtime_truth(qapp, monkeypatch):
+    del monkeypatch
+    snapshot = WorkspaceDaemonSnapshot(
+        live=True,
+        workspace_owned=True,
+        leased_by_machine_id=None,
+        runtime_active=False,
+        runtime_stopping=False,
+        manual_runs=(),
+        last_checkpoint_at_utc=None,
+        source="daemon",
+        engine_starting=True,
+        projection_version=7,
+        active_engine_flow_names=("poller",),
+        active_runs=(
+            ActiveRunState(
+                run_id="run-1",
+                flow_name="poller",
+                group_name="Imports",
+                source_path="claims.xlsx",
+                state="running",
+                current_step_name="Read Excel",
+                current_step_started_at_utc="2026-04-17T12:00:00+00:00",
+                started_at_utc="2026-04-17T11:59:55+00:00",
+                elapsed_seconds=5.0,
+            ),
+        ),
+        flow_activity=(
+            FlowActivityState(
+                flow_name="poller",
+                active_run_count=1,
+                queued_run_count=2,
+                engine_run_count=1,
+                manual_run_count=0,
+                stopping_run_count=0,
+                running_step_counts={"Read Excel": 1},
+            ),
+        ),
+    )
+    window = _make_window(snapshot=snapshot)
+    try:
+        window._sync_from_daemon()
+
+        assert window.workspace_snapshot is not None
+        assert window.workspace_snapshot.version == 7
+        assert window.workspace_snapshot.engine.state == "starting"
+        assert window.workspace_snapshot.engine.active_flow_names == ("poller",)
+        assert tuple(window.workspace_snapshot.active_runs) == ("run-1",)
+        assert window.workspace_snapshot.active_runs["run-1"].current_step_name == "Read Excel"
+        assert window.workspace_snapshot.flows["poller"].active_run_count == 1
+        assert window.workspace_snapshot.flows["poller"].queued_run_count == 2
+        assert window.workspace_snapshot.flows["poller"].running_step_counts == {"Read Excel": 1}
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_log_view_prefers_daemon_live_runs_for_parallel_flow(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        for index in range(8):
+            window.log_store.append_entry(
+                FlowLogEntry(
+                    line=f"run-{index} started",
+                    kind="flow",
+                    flow_name="poller",
+                    event=RuntimeStepEvent(
+                        run_id=f"run-{index}",
+                        flow_name="poller",
+                        step_name=None,
+                        source_label=f"claims_{index}.xlsx",
+                        status="started",
+                    ),
+                )
+            )
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=9,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, active_flow_names=("poller",)),
+            flows={},
+            active_runs={
+                f"run-{index}": RunLiveSnapshot(
+                    run_id=f"run-{index}",
+                    flow_name="poller",
+                    group_name="Imports",
+                    source_path=f"claims_{index}.xlsx",
+                    state="running",
+                    current_step_name="Normalize",
+                    current_step_started_at_utc="2026-04-18T12:00:00+00:00",
+                    started_at_utc="2026-04-18T11:59:00+00:00",
+                    elapsed_seconds=60.0,
+                )
+                for index in range(4)
+            },
+        )
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+
+        assert window.log_view.count() == 4
     finally:
         _dispose_window(qapp, window)
 

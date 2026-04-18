@@ -107,6 +107,11 @@ class GuiRuntimeController:
                     workspace_control_state=sync_state.workspace_control_state,
                     daemon_live=bool(getattr(sync_state.snapshot, "live", False)),
                     daemon_startup_in_progress=window._daemon_startup_in_progress,
+                    daemon_projection_version=int(getattr(sync_state.snapshot, "projection_version", 0) or 0),
+                    daemon_engine_starting=bool(getattr(sync_state.snapshot, "engine_starting", False)),
+                    daemon_active_flow_names=tuple(getattr(sync_state.snapshot, "active_engine_flow_names", ()) or ()),
+                    daemon_active_runs=tuple(getattr(sync_state.snapshot, "active_runs", ()) or ()),
+                    daemon_flow_activity=tuple(getattr(sync_state.snapshot, "flow_activity", ()) or ()),
                 )
                 if not window.workspace_snapshot.engine.daemon_live and window._auto_daemon_enabled:
                     self.ensure_daemon_started(window)

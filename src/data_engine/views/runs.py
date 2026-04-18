@@ -20,10 +20,11 @@ class RunGroupDisplay:
 
     @classmethod
     def from_run(cls, run_state: FlowRunState) -> "RunGroupDisplay":
+        status_text = "Running" if run_state.status == "started" else "Stopping" if run_state.status == "stopping" else run_state.status.title()
         return cls(
             primary_label=run_state.display_label,
             source_label=run_state.source_label,
-            status_text=run_state.status.title(),
+            status_text=status_text,
             status_visual_state=_status_visual_state(run_state.status),
             duration_text=format_seconds(run_state.elapsed_seconds) if run_state.elapsed_seconds is not None else None,
         )
@@ -53,7 +54,7 @@ def format_raw_log_message(entry: FlowLogEntry) -> str:
 def _status_visual_state(status: str) -> str:
     if status in {"failed", "stopped"}:
         return "failed"
-    if status == "started":
+    if status in {"started", "stopping"}:
         return "started"
     return "finished"
 

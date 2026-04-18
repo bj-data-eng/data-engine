@@ -342,12 +342,21 @@ class _TuiFlowPresentationController:
         detail = window.query_one("#detail-view", Static)
         run_list = window.query_one("#log-run-list", ListView)
         run_groups = self.history_query_service.list_flow_runs(window.runtime_binding.log_store, flow_name=(card.name if card is not None else None))
+        workspace_snapshot = getattr(window, "workspace_snapshot", None)
         presentation = build_selected_flow_presentation(
             card=card,
             tracker=window.operation_tracker,
             flow_states=window.flow_states,
             run_groups=tuple(run_groups),
             selected_run_key=window.selected_run_key,
+            live_runs=(
+                workspace_snapshot.active_runs
+                if workspace_snapshot is not None and workspace_snapshot.engine.daemon_live
+                else None
+            ),
+            live_truth_authoritative=bool(
+                workspace_snapshot is not None and workspace_snapshot.engine.daemon_live
+            ),
         )
         window.selected_run_key = presentation.selected_run_key
         if presentation.detail_state is None:
@@ -371,12 +380,21 @@ class _TuiFlowPresentationController:
     def selected_run_group(self, window: "DataEngineTui") -> "FlowRunState | None":
         card = window._selected_card()
         run_groups = self.history_query_service.list_flow_runs(window.runtime_binding.log_store, flow_name=(card.name if card is not None else None))
+        workspace_snapshot = getattr(window, "workspace_snapshot", None)
         presentation = build_selected_flow_presentation(
             card=card,
             tracker=window.operation_tracker,
             flow_states=window.flow_states,
             run_groups=tuple(run_groups),
             selected_run_key=window.selected_run_key,
+            live_runs=(
+                workspace_snapshot.active_runs
+                if workspace_snapshot is not None and workspace_snapshot.engine.daemon_live
+                else None
+            ),
+            live_truth_authoritative=bool(
+                workspace_snapshot is not None and workspace_snapshot.engine.daemon_live
+            ),
         )
         window.selected_run_key = presentation.selected_run_key
         return presentation.selected_run_group

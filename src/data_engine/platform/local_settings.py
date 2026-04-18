@@ -20,6 +20,17 @@ def default_state_root(*, app_root: Path | None = None) -> Path:
     if env_value and env_value.strip():
         return stable_absolute_path(env_value)
 
+    # Non-default app roots are used heavily by tests and isolated local runs.
+    # Keep the real application on the normal platform-local state path, but
+    # give explicit alternate roots an app-local state area so they do not
+    # pollute the user's primary settings store.
+    if app_root is not None:
+        resolved_app_root = stable_absolute_path(app_root)
+        from data_engine.platform.workspace_models import APP_ROOT_PATH
+
+        if resolved_app_root != APP_ROOT_PATH:
+            return resolved_app_root / ".data_engine_state"
+
     if sys_platform() == "darwin":
         home = Path(os.environ.get("HOME") or Path.home())
         return home / "Library" / "Application Support" / APP_CACHE_DIR_NAME

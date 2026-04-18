@@ -47,6 +47,16 @@ def test_workspace_path_helpers_are_stable(monkeypatch):
     assert workspace_settings_path(app_root=APP_ROOT_PATH).name == "app_settings.sqlite"
 
 
+def test_non_default_app_root_uses_isolated_local_settings_store(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    monkeypatch.delenv(DATA_ENGINE_STATE_ROOT_ENV_VAR, raising=False)
+
+    settings_path = workspace_settings_path(app_root=app_root)
+
+    assert settings_path == app_root.resolve() / ".data_engine_state" / "settings" / "app_settings.sqlite"
+
+
 def test_local_workspace_namespace_does_not_require_path_resolve(tmp_path, monkeypatch):
     def _resolve(*args, **kwargs):  # pragma: no cover - defensive test hook
         raise AssertionError("local_workspace_namespace should not resolve paths")
