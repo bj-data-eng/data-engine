@@ -10,8 +10,8 @@ from typing import Any, Literal, Protocol
 from data_engine.application.runtime import RuntimeApplication
 from data_engine.domain import (
     ActiveRunState,
+    FlowActivityState,
     FlowRunState,
-    OperationFlowState,
     OperationSessionState,
     RuntimeSessionState,
     StepOutputIndex,
@@ -75,6 +75,7 @@ class RunLiveSnapshot:
     source_path: str | None
     state: RunStateName
     current_step_name: str | None = None
+    current_step_started_at_utc: str | None = None
     started_at_utc: str | None = None
     finished_at_utc: str | None = None
     elapsed_seconds: float | None = None
@@ -278,14 +279,23 @@ class RuntimeStateService:
         return run_group.summary_entry.line
 
     @staticmethod
-    def _running_step_counts(flow_state: OperationFlowState | None) -> dict[str, int]:
-        if flow_state is None:
-            return {}
-        return {
-            step_name: 1
-            for step_name, row in flow_state.rows.items()
-            if row.status == "running"
-        }
+    def _live_flow_state_name(
+        card: FlowCatalogLike,
+        *,
+        flow_state_text: str,
+        daemon_activity: FlowActivityState | None,
+    ) -> FlowStateName:
+        if daemon_activity is None:
+            return RuntimeStateService._flow_state_name(flow_state_text)
+        if daemon_activity.stopping_run_count > 0:
+            return "stopping"
+        if daemon_activity.manual_run_count > 0:
+            return "running"
+        if daemon_activity.engine_run_count > 0:
+            return "polling" if card.mode == "poll" else "scheduled"
+        if daemon_activity.queued_run_count > 0:
+            return "starting"
+        return RuntimeStateService._flow_state_name(flow_state_text)
 
     @staticmethod
     def _latest_run_times(run_groups: tuple[FlowRunState, ...]) -> tuple[str | None, str | None, str | None]:
@@ -326,6 +336,7 @@ class RuntimeStateService:
                     run.source_path,
                     run.state,
                     run.current_step_name,
+                    run.current_step_started_at_utc,
                     run.started_at_utc,
                     run.finished_at_utc,
                     run.elapsed_seconds,
@@ -411,6 +422,7 @@ class RuntimeStateService:
         daemon_engine_starting: bool,
         daemon_active_flow_names: tuple[str, ...],
         daemon_active_runs: tuple[ActiveRunState, ...],
+        daemon_flow_activity: tuple[FlowActivityState, ...],
         operation_tracker: OperationSessionState,
         flow_states: dict[str, str],
     ) -> WorkspaceSnapshot:
@@ -430,6 +442,7 @@ class RuntimeStateService:
                     source_path=run.source_path,
                     state=run.state if run.state in {"starting", "running", "stopping", "success", "failed", "stopped"} else "running",
                     current_step_name=run.current_step_name,
+                    current_step_started_at_utc=run.current_step_started_at_utc,
                     started_at_utc=run.started_at_utc,
                     finished_at_utc=run.finished_at_utc,
                     elapsed_seconds=run.elapsed_seconds,
@@ -440,7 +453,12 @@ class RuntimeStateService:
 
         for card in flow_cards:
             run_groups = runs_by_flow.get(card.name, ())
-            flow_state_name = self._flow_state_name(flow_states.get(card.name, card.state))
+            daemon_activity = next((item for item in daemon_flow_activity if item.flow_name == card.name), None)
+            flow_state_name = self._live_flow_state_name(
+                card,
+                flow_state_text=flow_states.get(card.name, card.state),
+                daemon_activity=daemon_activity,
+            )
             if not daemon_active_runs:
                 for run_group in run_groups:
                     run_state = self._run_state_name(run_group, flow_state=flow_state_name)
@@ -459,15 +477,14 @@ class RuntimeStateService:
                         error_text=self._run_error_text(run_group),
                     )
             last_started_at, last_finished_at, last_error_text = self._latest_run_times(run_groups)
-            flow_operation_state = operation_tracker.state_for(card.name)
             flow_summaries[card.name] = FlowLiveSummary(
                 flow_name=card.name,
                 group_name=card.group or "",
                 state=flow_state_name,
                 stop_requested=flow_state_name == "stopping",
-                active_run_count=sum(1 for run in active_runs.values() if run.flow_name == card.name),
-                queued_run_count=0,
-                running_step_counts=self._running_step_counts(flow_operation_state),
+                active_run_count=daemon_activity.active_run_count if daemon_activity is not None else sum(1 for run in active_runs.values() if run.flow_name == card.name),
+                queued_run_count=daemon_activity.queued_run_count if daemon_activity is not None else 0,
+                running_step_counts=dict(daemon_activity.running_step_counts) if daemon_activity is not None else {},
                 last_started_at_utc=last_started_at,
                 last_finished_at_utc=last_finished_at,
                 last_error_text=last_error_text,
@@ -616,6 +633,7 @@ class RuntimeStateService:
         daemon_engine_starting = bool(getattr(sync_state.snapshot, "engine_starting", False))
         daemon_active_flow_names = tuple(getattr(sync_state.snapshot, "active_engine_flow_names", ()) or ())
         daemon_active_runs = tuple(getattr(sync_state.snapshot, "active_runs", ()) or ())
+        daemon_flow_activity = tuple(getattr(sync_state.snapshot, "flow_activity", ()) or ())
         return self.snapshot_from_projection(
             binding=binding,
             flow_cards=flow_cards_tuple,
@@ -627,6 +645,7 @@ class RuntimeStateService:
             daemon_engine_starting=daemon_engine_starting,
             daemon_active_flow_names=daemon_active_flow_names,
             daemon_active_runs=daemon_active_runs,
+            daemon_flow_activity=daemon_flow_activity,
         )
 
     def snapshot_from_projection(
@@ -642,6 +661,7 @@ class RuntimeStateService:
         daemon_engine_starting: bool = False,
         daemon_active_flow_names: tuple[str, ...] = (),
         daemon_active_runs: tuple[ActiveRunState, ...] = (),
+        daemon_flow_activity: tuple[FlowActivityState, ...] = (),
     ) -> WorkspaceSnapshot:
         """Build one authoritative workspace snapshot from an explicit projection."""
         flow_cards_tuple = tuple(flow_cards)
@@ -656,6 +676,7 @@ class RuntimeStateService:
             daemon_engine_starting=daemon_engine_starting,
             daemon_active_flow_names=daemon_active_flow_names,
             daemon_active_runs=daemon_active_runs,
+            daemon_flow_activity=daemon_flow_activity,
             operation_tracker=projection.operation_tracker,
             flow_states=projection.flow_states,
         )

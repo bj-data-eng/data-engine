@@ -57,6 +57,35 @@ def test_daemon_service_initializes_and_serves_commands(tmp_path, monkeypatch):
         service._shutdown()  # noqa: SLF001 - direct daemon lifecycle test
 
 
+def test_daemon_status_returns_unchanged_when_projection_version_matches(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        full_status = service._handle_command({"command": "daemon_status"})  # noqa: SLF001 - direct daemon contract test
+        assert full_status["ok"] is True
+        version = int(full_status["status"]["projection_version"])
+        assert version >= 1
+
+        unchanged = service._handle_command(  # noqa: SLF001 - direct daemon contract test
+            {"command": "daemon_status", "since_version": version}
+        )
+
+        assert unchanged["ok"] is True
+        assert unchanged["status"] == {
+            "workspace_id": "default",
+            "projection_version": version,
+            "unchanged": True,
+        }
+    finally:
+        service._shutdown()  # noqa: SLF001 - direct daemon lifecycle test
+
+
 def test_daemon_host_dependencies_build_default_opens_workspace_runtime_ledger(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
@@ -358,10 +387,22 @@ def test_daemon_status_includes_active_runs_from_runtime_execution_bridge(tmp_pa
                 "source_path": "claims.xlsx",
                 "state": "running",
                 "current_step_name": "Emit Value",
+                "current_step_started_at_utc": started_at,
                 "started_at_utc": started_at,
                 "finished_at_utc": None,
                 "elapsed_seconds": None,
                 "error_text": None,
+            }
+        ]
+        assert status["status"]["flow_activity"] == [
+            {
+                "flow_name": "demo",
+                "active_run_count": 1,
+                "queued_run_count": 0,
+                "engine_run_count": 0,
+                "manual_run_count": 1,
+                "stopping_run_count": 0,
+                "running_step_counts": {"Emit Value": 1},
             }
         ]
     finally:

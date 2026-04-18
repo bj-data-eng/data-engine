@@ -34,7 +34,9 @@ class DaemonCommandHandler:
             if command == "daemon_ping":
                 return {"ok": True, "workspace_id": self.service.paths.workspace_id}
             if command == "daemon_status":
-                return {"ok": True, "status": self.state_sync.status_payload()}
+                since_version_raw = payload.get("since_version")
+                since_version = int(since_version_raw) if isinstance(since_version_raw, int | float) else None
+                return {"ok": True, "status": self.state_sync.status_payload(since_version=since_version)}
             if command == "list_flows":
                 return {"ok": True, "flows": [asdict(card) for card in self.state_sync.load_flow_cards()]}
             if command == "get_flow":

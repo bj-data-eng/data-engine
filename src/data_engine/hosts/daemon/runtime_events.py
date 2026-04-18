@@ -38,6 +38,7 @@ class DaemonRuntimeProjectionSnapshot:
     engine_starting: bool
     active_engine_flow_names: tuple[str, ...]
     active_runs: tuple[dict[str, Any], ...]
+    flow_activity: tuple[dict[str, Any], ...]
     manual_runs: tuple[str, ...]
     last_checkpoint_at_utc: str | None
 
@@ -104,6 +105,7 @@ class DaemonRuntimeProjector:
                     engine_starting=refreshed.engine_starting,
                     active_engine_flow_names=refreshed.active_engine_flow_names,
                     active_runs=refreshed.active_runs,
+                    flow_activity=refreshed.flow_activity,
                     manual_runs=refreshed.manual_runs,
                     last_checkpoint_at_utc=refreshed.last_checkpoint_at_utc,
                 )
@@ -136,6 +138,9 @@ class DaemonRuntimeProjector:
             ),
             active_runs=tuple(
                 item for item in state.get("active_runs", ()) if isinstance(item, dict)
+            ),
+            flow_activity=tuple(
+                item for item in state.get("flow_activity", ()) if isinstance(item, dict)
             ),
             manual_runs=tuple(str(name) for name in state.get("manual_runs", ()) if str(name).strip()),
             last_checkpoint_at_utc=_coerce_optional_text(state.get("last_checkpoint_at_utc")),

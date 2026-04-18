@@ -165,6 +165,7 @@ class DataEngineDaemonService:
     def _runtime_state_payload(self) -> dict[str, object]:
         """Return the current daemon-owned runtime state payload."""
         active_runs = self._active_runs_payload()
+        flow_activity = self._flow_activity_payload(active_runs)
         with self._state_lock:
             return {
                 "status": self.state.status,
@@ -175,6 +176,7 @@ class DataEngineDaemonService:
                 "engine_starting": self.state.engine_starting,
                 "active_engine_flow_names": self.state.active_engine_flow_names,
                 "active_runs": active_runs,
+                "flow_activity": flow_activity,
                 "manual_runs": tuple(sorted(self.state.manual_run_threads)),
                 "last_checkpoint_at_utc": self.state.last_checkpoint_at_utc,
             }
@@ -194,12 +196,61 @@ class DataEngineDaemonService:
                 "source_path": run.source_path,
                 "state": "stopping" if self.state.runtime_stopping else ("running" if run.status == "started" else "starting"),
                 "current_step_name": latest_step_by_run[run.run_id].step_label if run.run_id in latest_step_by_run else None,
+                "current_step_started_at_utc": latest_step_by_run[run.run_id].started_at_utc if run.run_id in latest_step_by_run else None,
                 "started_at_utc": run.started_at_utc,
                 "finished_at_utc": run.finished_at_utc,
                 "elapsed_seconds": run.elapsed_seconds,
                 "error_text": run.error_text,
             }
             for run in active_runs
+        )
+
+    def _flow_activity_payload(self, active_runs: tuple[dict[str, object], ...]) -> tuple[dict[str, object], ...]:
+        """Return daemon-native per-flow activity counts."""
+        active_counts: dict[str, int] = {}
+        engine_counts: dict[str, int] = {}
+        manual_counts: dict[str, int] = {}
+        stopping_counts: dict[str, int] = {}
+        running_step_counts: dict[str, dict[str, int]] = {}
+        with self._state_lock:
+            active_engine_flow_names = set(self.state.active_engine_flow_names)
+            pending_manual_run_names = set(self.state.pending_manual_run_names)
+        for run in active_runs:
+            flow_name = run.get("flow_name")
+            if isinstance(flow_name, str) and flow_name.strip():
+                active_counts[flow_name] = active_counts.get(flow_name, 0) + 1
+                if flow_name in active_engine_flow_names:
+                    engine_counts[flow_name] = engine_counts.get(flow_name, 0) + 1
+                else:
+                    manual_counts[flow_name] = manual_counts.get(flow_name, 0) + 1
+                if run.get("state") == "stopping":
+                    stopping_counts[flow_name] = stopping_counts.get(flow_name, 0) + 1
+                step_name = run.get("current_step_name")
+                if isinstance(step_name, str) and step_name.strip():
+                    counts = running_step_counts.setdefault(flow_name, {})
+                    counts[step_name] = counts.get(step_name, 0) + 1
+        queued_counts = {flow_name: 1 for flow_name in pending_manual_run_names}
+        flow_names = tuple(
+            sorted(
+                set(active_counts)
+                | set(queued_counts)
+                | set(engine_counts)
+                | set(manual_counts)
+                | set(stopping_counts)
+                | set(running_step_counts)
+            )
+        )
+        return tuple(
+            {
+                "flow_name": flow_name,
+                "active_run_count": active_counts.get(flow_name, 0),
+                "queued_run_count": queued_counts.get(flow_name, 0),
+                "engine_run_count": engine_counts.get(flow_name, 0),
+                "manual_run_count": manual_counts.get(flow_name, 0),
+                "stopping_run_count": stopping_counts.get(flow_name, 0),
+                "running_step_counts": dict(sorted(running_step_counts.get(flow_name, {}).items())),
+            }
+            for flow_name in flow_names
         )
 
     def _publish_runtime_event(

@@ -21,9 +21,15 @@ class DaemonStateSyncHandler:
     def load_flow_cards(self, *, force: bool = False) -> tuple[QtFlowCard, ...]:
         return self.service._load_flow_cards(force=force)
 
-    def status_payload(self) -> dict[str, Any]:
+    def status_payload(self, *, since_version: int | None = None) -> dict[str, Any]:
         service = self.service
         projection = service.runtime_projector.snapshot()
+        if since_version is not None and since_version == projection.version:
+            return {
+                "workspace_id": service.paths.workspace_id,
+                "projection_version": projection.version,
+                "unchanged": True,
+            }
         return {
             "workspace_id": service.paths.workspace_id,
             "workspace_root": str(service.paths.workspace_root),
@@ -38,6 +44,7 @@ class DaemonStateSyncHandler:
             "engine_starting": projection.engine_starting,
             "active_engine_flow_names": list(projection.active_engine_flow_names),
             "active_runs": list(projection.active_runs),
+            "flow_activity": list(projection.flow_activity),
             "manual_runs": list(projection.manual_runs),
             "last_checkpoint_at_utc": projection.last_checkpoint_at_utc,
             "projection_version": projection.version,

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
 
-from data_engine.domain import ActiveRunState, WorkspaceControlState
+from data_engine.domain import ActiveRunState, FlowActivityState, WorkspaceControlState
 from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.app import DaemonClientError, daemon_request, is_daemon_live
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
@@ -44,6 +44,7 @@ class WorkspaceDaemonSnapshot:
     projection_version: int = 0
     active_engine_flow_names: tuple[str, ...] = ()
     active_runs: tuple[ActiveRunState, ...] = ()
+    flow_activity: tuple[FlowActivityState, ...] = ()
 
 
 class WorkspaceDaemonManager:
@@ -92,6 +93,7 @@ class WorkspaceDaemonManager:
                     source="none",
                     projection_version=0,
                     active_runs=(),
+                    flow_activity=(),
                 )
                 self._last_snapshot = snapshot
                 return snapshot
@@ -116,15 +118,19 @@ class WorkspaceDaemonManager:
                         source="cached",
                         projection_version=self._last_snapshot.projection_version,
                         active_runs=self._last_snapshot.active_runs,
+                        flow_activity=self._last_snapshot.flow_activity,
                     )
                 snapshot = self._lease_snapshot()
                 self._last_snapshot = snapshot
                 return snapshot
             request_id = new_request_id("status")
+            request_payload: dict[str, object] = {"command": "daemon_status", "request_id": request_id}
+            if self._last_snapshot is not None and self._last_snapshot.projection_version > 0:
+                request_payload["since_version"] = self._last_snapshot.projection_version
             try:
                 response = daemon_request(
                     self.paths,
-                    {"command": "daemon_status", "request_id": request_id},
+                    request_payload,
                     timeout=2.0,
                 )
             except DaemonClientError:
@@ -143,6 +149,7 @@ class WorkspaceDaemonManager:
                         source="cached",
                         projection_version=self._last_snapshot.projection_version,
                         active_runs=self._last_snapshot.active_runs,
+                        flow_activity=self._last_snapshot.flow_activity,
                     )
                 snapshot = self._lease_snapshot()
                 self._last_snapshot = snapshot
@@ -152,9 +159,29 @@ class WorkspaceDaemonManager:
                 snapshot = self._lease_snapshot()
                 self._last_snapshot = snapshot
                 return snapshot
+            if bool(status.get("unchanged")) and self._last_snapshot is not None:
+                self._sync_misses = 0
+                snapshot = WorkspaceDaemonSnapshot(
+                    live=True,
+                    workspace_owned=self._last_snapshot.workspace_owned,
+                    leased_by_machine_id=self._last_snapshot.leased_by_machine_id,
+                    runtime_active=self._last_snapshot.runtime_active,
+                    runtime_stopping=self._last_snapshot.runtime_stopping,
+                    manual_runs=self._last_snapshot.manual_runs,
+                    last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
+                    source="daemon",
+                    engine_starting=self._last_snapshot.engine_starting,
+                    projection_version=int(status.get("projection_version", self._last_snapshot.projection_version) or self._last_snapshot.projection_version),
+                    active_engine_flow_names=self._last_snapshot.active_engine_flow_names,
+                    active_runs=self._last_snapshot.active_runs,
+                    flow_activity=self._last_snapshot.flow_activity,
+                )
+                self._last_snapshot = snapshot
+                return snapshot
             self._sync_misses = 0
             active_engine_flow_names = tuple(name for name in status.get("active_engine_flow_names", []) if isinstance(name, str))
             active_runs = _coerce_active_runs(status.get("active_runs"))
+            flow_activity = _coerce_flow_activity(status.get("flow_activity"))
             manual_runs = tuple(name for name in status.get("manual_runs", []) if isinstance(name, str))
             leased_by = status.get("leased_by_machine_id")
             checkpoint = status.get("last_checkpoint_at_utc")
@@ -171,6 +198,7 @@ class WorkspaceDaemonManager:
                 source="daemon",
                 projection_version=int(status.get("projection_version", 0) or 0),
                 active_runs=active_runs,
+                flow_activity=flow_activity,
             )
             self._last_snapshot = snapshot
             return snapshot
@@ -213,6 +241,7 @@ class WorkspaceDaemonManager:
             source="lease" if metadata is not None else "none",
             projection_version=0,
             active_runs=(),
+            flow_activity=(),
         )
 
     def control_status_text(
@@ -306,10 +335,52 @@ def _coerce_active_runs(value: object) -> tuple[ActiveRunState, ...]:
                 source_path=item.get("source_path") if isinstance(item.get("source_path"), str) else None,
                 state=state,
                 current_step_name=item.get("current_step_name") if isinstance(item.get("current_step_name"), str) else None,
+                current_step_started_at_utc=item.get("current_step_started_at_utc") if isinstance(item.get("current_step_started_at_utc"), str) else None,
                 started_at_utc=item.get("started_at_utc") if isinstance(item.get("started_at_utc"), str) else None,
                 finished_at_utc=item.get("finished_at_utc") if isinstance(item.get("finished_at_utc"), str) else None,
                 elapsed_seconds=float(elapsed_raw) if isinstance(elapsed_raw, int | float) else None,
                 error_text=item.get("error_text") if isinstance(item.get("error_text"), str) else None,
+            )
+        )
+    return tuple(coerced)
+
+
+def _coerce_flow_activity(value: object) -> tuple[FlowActivityState, ...]:
+    if not isinstance(value, list):
+        return ()
+    coerced: list[FlowActivityState] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        flow_name = item.get("flow_name")
+        if not isinstance(flow_name, str) or not flow_name.strip():
+            continue
+        active_raw = item.get("active_run_count", 0)
+        queued_raw = item.get("queued_run_count", 0)
+        engine_raw = item.get("engine_run_count", 0)
+        manual_raw = item.get("manual_run_count", 0)
+        stopping_raw = item.get("stopping_run_count", 0)
+        running_step_counts_raw = item.get("running_step_counts")
+        running_step_counts = (
+            {
+                str(step_name): int(count)
+                for step_name, count in running_step_counts_raw.items()
+                if isinstance(step_name, str)
+                and step_name.strip()
+                and isinstance(count, int | float)
+            }
+            if isinstance(running_step_counts_raw, dict)
+            else {}
+        )
+        coerced.append(
+            FlowActivityState(
+                flow_name=flow_name,
+                active_run_count=int(active_raw) if isinstance(active_raw, int | float) else 0,
+                queued_run_count=int(queued_raw) if isinstance(queued_raw, int | float) else 0,
+                engine_run_count=int(engine_raw) if isinstance(engine_raw, int | float) else 0,
+                manual_run_count=int(manual_raw) if isinstance(manual_raw, int | float) else 0,
+                stopping_run_count=int(stopping_raw) if isinstance(stopping_raw, int | float) else 0,
+                running_step_counts=running_step_counts,
             )
         )
     return tuple(coerced)

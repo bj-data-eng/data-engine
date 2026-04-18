@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Iterable, Mapping
 
@@ -52,10 +52,24 @@ class ActiveRunState:
     source_path: str | None
     state: str
     current_step_name: str | None = None
+    current_step_started_at_utc: str | None = None
     started_at_utc: str | None = None
     finished_at_utc: str | None = None
     elapsed_seconds: float | None = None
     error_text: str | None = None
+
+
+@dataclass(frozen=True)
+class FlowActivityState:
+    """One daemon-native flow activity summary."""
+
+    flow_name: str
+    active_run_count: int = 0
+    queued_run_count: int = 0
+    engine_run_count: int = 0
+    manual_run_count: int = 0
+    stopping_run_count: int = 0
+    running_step_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -184,6 +198,7 @@ class DaemonStatusState:
     engine_starting: bool = False
     active_engine_flow_names: tuple[str, ...] = ()
     active_runs: tuple[ActiveRunState, ...] = ()
+    flow_activity: tuple[FlowActivityState, ...] = ()
     manual_run_names: tuple[str, ...] = ()
     last_checkpoint_at_utc: str | None = None
     source: str = "none"
@@ -205,6 +220,7 @@ class DaemonStatusState:
             engine_starting=snapshot.engine_starting,
             active_engine_flow_names=snapshot.active_engine_flow_names,
             active_runs=snapshot.active_runs,
+            flow_activity=snapshot.flow_activity,
             manual_run_names=tuple(snapshot.manual_runs),
             last_checkpoint_at_utc=snapshot.last_checkpoint_at_utc,
             source=snapshot.source,
