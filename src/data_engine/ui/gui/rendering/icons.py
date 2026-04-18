@@ -28,6 +28,7 @@ def render_svg_icon_pixmap(
     device_pixel_ratio: float,
     fill_color: str | None = None,
     default_fill_color: QColor | str,
+    inset: float = 0.0,
 ) -> QPixmap:
     """Render one registered SVG icon to one theme-aware pixmap."""
     svg_text = load_svg_icon_text(icon_name)
@@ -42,7 +43,9 @@ def render_svg_icon_pixmap(
     pixmap.setDevicePixelRatio(dpr)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
-    renderer.render(painter, QRectF(0, 0, size, size))
+    inset_value = max(0.0, float(inset))
+    render_size = max(0.0, float(size) - (inset_value * 2.0))
+    renderer.render(painter, QRectF(inset_value, inset_value, render_size, render_size))
     painter.end()
     return pixmap
 

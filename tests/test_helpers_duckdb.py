@@ -826,6 +826,35 @@ def test_read_rows_by_values_returns_empty_frame_when_values_list_is_empty(tmp_p
     assert result.columns == ["claim_id", "amount"]
 
 
+def test_read_rows_by_values_supports_nulls_without_losing_lookup_order(tmp_path):
+    db_path = tmp_path / "claims.duckdb"
+    replace_rows_by_file(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame(
+            {
+                "claim_id": [1, 2, 3],
+                "status": ["open", None, "ready"],
+                "amount": [10, 20, 30],
+            }
+        ),
+        file_hash="file-a",
+    )
+
+    result = read_rows_by_values(
+        db_path,
+        "fact_claim",
+        column="status",
+        is_in=[None, "ready"],
+        select=["status", "amount"],
+    )
+
+    assert result.to_dict(as_series=False) == {
+        "status": [None, "ready"],
+        "amount": [20, 30],
+    }
+
+
 def test_read_sql_returns_query_result_as_polars_dataframe(tmp_path):
     db_path = tmp_path / "claims.duckdb"
     replace_rows_by_file(

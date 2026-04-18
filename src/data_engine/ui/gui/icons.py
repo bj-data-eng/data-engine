@@ -24,6 +24,7 @@ class SvgIconAsset:
 
 ICON_ASSETS: dict[str, SvgIconAsset] = {
     "dark_light": SvgIconAsset(file_name="dark_light.svg"),
+    "debug": SvgIconAsset(file_name="debug.svg"),
     "documentation": SvgIconAsset(file_name="documentation.svg"),
     "failed": SvgIconAsset(file_name="failed.svg"),
     "group": SvgIconAsset(file_name="group.svg"),

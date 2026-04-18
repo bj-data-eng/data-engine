@@ -68,10 +68,11 @@ def build_nav_rail(window: "DataEngineWindow") -> QWidget:
     window.view_button_group.setExclusive(True)
 
     window.home_button = _nav_button(window, "home", "Home")
+    window.debug_button = _nav_button(window, "debug", "Debug")
     window.docs_button = _nav_button(window, "docs", "Docs")
     window.settings_button = _nav_button(window, "settings", "Settings")
 
-    for index, button in enumerate((window.home_button, window.docs_button, window.settings_button)):
+    for index, button in enumerate((window.home_button, window.debug_button, window.docs_button, window.settings_button)):
         window.view_button_group.addButton(button, index)
         layout.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -124,6 +125,33 @@ def build_docs_view(window: "DataEngineWindow") -> QWidget:
     layout.addWidget(window.docs_browser, 1)
     container_layout.addWidget(panel, 1)
     window._initialize_docs_view()
+    return container
+
+
+def build_debug_view(window: "DataEngineWindow") -> QWidget:
+    del window
+    container = QWidget()
+    container_layout = QVBoxLayout(container)
+    container_layout.setContentsMargins(0, 0, 0, 0)
+    container_layout.setSpacing(10)
+
+    title = QLabel("Debug")
+    title.setObjectName("heroTitle")
+    container_layout.addWidget(title)
+
+    panel = QFrame()
+    panel.setObjectName("workspacePanel")
+    layout = QVBoxLayout(panel)
+    layout.setContentsMargins(18, 18, 18, 18)
+    layout.setSpacing(10)
+
+    status = QLabel("Debug snapshots and structured events will appear here.")
+    status.setWordWrap(True)
+    status.setObjectName("bodyText")
+    layout.addWidget(status)
+    layout.addStretch(1)
+
+    container_layout.addWidget(panel, 1)
     return container
 
 
@@ -501,6 +529,7 @@ def build_right_panel(window: "DataEngineWindow") -> QWidget:
 __all__ = [
     "build_action_bar",
     "build_center_panel",
+    "build_debug_view",
     "build_docs_view",
     "build_nav_rail",
     "build_operator_view",

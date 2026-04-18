@@ -2490,6 +2490,24 @@ def test_force_shutdown_daemon_button_calls_force_stop_path(qapp, monkeypatch):
         _dispose_window(qapp, window)
 
 
+def test_debug_nav_button_is_icon_only_and_switches_to_debug_view(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        assert window.debug_button.text() == ""
+        assert window.debug_button.toolTip() == "Debug"
+        assert window.view_stack.tabText(1) == "Debug"
+        assert window.view_stack.currentIndex() == 0
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        assert window.view_stack.currentIndex() == 1
+        assert window.debug_button.isChecked() is True
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_reset_flow_button_calls_persistent_reset_path(qapp, monkeypatch):
     reset_service = _FakeResetService()
     window = _make_window(command_service=_command_service_for_test(reset_service=reset_service))

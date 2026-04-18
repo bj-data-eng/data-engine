@@ -24,6 +24,7 @@ from data_engine.ui.gui.surface import handle_close_event, handle_show_event
 from data_engine.ui.gui.support import GuiWindowSupportMixin
 from data_engine.ui.gui.theme import DEFAULT_THEME
 from data_engine.ui.gui.widgets import (
+    build_debug_view,
     build_docs_view,
     build_nav_rail,
     build_operator_view,
@@ -41,6 +42,7 @@ class DataEngineWindow(GuiWindowSupportMixin, GuiRenderingMixin, GuiControlMixin
     _ACTIVE_FLOW_STATES = {"running", "polling", "scheduled", "stopping flow", "stopping runtime"}
     _VIEW_RAIL_ICON_NAMES = {
         "home": "home",
+        "debug": "debug",
         "docs": "documentation",
         "settings": "settings",
     }
@@ -98,6 +100,7 @@ class DataEngineWindow(GuiWindowSupportMixin, GuiRenderingMixin, GuiControlMixin
         self.view_stack.setObjectName("viewStack")
         self.view_stack.tabBar().hide()
         self.view_stack.addTab(build_operator_view(self), "Home")
+        self.view_stack.addTab(build_debug_view(self), "Debug")
         self.view_stack.addTab(build_docs_view(self), "Docs")
         self.view_stack.addTab(build_settings_view(self), "Settings")
         content_layout.addWidget(self.view_stack, 1)

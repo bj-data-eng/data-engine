@@ -126,6 +126,9 @@ def replace_rows_by_values(
     lookup = df.select(pl.col(normalized_column)).unique(maintain_order=True)
     if lookup.is_empty():
         raise ValueError("df must include at least one replacement value.")
+    lookup_values = tuple(lookup.get_column(normalized_column).to_list())
+    non_null_lookup_values = [value for value in lookup_values if value is not None]
+    has_null_lookup = len(non_null_lookup_values) != len(lookup_values)
 
     quoted_table = _quote_table_ref(table)
     quoted_schema = _schema_ref(table)
@@ -159,25 +162,34 @@ def replace_rows_by_values(
 
         target_column_type = existing_columns[normalized_column]
 
-        connection.register(temp_lookup_view, lookup)
-        connection.execute(
-            f"""
-            CREATE OR REPLACE TEMP TABLE {temp_lookup_table} AS
-            SELECT CAST({_quote_identifier(normalized_column)} AS {target_column_type}) AS lookup_value
-            FROM {temp_lookup_view}
-            """
-        )
-
-        connection.execute(
-            f"""
-            DELETE FROM {quoted_table}
-            WHERE EXISTS (
-                SELECT 1
-                FROM {temp_lookup_table} AS lookup
-                WHERE {quoted_table}.{quoted_column} IS NOT DISTINCT FROM lookup.lookup_value
+        if non_null_lookup_values:
+            connection.register(
+                temp_lookup_view,
+                pl.DataFrame({"lookup_value": non_null_lookup_values}),
             )
-            """
-        )
+            connection.execute(
+                f"""
+                CREATE OR REPLACE TEMP TABLE {temp_lookup_table} AS
+                SELECT CAST(lookup_value AS {target_column_type}) AS lookup_value
+                FROM {temp_lookup_view}
+                """
+            )
+            connection.execute(
+                f"""
+                DELETE FROM {quoted_table}
+                WHERE {quoted_column} IN (
+                    SELECT lookup_value
+                    FROM {temp_lookup_table}
+                )
+                """
+            )
+        if has_null_lookup:
+            connection.execute(
+                f"""
+                DELETE FROM {quoted_table}
+                WHERE {quoted_column} IS NULL
+                """
+            )
         connection.execute(
             f"""
             INSERT INTO {quoted_table} ({quoted_df_columns})

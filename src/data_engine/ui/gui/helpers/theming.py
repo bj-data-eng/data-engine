@@ -41,7 +41,15 @@ def render_svg_icon_pixmap(
 
 def view_rail_icon(window: "DataEngineWindow", view_name: str) -> QIcon:
     icon_name = window._VIEW_RAIL_ICON_NAMES[view_name]
-    return QIcon(window._render_svg_icon_pixmap(icon_name, 18))
+    return QIcon(
+        render_svg_icon_pixmap_helper(
+            icon_name=icon_name,
+            size=18,
+            inset=1.0,
+            device_pixel_ratio=window.devicePixelRatioF(),
+            default_fill_color=window._group_icon_color(),
+        )
+    )
 
 
 def action_bar_icon(window: "DataEngineWindow", action_name: str) -> QIcon:
@@ -77,7 +85,7 @@ def apply_theme(window: "DataEngineWindow") -> None:
         app.setStyleSheet(stylesheet(window.theme_name))
     window.theme_toggle_button.setIcon(window._action_bar_icon("theme_toggle"))
     window.refresh_button.setIcon(window._action_bar_icon("refresh"))
-    for button in (window.home_button, window.docs_button, window.settings_button):
+    for button in (window.home_button, window.debug_button, window.docs_button, window.settings_button):
         icon_name = button.property("viewIconName")
         if isinstance(icon_name, str):
             button.setIcon(window._view_rail_icon(icon_name))
