@@ -23,28 +23,22 @@ class DaemonStateSyncHandler:
 
     def status_payload(self) -> dict[str, Any]:
         service = self.service
-        with service._state_lock:
-            state = service.state
-            status = state.status
-            workspace_owned = state.workspace_owned
-            leased_by_machine_id = state.leased_by_machine_id
-            runtime_active = state.runtime_active
-            runtime_stopping = state.runtime_stopping
-            manual_runs = sorted(state.manual_run_threads)
-            last_checkpoint_at_utc = state.last_checkpoint_at_utc
+        projection = service.runtime_projector.snapshot()
         return {
             "workspace_id": service.paths.workspace_id,
             "workspace_root": str(service.paths.workspace_root),
             "machine_id": service.machine_id,
             "daemon_id": service.daemon_id,
             "pid": service.pid,
-            "status": status,
-            "workspace_owned": workspace_owned,
-            "leased_by_machine_id": leased_by_machine_id,
-            "engine_active": runtime_active,
-            "engine_stopping": runtime_stopping,
-            "manual_runs": manual_runs,
-            "last_checkpoint_at_utc": last_checkpoint_at_utc,
+            "status": projection.status,
+            "workspace_owned": projection.workspace_owned,
+            "leased_by_machine_id": projection.leased_by_machine_id,
+            "engine_active": projection.runtime_active,
+            "engine_stopping": projection.runtime_stopping,
+            "engine_starting": projection.engine_starting,
+            "manual_runs": list(projection.manual_runs),
+            "last_checkpoint_at_utc": projection.last_checkpoint_at_utc,
+            "projection_version": projection.version,
         }
 
     def checkpoint_once(self, *, status: str) -> None:
@@ -64,6 +58,7 @@ class DaemonStateSyncHandler:
         )
         with service._state_lock:
             service.state.set_checkpoint_time(checkpoint_time)
+        service._publish_runtime_event("checkpoint.recorded")
         self.update_daemon_state(status=status)
 
     def refresh_observer_snapshot(self) -> None:
@@ -76,6 +71,7 @@ class DaemonStateSyncHandler:
                 if metadata is not None and metadata.get("machine_id") is not None
                 else None
             )
+        service._publish_runtime_event("observer.refreshed")
         if metadata is None:
             self.update_daemon_state(status="available")
             service._shutdown_if_unowned_and_idle(reason="lease released")
@@ -96,6 +92,9 @@ class DaemonStateSyncHandler:
             workspace_root=str(service.paths.workspace_root),
             version_text=APP_VERSION,
         )
+        with service._state_lock:
+            service.state.status = status
+        service._publish_runtime_event("daemon.state_updated")
 
 
 __all__ = ["DaemonStateSyncHandler"]

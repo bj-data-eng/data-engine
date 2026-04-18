@@ -40,6 +40,8 @@ class WorkspaceDaemonSnapshot:
     manual_runs: tuple[str, ...]
     last_checkpoint_at_utc: str | None
     source: str
+    engine_starting: bool = False
+    projection_version: int = 0
 
 
 class WorkspaceDaemonManager:
@@ -81,9 +83,11 @@ class WorkspaceDaemonManager:
                     leased_by_machine_id=None,
                     runtime_active=False,
                     runtime_stopping=False,
+                    engine_starting=False,
                     manual_runs=(),
                     last_checkpoint_at_utc=None,
                     source="none",
+                    projection_version=0,
                 )
                 self._last_snapshot = snapshot
                 return snapshot
@@ -101,9 +105,11 @@ class WorkspaceDaemonManager:
                         leased_by_machine_id=self._last_snapshot.leased_by_machine_id,
                         runtime_active=self._last_snapshot.runtime_active,
                         runtime_stopping=self._last_snapshot.runtime_stopping,
+                        engine_starting=self._last_snapshot.engine_starting,
                         manual_runs=self._last_snapshot.manual_runs,
                         last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
                         source="cached",
+                        projection_version=self._last_snapshot.projection_version,
                     )
                 snapshot = self._lease_snapshot()
                 self._last_snapshot = snapshot
@@ -124,9 +130,11 @@ class WorkspaceDaemonManager:
                         leased_by_machine_id=self._last_snapshot.leased_by_machine_id,
                         runtime_active=self._last_snapshot.runtime_active,
                         runtime_stopping=self._last_snapshot.runtime_stopping,
+                        engine_starting=self._last_snapshot.engine_starting,
                         manual_runs=self._last_snapshot.manual_runs,
                         last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
                         source="cached",
+                        projection_version=self._last_snapshot.projection_version,
                     )
                 snapshot = self._lease_snapshot()
                 self._last_snapshot = snapshot
@@ -146,9 +154,11 @@ class WorkspaceDaemonManager:
                 leased_by_machine_id=str(leased_by) if isinstance(leased_by, str) and leased_by.strip() else None,
                 runtime_active=bool(status.get("engine_active")),
                 runtime_stopping=bool(status.get("engine_stopping")),
+                engine_starting=bool(status.get("engine_starting")),
                 manual_runs=manual_runs,
                 last_checkpoint_at_utc=str(checkpoint) if isinstance(checkpoint, str) and checkpoint.strip() else None,
                 source="daemon",
+                projection_version=int(status.get("projection_version", 0) or 0),
             )
             self._last_snapshot = snapshot
             return snapshot
@@ -184,9 +194,11 @@ class WorkspaceDaemonManager:
             leased_by_machine_id=str(owner) if isinstance(owner, str) and owner.strip() else None,
             runtime_active=False,
             runtime_stopping=False,
+            engine_starting=False,
             manual_runs=(),
             last_checkpoint_at_utc=checkpoint_text,
             source="lease" if metadata is not None else "none",
+            projection_version=0,
         )
 
     def control_status_text(

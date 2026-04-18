@@ -159,9 +159,11 @@ class DaemonStatusState:
     leased_by_machine_id: str | None = None
     engine_active: bool = False
     engine_stopping: bool = False
+    engine_starting: bool = False
     manual_run_names: tuple[str, ...] = ()
     last_checkpoint_at_utc: str | None = None
     source: str = "none"
+    projection_version: int = 0
 
     @classmethod
     def empty(cls) -> "DaemonStatusState":
@@ -176,9 +178,11 @@ class DaemonStatusState:
             leased_by_machine_id=snapshot.leased_by_machine_id,
             engine_active=snapshot.runtime_active,
             engine_stopping=snapshot.runtime_stopping,
+            engine_starting=snapshot.engine_starting,
             manual_run_names=tuple(snapshot.manual_runs),
             last_checkpoint_at_utc=snapshot.last_checkpoint_at_utc,
             source=snapshot.source,
+            projection_version=snapshot.projection_version,
         )
 
     def as_runtime_session(self, flow_cards: Iterable[FlowCatalogLike]) -> RuntimeSessionState:

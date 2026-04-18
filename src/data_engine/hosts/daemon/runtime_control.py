@@ -29,6 +29,7 @@ def stop_active_work(service: "DataEngineDaemonService") -> None:
         thread.join(timeout=1.5)
     with service._state_lock:
         service.state.end_runtime()
+    service._publish_runtime_event("runtime.stopped")
 
 
 __all__ = ["stop_active_work"]

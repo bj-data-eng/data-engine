@@ -1,0 +1,267 @@
+from __future__ import annotations
+
+from threading import Event
+
+import pytest
+
+from data_engine.authoring.flow import Flow
+from data_engine.core.model import FlowStoppedError
+from data_engine.runtime.stop import RuntimeStopController
+from data_engine.services.flow_execution import FlowExecutionService
+from data_engine.services.runtime_execution import RuntimeExecutionService
+
+
+def test_flow_execution_service_uses_injected_loader_and_discovery(tmp_path):
+    flow = Flow(name="claims", group="Claims")
+    load_calls: list[tuple[str, object | None]] = []
+    discover_calls: list[object | None] = []
+    service = FlowExecutionService(
+        load_flow_func=lambda name, *, data_root=None: load_calls.append((name, data_root)) or flow,
+        discover_flows_func=lambda *, data_root=None: discover_calls.append(data_root) or (flow,),
+    )
+
+    assert service.load_flow("claims", workspace_root=tmp_path) is flow
+    assert service.load_flows(("claims", "claims"), workspace_root=tmp_path) == (flow, flow)
+    assert service.discover_flows(workspace_root=tmp_path) == (flow,)
+    assert load_calls == [("claims", tmp_path), ("claims", tmp_path), ("claims", tmp_path)]
+    assert discover_calls == [tmp_path]
+
+
+def test_runtime_execution_service_constructs_runtime_objects():
+    flow = Flow(name="claims", group="Claims")
+
+    class _Runtime:
+        instances: list["_Runtime"] = []
+
+        def __init__(
+            self,
+            flows,
+            *,
+            continuous,
+            runtime_stop_event=None,
+            flow_stop_event=None,
+            runtime_ledger=None,
+            run_stop_controller=None,
+        ):
+            self.flows = flows
+            self.continuous = continuous
+            self.runtime_stop_event = runtime_stop_event
+            self.flow_stop_event = flow_stop_event
+            self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
+            type(self).instances.append(self)
+
+        def run(self):
+            return {"flows": tuple(flow.name for flow in self.flows), "continuous": self.continuous}
+
+        def preview(self, *, use=None):
+            return {"preview": use, "continuous": self.continuous}
+
+    class _GroupedRuntime:
+        instances: list["_GroupedRuntime"] = []
+
+        def __init__(
+            self,
+            flows,
+            *,
+            continuous,
+            runtime_stop_event=None,
+            flow_stop_event=None,
+            runtime_ledger=None,
+            run_stop_controller=None,
+        ):
+            self.flows = flows
+            self.continuous = continuous
+            self.runtime_stop_event = runtime_stop_event
+            self.flow_stop_event = flow_stop_event
+            self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
+            type(self).instances.append(self)
+
+        def run(self):
+            return {"grouped": tuple(flow.name for flow in self.flows), "continuous": self.continuous}
+
+    service = RuntimeExecutionService(flow_runtime_type=_Runtime, grouped_runtime_type=_GroupedRuntime)
+    flow_stop = Event()
+    runtime_stop = Event()
+    ledger = object()
+
+    assert service.run_once(flow, runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": False}
+    assert service.preview(flow, use="csv", runtime_ledger=ledger) == {"preview": "csv", "continuous": False}
+    assert service.run_manual(flow, runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": False}
+    assert service.run_continuous(flow, runtime_ledger=ledger, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": True}
+    assert service.run_grouped((flow,), runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"grouped": ("claims",), "continuous": True}
+    assert service.run_grouped_continuous((flow,), runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"grouped": ("claims",), "continuous": True}
+
+    assert _Runtime.instances[0].continuous is False
+    assert _Runtime.instances[1].continuous is False
+    assert _Runtime.instances[2].continuous is False
+    assert _Runtime.instances[3].continuous is True
+    assert _Runtime.instances[0].runtime_stop_event is runtime_stop
+    assert _Runtime.instances[2].runtime_stop_event is runtime_stop
+    assert _GroupedRuntime.instances[0].runtime_stop_event is runtime_stop
+    assert _GroupedRuntime.instances[1].flow_stop_event is flow_stop
+
+
+def test_runtime_execution_service_exposes_explicit_engine_commands(tmp_path):
+    flow = Flow(name="claims", group="Claims")
+    source = tmp_path / "claims.csv"
+    source.write_text("claim_id\n1\n", encoding="utf-8")
+
+    class _RunExecutor:
+        def run_one(self, flow, source_path, *, batch_signatures=()):
+            return {
+                "flow": flow.name,
+                "source_path": source_path,
+                "batch_signatures": batch_signatures,
+            }
+
+    class _Polling:
+        def stale_batch_poll_signatures(self, flow):
+            return (f"{flow.name}:signature",)
+
+    class _Runtime:
+        def __init__(self, flows, *, continuous, flow_stop_event=None, runtime_ledger=None, run_stop_controller=None):
+            self.flows = flows
+            self.continuous = continuous
+            self.flow_stop_event = flow_stop_event
+            self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
+            self.run_executor = _RunExecutor()
+            self.polling = _Polling()
+            self.closed = False
+
+        def _validate(self):
+            return None
+
+        def _close_owned_runtime_ledger(self):
+            self.closed = True
+
+        def run_source(self, flow, source_path):
+            self._validate()
+            try:
+                return self.run_executor.run_one(flow, source_path)
+            finally:
+                self._close_owned_runtime_ledger()
+
+        def run_batch(self, flow):
+            self._validate()
+            try:
+                return self.run_executor.run_one(
+                    flow,
+                    None,
+                    batch_signatures=self.polling.stale_batch_poll_signatures(flow),
+                )
+            finally:
+                self._close_owned_runtime_ledger()
+
+    service = RuntimeExecutionService(flow_runtime_type=_Runtime)
+
+    assert service.run_source(flow, source) == {
+        "flow": "claims",
+        "source_path": source,
+        "batch_signatures": (),
+    }
+    assert service.run_batch(flow) == {
+        "flow": "claims",
+        "source_path": None,
+        "batch_signatures": ("claims:signature",),
+    }
+
+
+def test_runtime_execution_service_stop_requests_run_id_on_controller():
+    controller = RuntimeStopController()
+    controller.register_run("run-123")
+    RuntimeExecutionService(run_stop_controller=controller).stop("run-123")
+
+    with pytest.raises(FlowStoppedError, match="run-123"):
+        controller.check_run("run-123")
+
+
+def test_runtime_execution_service_run_automated_splits_poll_and_schedule_flows():
+    poll_flow = Flow(name="poll_claims", group="Claims").watch(mode="poll", source="/tmp/in", interval="5s").step(lambda context: context.current)
+    schedule_flow = Flow(name="schedule_claims", group="Claims").watch(mode="schedule", interval="10m").step(lambda context: context.current)
+    scheduler_calls: list[tuple[str, object]] = []
+
+    class _GroupedRuntime:
+        instances: list["_GroupedRuntime"] = []
+
+        def __init__(self, flows, *, continuous, runtime_stop_event=None, flow_stop_event=None, runtime_ledger=None, run_stop_controller=None):
+            self.flows = flows
+            self.continuous = continuous
+            self.runtime_stop_event = runtime_stop_event
+            self.flow_stop_event = flow_stop_event
+            self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
+            type(self).instances.append(self)
+
+        def run(self):
+            self.runtime_stop_event.set()
+            return tuple(flow.name for flow in self.flows)
+
+    class _SchedulerHost:
+        def __init__(self, *, runtime_engine):
+            self.runtime_engine = runtime_engine
+            scheduler_calls.append(("init", runtime_engine))
+
+        def rebuild_jobs(self, flows):
+            scheduler_calls.append(("rebuild", tuple(flow.name for flow in flows)))
+            return tuple(flow.name for flow in flows)
+
+        def start(self):
+            scheduler_calls.append(("start", None))
+
+        def shutdown(self):
+            scheduler_calls.append(("shutdown", None))
+
+    runtime_stop = Event()
+    flow_stop = Event()
+    ledger = object()
+    service = RuntimeExecutionService(grouped_runtime_type=_GroupedRuntime, scheduler_host_factory=_SchedulerHost)
+
+    result = service.run_automated(
+        (poll_flow, schedule_flow),
+        runtime_ledger=ledger,
+        runtime_stop_event=runtime_stop,
+        flow_stop_event=flow_stop,
+    )
+
+    assert result == ("poll_claims",)
+    assert tuple(flow.name for flow in _GroupedRuntime.instances[0].flows) == ("poll_claims",)
+    assert _GroupedRuntime.instances[0].runtime_stop_event is runtime_stop
+    assert _GroupedRuntime.instances[0].runtime_ledger is ledger
+    assert scheduler_calls[1:] == [
+        ("rebuild", ("schedule_claims",)),
+        ("start", None),
+        ("shutdown", None),
+    ]
+
+
+def test_runtime_execution_service_run_automated_waits_for_schedule_only_flows():
+    schedule_flow = Flow(name="schedule_claims", group="Claims").watch(mode="schedule", interval="10m").step(lambda context: context.current)
+    runtime_stop = Event()
+    scheduler_calls: list[str] = []
+
+    class _SchedulerHost:
+        def __init__(self, *, runtime_engine):
+            self.runtime_engine = runtime_engine
+
+        def rebuild_jobs(self, flows):
+            scheduler_calls.append(f"rebuild:{','.join(flow.name for flow in flows)}")
+            return tuple(flow.name for flow in flows)
+
+        def start(self):
+            scheduler_calls.append("start")
+            runtime_stop.set()
+
+        def shutdown(self):
+            scheduler_calls.append("shutdown")
+
+    result = RuntimeExecutionService(scheduler_host_factory=_SchedulerHost).run_automated(
+        (schedule_flow,),
+        runtime_stop_event=runtime_stop,
+        flow_stop_event=Event(),
+    )
+
+    assert result == []
+    assert scheduler_calls == ["rebuild:schedule_claims", "start", "shutdown"]

@@ -47,27 +47,31 @@ def raise_open_file_limit(*, minimum_soft_limit: int = 4096) -> None:
 
 def test_slice_args(slice_name: str, *, app_root: Path) -> tuple[str, ...]:
     tests_dir = checkout_tests_dir(app_root)
+    qt_tests = tests_dir / "gui" / "qt"
+    tui_tests = tests_dir / "tui"
+    integration_tests = tests_dir / "integration"
+    live_tests = tests_dir / "daemon" / "test_live_runtime_suite.py"
     match slice_name:
         case "all":
             return (str(tests_dir),)
         case "unit":
             return (
                 str(tests_dir),
-                f"--ignore={tests_dir / 'test_qt_ui.py'}",
-                f"--ignore={tests_dir / 'test_tui.py'}",
-                f"--ignore={tests_dir / 'test_integration.py'}",
-                f"--ignore={tests_dir / 'test_live_runtime_suite.py'}",
+                f"--ignore={qt_tests}",
+                f"--ignore={tui_tests}",
+                f"--ignore={integration_tests}",
+                f"--ignore={live_tests}",
             )
         case "ui":
-            return (str(tests_dir / "test_qt_ui.py"), str(tests_dir / "test_tui.py"))
+            return (str(qt_tests), str(tui_tests))
         case "qt":
-            return (str(tests_dir / "test_qt_ui.py"),)
+            return (str(qt_tests),)
         case "tui":
-            return (str(tests_dir / "test_tui.py"),)
+            return (str(tui_tests),)
         case "integration":
-            return (str(tests_dir / "test_integration.py"),)
+            return (str(integration_tests),)
         case "live":
-            return (str(tests_dir / "test_live_runtime_suite.py"),)
+            return (str(live_tests),)
     raise FlowValidationError(f"Unknown test slice: {slice_name}")
 
 

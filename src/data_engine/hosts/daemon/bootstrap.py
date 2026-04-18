@@ -46,6 +46,7 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
             service.state.claim_workspace()
         else:
             service.state.release_workspace()
+    service._publish_runtime_event("workspace.claimed" if claimed else "workspace.released")
     shared_state.write_lease_metadata(
         service.paths,
         workspace_id=service.paths.workspace_id,
@@ -62,6 +63,7 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
     service._checkpoint_once(status="idle")
     with service._state_lock:
         service.state.status = "idle"
+    service._publish_runtime_event("daemon.ready")
     service._update_daemon_state(status="idle")
     service._debug_log("initialize complete workspace claimed")
 

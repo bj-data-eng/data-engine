@@ -66,6 +66,7 @@ def try_claim_released_workspace(service: "DataEngineDaemonService") -> bool:
         if isinstance(owner, str) and owner.strip():
             with service._state_lock:
                 service.host.leased_by_machine_id = owner
+            service._publish_runtime_event("workspace.lease_observed")
         return False
     try:
         claimed = shared_state.claim_workspace(service.paths)
@@ -76,9 +77,11 @@ def try_claim_released_workspace(service: "DataEngineDaemonService") -> bool:
         owner = metadata.get("machine_id") if isinstance(metadata, dict) else None
         with service._state_lock:
             service.host.leased_by_machine_id = str(owner) if isinstance(owner, str) and owner.strip() else None
+        service._publish_runtime_event("workspace.lease_observed")
         return False
     with service._state_lock:
         service.state.claim_workspace()
+    service._publish_runtime_event("workspace.claimed")
     try:
         service._checkpoint_once(status="idle")
         with service._state_lock:
@@ -86,6 +89,7 @@ def try_claim_released_workspace(service: "DataEngineDaemonService") -> bool:
     except Exception:
         with service._state_lock:
             service.state.release_workspace()
+        service._publish_runtime_event("workspace.released")
         release_workspace_claim(service)
         return False
     return True
@@ -112,6 +116,7 @@ def release_workspace_claim(
             pass
     with service._state_lock:
         service.state.release_workspace(leased_by_machine_id=leased_by_machine_id, status=status)
+    service._publish_runtime_event("workspace.released")
     if update_state and status is not None:
         service._update_daemon_state(status=status)
 

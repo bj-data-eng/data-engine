@@ -36,6 +36,11 @@ from data_engine.hosts.daemon.constants import (
     CHECKPOINT_INTERVAL_SECONDS,
     STALE_AFTER_SECONDS,
 )
+from data_engine.hosts.daemon.runtime_events import (
+    DaemonRuntimeEvent,
+    DaemonRuntimeEventBus,
+    DaemonRuntimeProjector,
+)
 from data_engine.hosts.daemon.lifecycle import (
     checkpoint_loop,
     relinquish_workspace_after_checkpoint_failures,
@@ -93,11 +98,18 @@ class DataEngineDaemonService:
         self._state_lock = threading.RLock()
         self._cached_flow_cards: tuple[QtFlowCard, ...] | None = None
         self._timing_log_path = self.paths.runtime_state_dir / "daemon_timing.log"
+        self.runtime_event_bus = DaemonRuntimeEventBus()
+        self.runtime_projector = DaemonRuntimeProjector(
+            workspace_id=self.paths.workspace_id,
+            initial_state=self._runtime_state_payload(),
+        )
+        self.runtime_event_bus.subscribe(self.runtime_projector.handle)
         maybe_start_viztracer(
             self.paths.runtime_state_dir / "daemon_viztrace.json",
             process_name=f"daemon:{self.paths.workspace_id}",
         )
         self.command_handler = DaemonCommandHandler(self)
+        self._publish_runtime_event("daemon.initialized")
 
     def _workspace_root_is_available(self) -> bool:
         """Return whether the authored workspace still exists at the configured root."""
@@ -144,6 +156,41 @@ class DataEngineDaemonService:
     def _timed_operation(self, scope: str, event: str, *, fields: dict[str, object] | None = None):
         """Return one dev-only timing context manager for daemon work."""
         return timed_operation(self._timing_log_path, scope=scope, event=event, fields=fields)
+
+    def _runtime_state_payload(self) -> dict[str, object]:
+        """Return the current daemon-owned runtime state payload."""
+        with self._state_lock:
+            return {
+                "status": self.state.status,
+                "workspace_owned": self.state.workspace_owned,
+                "leased_by_machine_id": self.state.leased_by_machine_id,
+                "runtime_active": self.state.runtime_active,
+                "runtime_stopping": self.state.runtime_stopping,
+                "engine_starting": self.state.engine_starting,
+                "manual_runs": tuple(sorted(self.state.manual_run_threads)),
+                "last_checkpoint_at_utc": self.state.last_checkpoint_at_utc,
+            }
+
+    def _publish_runtime_event(
+        self,
+        event_type: str,
+        *,
+        correlation_id: str | None = None,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        """Publish one daemon runtime event with the latest full state payload."""
+        event_payload = {"state": self._runtime_state_payload()}
+        if payload:
+            event_payload.update(payload)
+        self.runtime_event_bus.publish(
+            DaemonRuntimeEvent(
+                workspace_id=self.paths.workspace_id,
+                event_type=event_type,
+                timestamp_utc=utcnow_text(),
+                correlation_id=correlation_id,
+                payload=event_payload,
+            )
+        )
 
     def initialize(self) -> None:
         initialize_service(self)

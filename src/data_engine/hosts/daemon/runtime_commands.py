@@ -73,6 +73,7 @@ class DaemonRuntimeCommandHandler:
                 if active_same_group is not None:
                     return {"ok": False, "error": f"Group {card.group} already has {active_same_group} running."}
                 service.state.reserve_manual_run(name)
+                service._publish_runtime_event("manual.run_reserved", correlation_id=request_id, payload={"flow_name": name})
             try:
                 runtime_stop_event = threading.Event()
                 flow_stop_event = threading.Event()
@@ -109,6 +110,11 @@ class DaemonRuntimeCommandHandler:
                     finally:
                         with service._state_lock:
                             service.state.unregister_manual_run(name)
+                        service._publish_runtime_event(
+                            "manual.run_unregistered",
+                            correlation_id=request_id,
+                            payload={"flow_name": name},
+                        )
 
                 thread = threading.Thread(target=_target, daemon=True)
                 with service._state_lock:
@@ -118,6 +124,11 @@ class DaemonRuntimeCommandHandler:
                         runtime_stop_event=runtime_stop_event,
                         flow_stop_event=flow_stop_event,
                     )
+                service._publish_runtime_event(
+                    "manual.run_registered",
+                    correlation_id=request_id,
+                    payload={"flow_name": name},
+                )
                 thread.start()
                 if wait:
                     thread.join()
@@ -125,6 +136,11 @@ class DaemonRuntimeCommandHandler:
             except Exception as exc:
                 with service._state_lock:
                     service.state.clear_manual_run_reservation(name)
+                service._publish_runtime_event(
+                    "manual.run_reservation_cleared",
+                    correlation_id=request_id,
+                    payload={"flow_name": name},
+                )
                 return {"ok": False, "error": str(exc)}
 
     def start_engine(self, *, request_id: str | None = None) -> dict[str, Any]:
@@ -139,12 +155,14 @@ class DaemonRuntimeCommandHandler:
             with service._state_lock:
                 if not service.state.reserve_engine_start():
                     return {"ok": True}
+            service._publish_runtime_event("engine.start_reserved", correlation_id=request_id)
             flow_names = self.automated_flow_names(force=True)
             if not flow_names:
                 flow_names = self.automated_flow_names(force=True)
             if not flow_names:
                 with service._state_lock:
                     service.state.clear_engine_start_reservation()
+                service._publish_runtime_event("engine.start_reservation_cleared", correlation_id=request_id)
                 return {"ok": False, "error": "No automated flows are available."}
             try:
                 with service._timed_operation(
@@ -156,12 +174,14 @@ class DaemonRuntimeCommandHandler:
             except Exception as exc:
                 with service._state_lock:
                     service.state.clear_engine_start_reservation()
+                service._publish_runtime_event("engine.start_reservation_cleared", correlation_id=request_id)
                 return {"ok": False, "error": str(exc)}
             with service._state_lock:
                 runtime_stop_event = threading.Event()
                 flow_stop_event = threading.Event()
                 service.state.set_engine_threads(runtime_stop_event=runtime_stop_event, flow_stop_event=flow_stop_event)
                 service.state.begin_runtime(status="running")
+            service._publish_runtime_event("engine.started", correlation_id=request_id)
 
             def _target() -> None:
                 try:
@@ -184,6 +204,7 @@ class DaemonRuntimeCommandHandler:
                 finally:
                     with service._state_lock:
                         service.state.end_runtime(status="idle")
+                    service._publish_runtime_event("engine.stopped", correlation_id=request_id)
                     service._debug_log(f"engine thread finished status={service.state.status}")
 
             engine_thread = threading.Thread(target=_target, daemon=True)
@@ -211,6 +232,7 @@ class DaemonRuntimeCommandHandler:
                     return {"ok": True}
                 service.state.stop_runtime(status="stopping")
                 runtime_stop_event = service.state.engine_runtime_stop_event
+            service._publish_runtime_event("engine.stop_requested", correlation_id=request_id)
             runtime_stop_event.set()
             return {"ok": True}
 
@@ -227,6 +249,7 @@ class DaemonRuntimeCommandHandler:
                 stop_event = service.state.manual_runtime_stop_events.get(name)
             if stop_event is None:
                 return {"ok": False, "error": f"Flow {name} is not running."}
+            service._publish_runtime_event("manual.stop_requested", correlation_id=request_id, payload={"flow_name": name})
             stop_event.set()
             return {"ok": True}
 

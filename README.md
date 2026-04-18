@@ -249,7 +249,7 @@ Authored flow modules compile into `artifacts/workspace_cache/<workspace_id>/com
 
 The live smoke suite is intentionally self-contained:
 
-- `tests/test_live_runtime_suite.py`
+- `tests/daemon/test_live_runtime_suite.py`
 
 It generates temporary workspaces from scratch, generates temporary `example_data/` and `data2/` with the real starter-data generator, adds notebook-authored poll/schedule/manual flows, runs the daemons, and tears the whole environment down afterward. It does not rely on existing `workspaces/example_workspace` or `workspaces/claims2` or live repo data directories.
 

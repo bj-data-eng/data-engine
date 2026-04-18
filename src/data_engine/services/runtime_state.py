@@ -201,12 +201,13 @@ class RuntimeStateService:
         *,
         daemon_live: bool,
         daemon_startup_in_progress: bool,
+        daemon_engine_starting: bool,
     ) -> EngineSnapshot:
         if runtime_session.runtime_stopping:
             state: EngineStateName = "stopping"
         elif runtime_session.runtime_active:
             state = "running"
-        elif daemon_startup_in_progress and not daemon_live:
+        elif daemon_engine_starting or (daemon_startup_in_progress and not daemon_live):
             state = "starting"
         else:
             state = "idle"
@@ -404,6 +405,8 @@ class RuntimeStateService:
         workspace_control_state: WorkspaceControlState,
         daemon_live: bool,
         daemon_startup_in_progress: bool,
+        daemon_projection_version: int,
+        daemon_engine_starting: bool,
         operation_tracker: OperationSessionState,
         flow_states: dict[str, str],
     ) -> WorkspaceSnapshot:
@@ -454,6 +457,7 @@ class RuntimeStateService:
             runtime_session,
             daemon_live=daemon_live,
             daemon_startup_in_progress=daemon_startup_in_progress,
+            daemon_engine_starting=daemon_engine_starting,
         )
         previous = self._last_workspace_snapshots.get(workspace_id)
         provisional = WorkspaceSnapshot(
@@ -469,7 +473,9 @@ class RuntimeStateService:
         current_signature = self._snapshot_signature(provisional)
         version = self._snapshot_versions.get(workspace_id, 0)
         if previous_signature != current_signature:
-            version += 1
+            version = max(version + 1, daemon_projection_version)
+        else:
+            version = max(version, daemon_projection_version)
         self._snapshot_versions[workspace_id] = version
         snapshot = WorkspaceSnapshot(
             workspace_id=workspace_id,
@@ -584,6 +590,8 @@ class RuntimeStateService:
             now=now,
         )
         daemon_live = bool(getattr(sync_state.snapshot, "live", False))
+        daemon_projection_version = int(getattr(sync_state.snapshot, "projection_version", 0) or 0)
+        daemon_engine_starting = bool(getattr(sync_state.snapshot, "engine_starting", False))
         return self.snapshot_from_projection(
             binding=binding,
             flow_cards=flow_cards_tuple,
@@ -591,6 +599,8 @@ class RuntimeStateService:
             workspace_control_state=sync_state.workspace_control_state,
             daemon_live=daemon_live,
             daemon_startup_in_progress=daemon_startup_in_progress,
+            daemon_projection_version=daemon_projection_version,
+            daemon_engine_starting=daemon_engine_starting,
         )
 
     def snapshot_from_projection(
@@ -602,6 +612,8 @@ class RuntimeStateService:
         workspace_control_state: WorkspaceControlState,
         daemon_live: bool,
         daemon_startup_in_progress: bool = False,
+        daemon_projection_version: int = 0,
+        daemon_engine_starting: bool = False,
     ) -> WorkspaceSnapshot:
         """Build one authoritative workspace snapshot from an explicit projection."""
         flow_cards_tuple = tuple(flow_cards)
@@ -612,6 +624,8 @@ class RuntimeStateService:
             workspace_control_state=workspace_control_state,
             daemon_live=daemon_live,
             daemon_startup_in_progress=daemon_startup_in_progress,
+            daemon_projection_version=daemon_projection_version,
+            daemon_engine_starting=daemon_engine_starting,
             operation_tracker=projection.operation_tracker,
             flow_states=projection.flow_states,
         )

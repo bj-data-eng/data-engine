@@ -170,7 +170,7 @@ The sibling starter-data trees are starter content only. Real path bindings belo
 
 ## Live Smoke Coverage
 
-- `tests/test_live_runtime_suite.py` is the end-to-end live smoke entrypoint
+- `tests/daemon/test_live_runtime_suite.py` is the end-to-end live smoke entrypoint
 - it generates temporary workspaces and temporary data roots from scratch
 - it verifies both Python-authored and notebook-authored poll, schedule, and manual flow modules
 - it verifies one-daemon-per-workspace, run/start/stop/shutdown, and lease cleanup

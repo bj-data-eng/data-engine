@@ -28,13 +28,13 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 - Qt-focused suite:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\test_qt_ui.py -q
+.\.venv\Scripts\python.exe -m pytest tests\gui\qt -q
 ```
 
 - Daemon-focused suite:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\test_daemon.py tests\test_live_runtime_suite.py -q
+.\.venv\Scripts\python.exe -m pytest tests\daemon -q
 ```
 
 - Lint and docstring checks:

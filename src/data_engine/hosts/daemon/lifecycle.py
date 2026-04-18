@@ -65,11 +65,13 @@ def checkpoint_loop(service: "DataEngineDaemonService") -> None:
             if failure_count == 2:
                 with service._state_lock:
                     service.state.status = "degraded"
+                service._publish_runtime_event("daemon.degraded")
                 service._update_daemon_state(status="degraded")
                 service._debug_log("daemon marked degraded after repeated checkpoint failures")
             if failure_count >= 3:
                 with service._state_lock:
                     service.state.status = "failed"
+                service._publish_runtime_event("daemon.failed")
                 service._debug_log("relinquishing workspace after repeated checkpoint failures")
                 relinquish_workspace_after_checkpoint_failures(service)
                 next_checkpoint_at = time.monotonic() + CHECKPOINT_INTERVAL_SECONDS
@@ -79,6 +81,7 @@ def relinquish_workspace_after_checkpoint_failures(service: "DataEngineDaemonSer
     """Stop active work, release shared ownership, and stop the daemon."""
     with service._state_lock:
         service.state.stop_runtime(status="failed")
+    service._publish_runtime_event("engine.stop_requested")
     service._debug_log("relinquish workspace starting")
     stop_active_work(service)
     release_workspace_claim(service, status="failed", update_state=True)
@@ -90,6 +93,7 @@ def relinquish_workspace_for_control_request(service: "DataEngineDaemonService",
     """Stop active work, hand ownership off, and stop this daemon."""
     with service._state_lock:
         service.state.stop_runtime(status="stopping flow")
+    service._publish_runtime_event("control.handoff_requested", payload={"requester_machine_id": requester_machine_id})
     service._debug_log(f"relinquish for control request requester={requester_machine_id}")
     stop_active_work(service)
     release_workspace_claim(
@@ -106,6 +110,7 @@ def relinquish_workspace_for_missing_root(service: "DataEngineDaemonService") ->
     """Stop active work and exit when the authored workspace root disappears."""
     with service._state_lock:
         service.state.stop_runtime(status="workspace missing")
+    service._publish_runtime_event("engine.stop_requested")
     stop_active_work(service)
     release_workspace_claim(service, status="workspace missing")
     service.host.shutdown_event.set()
@@ -116,6 +121,7 @@ def relinquish_workspace_for_missing_clients(service: "DataEngineDaemonService")
     """Stop active work and exit when an ephemeral daemon has no live local clients."""
     with service._state_lock:
         service.state.stop_runtime(status="client disconnected")
+    service._publish_runtime_event("engine.stop_requested")
     stop_active_work(service)
     release_workspace_claim(service, status="client disconnected")
     service.host.shutdown_event.set()
@@ -153,6 +159,7 @@ def shutdown_if_unowned_and_idle(service: "DataEngineDaemonService", *, reason: 
 
 def shutdown(service: "DataEngineDaemonService") -> None:
     service._debug_log("shutdown starting")
+    service._publish_runtime_event("daemon.shutdown_started")
     stop_active_work(service)
     if service.state.checkpoint_thread is not None and service.state.checkpoint_thread.is_alive():
         service.state.checkpoint_thread.join(timeout=5.0)
