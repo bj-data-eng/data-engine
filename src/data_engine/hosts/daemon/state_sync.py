@@ -23,7 +23,6 @@ class DaemonStateSyncHandler:
 
     def status_payload(self) -> dict[str, Any]:
         service = self.service
-        service.runtime_projector.refresh(service._runtime_state_payload())
         projection = service.runtime_projector.snapshot()
         return {
             "workspace_id": service.paths.workspace_id,

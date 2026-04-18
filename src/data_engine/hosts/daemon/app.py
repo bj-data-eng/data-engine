@@ -54,6 +54,7 @@ from data_engine.platform.workspace_models import (
     WorkspacePaths,
     authored_workspace_is_available,
 )
+from data_engine.hosts.daemon.runtime_ledger import DaemonRuntimeCacheProxy
 from data_engine.platform.instrumentation import (
     append_timing_line,
     maybe_start_viztracer,
@@ -87,6 +88,10 @@ class DataEngineDaemonService:
         self.host = DaemonHostFacade(self.state)
 
         self.runtime_cache_ledger = dependencies.runtime_cache_ledger
+        self.runtime_execution_ledger = DaemonRuntimeCacheProxy(
+            self.runtime_cache_ledger,
+            publish_event=self._publish_runtime_event,
+        )
         self.runtime_control_ledger = dependencies.runtime_control_ledger
         self.flow_catalog_service = dependencies.flow_catalog_service
         self.flow_execution_service = dependencies.flow_execution_service

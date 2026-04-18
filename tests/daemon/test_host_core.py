@@ -322,7 +322,7 @@ def test_stop_active_work_signals_running_threads_and_resets_runtime_state():
     assert service.published_events == ["runtime.stopped"]
 
 
-def test_daemon_status_includes_active_runs_from_runtime_ledger(tmp_path, monkeypatch):
+def test_daemon_status_includes_active_runs_from_runtime_execution_bridge(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -333,14 +333,14 @@ def test_daemon_status_includes_active_runs_from_runtime_ledger(tmp_path, monkey
     service.initialize()
     try:
         started_at = utcnow_text()
-        service.runtime_cache_ledger.execution_state.record_run_started(
+        service.runtime_execution_ledger.execution_state.record_run_started(
             run_id="run-1",
             flow_name="demo",
             group_name="Demo",
             source_path="claims.xlsx",
             started_at_utc=started_at,
         )
-        service.runtime_cache_ledger.execution_state.record_step_started(
+        service.runtime_execution_ledger.execution_state.record_step_started(
             run_id="run-1",
             flow_name="demo",
             step_label="Emit Value",

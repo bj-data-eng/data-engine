@@ -93,7 +93,7 @@ class DaemonRuntimeCommandHandler:
                         ):
                             service.runtime_execution_service.run_manual(
                                 flow,
-                                runtime_ledger=service.runtime_cache_ledger,
+                                runtime_ledger=service.runtime_execution_ledger,
                                 runtime_stop_event=runtime_stop_event,
                                 flow_stop_event=flow_stop_event,
                             )
@@ -192,7 +192,7 @@ class DaemonRuntimeCommandHandler:
                     ):
                         service.runtime_execution_service.run_automated(
                             flows,
-                            runtime_ledger=service.runtime_cache_ledger,
+                            runtime_ledger=service.runtime_execution_ledger,
                             runtime_stop_event=runtime_stop_event,
                             flow_stop_event=flow_stop_event,
                         )
