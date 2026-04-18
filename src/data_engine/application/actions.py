@@ -16,6 +16,8 @@ class ActionStateApplication:
         runtime_session,
         flow_groups_by_name: dict[str, str | None],
         active_flow_states,
+        engine_state: str = "idle",
+        live_runs: dict[str, object] | None = None,
         has_logs: bool,
         has_automated_flows: bool,
         workspace_available: bool = True,
@@ -30,11 +32,13 @@ class ActionStateApplication:
             flow_groups_by_name=flow_groups_by_name,
             active_flow_states=active_flow_states,
             has_logs=has_logs,
+            live_runs=live_runs,
         )
         return OperatorActionContext(
             runtime_session=runtime_session,
             selected_flow=selected_flow,
             has_automated_flows=has_automated_flows,
+            engine_state=engine_state,
             workspace_available=workspace_available,
             selected_run_group_present=selected_run_group_present,
             local_request_pending=local_request_pending,

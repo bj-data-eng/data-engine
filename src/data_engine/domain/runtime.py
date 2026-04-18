@@ -202,6 +202,8 @@ class DaemonStatusState:
     manual_run_names: tuple[str, ...] = ()
     last_checkpoint_at_utc: str | None = None
     source: str = "none"
+    transport_mode: str = "heartbeat"
+    daemon_id: str | None = None
     projection_version: int = 0
 
     @classmethod
@@ -224,6 +226,8 @@ class DaemonStatusState:
             manual_run_names=tuple(snapshot.manual_runs),
             last_checkpoint_at_utc=snapshot.last_checkpoint_at_utc,
             source=snapshot.source,
+            transport_mode=snapshot.transport_mode,
+            daemon_id=snapshot.daemon_id,
             projection_version=snapshot.projection_version,
         )
 

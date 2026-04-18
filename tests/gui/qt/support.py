@@ -265,6 +265,48 @@ class _FakeDaemonStateService:
     def wait_for_update(self, manager, *, timeout_seconds: float = 5.0):
         return manager.wait_for_update(timeout_seconds=timeout_seconds)
 
+    def run_subscription_loop(
+        self,
+        manager,
+        *,
+        stop_event,
+        workspace_available,
+        on_update,
+        timeout_seconds: float = 1.5,
+    ):
+        while not stop_event.is_set():
+            if not workspace_available():
+                if stop_event.wait(timeout_seconds):
+                    return
+                continue
+            previous_snapshot = getattr(manager, "_last_snapshot", None)
+            snapshot = self.wait_for_update(manager, timeout_seconds=timeout_seconds)
+            if stop_event.is_set():
+                return
+            if previous_snapshot is not None and snapshot == previous_snapshot:
+                continue
+            on_update(snapshot)
+
+    @staticmethod
+    def should_run_heartbeat(
+        *,
+        daemon_live: bool,
+        transport_mode: str,
+        wait_worker_alive: bool,
+        now_monotonic: float,
+        last_sync_monotonic: float,
+        last_subscription_monotonic: float,
+        stale_after_seconds: float = 15.0,
+    ) -> bool:
+        if not daemon_live:
+            return True
+        if transport_mode != "subscription":
+            return True
+        if not wait_worker_alive:
+            return True
+        freshest = max(float(last_sync_monotonic or 0.0), float(last_subscription_monotonic or 0.0))
+        return (float(now_monotonic) - freshest) >= max(float(stale_after_seconds), 0.0)
+
     def control_state(self, manager, snapshot, *, daemon_startup_in_progress: bool = False):
         del manager
         return WorkspaceControlState.from_snapshot(
@@ -2535,6 +2577,7 @@ def test_reset_flow_button_calls_persistent_reset_path(qapp, monkeypatch):
     try:
         window._clear_logs()
         _process_ui_until(qapp, lambda: len(reset_service.flow_resets) == 1)
+        _process_ui_until(qapp, lambda: len(rebuild_calls) >= 1)
 
         assert reset_service.flow_resets == [(window.workspace_paths, "poller")]
         assert len(rebuild_calls) >= 1
@@ -3212,6 +3255,40 @@ def test_sync_from_daemon_coalesces_nested_refresh_requests(qapp, monkeypatch):
         _dispose_window(qapp, window)
 
 
+def test_refresh_selection_prefers_daemon_live_step_state(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=8,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={
+                "run-1": RunLiveSnapshot(
+                    run_id="run-1",
+                    flow_name="poller",
+                    group_name="Imports",
+                    source_path="claims.xlsx",
+                    state="running",
+                    current_step_name="Read Excel",
+                    current_step_started_at_utc="2026-04-18T12:00:00+00:00",
+                    started_at_utc="2026-04-18T11:59:00+00:00",
+                    elapsed_seconds=60.0,
+                )
+            },
+        )
+
+        window._refresh_selection(window.flow_cards["poller"])
+
+        assert window.operation_row_widgets[0].row_card.property("stepState") == "running"
+        assert window.operation_row_widgets[1].row_card.property("stepState") == "idle"
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_daemon_wait_worker_schedules_sync_when_projection_changes(qapp, monkeypatch):
     window = _make_window()
     scheduled: list[str] = []
@@ -3249,7 +3326,7 @@ def test_daemon_wait_worker_schedules_sync_when_projection_changes(qapp, monkeyp
         monkeypatch.setattr(
             window,
             "_schedule_daemon_update_sync",
-            lambda: scheduled.append("sync") or window._daemon_wait_stop_event.set(),
+            lambda: scheduled.append("sync") or window.daemon_subscription.stop(),
         )
 
         window._daemon_wait_worker()
@@ -3279,7 +3356,7 @@ def test_daemon_wait_worker_skips_sync_when_projection_is_unchanged(qapp, monkey
         def _wait_for_update(manager, *, timeout_seconds=5.0):
             del timeout_seconds
             manager._last_snapshot = previous_snapshot
-            window._daemon_wait_stop_event.set()
+            window.daemon_subscription.stop()
             return previous_snapshot
 
         window.daemon_state_service.wait_for_update = _wait_for_update
@@ -3394,6 +3471,67 @@ def test_refresh_log_view_prefers_daemon_live_runs_for_parallel_flow(qapp, monke
         window._refresh_log_view(force_scroll_to_bottom=True)
 
         assert window.log_view.count() == 4
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_action_buttons_prefers_daemon_live_stopping_run_after_rebind(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("manual_review")
+        window.runtime_session = window.runtime_session.with_manual_runs(("Manual",))
+        window.manual_flow_stopping_groups = set()
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=5,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="idle", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={
+                "run-manual": RunLiveSnapshot(
+                    run_id="run-manual",
+                    flow_name="manual_review",
+                    group_name="Manual",
+                    source_path=None,
+                    state="stopping",
+                    current_step_name="Build Report",
+                    started_at_utc="2026-04-18T12:00:00+00:00",
+                    finished_at_utc=None,
+                    elapsed_seconds=5.0,
+                )
+            },
+        )
+
+        window._refresh_action_buttons()
+
+        assert window.flow_run_button.text() == "Stopping..."
+        assert window.flow_run_button.isEnabled() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_action_buttons_prefers_daemon_engine_starting_after_rebind(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=6,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="starting", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+
+        window._refresh_action_buttons()
+
+        assert window.engine_button.text() == "Starting..."
+        assert window.engine_button.isEnabled() is False
+        assert window.clear_flow_log_button.isEnabled() is False
     finally:
         _dispose_window(qapp, window)
 

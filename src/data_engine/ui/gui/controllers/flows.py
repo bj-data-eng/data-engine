@@ -321,12 +321,21 @@ class _GuiFlowPresentationController:
         window._refresh_log_view(force_scroll_to_bottom=True)
 
     def refresh_selection(self, window: "DataEngineWindow", card: QtFlowCard | None) -> None:
+        workspace_snapshot = getattr(window, "workspace_snapshot", None)
         presentation = build_selected_flow_presentation(
             card=card,
             tracker=window.operation_tracker,
             flow_states=window.flow_states,
             run_groups=(),
             selected_run_key=None,
+            live_runs=(
+                workspace_snapshot.active_runs
+                if workspace_snapshot is not None and workspace_snapshot.engine.daemon_live
+                else None
+            ),
+            live_truth_authoritative=bool(
+                workspace_snapshot is not None and workspace_snapshot.engine.daemon_live
+            ),
         )
         if presentation.detail_state is None:
             window.flow_error_label.clear()
@@ -343,12 +352,23 @@ class _GuiFlowPresentationController:
 
     def refresh_action_buttons(self, window: "DataEngineWindow") -> None:
         card = window.flow_cards.get(window.selected_flow_name or "")
+        workspace_snapshot = getattr(window, "workspace_snapshot", None)
         action_context = build_operator_action_context(
             card=card,
             flow_states=window.flow_states,
             runtime_session=window.runtime_session,
             flow_groups_by_name={flow_name: flow_card.group for flow_name, flow_card in window.flow_cards.items()},
             active_flow_states=window._ACTIVE_FLOW_STATES,
+            engine_state=(
+                workspace_snapshot.engine.state
+                if workspace_snapshot is not None
+                else "stopping"
+                if window.runtime_session.runtime_stopping
+                else "running"
+                if window.runtime_session.runtime_active
+                else "idle"
+            ),
+            live_runs=None if workspace_snapshot is None else workspace_snapshot.active_runs,
             has_logs=bool(
                 card is not None
                 and self.history_query_service.list_run_groups(
@@ -377,7 +397,10 @@ class _GuiFlowPresentationController:
                 flow_run_label="Starting...",
                 flow_run_enabled=False,
             )
-        if selected_manual_stopping or ("stop_pipeline" in window._pending_control_actions and selected_manual_running):
+        if (
+            selected_manual_stopping
+            or ("stop_pipeline" in window._pending_control_actions and selected_manual_running)
+        ):
             action_state = replace(
                 action_state,
                 flow_run_label="Stopping...",

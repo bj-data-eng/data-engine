@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 class TuiWindowSupportMixin:
     """Session, workspace, and daemon plumbing separated from the main TUI shell."""
 
+    _SUBSCRIPTION_HEALTH_WINDOW_SECONDS = 15.0
+
     def _has_authored_workspace(self: "DataEngineTui") -> bool:
         """Return whether the selected workspace currently has authored flow modules."""
         return authored_workspace_is_available(self.workspace_paths)
@@ -65,8 +67,32 @@ class TuiWindowSupportMixin:
         """Queue one daemon-driven sync back onto the Textual app thread."""
         if not getattr(self, "is_mounted", False):
             return
+        self.daemon_subscription.mark_subscription(self._monotonic())
         try:
             self.call_from_thread(self._sync_daemon_state)
         except Exception:
             return
+
+    def _ensure_daemon_wait_worker(self: "DataEngineTui") -> None:
+        """Ensure the daemon wait worker is running for the current workspace."""
+        if not getattr(self, "is_mounted", False):
+            return
+        if not self._has_authored_workspace():
+            return
+        import threading
+
+        def _start_daemon_wait_thread(target):
+            thread = threading.Thread(target=target, daemon=True)
+            thread.start()
+            return thread
+
+        self.daemon_subscription.ensure_started(
+            workspace_available=lambda: self._has_authored_workspace(),
+            on_update=lambda snapshot: self._schedule_daemon_update_sync(),
+            start_worker=lambda target: _start_daemon_wait_thread(target),
+        )
+
+    def _should_run_daemon_heartbeat(self: "DataEngineTui") -> bool:
+        """Return whether the TUI heartbeat should perform a daemon sync right now."""
+        return self.daemon_subscription.should_run_heartbeat(getattr(self, "workspace_snapshot", None))
 __all__ = ["TuiWindowSupportMixin"]

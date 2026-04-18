@@ -113,6 +113,36 @@ def test_selected_flow_presentation_keeps_terminal_history_and_adds_daemon_only_
     assert presentation.selected_run_group.steps[-1].step_name == "Write"
 
 
+def test_selected_flow_presentation_overlays_live_step_statuses_on_detail_rows() -> None:
+    card = _card()
+    live_runs = {
+        "live-1": RunLiveSnapshot(
+            run_id="live-1",
+            flow_name=card.name,
+            group_name=card.group,
+            source_path="live-1.xlsx",
+            state="running",
+            current_step_name="Normalize",
+            current_step_started_at_utc="2026-04-18T12:00:00+00:00",
+            started_at_utc="2026-04-18T11:59:00+00:00",
+            elapsed_seconds=60.0,
+        )
+    }
+
+    presentation = build_selected_flow_presentation(
+        card=card,
+        tracker=OperationSessionState.empty(),
+        flow_states={},
+        run_groups=(),
+        selected_run_key=None,
+        live_runs=live_runs,
+        live_truth_authoritative=True,
+    )
+
+    assert presentation.detail_state is not None
+    assert [row.status for row in presentation.detail_state.operation_rows] == ["idle", "running", "idle"]
+
+
 def _entry_to_group(entry: FlowLogEntry):
     from data_engine.domain import FlowRunState
 

@@ -148,14 +148,27 @@ class SelectedFlowDetailState:
         tracker: "OperationSessionState",
         *,
         flow_states: dict[str, str] | None = None,
+        live_step_statuses: dict[str, str] | None = None,
     ) -> "SelectedFlowDetailState":
         """Build the selected-flow detail state for one card."""
         summary_rows = FlowSummaryRow.rows_for_flow(card, flow_states or {})
         operation_rows = tuple(
             OperationDetailRow(
                 name=operation_name,
-                status=(row_state.status if row_state is not None else "idle"),
-                elapsed_seconds=(row_state.elapsed_seconds if row_state is not None else None),
+                status=(
+                    live_step_statuses.get(operation_name)
+                    if live_step_statuses is not None and operation_name in live_step_statuses
+                    else (row_state.status if row_state is not None else "idle")
+                ),
+                elapsed_seconds=(
+                    row_state.elapsed_seconds
+                    if row_state is not None
+                    and (
+                        live_step_statuses is None
+                        or row_state.status == live_step_statuses.get(operation_name, row_state.status)
+                    )
+                    else None
+                ),
             )
             for operation_name in card.operation_items
             for row_state in (tracker.row_state(card.name, operation_name),)

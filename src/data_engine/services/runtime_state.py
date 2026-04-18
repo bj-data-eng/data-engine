@@ -23,6 +23,7 @@ from data_engine.services.runtime_binding import WorkspaceRuntimeBinding, Worksp
 
 ControlAvailability = Literal["available", "leased", "stale", "requested"]
 EngineStateName = Literal["idle", "starting", "running", "stopping"]
+TransportStateName = Literal["disconnected", "heartbeat", "subscription"]
 FlowStateName = Literal["idle", "starting", "running", "stopping", "scheduled", "polling", "failed"]
 RunStateName = Literal["starting", "running", "stopping", "success", "failed", "stopped"]
 
@@ -45,6 +46,7 @@ class EngineSnapshot:
 
     state: EngineStateName
     daemon_live: bool = False
+    transport: TransportStateName = "heartbeat"
     stop_requested: bool = False
     active_flow_names: tuple[str, ...] = ()
 
@@ -202,6 +204,7 @@ class RuntimeStateService:
         runtime_session: RuntimeSessionState,
         *,
         daemon_live: bool,
+        transport_mode: str,
         daemon_startup_in_progress: bool,
         daemon_engine_starting: bool,
         daemon_active_flow_names: tuple[str, ...],
@@ -217,6 +220,11 @@ class RuntimeStateService:
         return EngineSnapshot(
             state=state,
             daemon_live=daemon_live,
+            transport=(
+                transport_mode
+                if transport_mode in {"disconnected", "heartbeat", "subscription"}
+                else "heartbeat"
+            ),
             stop_requested=runtime_session.runtime_stopping,
             active_flow_names=daemon_active_flow_names or runtime_session.active_runtime_flow_names,
         )
@@ -419,6 +427,7 @@ class RuntimeStateService:
         daemon_live: bool,
         daemon_startup_in_progress: bool,
         daemon_projection_version: int,
+        daemon_transport_mode: str,
         daemon_engine_starting: bool,
         daemon_active_flow_names: tuple[str, ...],
         daemon_active_runs: tuple[ActiveRunState, ...],
@@ -494,6 +503,7 @@ class RuntimeStateService:
         engine = self._engine_snapshot(
             runtime_session,
             daemon_live=daemon_live,
+            transport_mode=daemon_transport_mode,
             daemon_startup_in_progress=daemon_startup_in_progress,
             daemon_engine_starting=daemon_engine_starting,
             daemon_active_flow_names=daemon_active_flow_names,
@@ -630,6 +640,7 @@ class RuntimeStateService:
         )
         daemon_live = bool(getattr(sync_state.snapshot, "live", False))
         daemon_projection_version = int(getattr(sync_state.snapshot, "projection_version", 0) or 0)
+        daemon_transport_mode = str(getattr(sync_state.snapshot, "transport_mode", "heartbeat") or "heartbeat")
         daemon_engine_starting = bool(getattr(sync_state.snapshot, "engine_starting", False))
         daemon_active_flow_names = tuple(getattr(sync_state.snapshot, "active_engine_flow_names", ()) or ())
         daemon_active_runs = tuple(getattr(sync_state.snapshot, "active_runs", ()) or ())
@@ -642,6 +653,7 @@ class RuntimeStateService:
             daemon_live=daemon_live,
             daemon_startup_in_progress=daemon_startup_in_progress,
             daemon_projection_version=daemon_projection_version,
+            daemon_transport_mode=daemon_transport_mode,
             daemon_engine_starting=daemon_engine_starting,
             daemon_active_flow_names=daemon_active_flow_names,
             daemon_active_runs=daemon_active_runs,
@@ -658,6 +670,7 @@ class RuntimeStateService:
         daemon_live: bool,
         daemon_startup_in_progress: bool = False,
         daemon_projection_version: int = 0,
+        daemon_transport_mode: str = "heartbeat",
         daemon_engine_starting: bool = False,
         daemon_active_flow_names: tuple[str, ...] = (),
         daemon_active_runs: tuple[ActiveRunState, ...] = (),
@@ -673,6 +686,7 @@ class RuntimeStateService:
             daemon_live=daemon_live,
             daemon_startup_in_progress=daemon_startup_in_progress,
             daemon_projection_version=daemon_projection_version,
+            daemon_transport_mode=daemon_transport_mode,
             daemon_engine_starting=daemon_engine_starting,
             daemon_active_flow_names=daemon_active_flow_names,
             daemon_active_runs=daemon_active_runs,

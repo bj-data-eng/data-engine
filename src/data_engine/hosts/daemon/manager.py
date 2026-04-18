@@ -40,7 +40,9 @@ class WorkspaceDaemonSnapshot:
     manual_runs: tuple[str, ...]
     last_checkpoint_at_utc: str | None
     source: str
+    transport_mode: str = "heartbeat"
     engine_starting: bool = False
+    daemon_id: str | None = None
     projection_version: int = 0
     active_engine_flow_names: tuple[str, ...] = ()
     active_runs: tuple[ActiveRunState, ...] = ()
@@ -87,10 +89,12 @@ class WorkspaceDaemonManager:
                     runtime_active=False,
                     runtime_stopping=False,
                     active_engine_flow_names=(),
+                    transport_mode="disconnected",
                     engine_starting=False,
                     manual_runs=(),
                     last_checkpoint_at_utc=None,
                     source="none",
+                    daemon_id=None,
                     projection_version=0,
                     active_runs=(),
                     flow_activity=(),
@@ -112,10 +116,12 @@ class WorkspaceDaemonManager:
                         runtime_active=self._last_snapshot.runtime_active,
                         runtime_stopping=self._last_snapshot.runtime_stopping,
                         active_engine_flow_names=self._last_snapshot.active_engine_flow_names,
+                        transport_mode="disconnected",
                         engine_starting=self._last_snapshot.engine_starting,
                         manual_runs=self._last_snapshot.manual_runs,
                         last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
                         source="cached",
+                        daemon_id=self._last_snapshot.daemon_id,
                         projection_version=self._last_snapshot.projection_version,
                         active_runs=self._last_snapshot.active_runs,
                         flow_activity=self._last_snapshot.flow_activity,
@@ -147,6 +153,7 @@ class WorkspaceDaemonManager:
                         manual_runs=self._last_snapshot.manual_runs,
                         last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
                         source="cached",
+                        daemon_id=self._last_snapshot.daemon_id,
                         projection_version=self._last_snapshot.projection_version,
                         active_runs=self._last_snapshot.active_runs,
                         flow_activity=self._last_snapshot.flow_activity,
@@ -155,7 +162,7 @@ class WorkspaceDaemonManager:
                 self._last_snapshot = snapshot
                 return snapshot
             status = response.get("status") if response.get("ok") else None
-            return self._snapshot_from_status_dict(status, assume_live=True)
+            return self._snapshot_from_status_dict(status, assume_live=True, transport_mode="heartbeat")
 
     def wait_for_update(self, *, timeout_seconds: float = 5.0) -> WorkspaceDaemonSnapshot:
         """Wait for one daemon projection update, reusing the last known version when available."""
@@ -190,7 +197,7 @@ class WorkspaceDaemonManager:
             except DaemonClientError:
                 return self.sync()
             status = response.get("status") if response.get("ok") else None
-            return self._snapshot_from_status_dict(status, assume_live=True)
+            return self._snapshot_from_status_dict(status, assume_live=True, transport_mode="subscription")
 
     def _timing_log_path(self):
         if not self.workspace_configured:
@@ -228,12 +235,20 @@ class WorkspaceDaemonManager:
             manual_runs=(),
             last_checkpoint_at_utc=checkpoint_text,
             source="lease" if metadata is not None else "none",
+            transport_mode="disconnected",
+            daemon_id=None,
             projection_version=0,
             active_runs=(),
             flow_activity=(),
         )
 
-    def _snapshot_from_status_dict(self, status: object, *, assume_live: bool) -> WorkspaceDaemonSnapshot:
+    def _snapshot_from_status_dict(
+        self,
+        status: object,
+        *,
+        assume_live: bool,
+        transport_mode: str,
+    ) -> WorkspaceDaemonSnapshot:
         """Normalize one raw daemon status payload into a client snapshot."""
         if not isinstance(status, dict):
             snapshot = self._lease_snapshot()
@@ -250,6 +265,12 @@ class WorkspaceDaemonManager:
                 manual_runs=self._last_snapshot.manual_runs,
                 last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
                 source="daemon",
+                transport_mode=transport_mode,
+                daemon_id=(
+                    str(status.get("daemon_id")).strip()
+                    if isinstance(status.get("daemon_id"), str) and str(status.get("daemon_id")).strip()
+                    else self._last_snapshot.daemon_id
+                ),
                 engine_starting=self._last_snapshot.engine_starting,
                 projection_version=int(status.get("projection_version", self._last_snapshot.projection_version) or self._last_snapshot.projection_version),
                 active_engine_flow_names=self._last_snapshot.active_engine_flow_names,
@@ -272,7 +293,9 @@ class WorkspaceDaemonManager:
             runtime_active=bool(status.get("engine_active")),
             runtime_stopping=bool(status.get("engine_stopping")),
             active_engine_flow_names=active_engine_flow_names,
+            transport_mode=transport_mode,
             engine_starting=bool(status.get("engine_starting")),
+            daemon_id=str(status.get("daemon_id")).strip() if isinstance(status.get("daemon_id"), str) and str(status.get("daemon_id")).strip() else None,
             manual_runs=manual_runs,
             last_checkpoint_at_utc=str(checkpoint) if isinstance(checkpoint, str) and checkpoint.strip() else None,
             source="daemon",

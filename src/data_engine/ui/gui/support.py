@@ -37,6 +37,8 @@ if TYPE_CHECKING:
 class GuiWindowSupportMixin:
     """Shared window-support methods kept separate from the main GUI app shell."""
 
+    _SUBSCRIPTION_HEALTH_WINDOW_SECONDS = 15.0
+
     def _resolve_workspace_paths(
         self: "DataEngineWindow",
         *,
@@ -112,6 +114,7 @@ class GuiWindowSupportMixin:
         """Queue one daemon-driven sync back onto the Qt main thread."""
         if getattr(self, "ui_closing", False):
             return
+        self.daemon_subscription.mark_subscription(self._monotonic())
         signals = getattr(self, "signals", None)
         if signals is None:
             return
@@ -119,6 +122,31 @@ class GuiWindowSupportMixin:
             signals.daemon_update_available.emit()
         except RuntimeError:
             return
+
+    def _ensure_daemon_wait_worker(self: "DataEngineWindow") -> None:
+        """Ensure the daemon wait worker is running for the current workspace."""
+        if getattr(self, "ui_closing", False):
+            return
+        if not self._has_authored_workspace():
+            return
+        from data_engine.ui.gui.helpers import start_worker_thread
+
+        self.daemon_subscription.ensure_started(
+            workspace_available=lambda: not self.ui_closing and self._has_authored_workspace(),
+            on_update=lambda snapshot: (None if self.ui_closing else self._schedule_daemon_update_sync()),
+            start_worker=lambda target: start_worker_thread(self, target=target),
+        )
+
+    def _should_run_daemon_heartbeat(self: "DataEngineWindow") -> bool:
+        """Return whether the heartbeat path should perform a sync right now."""
+        return self.daemon_subscription.should_run_heartbeat(getattr(self, "workspace_snapshot", None))
+
+    def _heartbeat_daemon_sync(self: "DataEngineWindow") -> None:
+        """Run a low-frequency daemon heartbeat when the subscription path is degraded."""
+        self._ensure_daemon_wait_worker()
+        if not self._should_run_daemon_heartbeat():
+            return
+        self._sync_from_daemon()
 
     def _switch_view(self: "DataEngineWindow", index: int) -> None:
         self.view_stack.setCurrentIndex(index)

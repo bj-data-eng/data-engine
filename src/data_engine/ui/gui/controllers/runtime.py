@@ -61,24 +61,16 @@ class GuiRuntimeController:
         window.flow_controller.refresh_action_buttons(window)
 
     def daemon_wait_worker(self, window: "DataEngineWindow") -> None:
-        stop_event = getattr(window, "_daemon_wait_stop_event", None)
-        while not window.ui_closing:
-            if stop_event is not None and stop_event.is_set():
-                return
-            if not window._has_authored_workspace():
-                if stop_event is not None and stop_event.wait(1.5):
-                    return
-                continue
-            manager = window.runtime_binding.daemon_manager
-            previous_snapshot = getattr(manager, "_last_snapshot", None)
-            snapshot = window.daemon_state_service.wait_for_update(manager, timeout_seconds=1.5)
-            if stop_event is not None and stop_event.is_set():
-                return
-            if window.ui_closing:
-                return
-            if previous_snapshot is not None and snapshot == previous_snapshot:
-                continue
-            window._schedule_daemon_update_sync()
+        window.daemon_state_service.run_subscription_loop(
+            window.runtime_binding.daemon_manager,
+            stop_event=window.daemon_subscription.stop_event,
+            workspace_available=lambda: not window.ui_closing and window._has_authored_workspace(),
+            on_update=lambda snapshot: (
+                window.daemon_subscription.mark_subscription(window._monotonic()),
+                None if window.ui_closing else window._schedule_daemon_update_sync(),
+            )[-1],
+            timeout_seconds=window.daemon_subscription.timeout_seconds,
+        )
 
     @staticmethod
     def _blocked_status_text(window: "DataEngineWindow") -> str:
@@ -128,6 +120,7 @@ class GuiRuntimeController:
                     daemon_live=bool(getattr(sync_state.snapshot, "live", False)),
                     daemon_startup_in_progress=window._daemon_startup_in_progress,
                     daemon_projection_version=int(getattr(sync_state.snapshot, "projection_version", 0) or 0),
+                    daemon_transport_mode=str(getattr(sync_state.snapshot, "transport_mode", "heartbeat") or "heartbeat"),
                     daemon_engine_starting=bool(getattr(sync_state.snapshot, "engine_starting", False)),
                     daemon_active_flow_names=tuple(getattr(sync_state.snapshot, "active_engine_flow_names", ()) or ()),
                     daemon_active_runs=tuple(getattr(sync_state.snapshot, "active_runs", ()) or ()),
@@ -136,6 +129,7 @@ class GuiRuntimeController:
                 if not window.workspace_snapshot.engine.daemon_live and window._auto_daemon_enabled:
                     self.ensure_daemon_started(window)
                 window.daemon_status = sync_state.daemon_status
+                window.daemon_subscription.mark_sync(window._monotonic())
                 self._apply_runtime_projection(
                     window,
                     runtime_session=projection.runtime_session,

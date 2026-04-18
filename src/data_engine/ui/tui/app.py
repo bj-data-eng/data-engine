@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 from queue import Empty
-import threading
-
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Grid, Horizontal, Vertical
@@ -31,6 +29,8 @@ class DataEngineTui(TuiWindowSupportMixin, TuiStateMixin, App[None]):
 
     CSS = tui_stylesheet(DEFAULT_THEME)
     _ACTIVE_FLOW_STATES = {"running", "polling", "scheduled", "stopping flow", "stopping runtime"}
+    _UI_POLL_INTERVAL_SECONDS = 0.15
+    _DAEMON_HEARTBEAT_INTERVAL_SECONDS = 2.0
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
@@ -86,17 +86,16 @@ class DataEngineTui(TuiWindowSupportMixin, TuiStateMixin, App[None]):
         if self._has_authored_workspace():
             self._ensure_daemon_started()
         self._sync_daemon_state()
-        if not getattr(self, "_daemon_wait_started", False):
-            self._daemon_wait_started = True
-            threading.Thread(target=self._daemon_wait_worker, daemon=True).start()
-        self.set_interval(0.15, self._poll_ui)
+        self._ensure_daemon_wait_worker()
+        self.set_interval(self._UI_POLL_INTERVAL_SECONDS, self._poll_ui)
+        self.set_interval(self._DAEMON_HEARTBEAT_INTERVAL_SECONDS, self._heartbeat_daemon_state)
         self._refresh_buttons()
 
     def on_unmount(self) -> None:
         logging.getLogger("data_engine").removeHandler(self.log_handler)
-        daemon_wait_stop_event = getattr(self, "_daemon_wait_stop_event", None)
-        if daemon_wait_stop_event is not None:
-            daemon_wait_stop_event.set()
+        daemon_subscription = getattr(self, "daemon_subscription", None)
+        if daemon_subscription is not None:
+            daemon_subscription.stop()
         if self._unregister_client_session_and_check_for_shutdown():
             self._shutdown_daemon_on_close()
         self.runtime_binding_service.close_binding(self.runtime_binding)
@@ -186,6 +185,11 @@ class DataEngineTui(TuiWindowSupportMixin, TuiStateMixin, App[None]):
             except Empty:
                 break
             del entry
+
+    def _heartbeat_daemon_state(self) -> None:
+        self._ensure_daemon_wait_worker()
+        if not self._should_run_daemon_heartbeat():
+            return
         self._sync_daemon_state()
 
     def _refresh_flow_list_items(self) -> None:
@@ -205,9 +209,6 @@ class DataEngineTui(TuiWindowSupportMixin, TuiStateMixin, App[None]):
 
     def _start_daemon_worker(self) -> None:
         self.runtime_controller.start_daemon_worker(self)
-
-    def _daemon_wait_worker(self) -> None:
-        self.runtime_controller.daemon_wait_worker(self)
 
     def _finish_daemon_startup(self, success: bool, error_text: str) -> None:
         self.runtime_controller.finish_daemon_startup(self, success, error_text)

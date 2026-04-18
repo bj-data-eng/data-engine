@@ -27,6 +27,7 @@ class DaemonStateSyncHandler:
         if since_version is not None and since_version == projection.version:
             return {
                 "workspace_id": service.paths.workspace_id,
+                "daemon_id": service.daemon_id,
                 "projection_version": projection.version,
                 "unchanged": True,
             }
@@ -64,6 +65,7 @@ class DaemonStateSyncHandler:
         if projection.version == since_version:
             return {
                 "workspace_id": self.service.paths.workspace_id,
+                "daemon_id": self.service.daemon_id,
                 "projection_version": projection.version,
                 "unchanged": True,
             }

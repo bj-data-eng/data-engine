@@ -7,6 +7,7 @@ from importlib import import_module
 __all__ = [
     "DaemonService",
     "DaemonStateService",
+    "DaemonUpdateSubscription",
     "CatalogPort",
     "CatalogQueryService",
     "CommandPort",
@@ -43,6 +44,7 @@ __all__ = [
 _SERVICE_MODULES = {
     "DaemonService": "data_engine.services.daemon",
     "DaemonStateService": "data_engine.services.daemon_state",
+    "DaemonUpdateSubscription": "data_engine.services.daemon_state",
     "CatalogPort": "data_engine.services.operator_queries",
     "CatalogQueryService": "data_engine.services.operator_queries",
     "CommandPort": "data_engine.services.operator_commands",

@@ -6,6 +6,7 @@ import pytest
 
 from data_engine.domain import RuntimeSessionState
 from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
+from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, RunLiveSnapshot, WorkspaceSnapshot
 
 from tests.tui.support import (
     FakeDaemonStateService,
@@ -27,6 +28,73 @@ async def test_tui_disables_run_and_start_when_workspace_not_owned():
 
         assert app.query_one("#run-once").disabled is True
         assert app.query_one("#start-engine").disabled is True
+
+
+@pytest.mark.anyio
+async def test_tui_refresh_buttons_prefers_daemon_live_stopping_run_after_rebind():
+    app = make_tui()
+    async with app.run_test():
+        app.selected_flow_name = "manual_review"
+        app.runtime_session = RuntimeSessionState.empty()
+        app.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=app.workspace_paths.workspace_id,
+            version=4,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="idle", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={
+                "run-manual": RunLiveSnapshot(
+                    run_id="run-manual",
+                    flow_name="manual_review",
+                    group_name="Manual",
+                    source_path=None,
+                    state="stopping",
+                    current_step_name="Build Report",
+                    started_at_utc="2026-04-18T12:00:00+00:00",
+                    elapsed_seconds=5.0,
+                )
+            },
+        )
+
+        app._refresh_buttons()
+
+        assert app.query_one("#run-once").disabled is True
+        assert app.query_one("#clear-flow-log").disabled is True
+
+
+@pytest.mark.anyio
+async def test_tui_refresh_buttons_disable_runtime_controls_while_engine_is_starting():
+    app = make_tui()
+    async with app.run_test():
+        app.selected_flow_name = "poller"
+        app.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=app.workspace_paths.workspace_id,
+            version=5,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="starting", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+
+        app._refresh_buttons()
+
+        assert app.query_one("#refresh").disabled is True
+        assert app.query_one("#run-once").disabled is True
+        assert app.query_one("#start-engine").disabled is True
+        assert app.query_one("#stop-engine").disabled is True
+        assert app.query_one("#clear-flow-log").disabled is True
+
+
+@pytest.mark.anyio
+async def test_tui_refresh_buttons_preserve_workspace_selector_disabled_state():
+    app = make_tui()
+    async with app.run_test():
+        selector = app.query_one("#workspace-select")
+        selector.disabled = True
+
+        app._refresh_buttons()
+
+        assert selector.disabled is True
 
 
 @pytest.mark.anyio
@@ -115,9 +183,9 @@ def test_tui_daemon_wait_worker_schedules_sync_when_projection_changes(monkeypat
         return next_snapshot
 
     app.daemon_state_service.wait_for_update = _wait_for_update
-    monkeypatch.setattr(app, "_schedule_daemon_update_sync", lambda: scheduled.append("sync") or app._daemon_wait_stop_event.set())
+    monkeypatch.setattr(app, "_schedule_daemon_update_sync", lambda: scheduled.append("sync") or app.daemon_subscription.stop())
 
-    app._daemon_wait_worker()
+    app.runtime_controller.daemon_wait_worker(app)
 
     assert scheduled == ["sync"]
 
@@ -141,13 +209,13 @@ def test_tui_daemon_wait_worker_skips_sync_when_projection_is_unchanged(monkeypa
     def _wait_for_update(manager, *, timeout_seconds: float = 5.0):
         del timeout_seconds
         manager._last_snapshot = previous_snapshot
-        app._daemon_wait_stop_event.set()
+        app.daemon_subscription.stop()
         return previous_snapshot
 
     app.daemon_state_service.wait_for_update = _wait_for_update
     monkeypatch.setattr(app, "_schedule_daemon_update_sync", lambda: scheduled.append("sync"))
 
-    app._daemon_wait_worker()
+    app.runtime_controller.daemon_wait_worker(app)
 
     assert scheduled == []
 

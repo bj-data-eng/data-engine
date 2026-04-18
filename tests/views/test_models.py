@@ -244,7 +244,7 @@ def test_shared_action_state_builders_cover_runtime_stopping_and_workspace_owned
     assert tui.stop_engine_disabled is False
     assert tui.view_config_disabled is False
     assert tui.view_log_disabled is True
-    assert tui.clear_flow_log_disabled is False
+    assert tui.clear_flow_log_disabled is True
 
 
 def test_action_state_builders_allow_run_once_when_other_group_manual_run_is_active():
@@ -309,6 +309,50 @@ def test_action_state_builders_show_stop_flow_for_active_manual_run_while_engine
     assert gui.flow_run_enabled is True
     assert gui.engine_label == "Stop Engine"
     assert gui.engine_enabled is True
+
+
+def test_action_state_builders_use_daemon_live_stopping_state_for_selected_flow():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_review", group="Manual"), description=None))
+    selected = SelectedFlowState(card=card, live_state="stopping", group_active=True, has_logs=False)
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState.empty(),
+        selected_flow=selected,
+        has_automated_flows=True,
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+    tui = TuiActionState.from_context(context)
+
+    assert gui.flow_run_label == "Stopping..."
+    assert gui.flow_run_state == "stop"
+    assert gui.flow_run_enabled is False
+    assert tui.run_once_disabled is True
+
+
+def test_action_state_builders_disable_runtime_controls_while_engine_is_starting():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
+    selected = SelectedFlowState(card=card, has_logs=True)
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState.empty(),
+        selected_flow=selected,
+        has_automated_flows=True,
+        engine_state="starting",
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+    tui = TuiActionState.from_context(context)
+
+    assert gui.engine_label == "Starting..."
+    assert gui.engine_enabled is False
+    assert gui.clear_flow_log_enabled is False
+    assert tui.refresh_disabled is True
+    assert tui.start_engine_disabled is True
+    assert tui.stop_engine_disabled is True
+    assert tui.clear_flow_log_disabled is True
 
 
 def test_shared_action_state_builders_cover_control_unavailable_without_workspace_owner():

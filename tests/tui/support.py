@@ -176,6 +176,48 @@ class FakeDaemonStateService:
     def wait_for_update(self, manager, *, timeout_seconds: float = 5.0):
         return manager.wait_for_update(timeout_seconds=timeout_seconds)
 
+    def run_subscription_loop(
+        self,
+        manager,
+        *,
+        stop_event,
+        workspace_available,
+        on_update,
+        timeout_seconds: float = 1.5,
+    ):
+        while not stop_event.is_set():
+            if not workspace_available():
+                if stop_event.wait(timeout_seconds):
+                    return
+                continue
+            previous_snapshot = getattr(manager, "_last_snapshot", None)
+            snapshot = self.wait_for_update(manager, timeout_seconds=timeout_seconds)
+            if stop_event.is_set():
+                return
+            if previous_snapshot is not None and snapshot == previous_snapshot:
+                continue
+            on_update(snapshot)
+
+    @staticmethod
+    def should_run_heartbeat(
+        *,
+        daemon_live: bool,
+        transport_mode: str,
+        wait_worker_alive: bool,
+        now_monotonic: float,
+        last_sync_monotonic: float,
+        last_subscription_monotonic: float,
+        stale_after_seconds: float = 15.0,
+    ) -> bool:
+        if not daemon_live:
+            return True
+        if transport_mode != "subscription":
+            return True
+        if not wait_worker_alive:
+            return True
+        freshest = max(float(last_sync_monotonic or 0.0), float(last_subscription_monotonic or 0.0))
+        return (float(now_monotonic) - freshest) >= max(float(stale_after_seconds), 0.0)
+
     def control_state(self, manager, snapshot, *, daemon_startup_in_progress: bool = False):
         del manager
         return WorkspaceControlState.from_snapshot(

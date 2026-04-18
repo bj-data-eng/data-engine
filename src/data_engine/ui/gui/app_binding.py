@@ -17,6 +17,7 @@ from data_engine.domain import WorkspaceSessionState
 from data_engine.platform.identity import APP_DISPLAY_NAME, APP_INTERNAL_ID
 from data_engine.platform.instrumentation import maybe_start_viztracer
 from data_engine.platform.workspace_models import DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR
+from data_engine.services import DaemonUpdateSubscription
 from data_engine.ui.gui.bootstrap import GuiServices
 from data_engine.ui.gui.controllers import GuiFlowController, GuiRuntimeController
 from data_engine.ui.gui.helpers import register_client_session as helper_register_client_session
@@ -33,6 +34,7 @@ _DEFAULT_WINDOW_SIZE = (1480, 920)
 _MINIMUM_WINDOW_SIZE = (1180, 760)
 _STARTUP_SCREEN_WIDTH_RATIO = 0.78
 _STARTUP_SCREEN_HEIGHT_RATIO = 0.84
+_DAEMON_HEARTBEAT_INTERVAL_MS = 2000
 
 
 def initial_window_size_for_screen(screen: object | None) -> tuple[int, int]:
@@ -149,8 +151,11 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window._action_buttons_refresh_pending = False
     window._worker_threads: set[threading.Thread] = set()
     window._worker_threads_lock = threading.RLock()
-    window._daemon_wait_stop_event = threading.Event()
-    window._daemon_wait_started = False
+    window.daemon_subscription = DaemonUpdateSubscription(
+        daemon_state_service=window.daemon_state_service,
+        manager=window.runtime_binding.daemon_manager,
+        clock=window._monotonic,
+    )
     window._daemon_status = DaemonStatusState.empty()
     window._last_daemon_spawn_attempt = 0.0
     window._auto_daemon_enabled = False
@@ -188,8 +193,8 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.operation_timer.timeout.connect(window._refresh_live_operation_durations)
     window.operation_timer.start(100)
     window.daemon_timer = QTimer(window)
-    window.daemon_timer.timeout.connect(window._sync_from_daemon)
-    window.daemon_timer.start(500)
+    window.daemon_timer.timeout.connect(window._heartbeat_daemon_sync)
+    window.daemon_timer.start(_DAEMON_HEARTBEAT_INTERVAL_MS)
 
 
 __all__ = ["bootstrap_gui_window", "initial_window_size_for_screen"]

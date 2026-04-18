@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from data_engine.core.model import FlowStoppedError
+from data_engine.core.primitives import FlowContext
+from data_engine.runtime.execution.runner import FlowRunExecutionPorts, FlowRunExecutor
+
+
+@dataclass(frozen=True)
+class _Step:
+    label: str
+    fn: object
+    function_name: str = "step_fn"
+    save_as: str | None = None
+    use: str | None = None
+
+
+@dataclass(frozen=True)
+class _Flow:
+    name: str
+    group: str
+    steps: tuple[_Step, ...]
+    trigger: object | None = None
+
+
+class _ContextBuilder:
+    def new_run_id(self) -> str:
+        return "run-1"
+
+    def build(self, flow: _Flow, source_path: Path | None, *, run_id: str) -> FlowContext:
+        del source_path
+        return FlowContext(
+            flow_name=flow.name,
+            group=flow.group,
+            metadata={"started_at_utc": "2026-04-18T12:00:00+00:00", "run_id": run_id},
+        )
+
+
+class _Polling:
+    def poll_source_signature(self, flow: _Flow, source_path: Path | None):
+        del flow, source_path
+        return None
+
+    def normalized_source_path(self, source_path: Path | None) -> str | None:
+        return None if source_path is None else str(source_path)
+
+
+class _StateWriter:
+    def __init__(self, calls: list[tuple[str, object]]) -> None:
+        self.calls = calls
+
+    def record_run_started(self, **kwargs) -> None:
+        self.calls.append(("record_run_started", kwargs))
+
+    def record_run_finished(self, **kwargs) -> None:
+        self.calls.append(("record_run_finished", kwargs))
+
+    def record_step_started(self, **kwargs) -> int:
+        self.calls.append(("record_step_started", kwargs))
+        return 1
+
+    def record_step_finished(self, **kwargs) -> None:
+        self.calls.append(("record_step_finished", kwargs))
+
+    def upsert_file_state(self, **kwargs) -> None:
+        self.calls.append(("upsert_file_state", kwargs))
+
+
+class _LogEmitter:
+    def __init__(self, calls: list[tuple[str, object]]) -> None:
+        self.calls = calls
+
+    def log_runtime_message(self, message: str, **kwargs) -> None:
+        self.calls.append(("log_runtime_message", {"message": message, **kwargs}))
+
+    def log_flow_event(self, run_id: str, flow_name: str, source_path: Path | None, **kwargs) -> None:
+        self.calls.append(
+            (
+                "log_flow_event",
+                {"run_id": run_id, "flow_name": flow_name, "source_path": source_path, **kwargs},
+            )
+        )
+
+    def log_step_event(self, run_id: str, flow_name: str, step_label: str, source_path: Path | None, **kwargs) -> None:
+        self.calls.append(
+            (
+                "log_step_event",
+                {
+                    "run_id": run_id,
+                    "flow_name": flow_name,
+                    "step_label": step_label,
+                    "source_path": source_path,
+                    **kwargs,
+                },
+            )
+        )
+
+
+class _StopController:
+    def __init__(self) -> None:
+        self.registered: list[str] = []
+        self.unregistered: list[str] = []
+
+    def register_run(self, run_id: str) -> None:
+        self.registered.append(run_id)
+
+    def unregister_run(self, run_id: str) -> None:
+        self.unregistered.append(run_id)
+
+    def check_run(self, run_id: str | None) -> None:
+        del run_id
+
+
+def _executor(calls: list[tuple[str, object]]) -> FlowRunExecutor:
+    return FlowRunExecutor(
+        FlowRunExecutionPorts(
+            context_builder=_ContextBuilder(),
+            polling=_Polling(),
+            state_writer=_StateWriter(calls),
+            log_emitter=_LogEmitter(calls),
+            stop_controller=_StopController(),
+        )
+    )
+
+
+def test_flow_run_executor_logs_success_before_publishing_run_finished_state() -> None:
+    calls: list[tuple[str, object]] = []
+    executor = _executor(calls)
+    flow = _Flow(name="claims_summary", group="Claims", steps=(_Step("Emit", lambda context: "ok"),))
+
+    executor.run_one(flow, None)
+
+    log_index = next(index for index, call in enumerate(calls) if call[0] == "log_flow_event" and call[1]["status"] == "success")
+    finish_index = next(index for index, call in enumerate(calls) if call[0] == "record_run_finished")
+
+    assert log_index < finish_index
+
+
+def test_flow_run_executor_logs_failure_before_publishing_run_finished_state() -> None:
+    calls: list[tuple[str, object]] = []
+    executor = _executor(calls)
+
+    def _boom(context):
+        del context
+        raise FlowStoppedError("stop requested")
+
+    flow = _Flow(name="claims_summary", group="Claims", steps=(_Step("Emit", _boom),))
+
+    try:
+        executor.run_one(flow, None)
+    except FlowStoppedError:
+        pass
+    else:
+        raise AssertionError("expected FlowStoppedError")
+
+    log_index = next(index for index, call in enumerate(calls) if call[0] == "log_flow_event" and call[1]["status"] == "stopped")
+    finish_index = next(index for index, call in enumerate(calls) if call[0] == "record_run_finished")
+
+    assert log_index < finish_index

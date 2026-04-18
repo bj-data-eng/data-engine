@@ -79,6 +79,7 @@ def test_daemon_status_returns_unchanged_when_projection_version_matches(tmp_pat
         assert unchanged["ok"] is True
         assert unchanged["status"] == {
             "workspace_id": "default",
+            "daemon_id": service.daemon_id,
             "projection_version": version,
             "unchanged": True,
         }

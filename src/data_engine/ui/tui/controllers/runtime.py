@@ -6,7 +6,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from textual.css.query import NoMatches
-from textual.widgets import Button, ListView, Select, Static
+from textual.widgets import Button, ListView, Static
 
 from data_engine.application import RuntimeApplication
 from data_engine.services import DaemonService, HistoryQueryService, RuntimeStateService
@@ -46,22 +46,16 @@ class TuiRuntimeController:
                 child.refresh_view(window.flow_states.get(child.card.name, child.card.state))
 
     def daemon_wait_worker(self, window: "DataEngineTui") -> None:
-        stop_event = getattr(window, "_daemon_wait_stop_event", None)
-        while True:
-            if stop_event is not None and stop_event.is_set():
-                return
-            if not window._has_authored_workspace():
-                if stop_event is not None and stop_event.wait(1.5):
-                    return
-                continue
-            manager = window.runtime_binding.daemon_manager
-            previous_snapshot = getattr(manager, "_last_snapshot", None)
-            snapshot = window.daemon_state_service.wait_for_update(manager, timeout_seconds=1.5)
-            if stop_event is not None and stop_event.is_set():
-                return
-            if previous_snapshot is not None and snapshot == previous_snapshot:
-                continue
-            window._schedule_daemon_update_sync()
+        window.daemon_state_service.run_subscription_loop(
+            window.runtime_binding.daemon_manager,
+            stop_event=window.daemon_subscription.stop_event,
+            workspace_available=lambda: window._has_authored_workspace(),
+            on_update=lambda snapshot: (
+                window.daemon_subscription.mark_subscription(window._monotonic()),
+                window._schedule_daemon_update_sync(),
+            )[-1],
+            timeout_seconds=window.daemon_subscription.timeout_seconds,
+        )
 
     @staticmethod
     def _blocked_status_text(window: "DataEngineTui") -> str:
@@ -71,6 +65,7 @@ class TuiRuntimeController:
         return snapshot.control.blocked_status_text
 
     def refresh_buttons(self, window: "DataEngineTui") -> None:
+        workspace_snapshot = getattr(window, "workspace_snapshot", None)
         action_state = TuiActionState.from_context(
             build_operator_action_context(
                 card=window._selected_card(),
@@ -78,6 +73,16 @@ class TuiRuntimeController:
                 runtime_session=window.runtime_session,
                 flow_groups_by_name={card.name: card.group for card in window.flow_cards},
                 active_flow_states=window._ACTIVE_FLOW_STATES,
+                engine_state=(
+                    workspace_snapshot.engine.state
+                    if workspace_snapshot is not None
+                    else "stopping"
+                    if window.runtime_session.runtime_stopping
+                    else "running"
+                    if window.runtime_session.runtime_active
+                    else "idle"
+                ),
+                live_runs=None if workspace_snapshot is None else workspace_snapshot.active_runs,
                 has_logs=bool(
                     window.selected_flow_name is not None
                     and self.history_query_service.list_run_groups(
@@ -98,7 +103,6 @@ class TuiRuntimeController:
         window.query_one("#view-config", Button).disabled = action_state.view_config_disabled
         window.query_one("#view-log", Button).disabled = action_state.view_log_disabled
         window.query_one("#clear-flow-log", Button).disabled = action_state.clear_flow_log_disabled
-        window.query_one("#workspace-select", Select).disabled = action_state.workspace_select_disabled
 
     def sync_daemon_state(self, window: "DataEngineTui") -> None:
         if not window._has_authored_workspace():
@@ -131,10 +135,12 @@ class TuiRuntimeController:
             workspace_control_state=sync_state.workspace_control_state,
             daemon_live=bool(getattr(sync_state.snapshot, "live", False)),
             daemon_startup_in_progress=window._daemon_startup_in_progress,
+            daemon_transport_mode=str(getattr(sync_state.snapshot, "transport_mode", "heartbeat") or "heartbeat"),
         )
         if not window.workspace_snapshot.engine.daemon_live:
             self.ensure_daemon_started(window)
         window.runtime_session = projection.runtime_session
+        window.daemon_subscription.mark_sync(window._monotonic())
         try:
             window.query_one("#control-status", Static).update(
                 surface_control_status_text(window.workspace_snapshot.control.control_status_text)

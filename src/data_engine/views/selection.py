@@ -80,10 +80,12 @@ def build_selected_flow_presentation(
             selected_run_key=None,
             empty_text="Select one flow to see details.",
         )
+    live_flow_runs = _live_runs_for_flow(flow_name=card.name, live_runs=live_runs)
     detail_state = SelectedFlowDetailState.from_flow(
         card,
         tracker,
         flow_states=flow_states,
+        live_step_statuses=_live_step_statuses_for_runs(live_flow_runs),
     )
     effective_run_groups = _effective_run_groups(
         flow_name=card.name,
@@ -121,7 +123,7 @@ def _effective_run_groups(
     if not live_runs:
         return run_groups
 
-    live_flow_runs = tuple(run for run in live_runs.values() if run.flow_name == flow_name)
+    live_flow_runs = _live_runs_for_flow(flow_name=flow_name, live_runs=live_runs)
     if not live_flow_runs and not live_truth_authoritative:
         return run_groups
 
@@ -145,6 +147,33 @@ def _effective_run_groups(
     )
     merged.extend(_overlay_live_run(None, run) for run in daemon_only_runs)
     return tuple(merged)
+
+
+def _live_runs_for_flow(
+    *,
+    flow_name: str,
+    live_runs: Mapping[str, LiveRunLike] | None,
+) -> tuple[LiveRunLike, ...]:
+    """Return daemon-owned live runs filtered to one flow name."""
+    if not live_runs:
+        return ()
+    return tuple(run for run in live_runs.values() if run.flow_name == flow_name)
+
+
+def _live_step_statuses_for_runs(live_runs: tuple[LiveRunLike, ...]) -> dict[str, str]:
+    """Return per-step live status synthesized from daemon-owned live runs."""
+    statuses: dict[str, str] = {}
+    for run in live_runs:
+        step_name = run.current_step_name
+        if not step_name:
+            continue
+        run_state = str(run.state or "").strip().lower()
+        next_status = "stopping" if run_state == "stopping" else "running"
+        previous_status = statuses.get(step_name)
+        if previous_status == "stopping":
+            continue
+        statuses[step_name] = next_status
+    return statuses
 
 
 def _overlay_live_run(existing: FlowRunState | None, live_run: LiveRunLike) -> FlowRunState:

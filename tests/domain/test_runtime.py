@@ -111,10 +111,12 @@ def test_daemon_status_state_projects_idle_snapshot_to_empty_runtime_session():
             manual_runs=(),
             last_checkpoint_at_utc="2026-04-04T12:00:00+00:00",
             source="lease",
+            transport_mode="disconnected",
         )
     )
 
     assert status.source == "lease"
+    assert status.transport_mode == "disconnected"
     assert status.as_runtime_session(_sample_cards()) == RuntimeSessionState.empty()
 
 

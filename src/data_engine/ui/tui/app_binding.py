@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-import threading
 from queue import Queue
 from uuid import uuid4
 from typing import TYPE_CHECKING
 
 from data_engine.domain import FlowLogEntry, OperationSessionState, OperatorSessionState, WorkspaceSessionState
 from data_engine.platform.workspace_models import DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR
+from data_engine.services import DaemonUpdateSubscription
 from data_engine.ui.tui.bootstrap import TuiServices, build_tui_services, default_tui_service_kwargs
 from data_engine.ui.tui.controllers import TuiFlowController, TuiRuntimeController
 from data_engine.ui.tui.runtime import QueueLogHandler
@@ -104,8 +104,11 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
     app.workspace_snapshot = None
     app.log_queue: Queue[FlowLogEntry] = Queue()
     app.log_handler = QueueLogHandler(app.log_queue)
-    app._daemon_wait_stop_event = threading.Event()
-    app._daemon_wait_started = False
+    app.daemon_subscription = DaemonUpdateSubscription(
+        daemon_state_service=app.daemon_state_service,
+        manager=app.runtime_binding.daemon_manager,
+        clock=app._monotonic,
+    )
     app._last_daemon_spawn_attempt = 0.0
     app._daemon_startup_in_progress = False
     app._workspace_switch_suppressed = False

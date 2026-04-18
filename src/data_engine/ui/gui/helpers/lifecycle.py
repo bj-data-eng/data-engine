@@ -79,6 +79,7 @@ def start_worker_thread(window: "DataEngineWindow", *, target, args=()) -> None:
     thread = threading.Thread(target=run_tracked_worker, args=(window, target, args), daemon=True)
     window._register_worker_thread(thread)
     thread.start()
+    return thread
 
 
 def run_tracked_worker(window: "DataEngineWindow", target, args) -> None:
