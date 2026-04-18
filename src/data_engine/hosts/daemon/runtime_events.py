@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from threading import RLock
+from threading import Condition, RLock
 from typing import Any, Protocol
 
 
@@ -75,6 +75,7 @@ class DaemonRuntimeProjector:
 
     def __init__(self, *, workspace_id: str, initial_state: dict[str, Any]) -> None:
         self._lock = RLock()
+        self._condition = Condition(self._lock)
         self._snapshot = self._snapshot_from_state(workspace_id=workspace_id, state=initial_state, version=0)
 
     def handle(self, event: DaemonRuntimeEvent) -> None:
@@ -109,10 +110,25 @@ class DaemonRuntimeProjector:
                     manual_runs=refreshed.manual_runs,
                     last_checkpoint_at_utc=refreshed.last_checkpoint_at_utc,
                 )
+                self._condition.notify_all()
 
     def snapshot(self) -> DaemonRuntimeProjectionSnapshot:
         """Return the current live projection snapshot."""
         with self._lock:
+            return self._snapshot
+
+    def wait_for_version_change(
+        self,
+        *,
+        since_version: int,
+        timeout_seconds: float,
+    ) -> DaemonRuntimeProjectionSnapshot:
+        """Wait until the projection version changes or the timeout expires."""
+        with self._condition:
+            if self._snapshot.version != since_version:
+                return self._snapshot
+            timeout = max(float(timeout_seconds), 0.0)
+            self._condition.wait_for(lambda: self._snapshot.version != since_version, timeout=timeout)
             return self._snapshot
 
     @staticmethod

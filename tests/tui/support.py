@@ -151,6 +151,13 @@ class FakeDaemonManager:
         self._last_snapshot = self.snapshot
         return self.snapshot
 
+    def wait_for_update(self, *, timeout_seconds: float = 5.0) -> WorkspaceDaemonSnapshot:
+        del timeout_seconds
+        if self._last_snapshot is not None:
+            return self._last_snapshot
+        self._last_snapshot = self.snapshot
+        return self.snapshot
+
     def request_control(self) -> str:
         return self.request_control_message
 
@@ -165,6 +172,9 @@ class FakeDaemonStateService:
 
     def sync(self, manager):
         return manager.sync()
+
+    def wait_for_update(self, manager, *, timeout_seconds: float = 5.0):
+        return manager.wait_for_update(timeout_seconds=timeout_seconds)
 
     def control_state(self, manager, snapshot, *, daemon_startup_in_progress: bool = False):
         del manager

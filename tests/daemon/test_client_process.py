@@ -192,6 +192,94 @@ def test_workspace_daemon_manager_reuses_cached_snapshot_when_projection_is_unch
     assert manager._sync_misses == 0  # noqa: SLF001 - successful unchanged sync should clear retry debt
 
 
+def test_workspace_daemon_manager_wait_for_update_uses_wait_command_and_reuses_status_normalization(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    requests: list[dict[str, object]] = []
+    responses = iter(
+        (
+            {
+                "ok": True,
+                "status": {
+                    "workspace_id": "default",
+                    "workspace_owned": True,
+                    "leased_by_machine_id": None,
+                    "engine_active": False,
+                    "engine_stopping": False,
+                    "engine_starting": False,
+                    "active_engine_flow_names": [],
+                    "active_runs": [],
+                    "flow_activity": [],
+                    "manual_runs": [],
+                    "last_checkpoint_at_utc": "2026-04-17T00:00:10+00:00",
+                    "projection_version": 7,
+                },
+            },
+            {
+                "ok": True,
+                "status": {
+                    "workspace_id": "default",
+                    "workspace_owned": True,
+                    "leased_by_machine_id": None,
+                    "engine_active": True,
+                    "engine_stopping": False,
+                    "engine_starting": False,
+                    "active_engine_flow_names": ["demo_poll"],
+                    "active_runs": [
+                        {
+                            "run_id": "run-2",
+                            "flow_name": "demo_poll",
+                            "group_name": "Demo",
+                            "state": "running",
+                            "started_at_utc": "2026-04-17T00:01:00+00:00",
+                        }
+                    ],
+                    "flow_activity": [
+                        {
+                            "flow_name": "demo_poll",
+                            "active_run_count": 1,
+                            "queued_run_count": 0,
+                            "engine_run_count": 1,
+                            "manual_run_count": 0,
+                            "stopping_run_count": 0,
+                            "running_step_counts": {},
+                        }
+                    ],
+                    "manual_runs": [],
+                    "last_checkpoint_at_utc": "2026-04-17T00:01:00+00:00",
+                    "projection_version": 8,
+                },
+            },
+        )
+    )
+
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.is_daemon_live", lambda paths: True)
+
+    def _daemon_request(_paths, payload, timeout=0.0):
+        del timeout
+        requests.append(dict(payload))
+        return next(responses)
+
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.daemon_request", _daemon_request)
+
+    manager = WorkspaceDaemonManager(paths)
+    first = manager.sync()
+    second = manager.wait_for_update(timeout_seconds=1.5)
+
+    assert first.projection_version == 7
+    assert requests[1]["command"] == "wait_for_daemon_status"
+    assert requests[1]["since_version"] == 7
+    assert requests[1]["timeout_ms"] == 1500
+    assert second.projection_version == 8
+    assert second.runtime_active is True
+    assert second.active_engine_flow_names == ("demo_poll",)
+    assert tuple(run.run_id for run in second.active_runs) == ("run-2",)
+
+
 def test_lease_pid_is_live_delegates_to_pid_helper(monkeypatch):
     metadata = {"pid": 123}
 

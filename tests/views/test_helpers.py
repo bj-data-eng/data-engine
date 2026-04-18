@@ -193,7 +193,7 @@ def test_run_group_display_maps_started_runs_to_started_visual_state_without_dur
 
     display = RunGroupDisplay.from_run(run_state)
 
-    assert display.status_text == "Started"
+    assert display.status_text == "Running"
     assert display.status_visual_state == "started"
     assert display.duration_text is None
 

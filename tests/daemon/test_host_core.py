@@ -86,6 +86,45 @@ def test_daemon_status_returns_unchanged_when_projection_version_matches(tmp_pat
         service._shutdown()  # noqa: SLF001 - direct daemon lifecycle test
 
 
+def test_wait_for_daemon_status_returns_after_projection_change(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        initial = service._handle_command({"command": "daemon_status"})  # noqa: SLF001
+        version = int(initial["status"]["projection_version"])
+
+        def _refresh_projection() -> None:
+            service.runtime_execution_ledger.execution_state.record_run_started(
+                run_id="run-1",
+                flow_name="demo",
+                group_name="Demo",
+                source_path="claims.xlsx",
+                started_at_utc=utcnow_text(),
+            )
+            service._publish_runtime_event("runtime.execution.changed")  # noqa: SLF001
+
+        thread = threading.Thread(target=_refresh_projection, daemon=True)
+        thread.start()
+        try:
+            waited = service._handle_command(  # noqa: SLF001
+                {"command": "wait_for_daemon_status", "since_version": version, "timeout_ms": 500}
+            )
+        finally:
+            thread.join(timeout=1.0)
+
+        assert waited["ok"] is True
+        assert waited["status"]["projection_version"] > version
+        assert waited["status"]["active_runs"][0]["run_id"] == "run-1"
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
 def test_daemon_host_dependencies_build_default_opens_workspace_runtime_ledger(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"

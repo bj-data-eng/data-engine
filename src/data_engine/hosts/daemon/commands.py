@@ -37,6 +37,19 @@ class DaemonCommandHandler:
                 since_version_raw = payload.get("since_version")
                 since_version = int(since_version_raw) if isinstance(since_version_raw, int | float) else None
                 return {"ok": True, "status": self.state_sync.status_payload(since_version=since_version)}
+            if command == "wait_for_daemon_status":
+                since_version_raw = payload.get("since_version")
+                since_version = int(since_version_raw) if isinstance(since_version_raw, int | float) else 0
+                timeout_ms_raw = payload.get("timeout_ms")
+                timeout_ms = int(timeout_ms_raw) if isinstance(timeout_ms_raw, int | float) else 0
+                timeout_seconds = min(max(timeout_ms / 1000.0, 0.0), 30.0)
+                return {
+                    "ok": True,
+                    "status": self.state_sync.wait_for_status_payload(
+                        since_version=since_version,
+                        timeout_seconds=timeout_seconds,
+                    ),
+                }
             if command == "list_flows":
                 return {"ok": True, "flows": [asdict(card) for card in self.state_sync.load_flow_cards()]}
             if command == "get_flow":

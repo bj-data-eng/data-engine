@@ -60,4 +60,13 @@ class TuiWindowSupportMixin:
             self._daemon_request(self.workspace_paths, {"command": "shutdown_daemon"}, timeout=1.5)
         except Exception:
             pass
+
+    def _schedule_daemon_update_sync(self: "DataEngineTui") -> None:
+        """Queue one daemon-driven sync back onto the Textual app thread."""
+        if not getattr(self, "is_mounted", False):
+            return
+        try:
+            self.call_from_thread(self._sync_daemon_state)
+        except Exception:
+            return
 __all__ = ["TuiWindowSupportMixin"]

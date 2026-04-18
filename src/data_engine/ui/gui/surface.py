@@ -24,6 +24,8 @@ def build_default_gui_services(theme_name: str) -> GuiServices:
 
 def handle_show_event(window: "DataEngineWindow", event: "QShowEvent") -> None:
     """Run the GUI show-event side effects."""
+    from data_engine.ui.gui.helpers import start_worker_thread
+
     super(type(window), window).showEvent(event)
     controls_group = getattr(window, "action_bar_controls_group", None)
     if controls_group is not None:
@@ -43,6 +45,9 @@ def handle_show_event(window: "DataEngineWindow", event: "QShowEvent") -> None:
     if not window._auto_daemon_enabled:
         window._auto_daemon_enabled = True
         QTimer.singleShot(0, window._ensure_daemon_started)
+    if not getattr(window, "_daemon_wait_started", False):
+        window._daemon_wait_started = True
+        start_worker_thread(window, target=window._daemon_wait_worker)
 
 
 def handle_close_event(window: "DataEngineWindow", event: "QCloseEvent") -> None:
@@ -64,6 +69,9 @@ def handle_close_event(window: "DataEngineWindow", event: "QCloseEvent") -> None
     flow_stop_event = getattr(window, "engine_flow_stop_event", None)
     if flow_stop_event is not None:
         flow_stop_event.set()
+    daemon_wait_stop_event = getattr(window, "_daemon_wait_stop_event", None)
+    if daemon_wait_stop_event is not None:
+        daemon_wait_stop_event.set()
     for stop_event in getattr(window, "manual_flow_stop_events", {}).values():
         stop_event.set()
     if hasattr(window, "log_timer"):

@@ -108,6 +108,18 @@ class GuiWindowSupportMixin:
         with self._worker_threads_lock:
             return tuple(self._worker_threads)
 
+    def _schedule_daemon_update_sync(self: "DataEngineWindow") -> None:
+        """Queue one daemon-driven sync back onto the Qt main thread."""
+        if getattr(self, "ui_closing", False):
+            return
+        signals = getattr(self, "signals", None)
+        if signals is None:
+            return
+        try:
+            signals.daemon_update_available.emit()
+        except RuntimeError:
+            return
+
     def _switch_view(self: "DataEngineWindow", index: int) -> None:
         self.view_stack.setCurrentIndex(index)
         if hasattr(self, "workspace_counts_footer_label"):

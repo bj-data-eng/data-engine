@@ -115,6 +115,7 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.signals.runtime_finished.connect(window._finish_runtime)
     window.signals.daemon_startup_finished.connect(window._finish_daemon_startup)
     window.signals.control_action_finished.connect(window._finish_control_action)
+    window.signals.daemon_update_available.connect(window._sync_from_daemon)
 
     window.engine_runtime_stop_event = threading.Event()
     window.engine_flow_stop_event = threading.Event()
@@ -148,6 +149,8 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window._action_buttons_refresh_pending = False
     window._worker_threads: set[threading.Thread] = set()
     window._worker_threads_lock = threading.RLock()
+    window._daemon_wait_stop_event = threading.Event()
+    window._daemon_wait_started = False
     window._daemon_status = DaemonStatusState.empty()
     window._last_daemon_spawn_attempt = 0.0
     window._auto_daemon_enabled = False

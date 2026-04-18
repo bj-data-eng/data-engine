@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from queue import Queue
 from uuid import uuid4
 from typing import TYPE_CHECKING
@@ -103,6 +104,8 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
     app.workspace_snapshot = None
     app.log_queue: Queue[FlowLogEntry] = Queue()
     app.log_handler = QueueLogHandler(app.log_queue)
+    app._daemon_wait_stop_event = threading.Event()
+    app._daemon_wait_started = False
     app._last_daemon_spawn_attempt = 0.0
     app._daemon_startup_in_progress = False
     app._workspace_switch_suppressed = False

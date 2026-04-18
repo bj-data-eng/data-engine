@@ -50,6 +50,25 @@ class DaemonStateSyncHandler:
             "projection_version": projection.version,
         }
 
+    def wait_for_status_payload(
+        self,
+        *,
+        since_version: int,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        """Wait for one projection change and return the resulting status payload."""
+        projection = self.service.runtime_projector.wait_for_version_change(
+            since_version=since_version,
+            timeout_seconds=timeout_seconds,
+        )
+        if projection.version == since_version:
+            return {
+                "workspace_id": self.service.paths.workspace_id,
+                "projection_version": projection.version,
+                "unchanged": True,
+            }
+        return self.status_payload()
+
     def checkpoint_once(self, *, status: str) -> None:
         service = self.service
         checkpoint_time = utcnow_text()

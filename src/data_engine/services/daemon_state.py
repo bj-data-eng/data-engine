@@ -22,6 +22,15 @@ class DaemonStateService:
         """Fetch one normalized daemon snapshot."""
         return manager.sync()
 
+    def wait_for_update(
+        self,
+        manager: WorkspaceDaemonManager,
+        *,
+        timeout_seconds: float = 5.0,
+    ) -> WorkspaceDaemonSnapshot:
+        """Wait for one daemon projection update and return the normalized snapshot."""
+        return manager.wait_for_update(timeout_seconds=timeout_seconds)
+
     def control_state(
         self,
         manager: WorkspaceDaemonManager,

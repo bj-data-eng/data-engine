@@ -42,7 +42,7 @@ def test_default_settings_db_path_tracks_default_store_location(tmp_path):
     assert store.db_path == default_settings_db_path(app_root=app_root)
 
 
-def test_default_state_root_uses_platform_local_app_root_when_not_overridden(monkeypatch, tmp_path):
+def test_default_state_root_uses_app_local_state_root_for_explicit_non_default_app_root(monkeypatch, tmp_path):
     home = tmp_path / "home"
     monkeypatch.delenv(DATA_ENGINE_STATE_ROOT_ENV_VAR, raising=False)
     monkeypatch.setenv("HOME", str(home))
@@ -52,7 +52,7 @@ def test_default_state_root_uses_platform_local_app_root_when_not_overridden(mon
 
     resolved = default_state_root(app_root=tmp_path / "data_engine")
 
-    assert resolved == home / "Library" / "Application Support" / "data_engine"
+    assert resolved == (tmp_path / "data_engine").resolve() / ".data_engine_state"
 
 
 def test_local_settings_store_recreates_parent_dir_before_reopening_connection(tmp_path):

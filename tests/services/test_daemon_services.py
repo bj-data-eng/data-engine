@@ -57,8 +57,13 @@ def test_daemon_state_service_delegates_to_manager(tmp_path):
     class _Manager:
         def __init__(self):
             self.control_calls: list[bool] = []
+            self.wait_calls: list[float] = []
 
         def sync(self):
+            return snapshot
+
+        def wait_for_update(self, *, timeout_seconds: float = 5.0):
+            self.wait_calls.append(timeout_seconds)
             return snapshot
 
         def control_state(self, snapshot_arg, *, daemon_startup_in_progress: bool = False):
@@ -77,4 +82,6 @@ def test_daemon_state_service_delegates_to_manager(tmp_path):
     assert service.sync(manager) is snapshot
     assert service.control_state(manager, snapshot, daemon_startup_in_progress=True) == WorkspaceControlState.empty()
     assert service.request_control(manager) == "sent"
+    assert service.wait_for_update(manager, timeout_seconds=1.25) is snapshot
     assert manager.control_calls == [True]
+    assert manager.wait_calls == [1.25]

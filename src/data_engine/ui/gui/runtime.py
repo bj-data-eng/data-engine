@@ -41,6 +41,7 @@ class UiSignals(QObject):
     runtime_finished = Signal(object, object, object)
     daemon_startup_finished = Signal(bool, str)
     control_action_finished = Signal(str, object)
+    daemon_update_available = Signal()
 
 
 __all__ = ["FlowLogEntry", "QueueLogHandler", "UiSignals"]

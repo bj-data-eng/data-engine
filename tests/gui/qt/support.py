@@ -240,6 +240,13 @@ class _FakeDaemonManager:
         self._last_snapshot = self.snapshot
         return self.snapshot
 
+    def wait_for_update(self, *, timeout_seconds: float = 5.0) -> WorkspaceDaemonSnapshot:
+        del timeout_seconds
+        if self._last_snapshot is not None:
+            return self._last_snapshot
+        self._last_snapshot = self.snapshot
+        return self.snapshot
+
     def request_control(self) -> str:
         return self.request_control_message
 
@@ -254,6 +261,9 @@ class _FakeDaemonStateService:
 
     def sync(self, manager):
         return manager.sync()
+
+    def wait_for_update(self, manager, *, timeout_seconds: float = 5.0):
+        return manager.wait_for_update(timeout_seconds=timeout_seconds)
 
     def control_state(self, manager, snapshot, *, daemon_startup_in_progress: bool = False):
         del manager
@@ -3198,6 +3208,86 @@ def test_sync_from_daemon_coalesces_nested_refresh_requests(qapp, monkeypatch):
         assert sync_calls == 2
         assert window._daemon_sync_in_progress is False
         assert window._daemon_sync_pending is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_daemon_wait_worker_schedules_sync_when_projection_changes(qapp, monkeypatch):
+    window = _make_window()
+    scheduled: list[str] = []
+    try:
+        previous_snapshot = WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=False,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=None,
+            source="daemon",
+            projection_version=1,
+        )
+        next_snapshot = WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=False,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=None,
+            source="daemon",
+            projection_version=2,
+        )
+        window.runtime_binding.daemon_manager._last_snapshot = previous_snapshot
+
+        def _wait_for_update(manager, *, timeout_seconds=5.0):
+            del timeout_seconds
+            manager._last_snapshot = next_snapshot
+            return next_snapshot
+
+        window.daemon_state_service.wait_for_update = _wait_for_update
+        monkeypatch.setattr(
+            window,
+            "_schedule_daemon_update_sync",
+            lambda: scheduled.append("sync") or window._daemon_wait_stop_event.set(),
+        )
+
+        window._daemon_wait_worker()
+
+        assert scheduled == ["sync"]
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_daemon_wait_worker_skips_sync_when_projection_is_unchanged(qapp, monkeypatch):
+    window = _make_window()
+    scheduled: list[str] = []
+    try:
+        previous_snapshot = WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=False,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=None,
+            source="daemon",
+            projection_version=1,
+        )
+        window.runtime_binding.daemon_manager._last_snapshot = previous_snapshot
+
+        def _wait_for_update(manager, *, timeout_seconds=5.0):
+            del timeout_seconds
+            manager._last_snapshot = previous_snapshot
+            window._daemon_wait_stop_event.set()
+            return previous_snapshot
+
+        window.daemon_state_service.wait_for_update = _wait_for_update
+        monkeypatch.setattr(window, "_schedule_daemon_update_sync", lambda: scheduled.append("sync"))
+
+        window._daemon_wait_worker()
+
+        assert scheduled == []
     finally:
         _dispose_window(qapp, window)
 

@@ -88,6 +88,9 @@ class GuiControlMixin:
     def _rebuild_runtime_snapshot(self: "DataEngineWindow") -> None:
         self.runtime_controller.rebuild_runtime_snapshot(self)
 
+    def _daemon_wait_worker(self: "DataEngineWindow") -> None:
+        self.runtime_controller.daemon_wait_worker(self)
+
     def _refresh_log_view(self: "DataEngineWindow", *, force_scroll_to_bottom: bool = False) -> None:
         present_refresh_log_view(self, force_scroll_to_bottom=force_scroll_to_bottom)
 

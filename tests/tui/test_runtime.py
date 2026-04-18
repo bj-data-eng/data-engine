@@ -82,6 +82,76 @@ async def test_tui_hydrates_shared_runtime_logs_when_observing_lease():
         assert shared_state_service.hydrated[-1][1] is app.runtime_binding.runtime_cache_ledger
 
 
+def test_tui_daemon_wait_worker_schedules_sync_when_projection_changes(monkeypatch):
+    app = make_tui()
+    scheduled: list[str] = []
+    previous_snapshot = WorkspaceDaemonSnapshot(
+        live=True,
+        workspace_owned=True,
+        leased_by_machine_id=None,
+        runtime_active=False,
+        runtime_stopping=False,
+        manual_runs=(),
+        last_checkpoint_at_utc=None,
+        source="daemon",
+        projection_version=1,
+    )
+    next_snapshot = WorkspaceDaemonSnapshot(
+        live=True,
+        workspace_owned=True,
+        leased_by_machine_id=None,
+        runtime_active=False,
+        runtime_stopping=False,
+        manual_runs=(),
+        last_checkpoint_at_utc=None,
+        source="daemon",
+        projection_version=2,
+    )
+    app.runtime_binding.daemon_manager._last_snapshot = previous_snapshot
+
+    def _wait_for_update(manager, *, timeout_seconds: float = 5.0):
+        del timeout_seconds
+        manager._last_snapshot = next_snapshot
+        return next_snapshot
+
+    app.daemon_state_service.wait_for_update = _wait_for_update
+    monkeypatch.setattr(app, "_schedule_daemon_update_sync", lambda: scheduled.append("sync") or app._daemon_wait_stop_event.set())
+
+    app._daemon_wait_worker()
+
+    assert scheduled == ["sync"]
+
+
+def test_tui_daemon_wait_worker_skips_sync_when_projection_is_unchanged(monkeypatch):
+    app = make_tui()
+    scheduled: list[str] = []
+    previous_snapshot = WorkspaceDaemonSnapshot(
+        live=True,
+        workspace_owned=True,
+        leased_by_machine_id=None,
+        runtime_active=False,
+        runtime_stopping=False,
+        manual_runs=(),
+        last_checkpoint_at_utc=None,
+        source="daemon",
+        projection_version=1,
+    )
+    app.runtime_binding.daemon_manager._last_snapshot = previous_snapshot
+
+    def _wait_for_update(manager, *, timeout_seconds: float = 5.0):
+        del timeout_seconds
+        manager._last_snapshot = previous_snapshot
+        app._daemon_wait_stop_event.set()
+        return previous_snapshot
+
+    app.daemon_state_service.wait_for_update = _wait_for_update
+    monkeypatch.setattr(app, "_schedule_daemon_update_sync", lambda: scheduled.append("sync"))
+
+    app._daemon_wait_worker()
+
+    assert scheduled == []
+
+
 @pytest.mark.anyio
 async def test_tui_does_not_bootstrap_daemon_without_authored_workspace(tmp_path):
     spawn_calls: list[object] = []

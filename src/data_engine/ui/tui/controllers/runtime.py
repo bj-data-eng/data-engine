@@ -45,6 +45,24 @@ class TuiRuntimeController:
             if isinstance(child, FlowListItem):
                 child.refresh_view(window.flow_states.get(child.card.name, child.card.state))
 
+    def daemon_wait_worker(self, window: "DataEngineTui") -> None:
+        stop_event = getattr(window, "_daemon_wait_stop_event", None)
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                return
+            if not window._has_authored_workspace():
+                if stop_event is not None and stop_event.wait(1.5):
+                    return
+                continue
+            manager = window.runtime_binding.daemon_manager
+            previous_snapshot = getattr(manager, "_last_snapshot", None)
+            snapshot = window.daemon_state_service.wait_for_update(manager, timeout_seconds=1.5)
+            if stop_event is not None and stop_event.is_set():
+                return
+            if previous_snapshot is not None and snapshot == previous_snapshot:
+                continue
+            window._schedule_daemon_update_sync()
+
     @staticmethod
     def _blocked_status_text(window: "DataEngineTui") -> str:
         snapshot = getattr(window, "workspace_snapshot", None)
