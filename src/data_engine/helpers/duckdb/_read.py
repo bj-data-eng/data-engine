@@ -58,6 +58,12 @@ def read_rows_by_values(
     normalized_is_in = tuple(is_in)
     lookup = pl.DataFrame({"lookup_value": list(normalized_is_in)}).unique(maintain_order=True)
     lookup_values = tuple(lookup.get_column("lookup_value").to_list())
+    ordered_lookup = pl.DataFrame(
+        {
+            "lookup_value": list(lookup_values),
+            "lookup_order": list(range(1, len(lookup_values) + 1)),
+        }
+    )
     non_null_lookup_values = [value for value in lookup_values if value is not None]
     has_null_lookup = len(non_null_lookup_values) != len(lookup_values)
 
@@ -66,7 +72,6 @@ def read_rows_by_values(
     quoted_select = _ordered_columns(normalized_select)
 
     temp_lookup = "__data_engine_read_values_lookup"
-    temp_lookup_null = "__data_engine_read_values_lookup_null"
     resolved_db_path = _resolved_db_path(db_path)
 
     connection = duckdb.connect(resolved_db_path)
@@ -89,40 +94,25 @@ def read_rows_by_values(
             ).pl()
 
         query_parts: list[str] = []
+        connection.register(temp_lookup, ordered_lookup)
         if non_null_lookup_values:
-            connection.execute(
-                f"""
-                CREATE OR REPLACE TEMP TABLE {temp_lookup} AS
-                SELECT *
-                FROM (
-                    SELECT
-                        UNNEST(?) AS lookup_value,
-                        ROW_NUMBER() OVER () AS lookup_order
-                )
-                """
-            , [non_null_lookup_values])
             query_parts.append(
                 f"""
                 SELECT {quoted_select}, lookup.lookup_order AS __lookup_order
                 FROM {quoted_table} AS source
                 INNER JOIN {temp_lookup} AS lookup
                     ON source.{quoted_column} = lookup.lookup_value
+                WHERE lookup.lookup_value IS NOT NULL
                 """
             )
         if has_null_lookup:
-            null_order = next(index for index, value in enumerate(lookup_values, start=1) if value is None)
-            connection.execute(
-                f"""
-                CREATE OR REPLACE TEMP TABLE {temp_lookup_null} AS
-                SELECT ?::INTEGER AS lookup_order
-                """
-            , [null_order])
             query_parts.append(
                 f"""
                 SELECT {quoted_select}, lookup.lookup_order AS __lookup_order
                 FROM {quoted_table} AS source
-                INNER JOIN {temp_lookup_null} AS lookup
+                INNER JOIN {temp_lookup} AS lookup
                     ON source.{quoted_column} IS NULL
+                WHERE lookup.lookup_value IS NULL
                 """
             )
         return connection.execute(
