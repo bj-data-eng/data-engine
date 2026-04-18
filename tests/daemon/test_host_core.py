@@ -322,6 +322,52 @@ def test_stop_active_work_signals_running_threads_and_resets_runtime_state():
     assert service.published_events == ["runtime.stopped"]
 
 
+def test_daemon_status_includes_active_runs_from_runtime_ledger(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        started_at = utcnow_text()
+        service.runtime_cache_ledger.execution_state.record_run_started(
+            run_id="run-1",
+            flow_name="demo",
+            group_name="Demo",
+            source_path="claims.xlsx",
+            started_at_utc=started_at,
+        )
+        service.runtime_cache_ledger.execution_state.record_step_started(
+            run_id="run-1",
+            flow_name="demo",
+            step_label="Emit Value",
+            started_at_utc=started_at,
+        )
+
+        status = service._handle_command({"command": "daemon_status"})  # noqa: SLF001
+
+        assert status["ok"] is True
+        assert status["status"]["active_runs"] == [
+            {
+                "run_id": "run-1",
+                "flow_name": "demo",
+                "group_name": "Demo",
+                "source_path": "claims.xlsx",
+                "state": "running",
+                "current_step_name": "Emit Value",
+                "started_at_utc": started_at,
+                "finished_at_utc": None,
+                "elapsed_seconds": None,
+                "error_text": None,
+            }
+        ]
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
 def test_serve_workspace_daemon_passes_lifecycle_policy_to_service_type(tmp_path):
     workspace_root = tmp_path / "shared" / "default"
 

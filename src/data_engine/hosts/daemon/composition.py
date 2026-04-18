@@ -98,6 +98,7 @@ class DaemonHostState:
     runtime_active: bool
     runtime_stopping: bool
     engine_starting: bool
+    active_engine_flow_names: tuple[str, ...]
     engine_thread: threading.Thread | None
     engine_runtime_stop_event: threading.Event
     engine_flow_stop_event: threading.Event
@@ -121,6 +122,7 @@ class DaemonHostState:
             runtime_active=False,
             runtime_stopping=False,
             engine_starting=False,
+            active_engine_flow_names=(),
             engine_thread=None,
             engine_runtime_stop_event=threading.Event(),
             engine_flow_stop_event=threading.Event(),
@@ -147,11 +149,12 @@ class DaemonHostState:
         if status is not None:
             self.status = status
 
-    def begin_runtime(self, *, status: str = "running") -> None:
+    def begin_runtime(self, *, status: str = "running", active_flow_names: tuple[str, ...] = ()) -> None:
         """Mark the engine runtime as active and running."""
         self.engine_starting = False
         self.runtime_active = True
         self.runtime_stopping = False
+        self.active_engine_flow_names = tuple(active_flow_names)
         self.status = status
 
     def stop_runtime(self, *, status: str = "stopping") -> None:
@@ -165,6 +168,7 @@ class DaemonHostState:
         self.engine_starting = False
         self.runtime_active = False
         self.runtime_stopping = False
+        self.active_engine_flow_names = ()
         if self.status != "failed":
             self.status = status
 

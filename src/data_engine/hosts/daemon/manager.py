@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
 
+from data_engine.domain import ActiveRunState, WorkspaceControlState
 from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.app import DaemonClientError, daemon_request, is_daemon_live
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
-from data_engine.domain import WorkspaceControlState
 from data_engine.platform.instrumentation import new_request_id, timed_operation
 from data_engine.platform.processes import process_is_running as _pid_is_live
 from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
@@ -42,6 +42,8 @@ class WorkspaceDaemonSnapshot:
     source: str
     engine_starting: bool = False
     projection_version: int = 0
+    active_engine_flow_names: tuple[str, ...] = ()
+    active_runs: tuple[ActiveRunState, ...] = ()
 
 
 class WorkspaceDaemonManager:
@@ -83,11 +85,13 @@ class WorkspaceDaemonManager:
                     leased_by_machine_id=None,
                     runtime_active=False,
                     runtime_stopping=False,
+                    active_engine_flow_names=(),
                     engine_starting=False,
                     manual_runs=(),
                     last_checkpoint_at_utc=None,
                     source="none",
                     projection_version=0,
+                    active_runs=(),
                 )
                 self._last_snapshot = snapshot
                 return snapshot
@@ -105,11 +109,13 @@ class WorkspaceDaemonManager:
                         leased_by_machine_id=self._last_snapshot.leased_by_machine_id,
                         runtime_active=self._last_snapshot.runtime_active,
                         runtime_stopping=self._last_snapshot.runtime_stopping,
+                        active_engine_flow_names=self._last_snapshot.active_engine_flow_names,
                         engine_starting=self._last_snapshot.engine_starting,
                         manual_runs=self._last_snapshot.manual_runs,
                         last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
                         source="cached",
                         projection_version=self._last_snapshot.projection_version,
+                        active_runs=self._last_snapshot.active_runs,
                     )
                 snapshot = self._lease_snapshot()
                 self._last_snapshot = snapshot
@@ -130,11 +136,13 @@ class WorkspaceDaemonManager:
                         leased_by_machine_id=self._last_snapshot.leased_by_machine_id,
                         runtime_active=self._last_snapshot.runtime_active,
                         runtime_stopping=self._last_snapshot.runtime_stopping,
+                        active_engine_flow_names=self._last_snapshot.active_engine_flow_names,
                         engine_starting=self._last_snapshot.engine_starting,
                         manual_runs=self._last_snapshot.manual_runs,
                         last_checkpoint_at_utc=self._last_snapshot.last_checkpoint_at_utc,
                         source="cached",
                         projection_version=self._last_snapshot.projection_version,
+                        active_runs=self._last_snapshot.active_runs,
                     )
                 snapshot = self._lease_snapshot()
                 self._last_snapshot = snapshot
@@ -145,6 +153,8 @@ class WorkspaceDaemonManager:
                 self._last_snapshot = snapshot
                 return snapshot
             self._sync_misses = 0
+            active_engine_flow_names = tuple(name for name in status.get("active_engine_flow_names", []) if isinstance(name, str))
+            active_runs = _coerce_active_runs(status.get("active_runs"))
             manual_runs = tuple(name for name in status.get("manual_runs", []) if isinstance(name, str))
             leased_by = status.get("leased_by_machine_id")
             checkpoint = status.get("last_checkpoint_at_utc")
@@ -154,11 +164,13 @@ class WorkspaceDaemonManager:
                 leased_by_machine_id=str(leased_by) if isinstance(leased_by, str) and leased_by.strip() else None,
                 runtime_active=bool(status.get("engine_active")),
                 runtime_stopping=bool(status.get("engine_stopping")),
+                active_engine_flow_names=active_engine_flow_names,
                 engine_starting=bool(status.get("engine_starting")),
                 manual_runs=manual_runs,
                 last_checkpoint_at_utc=str(checkpoint) if isinstance(checkpoint, str) and checkpoint.strip() else None,
                 source="daemon",
                 projection_version=int(status.get("projection_version", 0) or 0),
+                active_runs=active_runs,
             )
             self._last_snapshot = snapshot
             return snapshot
@@ -194,11 +206,13 @@ class WorkspaceDaemonManager:
             leased_by_machine_id=str(owner) if isinstance(owner, str) and owner.strip() else None,
             runtime_active=False,
             runtime_stopping=False,
+            active_engine_flow_names=(),
             engine_starting=False,
             manual_runs=(),
             last_checkpoint_at_utc=checkpoint_text,
             source="lease" if metadata is not None else "none",
             projection_version=0,
+            active_runs=(),
         )
 
     def control_status_text(
@@ -268,6 +282,37 @@ class WorkspaceDaemonManager:
             requested_at_utc=datetime.now(UTC).isoformat(),
         )
         return "Control request sent."
+
+
+def _coerce_active_runs(value: object) -> tuple[ActiveRunState, ...]:
+    if not isinstance(value, list):
+        return ()
+    coerced: list[ActiveRunState] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        run_id = item.get("run_id")
+        flow_name = item.get("flow_name")
+        group_name = item.get("group_name")
+        state = item.get("state")
+        if not all(isinstance(field, str) and field.strip() for field in (run_id, flow_name, group_name, state)):
+            continue
+        elapsed_raw = item.get("elapsed_seconds")
+        coerced.append(
+            ActiveRunState(
+                run_id=run_id,
+                flow_name=flow_name,
+                group_name=group_name,
+                source_path=item.get("source_path") if isinstance(item.get("source_path"), str) else None,
+                state=state,
+                current_step_name=item.get("current_step_name") if isinstance(item.get("current_step_name"), str) else None,
+                started_at_utc=item.get("started_at_utc") if isinstance(item.get("started_at_utc"), str) else None,
+                finished_at_utc=item.get("finished_at_utc") if isinstance(item.get("finished_at_utc"), str) else None,
+                elapsed_seconds=float(elapsed_raw) if isinstance(elapsed_raw, int | float) else None,
+                error_text=item.get("error_text") if isinstance(item.get("error_text"), str) else None,
+            )
+        )
+    return tuple(coerced)
 
 
 __all__ = ["WorkspaceDaemonManager", "WorkspaceDaemonSnapshot"]

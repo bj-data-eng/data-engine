@@ -180,7 +180,7 @@ class DaemonRuntimeCommandHandler:
                 runtime_stop_event = threading.Event()
                 flow_stop_event = threading.Event()
                 service.state.set_engine_threads(runtime_stop_event=runtime_stop_event, flow_stop_event=flow_stop_event)
-                service.state.begin_runtime(status="running")
+                service.state.begin_runtime(status="running", active_flow_names=tuple(flow_names))
             service._publish_runtime_event("engine.started", correlation_id=request_id)
 
             def _target() -> None:

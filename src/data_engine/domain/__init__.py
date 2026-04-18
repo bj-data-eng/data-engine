@@ -26,6 +26,7 @@ from data_engine.domain.logs import (
 from data_engine.domain.operations import OperationFlowState, OperationRowState, OperationSessionState
 from data_engine.domain.operator import OperatorSessionState
 from data_engine.domain.runtime import (
+    ActiveRunState,
     DaemonLifecyclePolicy,
     DaemonStatusState,
     ManualRunState,
@@ -74,6 +75,7 @@ __all__ = [
     "OperationSessionState",
     "OperatorSessionState",
     "parse_utc_text",
+    "ActiveRunState",
     "DaemonStatusState",
     "DaemonLifecyclePolicy",
     "ManualRunState",

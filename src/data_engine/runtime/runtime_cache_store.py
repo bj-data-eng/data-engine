@@ -181,6 +181,41 @@ class RuntimeRunRepository:
             for row in rows
         )
 
+    def list_active(self, *, flow_name: str | None = None) -> tuple[PersistedRun, ...]:
+        """Return runs that are still in a non-terminal state."""
+        if flow_name is None:
+            rows = self._store._connection().execute(
+                """
+                SELECT run_id, flow_name, group_name, source_path, status, started_at_utc, finished_at_utc, error_text
+                FROM runs
+                WHERE status NOT IN ('success', 'failed', 'stopped')
+                ORDER BY started_at_utc, run_id
+                """
+            ).fetchall()
+        else:
+            rows = self._store._connection().execute(
+                """
+                SELECT run_id, flow_name, group_name, source_path, status, started_at_utc, finished_at_utc, error_text
+                FROM runs
+                WHERE flow_name = ? AND status NOT IN ('success', 'failed', 'stopped')
+                ORDER BY started_at_utc, run_id
+                """,
+                (flow_name,),
+            ).fetchall()
+        return tuple(
+            PersistedRun(
+                run_id=str(row["run_id"]),
+                flow_name=str(row["flow_name"]),
+                group_name=str(row["group_name"]),
+                source_path=row["source_path"],
+                status=str(row["status"]),
+                started_at_utc=str(row["started_at_utc"]),
+                finished_at_utc=row["finished_at_utc"],
+                error_text=row["error_text"],
+            )
+            for row in rows
+        )
+
     def replace(self, rows: tuple[PersistedRun, ...]) -> None:
         connection = self._store._connection()
         connection.execute("DELETE FROM step_runs")
@@ -342,6 +377,43 @@ class RuntimeStepOutputRepository:
             """,
             params,
         ).fetchall()
+        return tuple(
+            PersistedStepRun(
+                id=int(row["id"]),
+                run_id=str(row["run_id"]),
+                flow_name=str(row["flow_name"]),
+                step_label=str(row["step_label"]),
+                status=str(row["status"]),
+                started_at_utc=str(row["started_at_utc"]),
+                finished_at_utc=row["finished_at_utc"],
+                elapsed_ms=row["elapsed_ms"],
+                error_text=row["error_text"],
+                output_path=row["output_path"],
+            )
+            for row in rows
+        )
+
+    def list_active(self, *, run_id: str | None = None) -> tuple[PersistedStepRun, ...]:
+        """Return step rows that are still in a non-terminal state."""
+        if run_id is None:
+            rows = self._store._connection().execute(
+                """
+                SELECT id, run_id, flow_name, step_label, status, started_at_utc, finished_at_utc, elapsed_ms, error_text, output_path
+                FROM step_runs
+                WHERE status NOT IN ('success', 'failed', 'stopped')
+                ORDER BY id
+                """
+            ).fetchall()
+        else:
+            rows = self._store._connection().execute(
+                """
+                SELECT id, run_id, flow_name, step_label, status, started_at_utc, finished_at_utc, elapsed_ms, error_text, output_path
+                FROM step_runs
+                WHERE run_id = ? AND status NOT IN ('success', 'failed', 'stopped')
+                ORDER BY id
+                """,
+                (run_id,),
+            ).fetchall()
         return tuple(
             PersistedStepRun(
                 id=int(row["id"]),

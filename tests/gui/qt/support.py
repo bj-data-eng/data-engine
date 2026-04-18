@@ -2563,7 +2563,14 @@ def test_reset_flow_button_clears_selected_flow_logs_before_rebuild(qapp, monkey
         window.step_output_index = window.step_output_index.with_flow_outputs("poller", {"Write Parquet": Path("C:/tmp/out.parquet")})
 
         window._clear_logs()
-        _process_ui_until(qapp, lambda: len(reset_service.flow_resets) == 1)
+        _process_ui_until(
+            qapp,
+            lambda: (
+                len(reset_service.flow_resets) == 1
+                and window.log_store.entries_for_flow("poller") == ()
+                and window.step_output_index.outputs_for("poller").outputs == {}
+            ),
+        )
 
         assert window.log_store.entries_for_flow("poller") == ()
         assert len(window.log_store.entries_for_flow("manual_review")) == 1

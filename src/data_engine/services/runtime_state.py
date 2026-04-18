@@ -9,6 +9,7 @@ from typing import Any, Literal, Protocol
 
 from data_engine.application.runtime import RuntimeApplication
 from data_engine.domain import (
+    ActiveRunState,
     FlowRunState,
     OperationFlowState,
     OperationSessionState,
@@ -202,6 +203,7 @@ class RuntimeStateService:
         daemon_live: bool,
         daemon_startup_in_progress: bool,
         daemon_engine_starting: bool,
+        daemon_active_flow_names: tuple[str, ...],
     ) -> EngineSnapshot:
         if runtime_session.runtime_stopping:
             state: EngineStateName = "stopping"
@@ -215,7 +217,7 @@ class RuntimeStateService:
             state=state,
             daemon_live=daemon_live,
             stop_requested=runtime_session.runtime_stopping,
-            active_flow_names=runtime_session.active_runtime_flow_names,
+            active_flow_names=daemon_active_flow_names or runtime_session.active_runtime_flow_names,
         )
 
     @staticmethod
@@ -407,6 +409,8 @@ class RuntimeStateService:
         daemon_startup_in_progress: bool,
         daemon_projection_version: int,
         daemon_engine_starting: bool,
+        daemon_active_flow_names: tuple[str, ...],
+        daemon_active_runs: tuple[ActiveRunState, ...],
         operation_tracker: OperationSessionState,
         flow_states: dict[str, str],
     ) -> WorkspaceSnapshot:
@@ -417,26 +421,43 @@ class RuntimeStateService:
         }
         flow_summaries: dict[str, FlowLiveSummary] = {}
         active_runs: dict[str, RunLiveSnapshot] = {}
+        if daemon_active_runs:
+            active_runs = {
+                run.run_id: RunLiveSnapshot(
+                    run_id=run.run_id,
+                    flow_name=run.flow_name,
+                    group_name=run.group_name,
+                    source_path=run.source_path,
+                    state=run.state if run.state in {"starting", "running", "stopping", "success", "failed", "stopped"} else "running",
+                    current_step_name=run.current_step_name,
+                    started_at_utc=run.started_at_utc,
+                    finished_at_utc=run.finished_at_utc,
+                    elapsed_seconds=run.elapsed_seconds,
+                    error_text=run.error_text,
+                )
+                for run in daemon_active_runs
+            }
 
         for card in flow_cards:
             run_groups = runs_by_flow.get(card.name, ())
             flow_state_name = self._flow_state_name(flow_states.get(card.name, card.state))
-            for run_group in run_groups:
-                run_state = self._run_state_name(run_group, flow_state=flow_state_name)
-                if run_state not in {"starting", "running", "stopping"}:
-                    continue
-                active_runs[run_group.key[1]] = RunLiveSnapshot(
-                    run_id=run_group.key[1],
-                    flow_name=card.name,
-                    group_name=card.group or "",
-                    source_path=None if run_group.source_label in {"", "-"} else run_group.source_label,
-                    state=run_state,
-                    current_step_name=self._current_step_name(run_group),
-                    started_at_utc=self._run_started_at(run_group),
-                    finished_at_utc=self._run_finished_at(run_group),
-                    elapsed_seconds=run_group.elapsed_seconds,
-                    error_text=self._run_error_text(run_group),
-                )
+            if not daemon_active_runs:
+                for run_group in run_groups:
+                    run_state = self._run_state_name(run_group, flow_state=flow_state_name)
+                    if run_state not in {"starting", "running", "stopping"}:
+                        continue
+                    active_runs[run_group.key[1]] = RunLiveSnapshot(
+                        run_id=run_group.key[1],
+                        flow_name=card.name,
+                        group_name=card.group or "",
+                        source_path=None if run_group.source_label in {"", "-"} else run_group.source_label,
+                        state=run_state,
+                        current_step_name=self._current_step_name(run_group),
+                        started_at_utc=self._run_started_at(run_group),
+                        finished_at_utc=self._run_finished_at(run_group),
+                        elapsed_seconds=run_group.elapsed_seconds,
+                        error_text=self._run_error_text(run_group),
+                    )
             last_started_at, last_finished_at, last_error_text = self._latest_run_times(run_groups)
             flow_operation_state = operation_tracker.state_for(card.name)
             flow_summaries[card.name] = FlowLiveSummary(
@@ -458,6 +479,7 @@ class RuntimeStateService:
             daemon_live=daemon_live,
             daemon_startup_in_progress=daemon_startup_in_progress,
             daemon_engine_starting=daemon_engine_starting,
+            daemon_active_flow_names=daemon_active_flow_names,
         )
         previous = self._last_workspace_snapshots.get(workspace_id)
         provisional = WorkspaceSnapshot(
@@ -592,6 +614,8 @@ class RuntimeStateService:
         daemon_live = bool(getattr(sync_state.snapshot, "live", False))
         daemon_projection_version = int(getattr(sync_state.snapshot, "projection_version", 0) or 0)
         daemon_engine_starting = bool(getattr(sync_state.snapshot, "engine_starting", False))
+        daemon_active_flow_names = tuple(getattr(sync_state.snapshot, "active_engine_flow_names", ()) or ())
+        daemon_active_runs = tuple(getattr(sync_state.snapshot, "active_runs", ()) or ())
         return self.snapshot_from_projection(
             binding=binding,
             flow_cards=flow_cards_tuple,
@@ -601,6 +625,8 @@ class RuntimeStateService:
             daemon_startup_in_progress=daemon_startup_in_progress,
             daemon_projection_version=daemon_projection_version,
             daemon_engine_starting=daemon_engine_starting,
+            daemon_active_flow_names=daemon_active_flow_names,
+            daemon_active_runs=daemon_active_runs,
         )
 
     def snapshot_from_projection(
@@ -614,6 +640,8 @@ class RuntimeStateService:
         daemon_startup_in_progress: bool = False,
         daemon_projection_version: int = 0,
         daemon_engine_starting: bool = False,
+        daemon_active_flow_names: tuple[str, ...] = (),
+        daemon_active_runs: tuple[ActiveRunState, ...] = (),
     ) -> WorkspaceSnapshot:
         """Build one authoritative workspace snapshot from an explicit projection."""
         flow_cards_tuple = tuple(flow_cards)
@@ -626,6 +654,8 @@ class RuntimeStateService:
             daemon_startup_in_progress=daemon_startup_in_progress,
             daemon_projection_version=daemon_projection_version,
             daemon_engine_starting=daemon_engine_starting,
+            daemon_active_flow_names=daemon_active_flow_names,
+            daemon_active_runs=daemon_active_runs,
             operation_tracker=projection.operation_tracker,
             flow_states=projection.flow_states,
         )

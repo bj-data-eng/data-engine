@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from data_engine.domain import (
+    ActiveRunState,
     DaemonStatusState,
     FlowCatalogEntry,
     OperationSessionState,
@@ -30,11 +31,11 @@ def test_runtime_state_service_returns_unified_workspace_snapshot():
                 leased_by_machine_id=None,
                 runtime_active=True,
                 runtime_stopping=False,
-                active_runtime_flow_names=("poller",),
+                active_runtime_flow_names=("poller", "scheduler"),
                 manual_runs=(),
             ),
             "snapshot_source": "daemon",
-            "snapshot": type("_Snapshot", (), {"live": True})(),
+            "snapshot": type("_Snapshot", (), {"live": True, "active_engine_flow_names": ("poller",)})(),
         },
     )()
 
@@ -141,6 +142,7 @@ def test_runtime_state_service_returns_unified_workspace_snapshot():
         projection=projection,
         workspace_control_state=sync_state.workspace_control_state,
         daemon_live=True,
+        daemon_active_flow_names=("poller",),
     )
 
     assert rebuilt == snapshot
@@ -342,3 +344,123 @@ def test_runtime_state_service_uses_daemon_projection_version_and_engine_startin
 
     assert snapshot.version == 7
     assert snapshot.engine.state == "starting"
+
+
+def test_runtime_state_service_prefers_daemon_active_runs_over_log_reconstruction():
+    active_run = ActiveRunState(
+        run_id="run-1",
+        flow_name="poller",
+        group_name="Imports",
+        source_path="claims.xlsx",
+        state="running",
+        current_step_name="Emit Value",
+        started_at_utc="2026-04-17T00:00:00+00:00",
+        elapsed_seconds=12.5,
+    )
+    sync_state = type(
+        "_SyncState",
+        (),
+        {
+            "daemon_status": DaemonStatusState(
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                engine_active=True,
+                engine_stopping=False,
+                active_runs=(active_run,),
+                manual_run_names=(),
+                last_checkpoint_at_utc=None,
+                source="daemon",
+            ),
+            "workspace_control_state": WorkspaceControlState.empty(),
+            "runtime_session": RuntimeSessionState(
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=True,
+                runtime_stopping=False,
+                active_runtime_flow_names=("poller",),
+                manual_runs=(),
+            ),
+            "snapshot_source": "daemon",
+            "snapshot": type(
+                "_Snapshot",
+                (),
+                {
+                    "live": True,
+                    "active_engine_flow_names": ("poller",),
+                    "active_runs": (active_run,),
+                },
+            )(),
+        },
+    )()
+
+    class _BindingService:
+        def sync_runtime_state(self, binding, *, runtime_application, flow_cards, daemon_startup_in_progress=False):
+            del binding, runtime_application, flow_cards, daemon_startup_in_progress
+            return sync_state
+
+        def reload_logs(self, binding) -> None:
+            del binding
+
+        def rebuild_step_outputs(self, binding, flow_cards):
+            del binding, flow_cards
+            return {}
+
+    class _LogService:
+        def all_entries(self, log_store):
+            del log_store
+            return ()
+
+        def runs_for_flow(self, log_store, flow_name):
+            del log_store, flow_name
+            return ()
+
+    class _RuntimeApp:
+        def build_runtime_snapshot(self, *, flow_cards, log_entries, runtime_session, now):
+            del flow_cards, log_entries, runtime_session, now
+            return type(
+                "_Presentation",
+                (),
+                {
+                    "operation_tracker": OperationSessionState.empty(),
+                    "flow_states": {"poller": "polling"},
+                    "active_runtime_flow_names": ("poller",),
+                },
+            )()
+
+    card = FlowCatalogEntry(
+        name="poller",
+        group="Imports",
+        title="Poller",
+        description="",
+        source_root="inbox",
+        target_root="outbox",
+        mode="poll",
+        interval="5s",
+        settle="1",
+        operations="Read -> Write",
+        operation_items=("Read", "Write"),
+        state="poll ready",
+        valid=True,
+        category="automated",
+    )
+    binding = type(
+        "_Binding",
+        (),
+        {
+            "log_store": "log-store",
+            "workspace_paths": type("_Paths", (), {"workspace_id": "claims2"})(),
+        },
+    )()
+    service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
+
+    snapshot = service.current_snapshot(
+        binding,
+        runtime_application=_RuntimeApp(),
+        flow_cards=(card,),
+        now=123.0,
+    )
+
+    assert tuple(snapshot.active_runs) == ("run-1",)
+    assert snapshot.active_runs["run-1"].current_step_name == "Emit Value"
+    assert snapshot.active_runs["run-1"].elapsed_seconds == 12.5
+    assert snapshot.flows["poller"].active_run_count == 1

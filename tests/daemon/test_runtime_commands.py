@@ -704,6 +704,7 @@ def test_daemon_projection_tracks_engine_lifecycle(tmp_path, monkeypatch):
 
         status = service._handle_command({"command": "daemon_status"})  # noqa: SLF001
         assert status["status"]["engine_active"] is True
+        assert status["status"]["active_engine_flow_names"] == ["demo_poll"]
 
         stop_response = service._handle_command({"command": "stop_engine"})  # noqa: SLF001
         assert stop_response["ok"] is True
@@ -718,6 +719,7 @@ def test_daemon_projection_tracks_engine_lifecycle(tmp_path, monkeypatch):
         status = service._handle_command({"command": "daemon_status"})  # noqa: SLF001
         assert status["status"]["engine_active"] is False
         assert status["status"]["engine_stopping"] is False
+        assert status["status"]["active_engine_flow_names"] == []
         assert "engine.start_reserved" in observed_events
     finally:
         release_engine.set()

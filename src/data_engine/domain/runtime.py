@@ -43,6 +43,22 @@ class ManualRunState:
 
 
 @dataclass(frozen=True)
+class ActiveRunState:
+    """One active run snapshot sourced from daemon or runtime state."""
+
+    run_id: str
+    flow_name: str
+    group_name: str
+    source_path: str | None
+    state: str
+    current_step_name: str | None = None
+    started_at_utc: str | None = None
+    finished_at_utc: str | None = None
+    elapsed_seconds: float | None = None
+    error_text: str | None = None
+
+
+@dataclass(frozen=True)
 class RuntimeSessionState:
     """Runtime/control state shared by operator surfaces."""
 
@@ -72,11 +88,17 @@ class RuntimeSessionState:
             for flow_name in snapshot.manual_runs
             if (card := cards_by_name.get(flow_name)) is not None
         )
-        active_runtime_flow_names = (
-            tuple(card.name for card in cards if card.valid and card.mode in {"poll", "schedule"})
-            if snapshot.runtime_active
-            else ()
-        )
+        active_runtime_flow_names: tuple[str, ...]
+        if snapshot.runtime_active:
+            active_runtime_flow_names = tuple(
+                flow_name
+                for flow_name in snapshot.active_engine_flow_names
+                if (card := cards_by_name.get(flow_name)) is not None and card.valid and card.mode in {"poll", "schedule"}
+            )
+            if not active_runtime_flow_names:
+                active_runtime_flow_names = tuple(card.name for card in cards if card.valid and card.mode in {"poll", "schedule"})
+        else:
+            active_runtime_flow_names = ()
         return cls(
             workspace_owned=snapshot.workspace_owned,
             leased_by_machine_id=snapshot.leased_by_machine_id,
@@ -160,6 +182,8 @@ class DaemonStatusState:
     engine_active: bool = False
     engine_stopping: bool = False
     engine_starting: bool = False
+    active_engine_flow_names: tuple[str, ...] = ()
+    active_runs: tuple[ActiveRunState, ...] = ()
     manual_run_names: tuple[str, ...] = ()
     last_checkpoint_at_utc: str | None = None
     source: str = "none"
@@ -179,6 +203,8 @@ class DaemonStatusState:
             engine_active=snapshot.runtime_active,
             engine_stopping=snapshot.runtime_stopping,
             engine_starting=snapshot.engine_starting,
+            active_engine_flow_names=snapshot.active_engine_flow_names,
+            active_runs=snapshot.active_runs,
             manual_run_names=tuple(snapshot.manual_runs),
             last_checkpoint_at_utc=snapshot.last_checkpoint_at_utc,
             source=snapshot.source,
@@ -193,6 +219,7 @@ class DaemonStatusState:
                 "leased_by_machine_id": self.leased_by_machine_id,
                 "runtime_active": self.engine_active,
                 "runtime_stopping": self.engine_stopping,
+                "active_engine_flow_names": self.active_engine_flow_names,
                 "manual_runs": self.manual_run_names,
             })(),
             flow_cards,

@@ -50,6 +50,7 @@ def test_runtime_session_state_projects_daemon_snapshot_into_surface_state():
             manual_runs=("manual_review",),
             last_checkpoint_at_utc=None,
             source="daemon",
+            active_engine_flow_names=("poller",),
         ),
         _sample_cards(),
     )
@@ -61,6 +62,42 @@ def test_runtime_session_state_projects_daemon_snapshot_into_surface_state():
     assert session.active_manual_runs == {"Manual": "manual_review"}
     assert session.manual_run_active is True
     assert session.control_available is False
+
+
+def test_runtime_session_state_prefers_daemon_active_engine_flow_names():
+    cards = _sample_cards() + (
+        FlowCatalogEntry(
+            name="scheduler",
+            group="Imports",
+            title="Claims Schedule",
+            description="",
+            source_root="/tmp/input",
+            target_root="/tmp/output",
+            mode="schedule",
+            interval="15m",
+            operations="Read -> Write",
+            operation_items=("Read", "Write"),
+            state="scheduled",
+            valid=True,
+            category="automated",
+        ),
+    )
+    session = RuntimeSessionState.from_daemon_snapshot(
+        WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=None,
+            source="daemon",
+            active_engine_flow_names=("scheduler",),
+        ),
+        cards,
+    )
+
+    assert session.active_runtime_flow_names == ("scheduler",)
 
 
 def test_daemon_status_state_projects_idle_snapshot_to_empty_runtime_session():

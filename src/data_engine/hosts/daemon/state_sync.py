@@ -23,6 +23,7 @@ class DaemonStateSyncHandler:
 
     def status_payload(self) -> dict[str, Any]:
         service = self.service
+        service.runtime_projector.refresh(service._runtime_state_payload())
         projection = service.runtime_projector.snapshot()
         return {
             "workspace_id": service.paths.workspace_id,
@@ -36,6 +37,8 @@ class DaemonStateSyncHandler:
             "engine_active": projection.runtime_active,
             "engine_stopping": projection.runtime_stopping,
             "engine_starting": projection.engine_starting,
+            "active_engine_flow_names": list(projection.active_engine_flow_names),
+            "active_runs": list(projection.active_runs),
             "manual_runs": list(projection.manual_runs),
             "last_checkpoint_at_utc": projection.last_checkpoint_at_utc,
             "projection_version": projection.version,

@@ -159,6 +159,7 @@ class DataEngineDaemonService:
 
     def _runtime_state_payload(self) -> dict[str, object]:
         """Return the current daemon-owned runtime state payload."""
+        active_runs = self._active_runs_payload()
         with self._state_lock:
             return {
                 "status": self.state.status,
@@ -167,9 +168,34 @@ class DataEngineDaemonService:
                 "runtime_active": self.state.runtime_active,
                 "runtime_stopping": self.state.runtime_stopping,
                 "engine_starting": self.state.engine_starting,
+                "active_engine_flow_names": self.state.active_engine_flow_names,
+                "active_runs": active_runs,
                 "manual_runs": tuple(sorted(self.state.manual_run_threads)),
                 "last_checkpoint_at_utc": self.state.last_checkpoint_at_utc,
             }
+
+    def _active_runs_payload(self) -> tuple[dict[str, object], ...]:
+        """Return active run rows derived from the runtime cache ledger."""
+        active_runs = self.runtime_cache_ledger.runs.list_active()
+        active_steps = self.runtime_cache_ledger.step_outputs.list_active()
+        latest_step_by_run: dict[str, object] = {}
+        for step in active_steps:
+            latest_step_by_run[step.run_id] = step
+        return tuple(
+            {
+                "run_id": run.run_id,
+                "flow_name": run.flow_name,
+                "group_name": run.group_name,
+                "source_path": run.source_path,
+                "state": "stopping" if self.state.runtime_stopping else ("running" if run.status == "started" else "starting"),
+                "current_step_name": latest_step_by_run[run.run_id].step_label if run.run_id in latest_step_by_run else None,
+                "started_at_utc": run.started_at_utc,
+                "finished_at_utc": run.finished_at_utc,
+                "elapsed_seconds": run.elapsed_seconds,
+                "error_text": run.error_text,
+            }
+            for run in active_runs
+        )
 
     def _publish_runtime_event(
         self,
