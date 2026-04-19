@@ -27,3 +27,7 @@ workspaces/
 .codex_tmp/
 .codex_tmp_*/
 rust/**/target/
+src/data_engine/ui/egui/*.pyd
+src/data_engine/ui/egui/*.so
+src/data_engine/ui/egui/*.dylib
+dist-egui/

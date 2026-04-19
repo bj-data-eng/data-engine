@@ -112,6 +112,9 @@ include = ["data_engine*"]
 [tool.setuptools.package-data]
 data_engine = [
   "ui/gui/icons/*.svg",
+  "ui/egui/*.pyd",
+  "ui/egui/*.so",
+  "ui/egui/*.dylib",
   "docs/sphinx_source/conf.py",
   "docs/sphinx_source/*.rst",
   "docs/sphinx_source/guides/*.md",
