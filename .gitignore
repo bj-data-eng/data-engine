@@ -26,3 +26,4 @@ data2/
 workspaces/
 .codex_tmp/
 .codex_tmp_*/
+rust/**/target/

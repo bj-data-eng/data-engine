@@ -20,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  data-engine start gui\n"
+            "  data-engine start egui\n"
             "  data-engine start tui\n"
             "  data-engine create workspace .\\workspaces\\claims\n"
             "  data-engine create workspace ./workspaces/claims\n"
@@ -35,8 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="{start,create,run,doctor}")
 
     start_parser = subparsers.add_parser("start", help="Launch one Data Engine operator surface.")
-    start_subparsers = start_parser.add_subparsers(dest="start_command", required=True, metavar="{gui,tui}")
+    start_subparsers = start_parser.add_subparsers(dest="start_command", required=True, metavar="{gui,egui,tui}")
     start_subparsers.add_parser("gui", help="Launch the desktop GUI.")
+    start_subparsers.add_parser("egui", help="Launch the experimental egui surface.")
     start_subparsers.add_parser("tui", help="Launch the terminal UI.")
 
     create_parser = subparsers.add_parser("create", help="Create Data Engine scaffolding.")

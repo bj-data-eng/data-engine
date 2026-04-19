@@ -22,8 +22,10 @@ from data_engine.ui.cli import commands_doctor as _commands_doctor
 from data_engine.ui.cli import commands_run as _commands_run
 from data_engine.ui.cli.commands_start import (
     launch_desktop_ui as _launch_desktop_ui,
+    launch_egui_ui as _launch_egui_ui,
     launch_terminal_ui as _launch_terminal_ui,
     preferred_gui_python_executable as _preferred_gui_python_executable,
+    start_egui_subprocess as _start_egui_subprocess,
     start_gui_subprocess as _start_gui_subprocess,
     start_surface as _start_surface,
 )
@@ -150,11 +152,13 @@ __all__ = [
     "_doctor_daemons",
     "_infer_project_root_from_cwd",
     "_launch_desktop_ui",
+    "_launch_egui_ui",
     "_launch_terminal_ui",
     "_preferred_gui_python_executable",
     "_run_command",
     "_run_process_listing",
     "_run_tests",
+    "_start_egui_subprocess",
     "_start_gui_subprocess",
     "_start_surface",
     "_test_slice_args",

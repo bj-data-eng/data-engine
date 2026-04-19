@@ -64,6 +64,8 @@ def classify_process_kind(command: str) -> str | None:
         return "daemon"
     if "data_engine.ui.gui.launcher" in command:
         return "gui"
+    if "data_engine.ui.egui.launcher" in command:
+        return "egui"
     if "data_engine.ui.tui.app" in command:
         return "tui"
     return None
@@ -95,7 +97,7 @@ def doctor_daemons(
     ]
     relevant = collapse_windows_launcher_processes(relevant)
     daemons = [row for row in relevant if row.kind == "daemon"]
-    surfaces = [row for row in relevant if row.kind in {"gui", "tui"}]
+    surfaces = [row for row in relevant if row.kind in {"gui", "egui", "tui"}]
     defunct = [row for row in daemons if row.is_defunct]
     live_daemons = [row for row in daemons if row not in defunct]
 
