@@ -96,6 +96,7 @@ class DaemonRuntimeCommandHandler:
                                 runtime_ledger=service.runtime_execution_ledger,
                                 runtime_stop_event=runtime_stop_event,
                                 flow_stop_event=flow_stop_event,
+                                workspace_id=service.paths.workspace_id,
                             )
                         service._debug_log(f"manual flow completed name={name}")
                     except Exception as exc:
@@ -153,6 +154,7 @@ class DaemonRuntimeCommandHandler:
             if not service.state.workspace_owned and not try_claim_released_workspace(service):
                 return {"ok": False, "error": lease_error_text(service)}
             with service._state_lock:
+                service.state.clear_shutdown_when_idle()
                 if not service.state.reserve_engine_start():
                     return {"ok": True}
             service._publish_runtime_event("engine.start_reserved", correlation_id=request_id)
@@ -195,6 +197,7 @@ class DaemonRuntimeCommandHandler:
                             runtime_ledger=service.runtime_execution_ledger,
                             runtime_stop_event=runtime_stop_event,
                             flow_stop_event=flow_stop_event,
+                            workspace_id=service.paths.workspace_id,
                         )
                     service._debug_log("engine runtime exited normally")
                 except Exception as exc:
@@ -205,6 +208,7 @@ class DaemonRuntimeCommandHandler:
                     with service._state_lock:
                         service.state.end_runtime(status="idle")
                     service._publish_runtime_event("engine.stopped", correlation_id=request_id)
+                    service._shutdown_for_requested_idle_disconnect(reason="engine stopped after client disconnect")
                     service._debug_log(f"engine thread finished status={service.state.status}")
 
             engine_thread = threading.Thread(target=_target, daemon=True)
@@ -218,7 +222,7 @@ class DaemonRuntimeCommandHandler:
                 raise
             return {"ok": True}
 
-    def stop_engine(self, *, request_id: str | None = None) -> dict[str, Any]:
+    def stop_engine(self, *, request_id: str | None = None, shutdown_when_idle: bool = False) -> dict[str, Any]:
         service = self.service
         with service._timed_operation(
             "daemon.runtime",
@@ -228,7 +232,11 @@ class DaemonRuntimeCommandHandler:
             if not service.state.workspace_owned:
                 return {"ok": False, "error": lease_error_text(service)}
             with service._state_lock:
+                if shutdown_when_idle:
+                    service.state.request_shutdown_when_idle()
                 if not service.state.runtime_active:
+                    if shutdown_when_idle:
+                        service._shutdown_for_requested_idle_disconnect(reason="idle disconnect request")
                     return {"ok": True}
                 service.state.stop_runtime(status="stopping")
                 runtime_stop_event = service.state.engine_runtime_stop_event

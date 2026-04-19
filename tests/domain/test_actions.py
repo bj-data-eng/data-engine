@@ -109,3 +109,68 @@ def test_action_states_allow_manual_run_while_engine_is_active_for_another_group
 
     assert gui.flow_run_enabled is True
     assert tui.run_once_disabled is False
+
+
+def test_action_states_disable_run_once_for_automated_flow_while_engine_is_starting():
+    card = qt_flow_card_from_entry(
+        flow_catalog_entry_from_flow(
+            Flow(name="poller", label="Poller", group="Claims").watch(
+                mode="poll",
+                source="/tmp/in",
+                interval="5s",
+            ),
+            description=None,
+        )
+    )
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState.empty(),
+        selected_flow=SelectedFlowState(card=card, has_logs=False),
+        has_automated_flows=True,
+        engine_state="starting",
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+    tui = TuiActionState.from_context(context)
+
+    assert gui.flow_run_enabled is False
+    assert tui.run_once_disabled is True
+
+
+def test_selected_flow_state_does_not_treat_engine_owned_flow_as_manual_running():
+    card = qt_flow_card_from_entry(
+        flow_catalog_entry_from_flow(
+            Flow(name="claims_summary", label="Claims Summary", group="Claims").watch(
+                mode="poll",
+                source="/tmp/in",
+                interval="5s",
+            ),
+            description=None,
+        )
+    )
+
+    selected = SelectedFlowState.from_runtime(
+        card=card,
+        flow_states={card.name: "polling"},
+        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("claims_summary",)),
+        flow_groups_by_name={card.name: card.group},
+        active_flow_states={"running", "polling", "scheduled", "stopping flow", "stopping runtime"},
+        has_logs=True,
+        live_runs={
+            "run-1": type(
+                "Run",
+                (),
+                {
+                    "flow_name": "claims_summary",
+                    "group_name": "Claims",
+                    "state": "running",
+                },
+            )(),
+        },
+        engine_active_flow_names=("claims_summary",),
+    )
+
+    assert selected.live_state == "running"
+    assert selected.live_manual_running is False
+    assert selected.group_active is True

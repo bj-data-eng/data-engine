@@ -47,6 +47,9 @@ class WorkspaceDaemonSnapshot:
     active_engine_flow_names: tuple[str, ...] = ()
     active_runs: tuple[ActiveRunState, ...] = ()
     flow_activity: tuple[FlowActivityState, ...] = ()
+    event_sequence: int = 0
+    recent_events: tuple[dict[str, object], ...] = ()
+    events_truncated: bool = False
 
 
 class WorkspaceDaemonManager:
@@ -133,6 +136,7 @@ class WorkspaceDaemonManager:
             request_payload: dict[str, object] = {"command": "daemon_status", "request_id": request_id}
             if self._last_snapshot is not None and self._last_snapshot.projection_version > 0:
                 request_payload["since_version"] = self._last_snapshot.projection_version
+                request_payload["since_event_sequence"] = self._last_snapshot.event_sequence
             try:
                 response = daemon_request(
                     self.paths,
@@ -183,6 +187,7 @@ class WorkspaceDaemonManager:
                 return self.sync()
             request_id = new_request_id("wait-status")
             since_version = self._last_snapshot.projection_version if self._last_snapshot is not None else 0
+            since_event_sequence = self._last_snapshot.event_sequence if self._last_snapshot is not None else 0
             try:
                 response = daemon_request(
                     self.paths,
@@ -190,6 +195,7 @@ class WorkspaceDaemonManager:
                         "command": "wait_for_daemon_status",
                         "request_id": request_id,
                         "since_version": since_version,
+                        "since_event_sequence": since_event_sequence,
                         "timeout_ms": max(int(timeout_seconds * 1000.0), 0),
                     },
                     timeout=max(timeout_seconds + 1.0, 2.0),
@@ -220,14 +226,16 @@ class WorkspaceDaemonManager:
             if recovered:
                 metadata = self.shared_state_adapter.read_lease_metadata(self.paths)
         owner = metadata.get("machine_id") if isinstance(metadata, dict) else None
+        owner_text = str(owner).strip() if isinstance(owner, str) and owner.strip() else None
+        workspace_owned = metadata is None or owner_text == local_machine_id
         checkpoint = metadata.get("last_checkpoint_at_utc") if isinstance(metadata, dict) else None
         checkpoint_text = str(checkpoint) if isinstance(checkpoint, str) and checkpoint.strip() else None
         if checkpoint_text is not None and parse_utc_text(checkpoint_text) is None:
             checkpoint_text = None
         return WorkspaceDaemonSnapshot(
             live=False,
-            workspace_owned=metadata is None,
-            leased_by_machine_id=str(owner) if isinstance(owner, str) and owner.strip() else None,
+            workspace_owned=workspace_owned,
+            leased_by_machine_id=None if workspace_owned else owner_text,
             runtime_active=False,
             runtime_stopping=False,
             active_engine_flow_names=(),
@@ -272,7 +280,16 @@ class WorkspaceDaemonManager:
                     else self._last_snapshot.daemon_id
                 ),
                 engine_starting=self._last_snapshot.engine_starting,
-                projection_version=int(status.get("projection_version", self._last_snapshot.projection_version) or self._last_snapshot.projection_version),
+                projection_version=int(
+                    status.get("projection_version", self._last_snapshot.projection_version)
+                    or self._last_snapshot.projection_version
+                ),
+                event_sequence=int(
+                    status.get("event_sequence", self._last_snapshot.event_sequence)
+                    or self._last_snapshot.event_sequence
+                ),
+                recent_events=(),
+                events_truncated=False,
                 active_engine_flow_names=self._last_snapshot.active_engine_flow_names,
                 active_runs=self._last_snapshot.active_runs,
                 flow_activity=self._last_snapshot.flow_activity,
@@ -300,6 +317,9 @@ class WorkspaceDaemonManager:
             last_checkpoint_at_utc=str(checkpoint) if isinstance(checkpoint, str) and checkpoint.strip() else None,
             source="daemon",
             projection_version=int(status.get("projection_version", 0) or 0),
+            event_sequence=int(status.get("event_sequence", 0) or 0),
+            recent_events=_coerce_recent_events(status.get("recent_events")),
+            events_truncated=bool(status.get("events_truncated", False)),
             active_runs=active_runs,
             flow_activity=flow_activity,
         )
@@ -446,6 +466,12 @@ def _coerce_flow_activity(value: object) -> tuple[FlowActivityState, ...]:
             )
         )
     return tuple(coerced)
+
+
+def _coerce_recent_events(value: object) -> tuple[dict[str, object], ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, dict))
 
 
 __all__ = ["WorkspaceDaemonManager", "WorkspaceDaemonSnapshot"]

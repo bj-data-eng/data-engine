@@ -22,11 +22,12 @@ class RunLogPreviewRequest:
 
     run_group: FlowRunState
     detail: RunDetailState
+    source_path: str | None = None
 
     @classmethod
-    def from_run(cls, run_group: FlowRunState) -> "RunLogPreviewRequest":
+    def from_run(cls, run_group: FlowRunState, *, source_path: str | None = None) -> "RunLogPreviewRequest":
         """Build one run-log preview request from a grouped run."""
-        return cls(run_group=run_group, detail=RunDetailState.from_run(run_group))
+        return cls(run_group=run_group, detail=RunDetailState.from_run(run_group), source_path=source_path)
 
 
 @dataclass(frozen=True)

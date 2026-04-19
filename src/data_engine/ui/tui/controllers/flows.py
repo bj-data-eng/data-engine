@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 from textual.widgets import ListView, Select, Static
 
 from data_engine.domain import FlowRunState, OperatorSessionState, WorkspaceSessionState
-from data_engine.services import CatalogPort, CommandPort, HistoryPort, WorkspaceService
+from data_engine.services import (
+    CatalogPort,
+    CommandPort,
+    HistoryPort,
+    WorkspaceService,
+    runtime_session_from_workspace_snapshot,
+)
 from data_engine.views import TuiActionState, build_operator_action_context, build_selected_flow_presentation
 from data_engine.views.text import render_selected_flow_lines
 from data_engine.ui.tui.widgets import FlowListItem, GroupHeaderListItem, InfoModal, RunGroupListItem
@@ -90,12 +96,13 @@ class _TuiWorkspaceCatalogController:
         self.command_service = command_service
 
     def action_refresh_flows(self, window: "DataEngineTui", presentation: "_TuiFlowPresentationController") -> None:
+        action_context = presentation._action_context(window)
         if presentation._action_state(window).refresh_disabled:
             window._set_status("Stop active engine or manual runs before refreshing flows.")
             return
         result = self.command_service.refresh_flows(
             paths=window.workspace_paths,
-            runtime_session=window.runtime_session,
+            action_context=action_context,
             has_authored_workspace=window._has_authored_workspace(),
             timeout=5.0,
         )
@@ -244,24 +251,38 @@ class _TuiFlowPresentationController:
             return "Takeover available."
         return snapshot.control.blocked_status_text
 
+    @staticmethod
+    def _current_runtime_session(window: "DataEngineTui"):
+        snapshot = getattr(window, "workspace_snapshot", None)
+        if snapshot is None:
+            return window.runtime_session
+        return runtime_session_from_workspace_snapshot(snapshot)
+
     def _action_context(self, window: "DataEngineTui"):
         workspace_snapshot = getattr(window, "workspace_snapshot", None)
+        effective_runtime_session = self._current_runtime_session(window)
         return build_operator_action_context(
             card=window._selected_card(),
             flow_states=window.flow_states,
-            runtime_session=window.runtime_session,
+            runtime_session=effective_runtime_session,
             flow_groups_by_name={card.name: card.group for card in window.flow_cards},
             active_flow_states=window._ACTIVE_FLOW_STATES,
             engine_state=(
                 workspace_snapshot.engine.state
                 if workspace_snapshot is not None
                 else "stopping"
-                if window.runtime_session.runtime_stopping
+                if effective_runtime_session.runtime_stopping
                 else "running"
-                if window.runtime_session.runtime_active
+                if effective_runtime_session.runtime_active
                 else "idle"
             ),
-            live_runs=None if workspace_snapshot is None else workspace_snapshot.active_runs,
+            engine_truth_known=workspace_snapshot is not None,
+            live_runs=(workspace_snapshot.active_runs if workspace_snapshot is not None else None),
+            engine_active_flow_names=(
+                ()
+                if workspace_snapshot is None
+                else workspace_snapshot.engine.active_flow_names
+            ),
             has_logs=bool(
                 window.selected_flow_name is not None
                 and self.history_query_service.list_run_groups(
@@ -281,17 +302,19 @@ class _TuiFlowPresentationController:
     def action_run_selected(self, window: "DataEngineTui") -> None:
         window._sync_daemon_state()
         action_context = self._action_context(window)
-        if action_context.engine_state == "starting":
+        action_state = self._action_state(window)
+        if action_context.engine_starting:
             window._set_status("Wait for the automated engine to finish starting before running another flow.")
+            return
+        if action_state.run_once_disabled:
+            window._set_status("Select an idle flow with local control before running it.")
             return
         card = window._selected_card()
         result = self.command_service.run_selected_flow(
             paths=window.workspace_paths,
-            runtime_session=window.runtime_session,
+            action_context=action_context,
             selected_flow_name=card.name if card is not None else None,
             selected_flow_valid=bool(card is not None and card.valid),
-            selected_flow_group=card.group if card is not None else None,
-            selected_flow_group_active=action_context.selected_flow.group_active,
             blocked_status_text=self._blocked_status_text(window),
             timeout=5.0,
         )
@@ -306,12 +329,16 @@ class _TuiFlowPresentationController:
     def action_start_engine(self, window: "DataEngineTui") -> None:
         window._sync_daemon_state()
         action_context = self._action_context(window)
-        if action_context.engine_state == "starting":
+        action_state = self._action_state(window)
+        if action_context.engine_starting:
             window._set_status("Automated engine is already starting.")
+            return
+        if action_state.start_engine_disabled:
+            window._set_status("Local control and an idle runtime are required before starting the engine.")
             return
         result = self.command_service.start_engine(
             paths=window.workspace_paths,
-            runtime_session=window.runtime_session,
+            action_context=action_context,
             has_automated_flows=any(card.valid and card.mode in {"poll", "schedule"} for card in window.flow_cards),
             blocked_status_text=self._blocked_status_text(window),
             timeout=5.0,
@@ -327,14 +354,18 @@ class _TuiFlowPresentationController:
     def action_stop_engine(self, window: "DataEngineTui") -> None:
         window._sync_daemon_state()
         action_context = self._action_context(window)
-        if action_context.engine_state == "starting":
+        action_state = self._action_state(window)
+        if action_context.engine_starting:
             window._set_status("Wait for the automated engine startup to finish before requesting a stop.")
+            return
+        if action_state.stop_engine_disabled:
+            window._set_status("No active engine or selected manual flow is available to stop.")
             return
         card = window._selected_card()
         result = self.command_service.stop_pipeline(
             paths=window.workspace_paths,
-            runtime_session=window.runtime_session,
-            selected_flow_group=card.group if card is not None else None,
+            action_context=action_context,
+            selected_flow_name=card.name if card is not None else None,
             blocked_status_text=self._blocked_status_text(window),
             timeout=5.0,
         )
@@ -363,14 +394,15 @@ class _TuiFlowPresentationController:
         if window.selected_flow_name is None:
             return
         action_context = self._action_context(window)
+        effective_runtime_session = self._current_runtime_session(window)
         if (
-            action_context.engine_state in {"starting", "running", "stopping"}
-            or window.runtime_session.manual_run_active
+            action_context.engine_busy
+            or action_context.manual_run_active
             or action_context.selected_flow.group_active
         ):
             window._set_status("Stop the engine and any active manual runs before resetting a flow.")
             return
-        if not window.runtime_session.control_available:
+        if not effective_runtime_session.control_available:
             window._set_status(self._blocked_status_text(window))
             return
         result = self.command_service.reset_flow(

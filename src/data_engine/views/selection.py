@@ -86,6 +86,9 @@ def build_selected_flow_presentation(
         tracker,
         flow_states=flow_states,
         live_step_statuses=_live_step_statuses_for_runs(live_flow_runs),
+        live_step_counts=_live_step_counts_for_runs(live_flow_runs),
+        live_step_elapsed_seconds=_live_step_elapsed_seconds_for_runs(live_flow_runs),
+        live_step_started_at_utc=_live_step_started_at_utc_for_runs(live_flow_runs),
     )
     effective_run_groups = _effective_run_groups(
         flow_name=card.name,
@@ -134,7 +137,7 @@ def _effective_run_groups(
     for group in run_groups:
         live_run = active_by_run_id.get(group.key[1])
         if live_run is not None:
-            merged.append(group)
+            merged.append(_overlay_live_run(group, live_run))
             included_live_run_ids.add(live_run.run_id)
             continue
         if live_truth_authoritative and group.status not in {"success", "failed", "stopped"}:
@@ -176,6 +179,61 @@ def _live_step_statuses_for_runs(live_runs: tuple[LiveRunLike, ...]) -> dict[str
     return statuses
 
 
+def _live_step_counts_for_runs(live_runs: tuple[LiveRunLike, ...]) -> dict[str, int]:
+    """Return active live-run counts per step name for one flow."""
+    counts: dict[str, int] = {}
+    for run in live_runs:
+        step_name = run.current_step_name
+        if not step_name:
+            continue
+        counts[step_name] = counts.get(step_name, 0) + 1
+    return counts
+
+
+def _live_step_elapsed_seconds_for_runs(
+    live_runs: tuple[LiveRunLike, ...],
+) -> dict[str, float | None]:
+    """Return a representative live elapsed time per step when only one run is active there."""
+    counts: dict[str, int] = {}
+    elapsed_by_step: dict[str, float | None] = {}
+    for run in live_runs:
+        step_name = run.current_step_name
+        if not step_name:
+            continue
+        counts[step_name] = counts.get(step_name, 0) + 1
+        if counts[step_name] == 1:
+            elapsed_by_step[step_name] = _current_step_elapsed_seconds(run)
+        else:
+            elapsed_by_step[step_name] = None
+    return elapsed_by_step
+
+
+def _live_step_started_at_utc_for_runs(
+    live_runs: tuple[LiveRunLike, ...],
+) -> dict[str, str | None]:
+    """Return the current-step start timestamp per step when only one run is active there."""
+    counts: dict[str, int] = {}
+    started_at_by_step: dict[str, str | None] = {}
+    for run in live_runs:
+        step_name = run.current_step_name
+        if not step_name:
+            continue
+        counts[step_name] = counts.get(step_name, 0) + 1
+        if counts[step_name] == 1:
+            started_at_by_step[step_name] = run.current_step_started_at_utc
+        else:
+            started_at_by_step[step_name] = None
+    return started_at_by_step
+
+
+def _current_step_elapsed_seconds(run: LiveRunLike) -> float | None:
+    """Return current-step elapsed time derived from the step start timestamp when available."""
+    started = parse_utc_text(run.current_step_started_at_utc)
+    if started is not None:
+        return max((datetime.now(UTC) - started).total_seconds(), 0.0)
+    return run.elapsed_seconds
+
+
 def _overlay_live_run(existing: FlowRunState | None, live_run: LiveRunLike) -> FlowRunState:
     """Return one run-group state updated with daemon-owned live run truth."""
     live_entry = _live_run_entry(live_run)
@@ -193,7 +251,7 @@ def _overlay_live_run(existing: FlowRunState | None, live_run: LiveRunLike) -> F
             RunStepState(
                 step_name=live_run.current_step_name,
                 status=current_step_status,
-                elapsed_seconds=live_run.elapsed_seconds,
+                elapsed_seconds=_current_step_elapsed_seconds(live_run),
                 entry=live_entry,
             ),
         )

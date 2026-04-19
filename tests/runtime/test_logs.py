@@ -324,6 +324,47 @@ def test_log_service_reload_dedupes_incremental_persisted_copy_of_live_entry(tmp
     assert [entry.event.run_id if entry.event is not None else None for entry in entries] == ["run-0", "run-1"]
 
 
+def test_flow_log_store_dedupes_duplicate_live_runtime_events_with_different_timestamps():
+    store = FlowLogStore()
+    first = FlowLogEntry(
+        line=FlowLogEntry.format_runtime_message(
+            "run=run-1 flow=poller source=/tmp/input.xlsx status=success elapsed=0.250000"
+        ),
+        kind="flow",
+        flow_name="poller",
+        event=RuntimeStepEvent(
+            run_id="run-1",
+            flow_name="poller",
+            step_name=None,
+            source_label="input.xlsx",
+            status="success",
+            elapsed_seconds=0.25,
+        ),
+        created_at_utc=datetime.fromisoformat("2026-04-18T12:00:00+00:00"),
+    )
+    second = FlowLogEntry(
+        line=FlowLogEntry.format_runtime_message(
+            "run=run-1 flow=poller source=/tmp/input.xlsx status=success elapsed=0.250000"
+        ),
+        kind="flow",
+        flow_name="poller",
+        event=RuntimeStepEvent(
+            run_id="run-1",
+            flow_name="poller",
+            step_name=None,
+            source_label="input.xlsx",
+            status="success",
+            elapsed_seconds=0.25,
+        ),
+        created_at_utc=datetime.fromisoformat("2026-04-18T12:00:01+00:00"),
+    )
+
+    store.append_entry(first)
+    store.append_entry(second)
+
+    assert len(store.entries()) == 1
+
+
 def test_flow_log_store_caches_grouped_runs_per_flow(monkeypatch):
     store = FlowLogStore()
     store.append_entry(

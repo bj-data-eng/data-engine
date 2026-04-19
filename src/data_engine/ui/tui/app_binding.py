@@ -109,6 +109,7 @@ def bootstrap_tui_app(app: "DataEngineTui", *, theme_name: str, services: TuiSer
         manager=app.runtime_binding.daemon_manager,
         clock=app._monotonic,
     )
+    app._pending_daemon_update_batch = None
     app._last_daemon_spawn_attempt = 0.0
     app._daemon_startup_in_progress = False
     app._workspace_switch_suppressed = False

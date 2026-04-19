@@ -109,8 +109,6 @@ class RuntimeSessionState:
                 for flow_name in snapshot.active_engine_flow_names
                 if (card := cards_by_name.get(flow_name)) is not None and card.valid and card.mode in {"poll", "schedule"}
             )
-            if not active_runtime_flow_names:
-                active_runtime_flow_names = tuple(card.name for card in cards if card.valid and card.mode in {"poll", "schedule"})
         else:
             active_runtime_flow_names = ()
         return cls(

@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QWidget
 
 from data_engine.platform.workspace_models import authored_workspace_is_available
+from data_engine.services import DaemonUpdateBatch
+from data_engine.services.daemon_state import merge_update_batches
 from data_engine.ui.gui.dialogs import show_message_box, structured_error_content
 from data_engine.ui.gui.helpers import (
     is_last_process_ui_window as helper_is_last_process_ui_window,
@@ -37,7 +39,75 @@ if TYPE_CHECKING:
 class GuiWindowSupportMixin:
     """Shared window-support methods kept separate from the main GUI app shell."""
 
-    _SUBSCRIPTION_HEALTH_WINDOW_SECONDS = 15.0
+    _SUBSCRIPTION_HEALTH_WINDOW_SECONDS = 3.0
+
+    def _workspace_binding_token(self: "DataEngineWindow") -> tuple[int, str]:
+        """Return the current workspace-binding token for stale-result rejection."""
+        return (
+            int(getattr(self, "_workspace_binding_generation", 0)),
+            str(self.workspace_paths.workspace_id),
+        )
+
+    def _advance_workspace_binding_generation(self: "DataEngineWindow") -> tuple[int, str]:
+        """Advance and return the current workspace-binding token."""
+        self._workspace_binding_generation = int(getattr(self, "_workspace_binding_generation", 0)) + 1
+        return self._workspace_binding_token()
+
+    def _matches_workspace_binding_token(
+        self: "DataEngineWindow",
+        token: tuple[int, str] | None,
+    ) -> bool:
+        """Return whether one worker/subscription token still matches the active binding."""
+        return token == self._workspace_binding_token()
+
+    def _control_action_payload(
+        self: "DataEngineWindow",
+        payload: object,
+        *,
+        token: tuple[int, str] | None = None,
+    ) -> dict[str, object]:
+        """Wrap one background control result with the current workspace token."""
+        return {
+            "workspace_token": self._workspace_binding_token() if token is None else token,
+            "payload": payload,
+        }
+
+    def _unwrap_control_action_payload(
+        self: "DataEngineWindow",
+        payload: object,
+    ) -> tuple[tuple[int, str] | None, object]:
+        """Return the workspace token and inner control payload from one signal payload."""
+        if isinstance(payload, dict) and "workspace_token" in payload and "payload" in payload:
+            raw_token = payload.get("workspace_token")
+            token = raw_token if isinstance(raw_token, tuple) and len(raw_token) == 2 else None
+            return token, payload.get("payload")
+        return None, payload
+
+    def _daemon_batch_payload(
+        self: "DataEngineWindow",
+        batch: DaemonUpdateBatch,
+        *,
+        token: tuple[int, str] | None = None,
+    ) -> dict[str, object]:
+        """Wrap one daemon update batch with the current workspace token."""
+        return {
+            "workspace_token": self._workspace_binding_token() if token is None else token,
+            "batch": batch,
+        }
+
+    def _unwrap_daemon_batch_payload(
+        self: "DataEngineWindow",
+        payload: object,
+    ) -> tuple[tuple[int, str] | None, DaemonUpdateBatch | None]:
+        """Return the workspace token and batch from one queued daemon payload."""
+        if isinstance(payload, dict) and "workspace_token" in payload and "batch" in payload:
+            raw_token = payload.get("workspace_token")
+            token = raw_token if isinstance(raw_token, tuple) and len(raw_token) == 2 else None
+            batch = payload.get("batch")
+            return token, batch if isinstance(batch, DaemonUpdateBatch) else None
+        if isinstance(payload, DaemonUpdateBatch):
+            return None, payload
+        return None, None
 
     def _resolve_workspace_paths(
         self: "DataEngineWindow",
@@ -111,7 +181,7 @@ class GuiWindowSupportMixin:
             return tuple(self._worker_threads)
 
     def _schedule_daemon_update_sync(self: "DataEngineWindow") -> None:
-        """Queue one daemon-driven sync back onto the Qt main thread."""
+        """Queue one daemon-driven full sync back onto the Qt main thread."""
         if getattr(self, "ui_closing", False):
             return
         self.daemon_subscription.mark_subscription(self._monotonic())
@@ -120,6 +190,29 @@ class GuiWindowSupportMixin:
             return
         try:
             signals.daemon_update_available.emit()
+        except RuntimeError:
+            return
+
+    def _schedule_daemon_update_batch(self: "DataEngineWindow", batch: DaemonUpdateBatch) -> None:
+        """Queue one lane-based daemon update back onto the Qt main thread."""
+        if getattr(self, "ui_closing", False):
+            return
+        self.daemon_subscription.mark_subscription(self._monotonic())
+        token = self._workspace_binding_token()
+        existing_token, existing_batch = self._unwrap_daemon_batch_payload(
+            getattr(self, "_pending_daemon_update_batch", None)
+        )
+        merged_batch = (
+            merge_update_batches(existing_batch, batch)
+            if existing_batch is not None and existing_token == token
+            else batch
+        )
+        self._pending_daemon_update_batch = self._daemon_batch_payload(merged_batch, token=token)
+        signals = getattr(self, "signals", None)
+        if signals is None:
+            return
+        try:
+            signals.daemon_update_batch_available.emit(self._daemon_batch_payload(batch, token=token))
         except RuntimeError:
             return
 
@@ -133,7 +226,7 @@ class GuiWindowSupportMixin:
 
         self.daemon_subscription.ensure_started(
             workspace_available=lambda: not self.ui_closing and self._has_authored_workspace(),
-            on_update=lambda snapshot: (None if self.ui_closing else self._schedule_daemon_update_sync()),
+            on_update=lambda batch: (None if self.ui_closing else self._schedule_daemon_update_batch(batch)),
             start_worker=lambda target: start_worker_thread(self, target=target),
         )
 

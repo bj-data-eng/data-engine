@@ -268,7 +268,9 @@ def test_ephemeral_daemon_stays_alive_when_no_live_clients_remain_during_active_
     assert service.host.shutdown_event.is_set() is False
     assert service.host.workspace_owned is True
     assert service.host.runtime_active is True
-    assert service.host.status == "running"
+    assert service.host.status == "client disconnected"
+    assert service.state.shutdown_when_idle is True
+    assert service.state.engine_runtime_stop_event.is_set() is True
 
     service._shutdown()  # noqa: SLF001
 

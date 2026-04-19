@@ -21,14 +21,29 @@ class DaemonStateSyncHandler:
     def load_flow_cards(self, *, force: bool = False) -> tuple[QtFlowCard, ...]:
         return self.service._load_flow_cards(force=force)
 
-    def status_payload(self, *, since_version: int | None = None) -> dict[str, Any]:
+    def status_payload(
+        self,
+        *,
+        since_version: int | None = None,
+        since_event_sequence: int | None = None,
+    ) -> dict[str, Any]:
         service = self.service
         projection = service.runtime_projector.snapshot()
-        if since_version is not None and since_version == projection.version:
+        recent_events = ()
+        events_truncated = False
+        if since_event_sequence is not None:
+            recent_events, events_truncated = service.runtime_projector.events_since(since_event_sequence)
+        if (
+            since_version is not None
+            and since_version == projection.version
+            and since_event_sequence is not None
+            and since_event_sequence == projection.event_sequence
+        ):
             return {
                 "workspace_id": service.paths.workspace_id,
                 "daemon_id": service.daemon_id,
                 "projection_version": projection.version,
+                "event_sequence": projection.event_sequence,
                 "unchanged": True,
             }
         return {
@@ -49,27 +64,54 @@ class DaemonStateSyncHandler:
             "manual_runs": list(projection.manual_runs),
             "last_checkpoint_at_utc": projection.last_checkpoint_at_utc,
             "projection_version": projection.version,
+            "event_sequence": projection.event_sequence,
+            "recent_events": list(recent_events),
+            "events_truncated": events_truncated,
         }
 
     def wait_for_status_payload(
         self,
         *,
         since_version: int,
+        since_event_sequence: int,
         timeout_seconds: float,
     ) -> dict[str, Any]:
         """Wait for one projection change and return the resulting status payload."""
-        projection = self.service.runtime_projector.wait_for_version_change(
+        projection, recent_events, events_truncated = self.service.runtime_projector.wait_for_change(
             since_version=since_version,
+            since_event_sequence=since_event_sequence,
             timeout_seconds=timeout_seconds,
         )
-        if projection.version == since_version:
+        if projection.version == since_version and projection.event_sequence == since_event_sequence:
             return {
                 "workspace_id": self.service.paths.workspace_id,
                 "daemon_id": self.service.daemon_id,
                 "projection_version": projection.version,
+                "event_sequence": projection.event_sequence,
                 "unchanged": True,
             }
-        return self.status_payload()
+        return {
+            "workspace_id": self.service.paths.workspace_id,
+            "workspace_root": str(self.service.paths.workspace_root),
+            "machine_id": self.service.machine_id,
+            "daemon_id": self.service.daemon_id,
+            "pid": self.service.pid,
+            "status": projection.status,
+            "workspace_owned": projection.workspace_owned,
+            "leased_by_machine_id": projection.leased_by_machine_id,
+            "engine_active": projection.runtime_active,
+            "engine_stopping": projection.runtime_stopping,
+            "engine_starting": projection.engine_starting,
+            "active_engine_flow_names": list(projection.active_engine_flow_names),
+            "active_runs": list(projection.active_runs),
+            "flow_activity": list(projection.flow_activity),
+            "manual_runs": list(projection.manual_runs),
+            "last_checkpoint_at_utc": projection.last_checkpoint_at_utc,
+            "projection_version": projection.version,
+            "event_sequence": projection.event_sequence,
+            "recent_events": list(recent_events),
+            "events_truncated": events_truncated,
+        }
 
     def checkpoint_once(self, *, status: str) -> None:
         service = self.service

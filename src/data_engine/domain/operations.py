@@ -31,6 +31,16 @@ class OperationRowState:
             return self
         return type(self)(status="idle", started_at=None, elapsed_seconds=self.elapsed_seconds)
 
+    def reset_for_next_started(self) -> "OperationRowState":
+        """Return the visible idle state to use when a new step starts."""
+        if self.status == "success":
+            return self.normalized()
+        if self.status == "idle" and self.elapsed_seconds is not None and self.started_at is None:
+            return self
+        if self.status in {"stopped", "failed"} and self.elapsed_seconds is not None and self.started_at is None:
+            return self
+        return type(self)(status="idle", started_at=None, elapsed_seconds=None)
+
     def duration_text(self, *, now: float, formatter) -> str:
         """Return the formatted visible duration for this row."""
         if self.status == "running" and isinstance(self.started_at, (int, float)):
@@ -85,12 +95,19 @@ class OperationFlowState:
         current = self.row_state(event.step_name) or OperationRowState()
         rows = dict(self.rows)
         if event.status == "started":
+            rows = {
+                name: row.reset_for_next_started()
+                for name, row in rows.items()
+            }
             rows[event.step_name] = current.started(now=now)
             return type(self)(current_index=operation_names.index(event.step_name), rows=rows), None
         if event.status == "success":
             rows[event.step_name] = current.finished(status="success", elapsed_seconds=event.elapsed_seconds)
             index = operation_names.index(event.step_name)
             return type(self)(current_index=index, rows=rows), index
+        if event.status == "stopped":
+            rows[event.step_name] = current.finished(status="stopped", elapsed_seconds=event.elapsed_seconds)
+            return type(self)(current_index=self.current_index, rows=rows), None
         if event.status == "failed":
             rows[event.step_name] = current.finished(status="failed", elapsed_seconds=event.elapsed_seconds)
             return type(self)(current_index=self.current_index, rows=rows), None

@@ -5,13 +5,14 @@ from datetime import UTC, datetime, timedelta
 import logging
 import os
 from pathlib import Path
+from queue import Queue
 import threading
 
 import pytest
 import polars as pl
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget, QTextEdit
+from PySide6.QtWidgets import QApplication, QLabel, QListWidget, QPushButton, QTableWidget, QTextEdit
 from shiboken6 import delete as shiboken_delete
 from shiboken6 import isValid as shiboken_is_valid
 
@@ -19,9 +20,11 @@ from data_engine.core.model import FlowValidationError
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot
 from data_engine.domain import (
     ActiveRunState,
+    DaemonStatusState,
     FlowActivityState,
     FlowCatalogEntry,
     FlowRunState,
+    OperationSessionState,
     RuntimeSessionState,
     WorkspaceControlState,
 )
@@ -30,8 +33,11 @@ from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_models import DiscoveredWorkspace, machine_id_text
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
-from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, RunLiveSnapshot, WorkspaceSnapshot
-from data_engine.services import DaemonService
+from data_engine.runtime.execution.logging import RuntimeLogEmitter
+from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, FlowLiveSummary, RunLiveSnapshot, WorkspaceSnapshot
+from data_engine.domain import StepOutputIndex
+from data_engine.services import DaemonService, DaemonStateService
+from data_engine.services.daemon_state import DaemonLaneUpdate, DaemonUpdateBatch
 from data_engine.services.operator_commands import OperatorCommandService
 from data_engine.services.workspace_provisioning import WorkspaceProvisioningResult
 from data_engine.ui.gui.bootstrap import build_gui_services
@@ -39,12 +45,15 @@ from data_engine.views import flow_category
 from data_engine.ui.gui.icons import ICON_ASSETS, load_svg_icon_text
 from data_engine.ui.gui.app import DataEngineWindow
 from data_engine.ui.gui.rendering import classify_artifact_preview, theme_svg_paths
+from data_engine.ui.gui.runtime import QueueLogHandler
 from data_engine.domain import FlowLogEntry
 from data_engine.domain import RuntimeStepEvent, parse_runtime_event
 from data_engine.views.models import QtFlowCard
 from data_engine.views.logs import FlowLogStore
 from data_engine.ui.gui.presenters.logs import next_log_scroll_value
 from data_engine.ui.gui.theme import stylesheet, theme_button_text, toggle_theme_name
+from data_engine.ui.gui.widgets.logs import build_log_run_widget
+from data_engine.ui.gui.widgets.sidebar import build_flow_row_widget, build_group_row_widget
 
 
 resolve_workspace_paths = RuntimeLayoutPolicy().resolve_paths
@@ -285,7 +294,7 @@ class _FakeDaemonStateService:
                 return
             if previous_snapshot is not None and snapshot == previous_snapshot:
                 continue
-            on_update(snapshot)
+            on_update(DaemonStateService.diff_update_batch(previous_snapshot, snapshot))
 
     @staticmethod
     def should_run_heartbeat(
@@ -590,10 +599,7 @@ def _visible_log_run_primary_labels(window: DataEngineWindow) -> list[str]:
     labels: list[str] = []
     for index in range(window.log_view.count()):
         item = window.log_view.item(index)
-        widget = window.log_view.itemWidget(item)
-        if widget is None:
-            continue
-        source_label = widget.property("sourceLabel")
+        source_label = window.log_view.source_label(item)
         if source_label:
             labels.append(str(source_label))
     return labels
@@ -665,6 +671,7 @@ def test_settings_visibility_panel_reports_workspace_stats(qapp):
         source_path="/tmp/input-b.xlsx",
         started_at_utc=old_started,
     )
+    window._workspace_counts_footer_cache.clear()
     window._refresh_workspace_visibility_panel()
 
     assert window.workspace_counts_footer_label.text() == "0 modules - 1 groups - 2 flows - 1 runs last 7 days"
@@ -690,13 +697,34 @@ def test_provision_workspace_button_creates_missing_workspace_assets(qapp, tmp_p
                 preserved_paths=(),
             )
 
+    workspace_collection_root = tmp_path / "claims_workspaces"
+    claims_root = workspace_collection_root / "claims"
+    claims2_root = workspace_collection_root / "claims2"
+    (claims_root / "flow_modules").mkdir(parents=True)
+    discovered = (
+        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
+        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+    )
+
+    def _resolve(workspace_id=None):
+        target = claims_root if workspace_id in (None, "claims") else claims2_root
+        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
+
     provisioning_service = _RecordingProvisioningService()
     window = _make_window(
         command_service=_command_service_for_test(workspace_provisioning_service=provisioning_service),
+        discover_workspaces_func=lambda app_root=None, workspace_collection_root=None: discovered,
+        resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
     )
-    selected_paths = window.workspace_paths
+    selected_paths = resolve_workspace_paths(workspace_root=claims2_root, workspace_id="claims2")
 
     try:
+        target_index = window.workspace_settings_selector.findData("claims2")
+        assert target_index >= 0
+        window.workspace_settings_selector.setCurrentIndex(target_index)
+        qapp.processEvents()
+
         window._provision_selected_workspace()
         _process_ui_until(
             qapp,
@@ -706,6 +734,7 @@ def test_provision_workspace_button_creates_missing_workspace_assets(qapp, tmp_p
 
         assert provisioning_service.requested_paths is not None
         assert provisioning_service.requested_paths.workspace_root == selected_paths.workspace_root
+        assert window.workspace_paths.workspace_id == "claims"
         assert (selected_paths.workspace_root / "flow_modules").is_dir()
         assert selected_paths.workspace_id in window.workspace_target_label.text()
         assert f"Provisioned {selected_paths.workspace_root.name}" in window.workspace_provision_status_label.text()
@@ -1660,7 +1689,8 @@ def test_manual_run_selected_flow_button_requests_graceful_stop_instead_of_new_r
         _process_ui_until(qapp, lambda: len(control_application.stop_pipeline_calls) == 1)
 
         assert control_application.run_selected_flow_calls == []
-        assert control_application.stop_pipeline_calls[0]["selected_flow_group"] == "Manual"
+        assert control_application.stop_pipeline_calls[0]["selected_flow_name"] == "manual_review"
+        assert control_application.stop_pipeline_calls[0]["action_context"].selected_flow.card.group == "Manual"
     finally:
         _dispose_window(qapp, window)
 
@@ -1779,6 +1809,66 @@ def test_show_event_reveals_action_bar_controls_after_startup_paint(qapp, monkey
         qapp.processEvents()
 
         assert window.action_bar_controls_group.isHidden() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_show_event_runs_initial_daemon_sync_for_engine_button_truth(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window(
+        snapshot=WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=datetime.now(UTC).isoformat(),
+            source="daemon",
+            active_engine_flow_names=("poller",),
+        ),
+    )
+    try:
+        assert window.engine_button.text() == "Start Engine"
+
+        window.show()
+        _process_ui_until(qapp, lambda: window.engine_button.text() == "Stop Engine")
+
+        assert window.engine_button.text() == "Stop Engine"
+        assert window.engine_button.isEnabled() is True
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_local_same_machine_lease_keeps_start_engine_enabled_during_startup(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window(
+        snapshot=WorkspaceDaemonSnapshot(
+            live=False,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=False,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=datetime.now(UTC).isoformat(),
+            source="lease",
+        ),
+    )
+    try:
+        window.workspace_snapshot = _workspace_snapshot_for_test(
+            window.workspace_paths.workspace_id,
+            control=ControlSnapshot(
+                state="available",
+                control_status_text="This Workstation has control",
+                blocked_status_text="Takeover available.",
+            ),
+        )
+
+        window._sync_from_daemon()
+
+        assert window.request_control_button.isHidden() is True
+        assert window.engine_button.text() == "Start Engine"
+        assert window.engine_button.isEnabled() is True
     finally:
         _dispose_window(qapp, window)
 
@@ -2194,8 +2284,10 @@ def test_settings_workspace_selector_can_switch_the_provisioning_target(qapp, mo
         window.workspace_settings_selector.setCurrentIndex(target_index)
         window._flush_deferred_ui_updates()
 
-        assert window.workspace_paths.workspace_id == "claims2"
-        assert window.workspace_selector.currentData() == "claims2"
+        assert window.workspace_paths.workspace_id == "claims"
+        assert window.workspace_selector.currentData() == "claims"
+        assert window.settings_workspace_target_id == "claims2"
+        assert window.workspace_settings_selector.currentData() == "claims2"
         assert "claims2" in window.workspace_target_label.text()
     finally:
         _dispose_window(qapp, window)
@@ -2335,14 +2427,26 @@ def test_start_runtime_reuses_loaded_flow_cards(qapp, monkeypatch, tmp_path):
         window._start_runtime()
         _process_ui_until(
             qapp,
-            lambda: len(control_application.start_engine_calls) == 1
-            and window.runtime_session.runtime_active is True
-            and window.runtime_session.active_runtime_flow_names == ("poller",),
+            lambda: len(control_application.start_engine_calls) == 1,
         )
 
-        assert window.runtime_session.runtime_active is True
-        assert window.runtime_session.active_runtime_flow_names == ("poller",)
         assert len(control_application.start_engine_calls) == 1
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_pending_engine_start_disables_run_once_for_selected_automated_flow(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window.selected_flow_name = "poller"
+        window._pending_control_actions.add("start_runtime")
+
+        window._refresh_action_buttons()
+
+        assert window.flow_run_button.text() == "Run Once"
+        assert window.flow_run_button.isEnabled() is False
+        assert window.engine_button.text() == "Starting..."
     finally:
         _dispose_window(qapp, window)
 
@@ -2360,6 +2464,65 @@ def test_finish_runtime_treats_stop_requested_error_as_normal_stop(qapp, monkeyp
         assert window.runtime_session.runtime_active is False
         assert window.flow_states["poller"] == "poll ready"
         assert capture.shown_later_messages == []
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_finish_daemon_sync_deduplicates_repeated_sync_error_logs(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    log_lines: list[tuple[str, str | None]] = []
+    window._append_log_line = lambda line, flow_name=None: log_lines.append((line, flow_name))
+    try:
+        window.show()
+        qapp.processEvents()
+        token = window._workspace_binding_token()
+
+        window._finish_daemon_sync({"workspace_token": token, "error": RuntimeError("sync failed")})
+        window._finish_daemon_sync({"workspace_token": token, "error": RuntimeError("sync failed")})
+
+        assert log_lines == [
+            (
+                "Daemon sync failed: sync failed",
+                None,
+            )
+        ]
+
+        window._finish_daemon_sync(
+            {
+                "workspace_token": token,
+                "sync_state": type(
+                    "_SyncState",
+                    (),
+                    {
+                        "daemon_status": DaemonStatusState.empty(),
+                    },
+                )(),
+                "projection": type(
+                    "_Projection",
+                    (),
+                    {
+                        "runtime_session": RuntimeSessionState.empty(),
+                        "operation_tracker": OperationSessionState.empty(),
+                        "flow_states": {},
+                        "step_output_index": StepOutputIndex.empty(),
+                    },
+                )(),
+                "workspace_snapshot": _workspace_snapshot_for_test(window.workspace_paths.workspace_id),
+            }
+        )
+        window._finish_daemon_sync({"workspace_token": token, "error": RuntimeError("sync failed")})
+
+        assert log_lines == [
+            (
+                "Daemon sync failed: sync failed",
+                None,
+            ),
+            (
+                "Daemon sync failed: sync failed",
+                None,
+            ),
+        ]
     finally:
         _dispose_window(qapp, window)
 
@@ -2388,10 +2551,160 @@ def test_stop_runtime_enters_stopping_transition_and_disables_engine_button(qapp
         _process_ui_until(qapp, lambda: daemon_commands == ["stop_engine"])
 
         assert daemon_commands == ["stop_engine"]
-        assert window.runtime_session.runtime_stopping is True
-        assert window.flow_states["poller"] == "stopping runtime"
-        assert window.engine_button.text() == "Stopping..."
-        assert window.engine_button.isEnabled() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_stop_runtime_failure_restores_runtime_state(qapp, monkeypatch):
+    del monkeypatch
+    control_application = _FakeControlApplication()
+    control_application.stop_pipeline_result = type(
+        "Result",
+        (),
+        {
+            "requested": False,
+            "sync_after": False,
+            "status_text": None,
+            "error_text": "No control",
+        },
+    )()
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
+    try:
+        window.runtime_session = replace(window.runtime_session, runtime_active=True).with_active_runtime_flow_names(("poller",))
+        window.flow_states["poller"] = "polling"
+
+        window._stop_runtime()
+        _process_ui_until(qapp, lambda: "stop_runtime" not in window._pending_control_actions)
+
+        assert window.runtime_session.runtime_stopping is False
+        assert window.flow_states["poller"] == "polling"
+        assert window.engine_button.text() == "Stop Engine"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_manual_run_selected_flow_request_is_not_reissued_before_live_truth_arrives(qapp, monkeypatch):
+    del monkeypatch
+    control_application = _FakeControlApplication()
+    control_application.run_selected_flow_result = type(
+        "Result",
+        (),
+        {
+            "requested": True,
+            "sync_after": False,
+            "status_text": "Starting one-time flow run: manual_review",
+            "error_text": None,
+        },
+    )()
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
+    try:
+        window._select_flow("manual_review")
+        window._refresh_action_buttons()
+
+        window._run_selected_flow()
+        _process_ui_until(
+            qapp,
+            lambda: len(control_application.run_selected_flow_calls) == 1
+            and "run_selected_flow" not in window._pending_control_actions,
+        )
+
+        assert window.flow_run_button.text() == "Starting..."
+        assert window.flow_run_button.isEnabled() is False
+        assert "Manual" in window.pending_manual_run_requests
+
+        window._run_selected_flow()
+        qapp.processEvents()
+
+        assert len(control_application.run_selected_flow_calls) == 1
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_manual_run_selected_flow_stays_starting_while_live_summary_is_still_idle(qapp, monkeypatch):
+    del monkeypatch
+    control_application = _FakeControlApplication()
+    control_application.run_selected_flow_result = type(
+        "Result",
+        (),
+        {
+            "requested": True,
+            "sync_after": False,
+            "status_text": "Starting one-time flow run: manual_review",
+            "error_text": None,
+        },
+    )()
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
+    try:
+        window._select_flow("manual_review")
+        window._refresh_action_buttons()
+
+        window._run_selected_flow()
+        _process_ui_until(
+            qapp,
+            lambda: len(control_application.run_selected_flow_calls) == 1
+            and "run_selected_flow" not in window._pending_control_actions,
+        )
+
+        window.workspace_snapshot = replace(
+            window.workspace_snapshot,
+            flows={
+                "manual_review": FlowLiveSummary(
+                    flow_name="manual_review",
+                    group_name="Manual",
+                    state="manual",
+                    active_run_count=0,
+                    queued_run_count=0,
+                ),
+            },
+        )
+        window._refresh_action_buttons()
+        window.runtime_controller._prune_pending_manual_run_requests(window, active_manual_groups=set())
+        window._refresh_action_buttons()
+
+        assert window.flow_run_button.text() == "Starting..."
+        assert window.flow_run_button.isEnabled() is False
+        assert "Manual" in window.pending_manual_run_requests
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_engine_stop_stays_enabled_while_manual_run_is_starting_under_running_engine(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window(
+        snapshot=WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=datetime.now(UTC).isoformat(),
+            source="daemon",
+            active_engine_flow_names=("poller",),
+        ),
+    )
+    try:
+        window.selected_flow_name = "manual_review"
+        window.runtime_session = RuntimeSessionState(
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            active_runtime_flow_names=("poller",),
+            manual_runs=(),
+        )
+        window.pending_manual_run_requests["Manual"] = (
+            "manual_review",
+            datetime.now(UTC).isoformat(),
+            window._monotonic(),
+        )
+
+        window._refresh_action_buttons()
+
+        assert window.flow_run_button.text() == "Starting..."
+        assert window.flow_run_button.isEnabled() is False
+        assert window.engine_button.text() == "Stop Engine"
+        assert window.engine_button.isEnabled() is True
     finally:
         _dispose_window(qapp, window)
 
@@ -2482,6 +2795,33 @@ def test_close_event_does_not_request_daemon_shutdown_when_other_local_client_ex
         _dispose_window(qapp, window)
 
         assert shutdown_calls == []
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_close_event_requests_engine_stop_instead_of_daemon_shutdown_when_engine_is_active(qapp, monkeypatch):
+    del monkeypatch
+
+    requests: list[dict[str, object]] = []
+    ledger_service = _FakeLedgerService(remaining_counts=[0])
+
+    window = _make_window(
+        is_live_func=lambda paths: True,
+        request_func=lambda paths, payload, timeout=0: requests.append({"payload": payload, "timeout": timeout}) or {"ok": True},
+        ledger_service=ledger_service,
+    )
+    window.workspace_snapshot = WorkspaceSnapshot(
+        workspace_id=window.workspace_paths.workspace_id,
+        version=1,
+        control=ControlSnapshot(state="available"),
+        engine=EngineSnapshot(state="running", daemon_live=True, active_flow_names=("poller",)),
+        flows={},
+        active_runs={},
+    )
+    try:
+        _dispose_window(qapp, window)
+
+        assert requests == [{"payload": {"command": "stop_engine", "shutdown_when_idle": True}, "timeout": 1.5}]
     finally:
         _dispose_window(qapp, window)
 
@@ -2585,6 +2925,111 @@ def test_reset_flow_button_calls_persistent_reset_path(qapp, monkeypatch):
         _dispose_window(qapp, window)
 
 
+def test_force_shutdown_daemon_targets_selected_settings_workspace_without_rebinding(qapp, tmp_path, monkeypatch):
+    del monkeypatch
+    workspace_collection_root = tmp_path / "claims_workspaces"
+    claims_root = workspace_collection_root / "claims"
+    claims2_root = workspace_collection_root / "claims2"
+    (claims_root / "flow_modules").mkdir(parents=True)
+    (claims2_root / "flow_modules").mkdir(parents=True)
+    discovered = (
+        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
+        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+    )
+
+    def _resolve(workspace_id=None):
+        target = claims_root if workspace_id in (None, "claims") else claims2_root
+        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
+
+    force_shutdown_calls: list[dict[str, object]] = []
+    window = _make_window(
+        force_shutdown_func=lambda paths, timeout=0.5: force_shutdown_calls.append(
+            {"workspace_id": paths.workspace_id, "workspace": paths.workspace_root, "timeout": timeout}
+        ),
+        discover_workspaces_func=lambda app_root=None, workspace_collection_root=None: discovered,
+        resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
+    )
+    try:
+        target_index = window.workspace_settings_selector.findData("claims2")
+        assert target_index >= 0
+        window.workspace_settings_selector.setCurrentIndex(target_index)
+        qapp.processEvents()
+
+        window._force_shutdown_daemon()
+        _process_ui_until(
+            qapp,
+            lambda: len(force_shutdown_calls) == 1
+            and "force_shutdown_daemon" not in window._pending_control_actions,
+        )
+
+        assert force_shutdown_calls == [
+            {"workspace_id": "claims2", "workspace": claims2_root, "timeout": 0.5}
+        ]
+        assert window.workspace_paths.workspace_id == "claims"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_action_buttons_prefers_empty_daemon_live_truth_over_stale_manual_session(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=10,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="idle", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+        window._select_flow("manual_review")
+
+        window._refresh_action_buttons()
+
+        assert window.flow_run_button.text() == "Run Once"
+        assert window.flow_run_button.property("flowRunState") == "run"
+        assert window.flow_run_button.isEnabled() is True
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_run_selected_flow_prefers_empty_daemon_live_truth_over_stale_manual_session(qapp, monkeypatch):
+    del monkeypatch
+    control_application = _FakeControlApplication()
+    control_application.run_selected_flow_result = type(
+        "Result",
+        (),
+        {
+            "requested": True,
+            "sync_after": False,
+            "status_text": None,
+            "error_text": None,
+        },
+    )()
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
+    try:
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=10,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="idle", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+        window._select_flow("manual_review")
+
+        window._run_selected_flow()
+        _process_ui_until(qapp, lambda: len(control_application.run_selected_flow_calls) == 1)
+
+        assert control_application.stop_pipeline_calls == []
+        assert control_application.run_selected_flow_calls[0]["selected_flow_name"] == "manual_review"
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_reset_flow_button_clears_selected_flow_logs_before_rebuild(qapp, monkeypatch):
     del monkeypatch
     reset_service = _FakeResetService()
@@ -2635,6 +3080,60 @@ def test_reset_flow_button_clears_selected_flow_logs_before_rebuild(qapp, monkey
         assert window.log_store.entries_for_flow("poller") == ()
         assert len(window.log_store.entries_for_flow("manual_review")) == 1
         assert window.step_output_index.outputs_for("poller").outputs == {}
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_action_buttons_prefers_empty_daemon_live_truth_over_stale_active_flow_state(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("manual_review")
+        window.flow_states["manual_review"] = "stopping flow"
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=12,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="idle", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+
+        window._refresh_action_buttons()
+
+        assert window.flow_run_button.text() == "Run Once"
+        assert window.flow_run_button.isEnabled() is True
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_action_buttons_does_not_fallback_to_stale_session_without_daemon_live_truth(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("manual_review")
+        window.runtime_session = replace(
+            window.runtime_session,
+            runtime_active=True,
+            runtime_stopping=True,
+        ).with_manual_runs_map({"Manual": "manual_review"})
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=7,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="idle", daemon_live=False, transport="disconnected"),
+            flows={},
+            active_runs={},
+        )
+
+        window._refresh_action_buttons()
+
+        assert window.flow_run_button.text() == "Run Once"
+        assert window.flow_run_button.isEnabled() is True
+        assert window.engine_button.text() == "Start Engine"
+        assert window.engine_button.isEnabled() is True
     finally:
         _dispose_window(qapp, window)
 
@@ -2722,6 +3221,208 @@ def test_reset_workspace_button_allows_idle_live_daemon(qapp, monkeypatch):
 
         assert reset_service.workspace_resets == [window.workspace_paths]
         assert rebind_calls == [((), {"workspace_id": window.workspace_paths.workspace_id})]
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_reset_workspace_targets_selected_settings_workspace_without_rebinding(qapp, tmp_path, monkeypatch):
+    del monkeypatch
+    workspace_collection_root = tmp_path / "claims_workspaces"
+    claims_root = workspace_collection_root / "claims"
+    claims2_root = workspace_collection_root / "claims2"
+    (claims_root / "flow_modules").mkdir(parents=True)
+    (claims2_root / "flow_modules").mkdir(parents=True)
+    discovered = (
+        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
+        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+    )
+
+    def _resolve(workspace_id=None):
+        target = claims_root if workspace_id in (None, "claims") else claims2_root
+        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
+
+    reset_service = _FakeResetService()
+    window = _make_window(
+        command_service=_command_service_for_test(reset_service=reset_service),
+        discover_workspaces_func=lambda app_root=None, workspace_collection_root=None: discovered,
+        resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
+    )
+    rebind_calls = _attach_call_recorder(window, "_rebind_workspace_context")
+    try:
+        target_index = window.workspace_settings_selector.findData("claims2")
+        assert target_index >= 0
+        window.workspace_settings_selector.setCurrentIndex(target_index)
+        qapp.processEvents()
+
+        window._reset_workspace()
+        _process_ui_until(
+            qapp,
+            lambda: len(reset_service.workspace_resets) == 1
+            and "reset_workspace" not in window._pending_control_actions,
+        )
+
+        assert reset_service.workspace_resets == [resolve_workspace_paths(workspace_root=claims2_root, workspace_id="claims2")]
+        assert rebind_calls == []
+        assert window.workspace_paths.workspace_id == "claims"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_rebind_workspace_context_recreates_daemon_subscription_and_clears_log_caches(qapp, monkeypatch, tmp_path):
+    del monkeypatch
+    workspace_collection_root = tmp_path / "workspaces"
+    claims_root = workspace_collection_root / "claims"
+    claims2_root = workspace_collection_root / "claims2"
+    (claims_root / "flow_modules").mkdir(parents=True)
+    (claims2_root / "flow_modules").mkdir(parents=True)
+    discovered = (
+        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
+        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+    )
+
+    def _resolve(workspace_id=None):
+        target = claims_root if workspace_id in (None, "claims") else claims2_root
+        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
+
+    window = _make_window(
+        discover_workspaces_func=lambda app_root=None, workspace_collection_root=None: discovered,
+        resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
+    )
+    try:
+        original_subscription = window.daemon_subscription
+        window._pending_daemon_update_batch = DaemonUpdateBatch(snapshot=window._daemon_manager.sync(), updates=())
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window.operation_tracker = OperationSessionState.empty().reset_flow("manual_review", ("Build Report",))
+        window.flow_states = {"manual_review": "stopping flow"}
+        window.workspace_provision_status_label.setText("Provisioned claims")
+        window.force_shutdown_daemon_status_label.setText("Force stop failed")
+        window.reset_workspace_status_label.setText("Workspace reset failed")
+        window._last_log_view_flow_name = "poller"
+        window._last_log_view_run_keys = (("poller", "run-1"),)
+        window._last_log_view_signature = ((("poller", "run-1"), "x", "y", "z", None),)
+        window._cached_selected_flow_run_groups = ("cached",)
+        window._cached_selected_flow_run_groups_flow_name = "poller"
+        window._selected_flow_run_groups_dirty = False
+        window._selected_flow_has_logs = True
+        window._selected_flow_has_logs_flow_name = "poller"
+
+        window._rebind_workspace_context(workspace_id="claims2")
+
+        assert original_subscription.stop_event.is_set() is True
+        assert window.daemon_subscription is not original_subscription
+        assert window.workspace_paths.workspace_id == "claims2"
+        assert window.runtime_session == RuntimeSessionState.empty()
+        assert window.operation_tracker.row_state("manual_review", "Build Report").status == "idle"
+        assert window.flow_states.get("manual_review") != "stopping flow"
+        assert window._pending_daemon_update_batch is None
+        assert "Provisioned claims" not in window.workspace_provision_status_label.text()
+        assert "Force stop failed" not in window.force_shutdown_daemon_status_label.text()
+        assert "Workspace reset failed" not in window.reset_workspace_status_label.text()
+        assert window._last_log_view_run_keys != (("poller", "run-1"),)
+        assert window._last_log_view_signature != ((("poller", "run-1"), "x", "y", "z", None),)
+        assert window._cached_selected_flow_run_groups == ()
+        assert window._selected_flow_has_logs is False or window._selected_flow_has_logs_flow_name != "poller"
+        assert window._pending_control_actions == set()
+        assert window._pending_control_action_tokens == {}
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon(qapp, monkeypatch, tmp_path):
+    del monkeypatch
+    workspace_collection_root = tmp_path / "workspaces"
+    claims_root = workspace_collection_root / "claims"
+    claims2_root = workspace_collection_root / "claims2"
+    (claims_root / "flow_modules").mkdir(parents=True)
+    (claims2_root / "flow_modules").mkdir(parents=True)
+    discovered = (
+        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
+        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+    )
+    shutdown_calls: list[dict[str, object]] = []
+
+    def _resolve(workspace_id=None):
+        target = claims_root if workspace_id in (None, "claims") else claims2_root
+        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
+
+    window = _make_window(
+        snapshot=WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=datetime.now(UTC).isoformat(),
+            source="daemon",
+        ),
+        request_func=lambda paths, payload, timeout=0.0: shutdown_calls.append({"paths": paths, "payload": payload, "timeout": timeout}) or {"ok": True},
+        discover_workspaces_func=lambda app_root=None, workspace_collection_root=None: discovered,
+        resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
+    )
+    try:
+        window._rebind_workspace_context(workspace_id="claims2")
+
+        assert shutdown_calls == []
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_apply_daemon_update_batch_ignores_stale_workspace_token(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        current_token = window._workspace_binding_token()
+        stale_token = (current_token[0] - 1, current_token[1])
+        window.runtime_session = window.runtime_session.with_runtime_flags(active=False, stopping=False)
+        batch_snapshot = WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=datetime.now(UTC).isoformat(),
+            source="daemon",
+            active_engine_flow_names=("poller",),
+        )
+        payload = window._daemon_batch_payload(
+            DaemonUpdateBatch(
+                snapshot=batch_snapshot,
+                updates=(DaemonLaneUpdate("engine", flow_names=("poller",)),),
+            ),
+            token=stale_token,
+        )
+
+        window._apply_daemon_update_batch(payload)
+
+        assert window.runtime_session.runtime_active is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_finish_control_action_ignores_stale_workspace_token(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        current_token = window._workspace_binding_token()
+        stale_token = (current_token[0] - 1, current_token[1])
+        window._pending_control_actions.add("request_control")
+        window._pending_control_action_tokens["request_control"] = current_token
+        window.runtime_session = replace(window.runtime_session, workspace_owned=True, leased_by_machine_id=None)
+
+        window._finish_control_action(
+            "request_control",
+            window._control_action_payload(
+                type("Result", (), {"error_text": None, "status_text": "stale", "ensure_daemon_started": False, "sync_after": False})(),
+                token=stale_token,
+            ),
+        )
+
+        assert "request_control" in window._pending_control_actions
     finally:
         _dispose_window(qapp, window)
 
@@ -3029,6 +3730,7 @@ def test_poll_log_queue_batches_selected_flow_refresh(qapp, monkeypatch):
                     line=f"poller event {index}",
                     kind="flow",
                     flow_name="poller",
+                    workspace_id=window.workspace_paths.workspace_id,
                     event=RuntimeStepEvent(
                         run_id=f"run-{index}",
                         flow_name="poller",
@@ -3084,6 +3786,7 @@ def test_poll_log_queue_yields_when_backlog_exceeds_tick_limit(qapp, monkeypatch
                     line=f"poller event {index}",
                     kind="flow",
                     flow_name="poller",
+                    workspace_id=window.workspace_paths.workspace_id,
                     event=RuntimeStepEvent(
                         run_id=f"run-{index}",
                         flow_name="poller",
@@ -3211,6 +3914,634 @@ def test_refresh_log_view_skips_row_rebuild_when_visible_runs_are_unchanged(qapp
         _dispose_window(qapp, window)
 
 
+def test_run_log_preview_collapses_step_started_and_finished_rows(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        entries = (
+            FlowLogEntry(
+                line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=started",
+                kind="runtime",
+                flow_name="claims_summary",
+                event=RuntimeStepEvent(
+                    run_id="abc",
+                    flow_name="claims_summary",
+                    step_name="Collect Claim Files",
+                    source_label="input.xlsx",
+                    status="started",
+                ),
+            ),
+            FlowLogEntry(
+                line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=success elapsed=0.4",
+                kind="runtime",
+                flow_name="claims_summary",
+                event=RuntimeStepEvent(
+                    run_id="abc",
+                    flow_name="claims_summary",
+                    step_name="Collect Claim Files",
+                    source_label="input.xlsx",
+                    status="success",
+                    elapsed_seconds=0.4,
+                ),
+            ),
+        )
+        run_group = FlowRunState.group_entries(entries)[0]
+
+        window._show_run_log_preview(run_group)
+
+        assert window.run_log_preview_dialog is not None
+        log_list = window.run_log_preview_dialog.findChild(QListWidget, "runLogList")
+        assert log_list is not None
+        assert log_list.count() == 1
+        item = log_list.item(0)
+        row_widget = log_list.itemWidget(item)
+        assert row_widget is not None
+        message = row_widget.findChild(QLabel, "rawLogMessage")
+        duration = row_widget.findChild(QLabel, "logDuration")
+        assert message is not None
+        assert duration is not None
+        assert "Collect Claim Files" in message.text()
+        assert "success" in message.text()
+        assert duration.text() == "400ms"
+        assert duration.alignment() & Qt.AlignmentFlag.AlignRight
+    finally:
+        if window.run_log_preview_dialog is not None:
+            window.run_log_preview_dialog.close()
+        _dispose_window(qapp, window)
+
+
+def test_run_log_preview_keeps_unfinished_started_step_rows_visible(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        entries = (
+            FlowLogEntry(
+                line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=started",
+                kind="runtime",
+                flow_name="claims_summary",
+                event=RuntimeStepEvent(
+                    run_id="abc",
+                    flow_name="claims_summary",
+                    step_name="Collect Claim Files",
+                    source_label="input.xlsx",
+                    status="started",
+                ),
+            ),
+        )
+        run_group = FlowRunState.group_entries(entries)[0]
+
+        window._show_run_log_preview(run_group)
+
+        assert window.run_log_preview_dialog is not None
+        log_list = window.run_log_preview_dialog.findChild(QListWidget, "runLogList")
+        assert log_list is not None
+        assert log_list.count() == 1
+        row_widget = log_list.itemWidget(log_list.item(0))
+        assert row_widget is not None
+        duration = row_widget.findChild(QLabel, "logDuration")
+        assert duration is not None
+        assert duration.isVisible() is False
+    finally:
+        if window.run_log_preview_dialog is not None:
+            window.run_log_preview_dialog.close()
+        _dispose_window(qapp, window)
+
+
+def test_run_log_preview_omits_redundant_run_terminal_rows_when_step_rows_exist(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        entries = (
+            FlowLogEntry(
+                line="run=abc flow=claims_summary source=input.xlsx status=started",
+                kind="flow",
+                flow_name="claims_summary",
+                event=RuntimeStepEvent(
+                    run_id="abc",
+                    flow_name="claims_summary",
+                    step_name=None,
+                    source_label="input.xlsx",
+                    status="started",
+                ),
+            ),
+            FlowLogEntry(
+                line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=success elapsed=0.4",
+                kind="flow",
+                flow_name="claims_summary",
+                event=RuntimeStepEvent(
+                    run_id="abc",
+                    flow_name="claims_summary",
+                    step_name="Collect Claim Files",
+                    source_label="input.xlsx",
+                    status="success",
+                    elapsed_seconds=0.4,
+                ),
+            ),
+            FlowLogEntry(
+                line="run=abc flow=claims_summary source=input.xlsx status=failed elapsed=0.8",
+                kind="flow",
+                flow_name="claims_summary",
+                event=RuntimeStepEvent(
+                    run_id="abc",
+                    flow_name="claims_summary",
+                    step_name=None,
+                    source_label="input.xlsx",
+                    status="failed",
+                    elapsed_seconds=0.8,
+                ),
+            ),
+        )
+        run_group = FlowRunState.group_entries(entries)[0]
+
+        window._show_run_log_preview(run_group)
+
+        assert window.run_log_preview_dialog is not None
+        log_list = window.run_log_preview_dialog.findChild(QListWidget, "runLogList")
+        assert log_list is not None
+        assert log_list.count() == 2
+        messages = []
+        for index in range(log_list.count()):
+            row_widget = log_list.itemWidget(log_list.item(index))
+            assert row_widget is not None
+            message = row_widget.findChild(QLabel, "rawLogMessage")
+            assert message is not None
+            messages.append(message.text())
+        assert any("&gt; <i>started</i>" in message for message in messages)
+        assert any("Collect Claim Files" in message and "success" in message for message in messages)
+        assert not any("&gt; <i>failed</i>" in message for message in messages)
+    finally:
+        if window.run_log_preview_dialog is not None:
+            window.run_log_preview_dialog.close()
+        _dispose_window(qapp, window)
+
+
+def test_run_log_preview_shows_full_source_path_in_header(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        source_path = r"C:\input\alternate\claims_flat_1.xlsx"
+        window.runtime_binding.runtime_cache_ledger.execution_state.record_run_started(
+            run_id="abc",
+            flow_name="claims_summary",
+            group_name="Claims",
+            source_path=source_path,
+            started_at_utc="2026-04-18T21:39:03+00:00",
+        )
+        entries = (
+            FlowLogEntry(
+                line="run=abc flow=claims_summary source=input.xlsx status=started",
+                kind="flow",
+                flow_name="claims_summary",
+                event=RuntimeStepEvent(
+                    run_id="abc",
+                    flow_name="claims_summary",
+                    step_name=None,
+                    source_label="input.xlsx",
+                    status="started",
+                ),
+            ),
+        )
+        run_group = FlowRunState.group_entries(entries)[0]
+
+        window._show_run_log_preview(run_group)
+
+        assert window.run_log_preview_dialog is not None
+        path_label = window.run_log_preview_dialog.findChild(QLabel, "outputPreviewPath")
+        assert path_label is not None
+        assert path_label.text() == source_path
+    finally:
+        if window.run_log_preview_dialog is not None:
+            window.run_log_preview_dialog.close()
+        _dispose_window(qapp, window)
+
+
+def test_run_log_preview_refreshes_runtime_cache_before_loading_source_path(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        source_path = r"C:\input\alternate\claims_flat_1.xlsx"
+        run_id = "abc"
+        # Prime the runtime-IO cache with a missing read, then write through a separate ledger handle.
+        assert window.runtime_binding.runtime_cache_ledger.runs.get(run_id) is None
+        direct_ledger = RuntimeCacheLedger(window.workspace_paths.runtime_cache_db_path)
+        try:
+            direct_ledger.execution_state.record_run_started(
+                run_id=run_id,
+                flow_name="claims_summary",
+                group_name="Claims",
+                source_path=source_path,
+                started_at_utc="2026-04-18T21:39:03+00:00",
+            )
+        finally:
+            direct_ledger.close()
+        entries = (
+            FlowLogEntry(
+                line="run=abc flow=claims_summary source=input.xlsx status=started",
+                kind="flow",
+                flow_name="claims_summary",
+                event=RuntimeStepEvent(
+                    run_id=run_id,
+                    flow_name="claims_summary",
+                    step_name=None,
+                    source_label="input.xlsx",
+                    status="started",
+                ),
+            ),
+        )
+        run_group = FlowRunState.group_entries(entries)[0]
+
+        window._show_run_log_preview(run_group)
+
+        assert window.run_log_preview_dialog is not None
+        path_label = window.run_log_preview_dialog.findChild(QLabel, "outputPreviewPath")
+        assert path_label is not None
+        assert path_label.text() == source_path
+    finally:
+        if window.run_log_preview_dialog is not None:
+            window.run_log_preview_dialog.close()
+        _dispose_window(qapp, window)
+
+
+def test_show_run_error_details_refreshes_runtime_cache_before_loading_failed_step_text(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    capture = _attach_message_capture(window)
+    try:
+        run_id = "abc"
+        step_name = "Write Parquet"
+        # Prime the runtime-IO cache with no step rows, then write the failure through a separate ledger handle.
+        assert window.runtime_binding.runtime_cache_ledger.step_outputs.list_for_run(run_id) == ()
+        direct_ledger = RuntimeCacheLedger(window.workspace_paths.runtime_cache_db_path)
+        try:
+            direct_ledger.execution_state.record_run_started(
+                run_id=run_id,
+                flow_name="claims_summary",
+                group_name="Claims",
+                source_path=r"C:\input\alternate\claims_flat_1.xlsx",
+                started_at_utc="2026-04-18T21:39:03+00:00",
+            )
+            step_run_id = direct_ledger.execution_state.record_step_started(
+                run_id=run_id,
+                flow_name="claims_summary",
+                step_label=step_name,
+                started_at_utc="2026-04-18T21:39:04+00:00",
+            )
+            direct_ledger.execution_state.record_step_finished(
+                step_run_id=step_run_id,
+                status="failed",
+                finished_at_utc="2026-04-18T21:39:05+00:00",
+                elapsed_ms=1000,
+                error_text='RuntimeError: Intentional Example Mirror failure for Inspect-modal testing.',
+            )
+            direct_ledger.execution_state.record_run_finished(
+                run_id=run_id,
+                status="failed",
+                finished_at_utc="2026-04-18T21:39:05+00:00",
+                error_text='RuntimeError: Intentional Example Mirror failure for Inspect-modal testing.',
+            )
+        finally:
+            direct_ledger.close()
+        entry = FlowLogEntry(
+            line="run=abc flow=claims_summary step=Write Parquet source=input.xlsx status=failed elapsed=1.0",
+            kind="flow",
+            flow_name="claims_summary",
+            event=RuntimeStepEvent(
+                run_id=run_id,
+                flow_name="claims_summary",
+                step_name=step_name,
+                source_label="input.xlsx",
+                status="failed",
+                elapsed_seconds=1.0,
+            ),
+        )
+        run_group = FlowRunState(
+            key=("claims_summary", run_id),
+            display_label="2026-04-18 09:39:03 PM",
+            source_label="input.xlsx",
+            status="failed",
+            elapsed_seconds=1.0,
+            summary_entry=entry,
+            steps=(),
+            entries=(entry,),
+        )
+
+        window._show_run_error_details(run_group, entry)
+
+        assert capture.shown_messages == [
+            (
+                f"{step_name} Error",
+                'RuntimeError: Intentional Example Mirror failure for Inspect-modal testing.',
+                "error",
+            )
+        ]
+    finally:
+        _dispose_window(qapp, window)
+
+
+class _QueuedLogSinkProbe:
+    def append(
+        self,
+        *,
+        level: str,
+        message: str,
+        created_at_utc: str,
+        run_id: str | None = None,
+        flow_name: str | None = None,
+        step_label: str | None = None,
+    ) -> None:
+        del level, message, created_at_utc, run_id, flow_name, step_label
+
+
+def test_runtime_log_emitter_scopes_live_queue_entries_to_workspace() -> None:
+    queue: Queue[FlowLogEntry] = Queue()
+    handler = QueueLogHandler(queue)
+    logger = logging.getLogger("data_engine.runtime.execution.logging")
+    logger.addHandler(handler)
+    previous_level = logger.level
+    logger.setLevel(logging.INFO)
+    try:
+        emitter = RuntimeLogEmitter(_QueuedLogSinkProbe(), workspace_id="claims2")
+        emitter.log_flow_event(
+            "run-1",
+            "poller",
+            Path("claims.xlsx"),
+            status="success",
+            elapsed=1.2,
+        )
+        entry = queue.get(timeout=1.0)
+        assert entry.workspace_id == "claims2"
+        assert entry.flow_name == "poller"
+        assert entry.event is not None
+        assert entry.event.status == "success"
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+
+def test_finish_run_reloads_visible_run_history_from_empty_state(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        window._select_flow("manual_review")
+        window._refresh_log_view(force_scroll_to_bottom=True)
+        assert window.log_view.count() == 0
+
+        reloaded = {"called": False}
+        original_reload_logs = window.runtime_binding_service.reload_logs
+
+        def _reload_logs(binding):
+            reloaded["called"] = True
+            flow_name = "manual_review"
+            window.log_store.append_entry(
+                FlowLogEntry(
+                    line="manual review success",
+                    kind="flow",
+                    flow_name=flow_name,
+                    event=RuntimeStepEvent(
+                        run_id="run-1",
+                        flow_name=flow_name,
+                        step_name=None,
+                        source_label="claims.xlsx",
+                        status="success",
+                        elapsed_seconds=1.2,
+                    ),
+                )
+            )
+            return original_reload_logs(binding)
+
+        monkeypatch.setattr(window.runtime_binding_service, "reload_logs", _reload_logs)
+
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window.manual_flow_stop_events["Manual"] = threading.Event()
+        window._finish_run("manual_review", [], None)
+
+        assert reloaded["called"] is True
+        assert window.log_view.count() == 1
+        item = window.log_view.item(0)
+        assert item is not None
+        assert window.log_view.duration_text(item) == "1.2s"
+        assert window.log_view.source_label(item) == "claims.xlsx"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_log_view_updates_duration_when_live_row_finishes_in_place(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        flow_name = "poller"
+        window.selected_flow_name = flow_name
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="run-1 started",
+                kind="flow",
+                flow_name=flow_name,
+                event=RuntimeStepEvent(
+                    run_id="run-1",
+                    flow_name=flow_name,
+                    step_name=None,
+                    source_label="claims.xlsx",
+                    status="started",
+                    elapsed_seconds=None,
+                ),
+            )
+        )
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+
+        item = window.log_view.item(0)
+        assert item is not None
+        assert window.log_view.duration_text(item) in (None, "", "<1ms")
+
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="run-1 success",
+                kind="flow",
+                flow_name=flow_name,
+                event=RuntimeStepEvent(
+                    run_id="run-1",
+                    flow_name=flow_name,
+                    step_name=None,
+                    source_label="claims.xlsx",
+                    status="success",
+                    elapsed_seconds=9.9,
+                ),
+            )
+        )
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+
+        assert window.log_view.duration_text(item) == "9.9s"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_log_view_updates_only_changed_rows_when_one_live_duration_changes(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        flow_name = "poller"
+        window.selected_flow_name = flow_name
+        for run_id, status, elapsed in (
+            ("run-1", "success", 1.1),
+            ("run-2", "success", 2.2),
+            ("run-3", "started", None),
+        ):
+            window.log_store.append_entry(
+                FlowLogEntry(
+                    line=f"{run_id} {status}",
+                    kind="flow",
+                    flow_name=flow_name,
+                    event=RuntimeStepEvent(
+                        run_id=run_id,
+                        flow_name=flow_name,
+                        step_name=None,
+                        source_label="claims.xlsx",
+                        status=status,
+                        elapsed_seconds=elapsed,
+                    ),
+                )
+            )
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+
+        from data_engine.ui.gui.presenters import logs as log_presenter
+
+        updated_indexes: list[int] = []
+        original_update = log_presenter.update_log_run_item
+
+        def counting_update(window_arg, index, run_group):
+            updated_indexes.append(index)
+            return original_update(window_arg, index, run_group)
+
+        monkeypatch.setattr(log_presenter, "update_log_run_item", counting_update)
+
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="run-3 success",
+                kind="flow",
+                flow_name=flow_name,
+                event=RuntimeStepEvent(
+                    run_id="run-3",
+                    flow_name=flow_name,
+                    step_name=None,
+                    source_label="claims.xlsx",
+                    status="success",
+                    elapsed_seconds=9.9,
+                ),
+            )
+        )
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+
+        assert updated_indexes == [2]
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_build_log_run_widget_is_not_created_as_top_level_window(qapp):
+    window = _make_window()
+    try:
+        flow_name = "poller"
+        window.selected_flow_name = flow_name
+        run_group = FlowLogEntry(
+            line="run-1 success",
+            kind="flow",
+            flow_name=flow_name,
+            event=RuntimeStepEvent(
+                run_id="run-1",
+                flow_name=flow_name,
+                step_name=None,
+                source_label="claims.xlsx",
+                status="success",
+                elapsed_seconds=1.0,
+            ),
+        )
+        window.log_store.append_entry(run_group)
+        groups = window.history_query_service.list_flow_runs(window.runtime_binding.log_store, flow_name=flow_name)
+        widget = build_log_run_widget(window, groups[0])
+
+        assert widget.parent() is window.log_view.viewport()
+        assert widget.isWindow() is False
+        assert widget.findChild(QLabel, "logPrimary").isWindow() is False
+        assert widget.findChild(QLabel, "logDuration").isWindow() is False
+        assert widget.findChild(QLabel, "logStatusIcon").isWindow() is False
+        assert widget.findChild(QPushButton, "logIconButton").isWindow() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_sidebar_row_widgets_are_not_created_as_top_level_windows(qapp):
+    window = _make_window()
+    try:
+        card = window.flow_cards["poller"]
+        flow_widget = build_flow_row_widget(window, card)
+        group_widget = build_group_row_widget(window, "Example Group", [card])
+
+        assert flow_widget.parent() is window.sidebar_content
+        assert flow_widget.isWindow() is False
+        assert group_widget.parent() is window.sidebar_content
+        assert group_widget.isWindow() is False
+        assert all(child.isWindow() is False for child in flow_widget.findChildren(QLabel))
+        assert all(child.isWindow() is False for child in group_widget.findChildren(QLabel))
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_log_view_reuses_view_log_callback_without_duplicate_preview_open(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    shown: list[str] = []
+    try:
+        flow_name = "poller"
+        window.selected_flow_name = flow_name
+        window._show_run_log_preview = lambda run_group: shown.append(run_group.key[0])
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="run-1 started",
+                kind="flow",
+                flow_name=flow_name,
+                event=RuntimeStepEvent(
+                    run_id="run-1",
+                    flow_name=flow_name,
+                    step_name=None,
+                    source_label="claims.xlsx",
+                    status="started",
+                    elapsed_seconds=None,
+                ),
+            )
+        )
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+
+        item = window.log_view.item(0)
+        assert item is not None
+        view_rect = window.log_view.visualItemRect(item)
+        click_point = view_rect.center()
+        click_point.setX(view_rect.right() - 18)
+
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="run-1 success",
+                kind="flow",
+                flow_name=flow_name,
+                event=RuntimeStepEvent(
+                    run_id="run-1",
+                    flow_name=flow_name,
+                    step_name=None,
+                    source_label="claims.xlsx",
+                    status="success",
+                    elapsed_seconds=9.9,
+                ),
+            )
+        )
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+        QTest.mouseClick(window.log_view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, click_point)
+
+        assert len(shown) == 1
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_refresh_selection_reuses_operation_rows_when_steps_are_unchanged(qapp, monkeypatch):
     del monkeypatch
     window = _make_window()
@@ -3247,10 +4578,72 @@ def test_sync_from_daemon_coalesces_nested_refresh_requests(qapp, monkeypatch):
         monkeypatch.setattr(window.runtime_binding_service, "sync_runtime_state", wrapped_sync_runtime_state)
 
         window._sync_from_daemon()
+        _process_ui_until(qapp, lambda: sync_calls == 2 and window._daemon_sync_in_progress is False)
 
         assert sync_calls == 2
         assert window._daemon_sync_in_progress is False
         assert window._daemon_sync_pending is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_poll_log_queue_ignores_entries_for_other_workspaces(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._select_flow("poller")
+        window.log_queue.put(
+            FlowLogEntry(
+                line="poller event",
+                kind="flow",
+                flow_name="poller",
+                workspace_id="other-workspace",
+                event=RuntimeStepEvent(
+                    run_id="run-1",
+                    flow_name="poller",
+                    step_name=None,
+                    source_label="input.xlsx",
+                    status="started",
+                ),
+            )
+        )
+
+        window._poll_log_queue()
+        qapp.processEvents()
+
+        assert window.log_store.entries_for_flow("poller") == ()
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_reset_workspace_button_prefers_idle_daemon_live_truth_over_stale_manual_session(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window(
+        snapshot=WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=False,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=datetime.now(UTC).isoformat(),
+            source="daemon",
+        ),
+    )
+    try:
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=11,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="idle", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+
+        window._refresh_workspace_visibility_panel()
+
+        assert window.reset_workspace_button.isEnabled() is True
     finally:
         _dispose_window(qapp, window)
 
@@ -3281,10 +4674,277 @@ def test_refresh_selection_prefers_daemon_live_step_state(qapp, monkeypatch):
             },
         )
 
-        window._refresh_selection(window.flow_cards["poller"])
+        window._select_flow("poller")
+        qapp.processEvents()
 
         assert window.operation_row_widgets[0].row_card.property("stepState") == "running"
         assert window.operation_row_widgets[1].row_card.property("stepState") == "idle"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_apply_daemon_update_batch_streams_step_events_without_log_rebuild(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=8,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+        window.runtime_session = RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=False)
+        batch_snapshot = WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=None,
+            source="daemon",
+            projection_version=9,
+            active_runs=(
+                ActiveRunState(
+                    run_id="run-1",
+                    flow_name="poller",
+                    group_name="Imports",
+                    source_path="claims.xlsx",
+                    state="running",
+                    current_step_name="Read Excel",
+                    current_step_started_at_utc="2026-04-18T12:00:00+00:00",
+                ),
+            ),
+            flow_activity=(FlowActivityState(flow_name="poller", active_run_count=1, engine_run_count=1),),
+        )
+        window._pending_daemon_update_batch = DaemonUpdateBatch(
+            snapshot=batch_snapshot,
+            updates=(
+                DaemonLaneUpdate("run_lifecycle", flow_names=("poller",), run_ids=("run-1",)),
+                DaemonLaneUpdate(
+                    "step_activity",
+                    flow_names=("poller",),
+                    run_ids=("run-1",),
+                    step_events=(
+                        RuntimeStepEvent(
+                            run_id="run-1",
+                            flow_name="poller",
+                            step_name="Read Excel",
+                            source_label="claims.xlsx",
+                            status="started",
+                            elapsed_seconds=None,
+                        ),
+                    ),
+                ),
+            ),
+            requires_full_sync=False,
+        )
+
+        def _fail_rebuild(*args, **kwargs):
+            raise AssertionError("nonterminal step lane should not rebuild from logs")
+
+        window.runtime_controller._refresh_runtime_projection_from_logs = _fail_rebuild
+
+        window._apply_daemon_update_batch()
+
+        assert window.operation_row_widgets[0].row_card.property("stepState") == "running"
+        assert window.workspace_snapshot.active_runs["run-1"].current_step_name == "Read Excel"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_apply_daemon_update_batch_normalizes_previous_success_when_next_step_starts(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=8,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+        window.runtime_session = RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=False)
+
+        window._apply_runtime_event(
+            RuntimeStepEvent(
+                run_id="run-1",
+                flow_name="poller",
+                step_name="Read Excel",
+                source_label="claims.xlsx",
+                status="success",
+                elapsed_seconds=0.25,
+            )
+        )
+        window._apply_runtime_event(
+            RuntimeStepEvent(
+                run_id="run-1",
+                flow_name="poller",
+                step_name="Write Parquet",
+                source_label="claims.xlsx",
+                status="started",
+                elapsed_seconds=None,
+            )
+        )
+
+        assert window.operation_row_widgets[0].row_card.property("stepState") == "idle"
+        assert window.operation_row_widgets[1].row_card.property("stepState") == "running"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_apply_daemon_update_batch_uses_persisted_finished_step_duration_before_next_step_start(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=8,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+        window.runtime_session = RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=False)
+        window.runtime_binding.runtime_cache_ledger.record_step_finished(
+            step_run_id=window.runtime_binding.runtime_cache_ledger.record_step_started(
+                run_id="run-1",
+                flow_name="poller",
+                step_label="Read Excel",
+                started_at_utc="2026-04-18T12:00:00+00:00",
+            ),
+            status="success",
+            finished_at_utc="2026-04-18T12:00:01+00:00",
+            elapsed_ms=1000,
+        )
+        batch_snapshot = WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=None,
+            source="daemon",
+            projection_version=9,
+            active_runs=(
+                ActiveRunState(
+                    run_id="run-1",
+                    flow_name="poller",
+                    group_name="Imports",
+                    source_path="claims.xlsx",
+                    state="running",
+                    current_step_name="Write Parquet",
+                    current_step_started_at_utc="2026-04-18T12:00:01+00:00",
+                ),
+            ),
+            flow_activity=(FlowActivityState(flow_name="poller", active_run_count=1, engine_run_count=1),),
+        )
+        window._pending_daemon_update_batch = DaemonUpdateBatch(
+            snapshot=batch_snapshot,
+            updates=(
+                DaemonLaneUpdate("run_lifecycle", flow_names=("poller",), run_ids=("run-1",)),
+                DaemonLaneUpdate(
+                    "step_activity",
+                    flow_names=("poller",),
+                    run_ids=("run-1",),
+                    step_events=(
+                        RuntimeStepEvent(
+                            run_id="run-1",
+                            flow_name="poller",
+                            step_name="Write Parquet",
+                            source_label="claims.xlsx",
+                            status="started",
+                            elapsed_seconds=None,
+                        ),
+                    ),
+                ),
+            ),
+            requires_full_sync=False,
+        )
+
+        window._apply_daemon_update_batch()
+
+        assert window.operation_row_widgets[0].row_card.property("stepState") == "idle"
+        assert window.operation_row_widgets[0].duration_label.text() == "1.0s"
+        assert window.operation_row_widgets[1].row_card.property("stepState") == "running"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_apply_daemon_update_batch_streams_log_events_without_waiting_for_reload(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=8,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+        window.runtime_session = RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=False)
+        window._pending_daemon_update_batch = DaemonUpdateBatch(
+            snapshot=WorkspaceDaemonSnapshot(
+                live=True,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=False,
+                runtime_stopping=False,
+                manual_runs=(),
+                last_checkpoint_at_utc=None,
+                source="daemon",
+                projection_version=9,
+                active_runs=(),
+            ),
+            updates=(
+                DaemonLaneUpdate(
+                    "log_events",
+                    flow_names=("poller",),
+                    run_ids=("run-1",),
+                    completed_run_ids=("run-1",),
+                    log_entries=(
+                        FlowLogEntry(
+                            line="poller  success  claims.xlsx",
+                            kind="flow",
+                            flow_name="poller",
+                            event=RuntimeStepEvent(
+                                run_id="run-1",
+                                flow_name="poller",
+                                step_name=None,
+                                source_label="claims.xlsx",
+                                status="success",
+                                elapsed_seconds=1.25,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            requires_full_sync=False,
+        )
+
+        def _fail_reload(*args, **kwargs):
+            raise AssertionError("log event lane should not wait for persisted log reload")
+
+        monkeypatch.setattr(window.runtime_binding_service, "reload_logs", _fail_reload)
+
+        window._apply_daemon_update_batch()
+
+        run_groups = window.log_store.runs_for_flow("poller")
+        assert len(run_groups) == 1
+        assert run_groups[0].status == "success"
+        assert run_groups[0].elapsed_seconds == 1.25
     finally:
         _dispose_window(qapp, window)
 
@@ -3325,13 +4985,13 @@ def test_daemon_wait_worker_schedules_sync_when_projection_changes(qapp, monkeyp
         window.daemon_state_service.wait_for_update = _wait_for_update
         monkeypatch.setattr(
             window,
-            "_schedule_daemon_update_sync",
-            lambda: scheduled.append("sync") or window.daemon_subscription.stop(),
+            "_schedule_daemon_update_batch",
+            lambda batch: scheduled.append(batch.snapshot.projection_version) or window.daemon_subscription.stop(),
         )
 
         window._daemon_wait_worker()
 
-        assert scheduled == ["sync"]
+        assert scheduled == [2]
     finally:
         _dispose_window(qapp, window)
 
@@ -3360,7 +5020,7 @@ def test_daemon_wait_worker_skips_sync_when_projection_is_unchanged(qapp, monkey
             return previous_snapshot
 
         window.daemon_state_service.wait_for_update = _wait_for_update
-        monkeypatch.setattr(window, "_schedule_daemon_update_sync", lambda: scheduled.append("sync"))
+        monkeypatch.setattr(window, "_schedule_daemon_update_batch", lambda batch: scheduled.append(batch.snapshot.projection_version))
 
         window._daemon_wait_worker()
 
@@ -3411,6 +5071,7 @@ def test_sync_from_daemon_preserves_daemon_owned_runtime_truth(qapp, monkeypatch
     window = _make_window(snapshot=snapshot)
     try:
         window._sync_from_daemon()
+        _process_ui_until(qapp, lambda: window.workspace_snapshot is not None)
 
         assert window.workspace_snapshot is not None
         assert window.workspace_snapshot.version == 7
@@ -3475,13 +5136,75 @@ def test_refresh_log_view_prefers_daemon_live_runs_for_parallel_flow(qapp, monke
         _dispose_window(qapp, window)
 
 
+def test_refresh_selection_shows_parallel_active_step_counts_without_serializing_steps(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        now = datetime.now(UTC)
+        window._load_flows()
+        window.flow_cards["poller"] = replace(window.flow_cards["poller"], parallelism="4")
+        window._select_flow("poller")
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=10,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, active_flow_names=("poller",)),
+            flows={},
+            active_runs={
+                "run-1": RunLiveSnapshot(
+                    run_id="run-1",
+                    flow_name="poller",
+                    group_name="Imports",
+                    source_path="claims_1.xlsx",
+                    state="running",
+                    current_step_name="Read Excel",
+                    current_step_started_at_utc=(now - timedelta(seconds=4)).isoformat(),
+                    started_at_utc=(now - timedelta(seconds=60)).isoformat(),
+                    elapsed_seconds=60.0,
+                ),
+                "run-2": RunLiveSnapshot(
+                    run_id="run-2",
+                    flow_name="poller",
+                    group_name="Imports",
+                    source_path="claims_2.xlsx",
+                    state="running",
+                    current_step_name="Write Parquet",
+                    current_step_started_at_utc=(now - timedelta(seconds=3)).isoformat(),
+                    started_at_utc=(now - timedelta(seconds=65)).isoformat(),
+                    elapsed_seconds=65.0,
+                ),
+                "run-3": RunLiveSnapshot(
+                    run_id="run-3",
+                    flow_name="poller",
+                    group_name="Imports",
+                    source_path="claims_3.xlsx",
+                    state="running",
+                    current_step_name="Write Parquet",
+                    current_step_started_at_utc=(now - timedelta(seconds=2)).isoformat(),
+                    started_at_utc=(now - timedelta(seconds=70)).isoformat(),
+                    elapsed_seconds=70.0,
+                ),
+            },
+        )
+
+        window._refresh_selection(window.flow_cards["poller"])
+
+        assert len(window.operation_row_widgets) == 2
+        assert window.operation_row_widgets[0].row_card.property("stepState") == "running"
+        assert window.operation_row_widgets[0].duration_label.text() == "4.0s"
+        assert window.operation_row_widgets[1].row_card.property("stepState") == "running"
+        assert window.operation_row_widgets[1].duration_label.text() == "2 active"
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_refresh_action_buttons_prefers_daemon_live_stopping_run_after_rebind(qapp, monkeypatch):
     del monkeypatch
     window = _make_window()
     try:
         window._load_flows()
         window._select_flow("manual_review")
-        window.runtime_session = window.runtime_session.with_manual_runs(("Manual",))
+        window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
         window.manual_flow_stopping_groups = set()
         window.workspace_snapshot = WorkspaceSnapshot(
             workspace_id=window.workspace_paths.workspace_id,
@@ -3532,6 +5255,32 @@ def test_refresh_action_buttons_prefers_daemon_engine_starting_after_rebind(qapp
         assert window.engine_button.text() == "Starting..."
         assert window.engine_button.isEnabled() is False
         assert window.clear_flow_log_button.isEnabled() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_action_buttons_does_not_toggle_workspace_selectors_on_hot_path(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        selector_calls: list[tuple[str, bool]] = []
+
+        original_workspace_set_enabled = window.workspace_selector.setEnabled
+        original_settings_set_enabled = window.workspace_settings_selector.setEnabled
+
+        def _record_workspace_enabled(value: bool) -> None:
+            selector_calls.append(("workspace", value))
+            original_workspace_set_enabled(value)
+
+        def _record_settings_enabled(value: bool) -> None:
+            selector_calls.append(("settings", value))
+            original_settings_set_enabled(value)
+
+        monkeypatch.setattr(window.workspace_selector, "setEnabled", _record_workspace_enabled)
+        monkeypatch.setattr(window.workspace_settings_selector, "setEnabled", _record_settings_enabled)
+
+        window._refresh_action_buttons()
+
+        assert selector_calls == []
     finally:
         _dispose_window(qapp, window)
 

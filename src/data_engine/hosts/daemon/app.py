@@ -46,6 +46,7 @@ from data_engine.hosts.daemon.lifecycle import (
     relinquish_workspace_after_checkpoint_failures,
     relinquish_workspace_for_control_request,
     relinquish_workspace_for_missing_root,
+    shutdown_for_requested_idle_disconnect,
     shutdown,
     shutdown_if_unowned_and_idle,
 )
@@ -315,6 +316,9 @@ class DataEngineDaemonService:
 
     def _relinquish_workspace_for_missing_root(self) -> None:
         relinquish_workspace_for_missing_root(self)
+
+    def _shutdown_for_requested_idle_disconnect(self, *, reason: str) -> None:
+        shutdown_for_requested_idle_disconnect(self, reason=reason)
 
     def _shutdown_if_unowned_and_idle(self, *, reason: str) -> None:
         shutdown_if_unowned_and_idle(self, reason=reason)

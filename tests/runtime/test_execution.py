@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from time import sleep
 
 from data_engine.core.model import FlowStoppedError
 from data_engine.core.primitives import FlowContext
@@ -159,3 +160,49 @@ def test_flow_run_executor_logs_failure_before_publishing_run_finished_state() -
     finish_index = next(index for index, call in enumerate(calls) if call[0] == "record_run_finished")
 
     assert log_index < finish_index
+
+
+class _DelayedStateWriter(_StateWriter):
+    def __init__(self, calls: list[tuple[str, object]], *, start_delay_seconds: float) -> None:
+        super().__init__(calls)
+        self.start_delay_seconds = start_delay_seconds
+
+    def record_run_started(self, **kwargs) -> None:
+        sleep(self.start_delay_seconds)
+        super().record_run_started(**kwargs)
+
+    def record_step_started(self, **kwargs) -> int:
+        sleep(self.start_delay_seconds)
+        return super().record_step_started(**kwargs)
+
+
+def test_flow_run_executor_elapsed_excludes_start_write_delay() -> None:
+    calls: list[tuple[str, object]] = []
+    executor = FlowRunExecutor(
+        FlowRunExecutionPorts(
+            context_builder=_ContextBuilder(),
+            polling=_Polling(),
+            state_writer=_DelayedStateWriter(calls, start_delay_seconds=0.05),
+            log_emitter=_LogEmitter(calls),
+            stop_controller=_StopController(),
+        )
+    )
+    flow = _Flow(name="claims_summary", group="Claims", steps=(_Step("Emit", lambda context: "ok"),))
+
+    executor.run_one(flow, None)
+
+    step_finished = next(call for call in calls if call[0] == "record_step_finished")
+    run_finished = next(call for call in calls if call[0] == "record_run_finished")
+    step_elapsed_ms = step_finished[1]["elapsed_ms"]
+    assert isinstance(step_elapsed_ms, int)
+    assert step_elapsed_ms < 25
+
+    success_step_log = next(
+        call for call in calls if call[0] == "log_step_event" and call[1]["status"] == "success"
+    )
+    success_flow_log = next(
+        call for call in calls if call[0] == "log_flow_event" and call[1]["status"] == "success"
+    )
+    assert success_step_log[1]["elapsed"] < 0.025
+    assert success_flow_log[1]["elapsed"] < 0.075
+    assert run_finished[1]["status"] == "success"

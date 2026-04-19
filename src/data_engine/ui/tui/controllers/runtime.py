@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import threading
 from typing import TYPE_CHECKING
 
@@ -9,8 +10,15 @@ from textual.css.query import NoMatches
 from textual.widgets import Button, ListView, Static
 
 from data_engine.application import RuntimeApplication
-from data_engine.services import DaemonService, HistoryQueryService, RuntimeStateService
-from data_engine.domain import RuntimeSessionState
+from data_engine.services import (
+    DaemonService,
+    HistoryQueryService,
+    RuntimeStateService,
+    flow_state_texts_from_workspace_snapshot,
+    runtime_session_from_workspace_snapshot,
+)
+from data_engine.domain import DaemonStatusState, RuntimeSessionState
+from data_engine.services.daemon_state import DaemonUpdateBatch
 from data_engine.views import (
     TuiActionState,
     WORKSPACE_UNAVAILABLE_TEXT,
@@ -45,17 +53,113 @@ class TuiRuntimeController:
             if isinstance(child, FlowListItem):
                 child.refresh_view(window.flow_states.get(child.card.name, child.card.state))
 
+    def _refresh_runtime_projection_from_logs(self, window: "DataEngineTui"):
+        """Rebuild the local runtime projection from persisted runtime history."""
+        return self.runtime_state_service.rebuild_projection(
+            window.runtime_binding,
+            runtime_application=self.runtime_application,
+            flow_cards=window.flow_cards,
+            runtime_session=self._current_runtime_session(window),
+            now=window._monotonic(),
+        )
+
     def daemon_wait_worker(self, window: "DataEngineTui") -> None:
         window.daemon_state_service.run_subscription_loop(
             window.runtime_binding.daemon_manager,
             stop_event=window.daemon_subscription.stop_event,
             workspace_available=lambda: window._has_authored_workspace(),
-            on_update=lambda snapshot: (
+            on_update=lambda batch: (
                 window.daemon_subscription.mark_subscription(window._monotonic()),
-                window._schedule_daemon_update_sync(),
+                window._schedule_daemon_update_batch(batch),
             )[-1],
             timeout_seconds=window.daemon_subscription.timeout_seconds,
         )
+
+    def _apply_daemon_live_snapshot(self, window: "DataEngineTui", batch: DaemonUpdateBatch) -> tuple[set[str], bool]:
+        workspace_snapshot = getattr(window, "workspace_snapshot", None)
+        if workspace_snapshot is None:
+            self.sync_daemon_state(window)
+            return set(card.name for card in window.flow_cards), True
+        daemon_status = DaemonStatusState.from_snapshot(batch.snapshot)
+        projection = self.runtime_state_service.incremental_projection_from_daemon(
+            window.workspace_snapshot,
+            flow_cards=window.flow_cards,
+            previous_flow_states=window.flow_states,
+            daemon_status=daemon_status,
+            changed_flow_names=batch.changed_flow_names,
+            requires_log_reload=bool(batch.completed_run_ids),
+        )
+        window.runtime_session = projection.runtime_session
+        window.workspace_snapshot = projection.workspace_snapshot
+        window.flow_states.update(projection.flow_states)
+        return set(projection.changed_flow_names), projection.requires_log_reload
+
+    @staticmethod
+    def _apply_step_event(window: "DataEngineTui", event) -> None:
+        card = next((candidate for candidate in window.flow_cards if candidate.name == event.flow_name), None)
+        if card is None:
+            return
+        window.operation_tracker, _ = window.operation_tracker.apply_event(
+            event.flow_name,
+            card.operation_items,
+            event,
+            now=window._monotonic(),
+        )
+
+    def apply_daemon_update_batch(self, window: "DataEngineTui") -> None:
+        batch = getattr(window, "_pending_daemon_update_batch", None)
+        window._pending_daemon_update_batch = None
+        if batch is None:
+            return
+        if batch.requires_full_sync or not window._has_authored_workspace():
+            self.sync_daemon_state(window)
+            return
+        changed_flow_names, requires_log_reload = self._apply_daemon_live_snapshot(window, batch)
+        if requires_log_reload:
+            window.runtime_binding_service.reload_logs(window.runtime_binding)
+        window.query_one("#control-status", Static).update(
+            surface_control_status_text(window.workspace_snapshot.control.control_status_text)
+        )
+        selected_flow_name = window.selected_flow_name
+        selected_flow_affected = selected_flow_name in changed_flow_names if selected_flow_name is not None else False
+        refresh_flow_list = bool(changed_flow_names)
+        refresh_buttons = False
+        refresh_selection = False
+        for update in batch.updates:
+            if update.lane == "control":
+                self.sync_daemon_state(window)
+                return
+            if update.lane in {"engine", "flow_activity", "run_lifecycle"}:
+                refresh_buttons = True
+            if update.lane == "log_events":
+                for entry in update.log_entries:
+                    synthesized_entry = (
+                        entry
+                        if entry.workspace_id is not None
+                        else replace(entry, workspace_id=window.workspace_paths.workspace_id)
+                    )
+                    window.log_service.append_entry(window.runtime_binding.log_store, synthesized_entry)
+                if selected_flow_name is not None and any(entry.flow_name == selected_flow_name for entry in update.log_entries):
+                    refresh_selection = True
+                if update.log_entries:
+                    refresh_buttons = True
+            if update.lane == "flow_activity" and selected_flow_affected:
+                refresh_selection = True
+            if update.lane == "run_lifecycle" and selected_flow_affected:
+                refresh_selection = True
+            if update.lane == "step_activity":
+                for event in update.step_events:
+                    self._apply_step_event(window, event)
+                if selected_flow_affected:
+                    refresh_selection = True
+        if selected_flow_affected and batch.completed_run_ids:
+            self._refresh_runtime_projection_from_logs(window)
+        if refresh_flow_list:
+            self.refresh_flow_list_items(window)
+        if refresh_buttons:
+            self.refresh_buttons(window)
+        if refresh_selection:
+            window.flow_controller.render_selected_flow(window)
 
     @staticmethod
     def _blocked_status_text(window: "DataEngineTui") -> str:
@@ -64,25 +168,34 @@ class TuiRuntimeController:
             return "Takeover available."
         return snapshot.control.blocked_status_text
 
+    @staticmethod
+    def _current_runtime_session(window: "DataEngineTui") -> RuntimeSessionState:
+        snapshot = getattr(window, "workspace_snapshot", None)
+        if snapshot is None:
+            return window.runtime_session
+        return runtime_session_from_workspace_snapshot(snapshot)
+
     def refresh_buttons(self, window: "DataEngineTui") -> None:
         workspace_snapshot = getattr(window, "workspace_snapshot", None)
+        effective_runtime_session = self._current_runtime_session(window)
         action_state = TuiActionState.from_context(
             build_operator_action_context(
                 card=window._selected_card(),
                 flow_states=window.flow_states,
-                runtime_session=window.runtime_session,
+                runtime_session=effective_runtime_session,
                 flow_groups_by_name={card.name: card.group for card in window.flow_cards},
                 active_flow_states=window._ACTIVE_FLOW_STATES,
                 engine_state=(
                     workspace_snapshot.engine.state
                     if workspace_snapshot is not None
                     else "stopping"
-                    if window.runtime_session.runtime_stopping
+                    if effective_runtime_session.runtime_stopping
                     else "running"
-                    if window.runtime_session.runtime_active
+                    if effective_runtime_session.runtime_active
                     else "idle"
                 ),
-                live_runs=None if workspace_snapshot is None else workspace_snapshot.active_runs,
+                engine_truth_known=workspace_snapshot is not None,
+                live_runs=(workspace_snapshot.active_runs if workspace_snapshot is not None else None),
                 has_logs=bool(
                     window.selected_flow_name is not None
                     and self.history_query_service.list_run_groups(
@@ -148,10 +261,16 @@ class TuiRuntimeController:
         except NoMatches:
             return
         window.operation_tracker = projection.operation_tracker
+        next_flow_states = dict(projection.flow_states)
+        if window.workspace_snapshot.engine.daemon_live:
+            next_flow_states = flow_state_texts_from_workspace_snapshot(
+                window.workspace_snapshot,
+                window.flow_cards,
+            )
         refresh_plan = self.runtime_application.plan_flow_state_refresh(
             previous_states=window.flow_states,
-            next_states=projection.flow_states,
-            runtime_session=window.runtime_session,
+            next_states=next_flow_states,
+            runtime_session=self._current_runtime_session(window),
         )
         states_changed = refresh_plan.signature != window._last_rendered_flow_signature
         window.flow_states = refresh_plan.flow_states
@@ -209,12 +328,18 @@ class TuiRuntimeController:
             window.runtime_binding,
             runtime_application=self.runtime_application,
             flow_cards=window.flow_cards,
-            runtime_session=window.runtime_session,
+            runtime_session=self._current_runtime_session(window),
             now=window._monotonic(),
         )
+        next_flow_states = dict(projection.flow_states)
+        if window.workspace_snapshot is not None and window.workspace_snapshot.engine.daemon_live:
+            next_flow_states = flow_state_texts_from_workspace_snapshot(
+                window.workspace_snapshot,
+                window.flow_cards,
+            )
         refresh_plan = self.runtime_application.plan_flow_state_refresh(
             previous_states=window.flow_states,
-            next_states=projection.flow_states,
+            next_states=next_flow_states,
             runtime_session=projection.runtime_session,
         )
         window.runtime_session = projection.runtime_session

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import os
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from data_engine.hosts.daemon.client import (
     daemon_authkey,
     force_shutdown_daemon_process,
 )
+from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, _lease_pid_is_live
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR, machine_id_text
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
@@ -30,6 +32,7 @@ from data_engine.runtime.shared_state import (
     initialize_workspace_state,
     read_lease_metadata,
 )
+from data_engine.services.workspace_io import WorkspaceIoLayer
 
 from .support import _write_demo_flow, resolve_workspace_paths
 
@@ -62,6 +65,129 @@ def test_workspace_daemon_manager_auto_recovers_dead_same_machine_lease(tmp_path
 
     assert snapshot.workspace_owned is True
     assert snapshot.leased_by_machine_id is None
+
+
+def test_workspace_daemon_manager_treats_live_same_machine_lease_as_locally_owned(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+    assert claim_workspace(paths) is True
+    started = datetime.now(UTC).isoformat()
+    checkpoint_workspace_state(
+        paths,
+        RuntimeCacheLedger(paths.runtime_db_path),
+        workspace_id="default",
+        machine_id=machine_id_text(),
+        daemon_id="daemon-a",
+        pid=os.getpid(),
+        status="starting",
+        started_at_utc=started,
+        last_checkpoint_at_utc=started,
+        app_version="0.1.0",
+    )
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.is_daemon_live", lambda paths: False)
+    monkeypatch.setattr("data_engine.hosts.daemon.manager._lease_pid_is_live", lambda metadata: True)
+
+    manager = WorkspaceDaemonManager(paths)
+    snapshot = manager.sync()
+
+    assert snapshot.workspace_owned is True
+    assert snapshot.leased_by_machine_id is None
+    assert snapshot.source == "lease"
+
+
+def test_daemon_shared_state_adapter_caches_lease_metadata_reads_briefly(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+
+    current_time = datetime(2026, 4, 18, tzinfo=UTC)
+    reads = {"count": 0}
+
+    def _read(_paths):
+        reads["count"] += 1
+        return {"workspace_id": "default", "last_checkpoint_at_utc": current_time.isoformat()}
+
+    monkeypatch.setattr("data_engine.services.workspace_io.read_lease_metadata", _read)
+    adapter = DaemonSharedStateAdapter(workspace_io=WorkspaceIoLayer(read_interval_seconds=0.5))
+
+    assert adapter.read_lease_metadata(paths) == {"workspace_id": "default", "last_checkpoint_at_utc": current_time.isoformat()}
+    assert adapter.read_lease_metadata(paths) == {"workspace_id": "default", "last_checkpoint_at_utc": current_time.isoformat()}
+    assert reads["count"] == 1
+
+
+def test_daemon_shared_state_adapter_invalidates_lease_cache_after_write(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+
+    reads = {"count": 0}
+
+    def _read(_paths):
+        reads["count"] += 1
+        return {"workspace_id": "default", "last_checkpoint_at_utc": datetime(2026, 4, 18, tzinfo=UTC).isoformat()}
+
+    writes = {"count": 0}
+
+    def _write(*args, **kwargs):
+        del args, kwargs
+        writes["count"] += 1
+
+    monkeypatch.setattr("data_engine.services.workspace_io.read_lease_metadata", _read)
+    monkeypatch.setattr("data_engine.services.workspace_io.write_lease_metadata", _write)
+    adapter = DaemonSharedStateAdapter(workspace_io=WorkspaceIoLayer(read_interval_seconds=30.0))
+
+    adapter.read_lease_metadata(paths)
+    adapter.write_lease_metadata(
+        paths,
+        workspace_id="default",
+        machine_id="machine-a",
+        daemon_id="daemon-a",
+        pid=101,
+        status="idle",
+        started_at_utc=datetime(2026, 4, 18, tzinfo=UTC).isoformat(),
+        last_checkpoint_at_utc=datetime(2026, 4, 18, tzinfo=UTC).isoformat(),
+        app_version="0.1.0",
+    )
+    adapter.read_lease_metadata(paths)
+
+    assert writes["count"] == 1
+    assert reads["count"] == 2
+
+
+def test_shared_state_service_and_daemon_adapter_share_one_workspace_io_cache(tmp_path, monkeypatch):
+    from data_engine.services.shared_state import SharedStateService
+
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+
+    reads = {"count": 0}
+
+    def _read(_paths):
+        reads["count"] += 1
+        return {"workspace_id": "default", "last_checkpoint_at_utc": datetime(2026, 4, 18, tzinfo=UTC).isoformat()}
+
+    monkeypatch.setattr("data_engine.services.workspace_io.read_lease_metadata", _read)
+    workspace_io = WorkspaceIoLayer(read_interval_seconds=1.0)
+    shared_state_service = SharedStateService(workspace_io=workspace_io)
+    daemon_adapter = DaemonSharedStateAdapter(workspace_io=workspace_io)
+
+    assert shared_state_service.read_lease_metadata(paths) is not None
+    assert daemon_adapter.read_lease_metadata(paths) is not None
+    assert reads["count"] == 1
 
 
 def test_workspace_daemon_manager_unconfigured_sync_does_not_create_runtime_state(tmp_path, monkeypatch):

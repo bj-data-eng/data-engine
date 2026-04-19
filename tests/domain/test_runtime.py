@@ -100,6 +100,26 @@ def test_runtime_session_state_prefers_daemon_active_engine_flow_names():
     assert session.active_runtime_flow_names == ("scheduler",)
 
 
+def test_runtime_session_state_preserves_empty_daemon_engine_truth():
+    session = RuntimeSessionState.from_daemon_snapshot(
+        WorkspaceDaemonSnapshot(
+            live=True,
+            workspace_owned=True,
+            leased_by_machine_id=None,
+            runtime_active=True,
+            runtime_stopping=False,
+            manual_runs=(),
+            last_checkpoint_at_utc=None,
+            source="daemon",
+            active_engine_flow_names=(),
+        ),
+        _sample_cards(),
+    )
+
+    assert session.runtime_active is True
+    assert session.active_runtime_flow_names == ()
+
+
 def test_daemon_status_state_projects_idle_snapshot_to_empty_runtime_session():
     status = DaemonStatusState.from_snapshot(
         WorkspaceDaemonSnapshot(

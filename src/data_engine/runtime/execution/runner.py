@@ -47,7 +47,7 @@ class RuntimeStateWriterPort(Protocol):
         flow_name: str,
         group_name: str,
         source_path: str | None,
-        started_at_utc: str,
+        started_at_utc: str | None = None,
     ) -> None:
         """Record that one flow run started."""
 
@@ -67,7 +67,7 @@ class RuntimeStateWriterPort(Protocol):
         run_id: str,
         flow_name: str,
         step_label: str,
-        started_at_utc: str,
+        started_at_utc: str | None = None,
     ) -> int:
         """Record that one step started and return the persisted step id."""
 
@@ -187,18 +187,17 @@ class FlowRunExecutor:
         batch_signatures=(),
     ) -> FlowContext:
         context = self.ports.context_builder.build(flow, source_path, run_id=run_id)
-        run_started = monotonic()
         signature = self.ports.polling.poll_source_signature(flow, source_path)
         effective_signatures = batch_signatures or ((signature,) if signature is not None else ())
-        started_at_utc = str(context.metadata["started_at_utc"])
         normalized_source_path = signature.source_path if signature is not None else self.ports.polling.normalized_source_path(source_path)
         self.ports.state_writer.record_run_started(
             run_id=run_id,
             flow_name=context.flow_name,
             group_name=context.group,
             source_path=normalized_source_path,
-            started_at_utc=started_at_utc,
+            started_at_utc=None,
         )
+        run_started = monotonic()
         for effective_signature in effective_signatures:
             self.ports.state_writer.upsert_file_state(flow_name=context.flow_name, signature=effective_signature, status="started")
         self.ports.log_emitter.log_flow_event(run_id, context.flow_name, source_path, status="started")
@@ -207,14 +206,13 @@ class FlowRunExecutor:
             for step in flow.steps:
                 self.ports.stop_controller.check_run(run_id)
                 self._load_current_for_step(context, step)
-                step_started = monotonic()
-                step_started_at_utc = utcnow_text()
                 step_run_id = self.ports.state_writer.record_step_started(
                     run_id=run_id,
                     flow_name=context.flow_name,
                     step_label=step.label,
-                    started_at_utc=step_started_at_utc,
+                    started_at_utc=None,
                 )
+                step_started = monotonic()
                 self.ports.log_emitter.log_step_event(run_id, context.flow_name, step.label, source_path, status="started")
                 try:
                     result = step.fn(context)

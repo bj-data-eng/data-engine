@@ -10,10 +10,12 @@ from typing import Callable
 
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
-from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger
+from data_engine.runtime.runtime_db import RuntimeControlLedger
 from data_engine.services.flow_catalog import FlowCatalogService
 from data_engine.services.flow_execution import FlowExecutionService
 from data_engine.services.ledger import RuntimeControlLedgerService
+from data_engine.services.runtime_io import default_runtime_io_layer
+from data_engine.services.runtime_ports import RuntimeCacheStore
 from data_engine.services.runtime_execution import RuntimeExecutionService
 
 
@@ -41,7 +43,7 @@ def default_daemon_host_dependency_factories() -> DaemonHostDependencyFactories:
 class DaemonHostDependencies:
     """Concrete collaborators used by one daemon host instance."""
 
-    runtime_cache_ledger: RuntimeCacheLedger
+    runtime_cache_ledger: RuntimeCacheStore
     runtime_control_ledger: RuntimeControlLedger
     flow_catalog_service: FlowCatalogService
     flow_execution_service: FlowExecutionService
@@ -60,7 +62,7 @@ class DaemonHostDependencies:
         ledger_service = ledger_service or RuntimeControlLedgerService()
         factories = factories or default_daemon_host_dependency_factories()
         return cls(
-            runtime_cache_ledger=RuntimeCacheLedger(paths.runtime_cache_db_path),
+            runtime_cache_ledger=default_runtime_io_layer().open_cache_store(paths.runtime_cache_db_path),
             runtime_control_ledger=ledger_service.open_for_workspace(paths.workspace_root),
             flow_catalog_service=factories.flow_catalog_service_factory(),
             flow_execution_service=factories.flow_execution_service_factory(),
@@ -110,6 +112,7 @@ class DaemonHostState:
     checkpoint_thread: threading.Thread | None
     consecutive_checkpoint_failures: int
     listener: object | None
+    shutdown_when_idle: bool
 
     @classmethod
     def build(cls, *, started_at_utc: str) -> "DaemonHostState":
@@ -134,6 +137,7 @@ class DaemonHostState:
             checkpoint_thread=None,
             consecutive_checkpoint_failures=0,
             listener=None,
+            shutdown_when_idle=False,
         )
 
     def claim_workspace(self) -> None:
@@ -249,6 +253,14 @@ class DaemonHostState:
     def set_listener(self, listener: object | None) -> None:
         """Update the active listener object."""
         self.listener = listener
+
+    def request_shutdown_when_idle(self) -> None:
+        """Mark this daemon to exit once active work drains and no clients remain."""
+        self.shutdown_when_idle = True
+
+    def clear_shutdown_when_idle(self) -> None:
+        """Clear any pending idle-shutdown request."""
+        self.shutdown_when_idle = False
 
 
 class DaemonHostFacade:

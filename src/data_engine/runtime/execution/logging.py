@@ -219,8 +219,9 @@ def acquire_queued_runtime_log_sink(
 class RuntimeLogEmitter:
     """Own runtime log persistence and logger emission."""
 
-    def __init__(self, log_sink: RuntimeLogSink) -> None:
+    def __init__(self, log_sink: RuntimeLogSink, *, workspace_id: str | None = None) -> None:
         self.log_sink = log_sink
+        self.workspace_id = str(workspace_id).strip() if workspace_id is not None else None
 
     def log_runtime_message(
         self,
@@ -242,7 +243,10 @@ class RuntimeLogEmitter:
             step_label=step_label,
         )
         logger_method = LOGGER.error if level == "error" else LOGGER.info
-        logger_method(message, exc_info=exc_info)
+        extra: dict[str, object] | None = None
+        if self.workspace_id is not None:
+            extra = {"workspace_id": self.workspace_id}
+        logger_method(message, exc_info=exc_info, extra=extra)
 
     def log_flow_event(
         self,

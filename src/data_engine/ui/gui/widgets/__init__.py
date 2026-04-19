@@ -1,6 +1,7 @@
 """View-layer builders for the desktop UI."""
 
 from data_engine.ui.gui.widgets.config import build_config_value, make_label_selectable
+from data_engine.ui.gui.widgets.log_list import LogRunListWidget
 from data_engine.ui.gui.widgets.panels import (
     build_action_bar,
     build_center_panel,
@@ -31,6 +32,7 @@ __all__ = [
     "build_settings_view",
     "build_sidebar",
     "format_operation_title",
+    "LogRunListWidget",
     "make_label_selectable",
     "set_operation_cards",
 ]

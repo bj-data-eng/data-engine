@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from data_engine.domain import RuntimeSessionState
+from data_engine.domain import OperatorActionContext
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager
 from data_engine.platform.workspace_models import WorkspacePaths, authored_workspace_is_available
 from data_engine.services import DaemonStateService
@@ -50,11 +50,9 @@ class OperatorControlApplication:
         self,
         *,
         paths: WorkspacePaths,
-        runtime_session: RuntimeSessionState,
+        action_context: OperatorActionContext,
         selected_flow_name: str | None,
         selected_flow_valid: bool,
-        selected_flow_group: str | None,
-        selected_flow_group_active: bool,
         blocked_status_text: str,
         timeout: float = 2.0,
     ) -> OperatorActionResult:
@@ -68,9 +66,15 @@ class OperatorControlApplication:
                 requested=False,
                 status_text=f"{selected_flow_name} is invalid and cannot run.",
             )
-        if selected_flow_group_active:
+        if action_context.overlay.run_selected_flow_pending:
             return OperatorActionResult(requested=False)
-        if not runtime_session.control_available:
+        if action_context.selected_flow.automated and (
+            action_context.engine_busy or action_context.overlay.engine_transition_pending
+        ):
+            return OperatorActionResult(requested=False)
+        if action_context.selected_flow.group_active:
+            return OperatorActionResult(requested=False)
+        if not action_context.control_available:
             return OperatorActionResult(requested=False, status_text=blocked_status_text)
         result = self.runtime_application.run_flow(
             paths,
@@ -96,7 +100,7 @@ class OperatorControlApplication:
         self,
         *,
         paths: WorkspacePaths,
-        runtime_session: RuntimeSessionState,
+        action_context: OperatorActionContext,
         has_automated_flows: bool,
         blocked_status_text: str,
         timeout: float = 2.0,
@@ -104,9 +108,14 @@ class OperatorControlApplication:
         """Validate and request automated engine start."""
         if not authored_workspace_is_available(paths):
             return OperatorActionResult(requested=False, error_text="Workspace root is no longer available.")
-        if runtime_session.runtime_active or runtime_session.runtime_stopping or runtime_session.manual_run_active:
+        if (
+            action_context.engine_busy
+            or action_context.manual_run_active
+            or action_context.overlay.engine_transition_pending
+            or action_context.overlay.run_selected_flow_pending
+        ):
             return OperatorActionResult(requested=False)
-        if not runtime_session.control_available:
+        if not action_context.control_available:
             return OperatorActionResult(requested=False, status_text=blocked_status_text)
         if not has_automated_flows:
             return OperatorActionResult(requested=False, status_text="No automated flows are available.")
@@ -122,17 +131,25 @@ class OperatorControlApplication:
         self,
         *,
         paths: WorkspacePaths,
-        runtime_session: RuntimeSessionState,
-        selected_flow_group: str | None,
+        action_context: OperatorActionContext,
+        selected_flow_name: str | None,
         blocked_status_text: str,
         timeout: float = 2.0,
     ) -> OperatorActionResult:
         """Validate and request stop for the engine or selected manual flow."""
-        manual_flow_name = runtime_session.active_manual_runs.get(selected_flow_group)
-        if manual_flow_name is None and len(runtime_session.manual_runs) == 1:
+        runtime_session = action_context.runtime_session
+        selected_group = (
+            action_context.selected_flow.card.group
+            if action_context.selected_flow.card is not None
+            else None
+        )
+        manual_flow_name = selected_flow_name if action_context.selected_manual_running else None
+        if manual_flow_name is None and not action_context.live_truth_known:
+            manual_flow_name = runtime_session.active_manual_runs.get(selected_group)
+        if manual_flow_name is None and not action_context.live_truth_known and len(runtime_session.manual_runs) == 1:
             manual_flow_name = runtime_session.manual_runs[0].flow_name
         if manual_flow_name is not None:
-            if not runtime_session.control_available:
+            if not action_context.control_available:
                 return OperatorActionResult(requested=False, status_text=blocked_status_text)
             result = self.runtime_application.stop_flow(paths, name=manual_flow_name, timeout=timeout)
             if not result.ok:
@@ -141,7 +158,9 @@ class OperatorControlApplication:
                     error_text=_verbose_action_error(f"stop {manual_flow_name}", result.error),
                 )
             return OperatorActionResult(requested=True, sync_after=True, status_text="Stopping selected flow...")
-        if runtime_session.runtime_active:
+        if action_context.engine_running:
+            if not action_context.control_available:
+                return OperatorActionResult(requested=False, status_text=blocked_status_text)
             result = self.runtime_application.stop_engine(paths, timeout=timeout)
             if not result.ok:
                 return OperatorActionResult(
@@ -171,12 +190,12 @@ class OperatorControlApplication:
         self,
         *,
         paths: WorkspacePaths,
-        runtime_session: RuntimeSessionState,
+        action_context: OperatorActionContext,
         has_authored_workspace: bool,
         timeout: float = 5.0,
     ) -> FlowRefreshResult:
         """Validate and request one flow refresh while preserving local reload behavior."""
-        if runtime_session.runtime_active or runtime_session.active_manual_runs:
+        if action_context.engine_busy or action_context.manual_run_active:
             return FlowRefreshResult(
                 reload_catalog=False,
                 error_text="Stop active engine or manual runs before refreshing flows.",

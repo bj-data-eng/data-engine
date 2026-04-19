@@ -108,6 +108,65 @@ class WorkspaceSnapshot:
 
 
 @dataclass(frozen=True)
+class IncrementalDaemonProjection:
+    """One client-side streamed runtime projection update from daemon truth."""
+
+    runtime_session: RuntimeSessionState
+    workspace_snapshot: WorkspaceSnapshot
+    flow_states: dict[str, str]
+    changed_flow_names: tuple[str, ...]
+    requires_log_reload: bool
+
+
+def flow_state_text_from_live_summary(card: FlowCatalogLike | None, live_state: str) -> str:
+    """Map one live flow summary state into the surface-facing flow-state text."""
+    if card is None:
+        return live_state
+    if live_state == "idle":
+        return card.state if card.valid else "invalid"
+    if live_state == "starting":
+        return "starting runtime" if card.mode in {"poll", "schedule"} else "starting flow"
+    if live_state == "stopping":
+        return "stopping runtime" if card.mode in {"poll", "schedule"} else "stopping flow"
+    return live_state
+
+
+def flow_state_texts_from_workspace_snapshot(
+    snapshot: WorkspaceSnapshot,
+    flow_cards: Iterable[FlowCatalogLike],
+) -> dict[str, str]:
+    """Project one live workspace snapshot into surface-facing flow-state text."""
+    card_by_name = {card.name: card for card in flow_cards}
+    return {
+        flow_name: flow_state_text_from_live_summary(card_by_name.get(flow_name), summary.state)
+        for flow_name, summary in snapshot.flows.items()
+    }
+
+
+def runtime_session_from_workspace_snapshot(snapshot: WorkspaceSnapshot) -> RuntimeSessionState:
+    """Project one live streamed workspace snapshot into command-gating session state."""
+    active_engine_flow_names = (
+        snapshot.engine.active_flow_names
+        if snapshot.engine.state in {"running", "stopping"}
+        else ()
+    )
+    engine_flow_names = set(snapshot.engine.active_flow_names)
+    manual_runs = {
+        run.group_name: run.flow_name
+        for run in snapshot.active_runs.values()
+        if run.flow_name not in engine_flow_names and run.state in {"starting", "running", "stopping"}
+    }
+    return RuntimeSessionState(
+        workspace_owned=snapshot.control.state != "leased" or snapshot.control.leased_by_machine_id is None,
+        leased_by_machine_id=snapshot.control.leased_by_machine_id,
+        runtime_active=snapshot.engine.state in {"running", "stopping"},
+        runtime_stopping=snapshot.engine.state == "stopping",
+        active_runtime_flow_names=active_engine_flow_names,
+        manual_runs=(),
+    ).with_manual_runs_map(manual_runs)
+
+
+@dataclass(frozen=True)
 class RuntimeEvent:
     """One incremental live-state event for a workspace snapshot subscriber."""
 
@@ -209,14 +268,21 @@ class RuntimeStateService:
         daemon_engine_starting: bool,
         daemon_active_flow_names: tuple[str, ...],
     ) -> EngineSnapshot:
-        if runtime_session.runtime_stopping:
-            state: EngineStateName = "stopping"
-        elif runtime_session.runtime_active:
-            state = "running"
-        elif daemon_engine_starting or (daemon_startup_in_progress and not daemon_live):
-            state = "starting"
+        if daemon_live:
+            if runtime_session.runtime_stopping:
+                state: EngineStateName = "stopping"
+            elif runtime_session.runtime_active:
+                state = "running"
+            elif daemon_engine_starting:
+                state = "starting"
+            else:
+                state = "idle"
+            active_flow_names = daemon_active_flow_names
+            stop_requested = runtime_session.runtime_stopping
         else:
             state = "idle"
+            active_flow_names = ()
+            stop_requested = False
         return EngineSnapshot(
             state=state,
             daemon_live=daemon_live,
@@ -225,8 +291,8 @@ class RuntimeStateService:
                 if transport_mode in {"disconnected", "heartbeat", "subscription"}
                 else "heartbeat"
             ),
-            stop_requested=runtime_session.runtime_stopping,
-            active_flow_names=daemon_active_flow_names or runtime_session.active_runtime_flow_names,
+            stop_requested=stop_requested,
+            active_flow_names=active_flow_names,
         )
 
     @staticmethod
@@ -290,11 +356,17 @@ class RuntimeStateService:
     def _live_flow_state_name(
         card: FlowCatalogLike,
         *,
-        flow_state_text: str,
+        daemon_live: bool,
+        daemon_active_flow_names: tuple[str, ...],
         daemon_activity: FlowActivityState | None,
     ) -> FlowStateName:
+        if not daemon_live:
+            return "idle"
+        if card.name in daemon_active_flow_names:
+            if daemon_activity is None or daemon_activity.stopping_run_count == 0:
+                return "polling" if card.mode == "poll" else "scheduled"
         if daemon_activity is None:
-            return RuntimeStateService._flow_state_name(flow_state_text)
+            return "idle"
         if daemon_activity.stopping_run_count > 0:
             return "stopping"
         if daemon_activity.manual_run_count > 0:
@@ -303,7 +375,7 @@ class RuntimeStateService:
             return "polling" if card.mode == "poll" else "scheduled"
         if daemon_activity.queued_run_count > 0:
             return "starting"
-        return RuntimeStateService._flow_state_name(flow_state_text)
+        return "idle"
 
     @staticmethod
     def _latest_run_times(run_groups: tuple[FlowRunState, ...]) -> tuple[str | None, str | None, str | None]:
@@ -465,26 +537,10 @@ class RuntimeStateService:
             daemon_activity = next((item for item in daemon_flow_activity if item.flow_name == card.name), None)
             flow_state_name = self._live_flow_state_name(
                 card,
-                flow_state_text=flow_states.get(card.name, card.state),
+                daemon_live=daemon_live,
+                daemon_active_flow_names=daemon_active_flow_names,
                 daemon_activity=daemon_activity,
             )
-            if not daemon_active_runs:
-                for run_group in run_groups:
-                    run_state = self._run_state_name(run_group, flow_state=flow_state_name)
-                    if run_state not in {"starting", "running", "stopping"}:
-                        continue
-                    active_runs[run_group.key[1]] = RunLiveSnapshot(
-                        run_id=run_group.key[1],
-                        flow_name=card.name,
-                        group_name=card.group or "",
-                        source_path=None if run_group.source_label in {"", "-"} else run_group.source_label,
-                        state=run_state,
-                        current_step_name=self._current_step_name(run_group),
-                        started_at_utc=self._run_started_at(run_group),
-                        finished_at_utc=self._run_finished_at(run_group),
-                        elapsed_seconds=run_group.elapsed_seconds,
-                        error_text=self._run_error_text(run_group),
-                    )
             last_started_at, last_finished_at, last_error_text = self._latest_run_times(run_groups)
             flow_summaries[card.name] = FlowLiveSummary(
                 flow_name=card.name,
@@ -538,6 +594,144 @@ class RuntimeStateService:
         self._publish_snapshot_events(previous, snapshot)
         self._last_workspace_snapshots[workspace_id] = snapshot
         return snapshot
+
+    def incremental_snapshot_from_daemon(
+        self,
+        previous: WorkspaceSnapshot,
+        *,
+        flow_cards: Iterable[FlowCatalogLike],
+        daemon_status,
+    ) -> WorkspaceSnapshot:
+        """Update one workspace snapshot from daemon-native live truth only.
+
+        This path intentionally avoids log reloads and runtime projection
+        rebuilds. It is used for hot subscription lanes where the daemon already
+        owns the operational truth and the surface only needs an updated live
+        snapshot.
+        """
+        flow_cards_tuple = tuple(flow_cards)
+        runtime_session = daemon_status.as_runtime_session(flow_cards_tuple)
+        control = ControlSnapshot(
+            state=previous.control.state,
+            leased_by_machine_id=daemon_status.leased_by_machine_id,
+            request_pending=previous.control.request_pending,
+            control_status_text=previous.control.control_status_text,
+            blocked_status_text=previous.control.blocked_status_text,
+            takeover_remaining_seconds=previous.control.takeover_remaining_seconds,
+        )
+        engine = self._engine_snapshot(
+            runtime_session,
+            daemon_live=True,
+            transport_mode=daemon_status.transport_mode,
+            daemon_startup_in_progress=False,
+            daemon_engine_starting=daemon_status.engine_starting,
+            daemon_active_flow_names=daemon_status.active_engine_flow_names,
+        )
+        active_runs = {
+            run.run_id: RunLiveSnapshot(
+                run_id=run.run_id,
+                flow_name=run.flow_name,
+                group_name=run.group_name,
+                source_path=run.source_path,
+                state=run.state if run.state in {"starting", "running", "stopping", "success", "failed", "stopped"} else "running",
+                current_step_name=run.current_step_name,
+                current_step_started_at_utc=run.current_step_started_at_utc,
+                started_at_utc=run.started_at_utc,
+                finished_at_utc=run.finished_at_utc,
+                elapsed_seconds=run.elapsed_seconds,
+                error_text=run.error_text,
+            )
+            for run in daemon_status.active_runs
+        }
+        previous_flows = previous.flows
+        activity_by_flow = {item.flow_name: item for item in daemon_status.flow_activity}
+        flow_summaries: dict[str, FlowLiveSummary] = {}
+        for card in flow_cards_tuple:
+            prior = previous_flows.get(card.name)
+            daemon_activity = activity_by_flow.get(card.name)
+            last_started_at = None if prior is None else prior.last_started_at_utc
+            last_finished_at = None if prior is None else prior.last_finished_at_utc
+            last_error_text = None if prior is None else prior.last_error_text
+            flow_summaries[card.name] = FlowLiveSummary(
+                flow_name=card.name,
+                group_name=card.group or "",
+                state=self._live_flow_state_name(
+                    card,
+                    daemon_live=True,
+                    daemon_active_flow_names=daemon_status.active_engine_flow_names,
+                    daemon_activity=daemon_activity,
+                ),
+                stop_requested=daemon_activity.stopping_run_count > 0 if daemon_activity is not None else False,
+                active_run_count=daemon_activity.active_run_count if daemon_activity is not None else 0,
+                queued_run_count=daemon_activity.queued_run_count if daemon_activity is not None else 0,
+                running_step_counts={} if daemon_activity is None else dict(daemon_activity.running_step_counts),
+                last_started_at_utc=last_started_at,
+                last_finished_at_utc=last_finished_at,
+                last_error_text=last_error_text,
+            )
+        provisional = WorkspaceSnapshot(
+            workspace_id=previous.workspace_id,
+            version=0,
+            control=control,
+            engine=engine,
+            flows=flow_summaries,
+            active_runs=active_runs,
+            notices=previous.notices,
+        )
+        prior_signature = self._snapshot_signature(previous)
+        current_signature = self._snapshot_signature(provisional)
+        version = max(previous.version, int(getattr(daemon_status, "projection_version", 0) or 0))
+        if prior_signature != current_signature:
+            version = max(version, previous.version + 1)
+        snapshot = WorkspaceSnapshot(
+            workspace_id=previous.workspace_id,
+            version=version,
+            control=control,
+            engine=engine,
+            flows=flow_summaries,
+            active_runs=active_runs,
+            notices=previous.notices,
+        )
+        self._publish_snapshot_events(previous, snapshot)
+        self._last_workspace_snapshots[previous.workspace_id] = snapshot
+        self._snapshot_versions[previous.workspace_id] = version
+        return snapshot
+
+    def incremental_projection_from_daemon(
+        self,
+        previous: WorkspaceSnapshot,
+        *,
+        flow_cards: Iterable[FlowCatalogLike],
+        previous_flow_states: dict[str, str],
+        daemon_status,
+        changed_flow_names: Iterable[str],
+        requires_log_reload: bool = False,
+    ) -> IncrementalDaemonProjection:
+        """Return one updated client-side streamed projection from daemon truth."""
+        flow_cards_tuple = tuple(flow_cards)
+        card_by_name = {card.name: card for card in flow_cards_tuple}
+        runtime_session = daemon_status.as_runtime_session(flow_cards_tuple)
+        workspace_snapshot = self.incremental_snapshot_from_daemon(
+            previous,
+            flow_cards=flow_cards_tuple,
+            daemon_status=daemon_status,
+        )
+        next_flow_states = dict(previous_flow_states)
+        for flow_name in changed_flow_names:
+            summary = workspace_snapshot.flows.get(flow_name)
+            if summary is None:
+                continue
+            next_flow_states[flow_name] = flow_state_text_from_live_summary(
+                card_by_name.get(flow_name),
+                summary.state,
+            )
+        return IncrementalDaemonProjection(
+            runtime_session=runtime_session,
+            workspace_snapshot=workspace_snapshot,
+            flow_states=next_flow_states,
+            changed_flow_names=tuple(sorted(set(changed_flow_names))),
+            requires_log_reload=requires_log_reload,
+        )
 
     def _publish_snapshot_events(self, previous: WorkspaceSnapshot | None, current: WorkspaceSnapshot) -> None:
         subscribers = self._subscribers_by_workspace.get(current.workspace_id)
@@ -699,6 +893,7 @@ __all__ = [
     "ControlSnapshot",
     "EngineSnapshot",
     "FlowLiveSummary",
+    "IncrementalDaemonProjection",
     "OperatorNotice",
     "RunLiveSnapshot",
     "RuntimeEvent",
@@ -707,4 +902,7 @@ __all__ = [
     "RuntimeStateSubscriber",
     "WorkspaceRuntimeProjection",
     "WorkspaceSnapshot",
+    "flow_state_text_from_live_summary",
+    "flow_state_texts_from_workspace_snapshot",
+    "runtime_session_from_workspace_snapshot",
 ]

@@ -99,6 +99,9 @@ class RuntimeHistoryService:
         entry: FlowLogEntry,
     ) -> tuple[str, str | None]:
         """Return one user-facing error title and persisted error text for a failed entry."""
+        refresh_external_state = getattr(ledger, "refresh_external_state", None)
+        if callable(refresh_external_state):
+            refresh_external_state()
         run_id = run_group.key[1]
         event = entry.event
         detail_text: str | None = None

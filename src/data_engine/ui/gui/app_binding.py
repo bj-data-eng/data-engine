@@ -105,6 +105,8 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
         discovered_workspace_ids=(item.workspace_id for item in discovered),
     )
     window.client_session_id = uuid4().hex
+    window.settings_workspace_target_id = window.workspace_paths.workspace_id
+    window._settings_workspace_target_pinned = False
 
     window.log_queue: Queue[FlowLogEntry] = Queue()
     window.log_handler = QueueLogHandler(window.log_queue)
@@ -116,13 +118,16 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.signals.run_finished.connect(window._finish_run)
     window.signals.runtime_finished.connect(window._finish_runtime)
     window.signals.daemon_startup_finished.connect(window._finish_daemon_startup)
+    window.signals.daemon_sync_finished.connect(window._finish_daemon_sync)
     window.signals.control_action_finished.connect(window._finish_control_action)
     window.signals.daemon_update_available.connect(window._sync_from_daemon)
+    window.signals.daemon_update_batch_available.connect(window._apply_daemon_update_batch)
 
     window.engine_runtime_stop_event = threading.Event()
     window.engine_flow_stop_event = threading.Event()
     window.manual_flow_stop_events: dict[str, threading.Event] = {}
     window.manual_flow_stopping_groups: set[str | None] = set()
+    window.pending_manual_run_requests: dict[str | None, tuple[str, str, float]] = {}
     window.operation_row_widgets = []
     window.operation_tracker = OperationSessionState.empty()
     window.workspace_snapshot = None
@@ -156,23 +161,35 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
         manager=window.runtime_binding.daemon_manager,
         clock=window._monotonic,
     )
+    window._workspace_binding_generation = 0
     window._daemon_status = DaemonStatusState.empty()
     window._last_daemon_spawn_attempt = 0.0
     window._auto_daemon_enabled = False
     window._daemon_startup_in_progress = False
     window._daemon_sync_in_progress = False
     window._daemon_sync_pending = False
+    window._pending_daemon_update_batch = None
     window._pending_control_actions: set[str] = set()
+    window._pending_control_action_tokens: dict[str, tuple[int, str]] = {}
     window._pending_message_box: tuple[str, str, str] | None = None
     window._message_box_scheduled = False
     window._message_box_open = False
     window._message_box_generation = 0
+    window._last_daemon_sync_error_text: str | None = None
     window._pending_workspace_switch_id = None
     window._workspace_switch_scheduled = False
     window._color_scheme_changed_slot = None
     window._last_log_view_flow_name = None
     window._last_log_view_run_keys = ()
     window._last_log_view_signature = ()
+    window._cached_selected_flow_run_groups = ()
+    window._cached_selected_flow_run_groups_flow_name = None
+    window._cached_selected_flow_entry_count = 0
+    window._selected_flow_run_groups_dirty = True
+    window._selected_flow_has_logs = False
+    window._selected_flow_has_logs_flow_name = None
+    window._workspace_counts_footer_cache: dict[str, str] = {}
+    window._last_gui_action_state = None
 
     window._build_window()
     window._reload_workspace_options()

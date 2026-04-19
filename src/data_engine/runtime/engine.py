@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.primitives import FlowContext
 from data_engine.runtime.execution import FlowRuntime, GroupedFlowRuntime
-from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
+from data_engine.services.runtime_ports import RuntimeCacheStore
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow as CoreFlow
@@ -27,10 +27,11 @@ class RuntimeEngine:
     def __init__(
         self,
         *,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
         status_callback: Callable[[str], None] | None = None,
+        workspace_id: str | None = None,
         flow_runtime_type: type[FlowRuntime] = FlowRuntime,
         grouped_runtime_type: type[GroupedFlowRuntime] = GroupedFlowRuntime,
         run_stop_controller: RuntimeStopController | None = None,
@@ -39,6 +40,7 @@ class RuntimeEngine:
         self.runtime_stop_event = runtime_stop_event
         self.flow_stop_event = flow_stop_event
         self.status_callback = status_callback
+        self.workspace_id = workspace_id
         self.flow_runtime_type = flow_runtime_type
         self.grouped_runtime_type = grouped_runtime_type
         self.run_stop_controller = run_stop_controller or RuntimeStopController()
@@ -101,6 +103,8 @@ class RuntimeEngine:
             kwargs["flow_stop_event"] = self.flow_stop_event
         if self.status_callback is not None:
             kwargs["status_callback"] = self.status_callback
+        if self.workspace_id is not None:
+            kwargs["workspace_id"] = self.workspace_id
         if self.runtime_ledger is not None:
             kwargs["runtime_ledger"] = self.runtime_ledger
         kwargs["run_stop_controller"] = self.run_stop_controller

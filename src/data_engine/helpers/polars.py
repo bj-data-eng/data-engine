@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable
 from datetime import date, datetime
 import os
 from pathlib import Path
+import time
 from uuid import uuid4
 
 import polars as pl
@@ -540,11 +541,30 @@ def _write_atomic(path: PathLike, write: Callable[[Path], object]) -> Path:
     temporary_path = target_path.with_name(f".{target_path.name}.{uuid4().hex}.tmp")
     try:
         write(temporary_path)
-        os.replace(temporary_path, target_path)
+        _replace_atomic(temporary_path, target_path)
     except BaseException:
         _remove_temporary_file(temporary_path)
         raise
     return target_path
+
+
+def _replace_atomic(source_path: Path, target_path: Path) -> None:
+    backoff_seconds = (0.0, 0.02, 0.05, 0.1, 0.2)
+    last_error: BaseException | None = None
+    for delay_seconds in backoff_seconds:
+        if delay_seconds > 0.0:
+            time.sleep(delay_seconds)
+        try:
+            os.replace(source_path, target_path)
+            return
+        except PermissionError as exc:
+            if os.name != "nt" or getattr(exc, "winerror", None) != 5:
+                raise
+            last_error = exc
+            continue
+    if last_error is not None:
+        raise last_error
+    os.replace(source_path, target_path)
 
 
 def _remove_temporary_file(path: Path) -> None:

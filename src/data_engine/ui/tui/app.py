@@ -204,6 +204,9 @@ class DataEngineTui(TuiWindowSupportMixin, TuiStateMixin, App[None]):
     def _sync_daemon_state(self) -> None:
         self.runtime_controller.sync_daemon_state(self)
 
+    def _apply_daemon_update_batch(self) -> None:
+        self.runtime_controller.apply_daemon_update_batch(self)
+
     def _ensure_daemon_started(self) -> bool:
         return self.runtime_controller.ensure_daemon_started(self)
 

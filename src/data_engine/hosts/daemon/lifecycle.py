@@ -26,10 +26,14 @@ if TYPE_CHECKING:
 def checkpoint_loop(service: "DataEngineDaemonService") -> None:
     next_checkpoint_at = time.monotonic() + CHECKPOINT_INTERVAL_SECONDS
     while not service.host.shutdown_event.wait(CONTROL_REQUEST_POLL_INTERVAL_SECONDS):
-        if _should_shutdown_for_missing_clients(service):
+        missing_clients_action = _missing_clients_action(service)
+        if missing_clients_action == "shutdown":
             service._debug_log("no live local clients remain; shutting down ephemeral daemon")
             relinquish_workspace_for_missing_clients(service)
             break
+        if missing_clients_action == "stop_engine":
+            service._debug_log("no live local clients remain; requesting graceful engine stop")
+            request_engine_stop_for_missing_clients(service)
         if not service._workspace_root_is_available():
             service._debug_log("workspace root no longer available; shutting down daemon")
             relinquish_workspace_for_missing_root(service)
@@ -128,19 +132,60 @@ def relinquish_workspace_for_missing_clients(service: "DataEngineDaemonService")
     service._wake_listener()
 
 
-def _should_shutdown_for_missing_clients(service: "DataEngineDaemonService") -> bool:
-    """Return whether an ephemeral daemon should stop because no live clients remain."""
+def _missing_clients_action(service: "DataEngineDaemonService") -> str | None:
+    """Return the action an ephemeral daemon should take when no live clients remain."""
     if service.lifecycle_policy is not DaemonLifecyclePolicy.EPHEMERAL:
-        return False
+        return None
     with service._state_lock:
-        if service.host.runtime_active or service.host.runtime_stopping:
-            return False
+        runtime_active = service.host.runtime_active
+        runtime_stopping = service.host.runtime_stopping
         if service.state.manual_run_threads:
-            return False
+            return None
     try:
-        return service.runtime_control_ledger.client_sessions.count_live(service.paths.workspace_id) == 0
+        no_clients = service.runtime_control_ledger.client_sessions.count_live(service.paths.workspace_id) == 0
     except Exception:
-        return False
+        return None
+    if not no_clients:
+        return None
+    if runtime_active or runtime_stopping:
+        return "stop_engine"
+    return "shutdown"
+
+
+def request_engine_stop_for_missing_clients(service: "DataEngineDaemonService") -> None:
+    """Request graceful engine stop and daemon exit when the last local client disappears."""
+    with service._state_lock:
+        if service.state.shutdown_when_idle or not service.host.runtime_active:
+            return
+        service.state.request_shutdown_when_idle()
+        service.state.stop_runtime(status="client disconnected")
+        runtime_stop_event = service.state.engine_runtime_stop_event
+    service._publish_runtime_event("engine.stop_requested")
+    runtime_stop_event.set()
+
+
+def shutdown_for_requested_idle_disconnect(service: "DataEngineDaemonService", *, reason: str) -> None:
+    """Release ownership and exit after a last-client close requested idle shutdown."""
+    with service._state_lock:
+        if not service.state.shutdown_when_idle:
+            return
+        if service.host.runtime_active or service.host.runtime_stopping:
+            return
+        if service.state.manual_run_threads:
+            return
+    try:
+        no_clients_remain = service.runtime_control_ledger.client_sessions.count_live(service.paths.workspace_id) == 0
+    except Exception:
+        no_clients_remain = False
+    with service._state_lock:
+        if not no_clients_remain:
+            service.state.clear_shutdown_when_idle()
+            return
+        service.state.clear_shutdown_when_idle()
+    release_workspace_claim(service, status="client disconnected")
+    service._debug_log(f"shutdown requested reason={reason}")
+    service.host.shutdown_event.set()
+    service._wake_listener()
 
 
 def shutdown_if_unowned_and_idle(service: "DataEngineDaemonService", *, reason: str) -> None:
@@ -196,6 +241,7 @@ __all__ = [
     "relinquish_workspace_after_checkpoint_failures",
     "relinquish_workspace_for_control_request",
     "relinquish_workspace_for_missing_root",
+    "shutdown_for_requested_idle_disconnect",
     "shutdown",
     "shutdown_if_unowned_and_idle",
 ]

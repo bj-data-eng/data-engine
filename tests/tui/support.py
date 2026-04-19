@@ -10,7 +10,7 @@ from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
 from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
-from data_engine.services import DaemonService
+from data_engine.services import DaemonService, DaemonStateService
 from data_engine.services.operator_commands import OperatorCommandService
 from data_engine.services.operator_queries import WorkspaceCatalogLoadResult, WorkspaceCatalogPresentation
 from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, WorkspaceSnapshot
@@ -196,7 +196,7 @@ class FakeDaemonStateService:
                 return
             if previous_snapshot is not None and snapshot == previous_snapshot:
                 continue
-            on_update(snapshot)
+            on_update(DaemonStateService.diff_update_batch(previous_snapshot, snapshot))
 
     @staticmethod
     def should_run_heartbeat(

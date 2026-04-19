@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from data_engine.ui.gui.widgets.log_list import LogRunListWidget
 
 if TYPE_CHECKING:
     from data_engine.ui.gui.app import DataEngineWindow
@@ -244,7 +244,7 @@ def _build_workspace_settings_panel(window: "DataEngineWindow") -> QWidget:
     window.workspace_settings_selector.setObjectName("workspaceSettingsSelector")
     window.workspace_settings_selector.setMinimumWidth(200)
     window.workspace_settings_selector.setFixedHeight(36)
-    window.workspace_settings_selector.currentIndexChanged.connect(window._workspace_selection_changed)
+    window.workspace_settings_selector.currentIndexChanged.connect(window._settings_workspace_target_changed)
     workspace_layout.addWidget(window.workspace_settings_selector, 0, Qt.AlignmentFlag.AlignLeft)
 
     window.workspace_target_label = QLabel("")
@@ -517,7 +517,7 @@ def build_right_panel(window: "DataEngineWindow") -> QWidget:
     header.addWidget(window.clear_flow_log_button)
     layout.addLayout(header)
 
-    window.log_view = QListWidget()
+    window.log_view = LogRunListWidget(window)
     window.log_view.setObjectName("logList")
     mono = QFont("Menlo")
     mono.setStyleHint(QFont.StyleHint.Monospace)

@@ -129,7 +129,13 @@ def test_runtime_ledger_poll_staleness_uses_signature_and_last_status(tmp_path):
     assert ledger.source_signatures.is_stale("claims_poll", signature) is False
 
     ledger.source_signatures.upsert_file_state(flow_name="claims_poll", signature=signature, status="failed", error_text="boom")
-    assert ledger.source_signatures.is_stale("claims_poll", signature) is True
+    assert ledger.source_signatures.is_stale("claims_poll", signature) is False
+
+    source.write_text("claims changed", encoding="utf-8")
+    changed_signature = ledger.source_signatures.signature_for_path(source)
+
+    assert changed_signature is not None
+    assert ledger.source_signatures.is_stale("claims_poll", changed_signature) is True
 
 
 def test_runtime_ledger_persists_run_step_and_log_history(tmp_path):

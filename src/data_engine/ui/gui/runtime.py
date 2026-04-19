@@ -20,6 +20,12 @@ class QueueLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         """Convert one log record into a UI entry and enqueue it."""
         try:
+            workspace_id = str(getattr(record, "workspace_id", "") or "").strip() or None
+            if workspace_id is None:
+                # The GUI no longer treats the shared process logger as an
+                # authoritative workspace event bus unless the record is
+                # explicitly scoped to a workspace.
+                return
             event = parse_runtime_event(record)
             kind = "flow" if event is not None and event.flow_name is not None else "system"
             self.queue.put_nowait(
@@ -28,6 +34,7 @@ class QueueLogHandler(logging.Handler):
                     kind=kind,
                     event=event,
                     flow_name=event.flow_name if event is not None else None,
+                    workspace_id=workspace_id,
                 )
             )
         except Exception:
@@ -40,8 +47,10 @@ class UiSignals(QObject):
     run_finished = Signal(object, object, object)
     runtime_finished = Signal(object, object, object)
     daemon_startup_finished = Signal(bool, str)
+    daemon_sync_finished = Signal(object)
     control_action_finished = Signal(str, object)
     daemon_update_available = Signal()
+    daemon_update_batch_available = Signal(object)
 
 
 __all__ = ["FlowLogEntry", "QueueLogHandler", "UiSignals"]

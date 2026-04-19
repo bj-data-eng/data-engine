@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
@@ -20,10 +21,20 @@ from PySide6.QtWidgets import (
 from data_engine.ui.gui.preview_models import ConfigPreviewRequest, OutputPreviewRequest, RunLogPreviewRequest
 from data_engine.ui.gui.rendering import populate_output_preview, render_svg_icon_pixmap
 from data_engine.ui.gui.widgets import build_config_value, make_label_selectable
+from data_engine.views.presentation import format_seconds
 
 if TYPE_CHECKING:
     from data_engine.domain import FlowLogEntry, FlowRunState
     from data_engine.ui.gui.app import DataEngineWindow
+
+
+@dataclass(frozen=True)
+class _RunLogPreviewRow:
+    entry: "FlowLogEntry"
+    message_html: str
+    duration_text: str | None
+    status_name: str | None
+    failed_entry: "FlowLogEntry | None" = None
 
 
 def show_run_log_preview(window: "DataEngineWindow", request: RunLogPreviewRequest) -> QDialog:
@@ -52,14 +63,20 @@ def show_run_log_preview(window: "DataEngineWindow", request: RunLogPreviewReque
     summary_label = QLabel("  •  ".join(summary_parts))
     summary_label.setObjectName("sectionMeta")
     header_layout.addWidget(summary_label)
+    if request.source_path not in {None, "", "-"}:
+        source_path_label = QLabel(str(request.source_path))
+        source_path_label.setObjectName("outputPreviewPath")
+        source_path_label.setWordWrap(True)
+        make_label_selectable(source_path_label)
+        header_layout.addWidget(source_path_label)
     layout.addWidget(header)
 
     log_list = QListWidget()
     log_list.setObjectName("runLogList")
     log_list.setSpacing(6)
-    for entry in request.run_group.entries:
-        item = QListWidgetItem(entry.line)
-        widget = _build_raw_log_entry_widget(window, entry, run_group=request.run_group)
+    for row in _build_run_log_preview_rows(window, request.run_group):
+        item = QListWidgetItem(row.entry.line)
+        widget = _build_raw_log_entry_widget(window, row, run_group=request.run_group)
         item.setSizeHint(widget.sizeHint())
         log_list.addItem(item)
         log_list.setItemWidget(item, widget)
@@ -69,7 +86,79 @@ def show_run_log_preview(window: "DataEngineWindow", request: RunLogPreviewReque
     return dialog
 
 
-def _build_raw_log_entry_widget(window: "DataEngineWindow", entry: "FlowLogEntry", *, run_group: "FlowRunState") -> QFrame:
+def _build_run_log_preview_rows(window: "DataEngineWindow", run_group: "FlowRunState") -> tuple[_RunLogPreviewRow, ...]:
+    pending_step_starts: dict[str, FlowLogEntry] = {}
+    rows: list[_RunLogPreviewRow] = []
+    has_step_entries = any(
+        entry.event is not None and entry.event.step_name is not None
+        for entry in run_group.entries
+    )
+    for entry in run_group.entries:
+        event = entry.event
+        if event is None or event.step_name is None:
+            if (
+                has_step_entries
+                and event is not None
+                and event.step_name is None
+                and event.status in {"success", "failed", "stopped"}
+            ):
+                continue
+            rows.append(_preview_row_for_entry(window, entry))
+            continue
+        if event.status == "started":
+            pending_step_starts[event.step_name] = entry
+            continue
+        if event.status in {"success", "failed", "stopped"} and event.step_name in pending_step_starts:
+            pending_step_starts.pop(event.step_name, None)
+            rows.append(_preview_row_for_entry(window, entry))
+            continue
+        rows.append(_preview_row_for_entry(window, entry))
+    for entry in pending_step_starts.values():
+        rows.append(_preview_row_for_entry(window, entry))
+    return tuple(rows)
+
+
+def _preview_row_for_entry(window: "DataEngineWindow", entry: "FlowLogEntry") -> _RunLogPreviewRow:
+    event = entry.event
+    status_name: str | None = None
+    failed_entry: FlowLogEntry | None = None
+    if event is not None and event.status in {"started", "failed", "success", "stopped"}:
+        status_name = "failed" if event.status == "failed" else "started" if event.status == "started" else "finished"
+        if event.status == "failed":
+            failed_entry = entry
+    duration_text = None
+    if event is not None and isinstance(event.elapsed_seconds, (int, float)):
+        duration_text = format_seconds(event.elapsed_seconds)
+    return _RunLogPreviewRow(
+        entry=entry,
+        message_html=_format_preview_log_message(entry),
+        duration_text=duration_text,
+        status_name=status_name,
+        failed_entry=failed_entry,
+    )
+
+
+def _format_preview_log_message(entry: "FlowLogEntry") -> str:
+    from html import escape
+
+    event = entry.event
+    if event is None:
+        return escape(entry.line)
+    flow_name = escape(event.flow_name)
+    source_label = escape(event.source_label)
+    status = escape(event.status)
+    has_source = event.source_label not in {"", "-"}
+    if event.step_name is None:
+        if has_source:
+            return f"{flow_name} &gt; {source_label} &gt; <i>{status}</i>"
+        return f"{flow_name} &gt; <i>{status}</i>"
+    step_name = escape(event.step_name.replace(":", "::", 1))
+    if has_source:
+        return f"{flow_name} &gt; {source_label} &gt; <b>{step_name}</b> - <i>{status}</i>"
+    return f"{flow_name} &gt; <b>{step_name}</b> - <i>{status}</i>"
+
+
+def _build_raw_log_entry_widget(window: "DataEngineWindow", row: _RunLogPreviewRow, *, run_group: "FlowRunState") -> QFrame:
     frame = QFrame()
     frame.setObjectName("rawLogRow")
     frame.setMinimumHeight(40)
@@ -77,20 +166,24 @@ def _build_raw_log_entry_widget(window: "DataEngineWindow", entry: "FlowLogEntry
     layout.setContentsMargins(8, 6, 8, 6)
     layout.setSpacing(10)
 
-    timestamp = QLabel(entry.created_at_utc.astimezone().strftime("%I:%M:%S %p"))
+    timestamp = QLabel(row.entry.created_at_utc.astimezone().strftime("%I:%M:%S %p"))
     timestamp.setObjectName("rawLogTimestamp")
     make_label_selectable(timestamp)
     layout.addWidget(timestamp, 0, Qt.AlignmentFlag.AlignVCenter)
 
-    message = QLabel(window._format_raw_log_message(entry))
+    message = QLabel(row.message_html)
     message.setObjectName("rawLogMessage")
     message.setTextFormat(Qt.TextFormat.RichText)
     message.setWordWrap(False)
     make_label_selectable(message)
     layout.addWidget(message, 1, Qt.AlignmentFlag.AlignVCenter)
 
-    event = entry.event
-    layout.addStretch(0)
+    duration = QLabel(row.duration_text or "")
+    duration.setObjectName("logDuration")
+    duration.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    duration.setVisible(row.duration_text is not None)
+    layout.addWidget(duration, 0, Qt.AlignmentFlag.AlignVCenter)
+
     inspect_slot = QWidget()
     inspect_slot.setObjectName("rawLogInspectSlot")
     inspect_slot.setFixedWidth(108)
@@ -112,28 +205,31 @@ def _build_raw_log_entry_widget(window: "DataEngineWindow", entry: "FlowLogEntry
     icon_slot_layout.setSpacing(0)
     icon_slot_layout.addStretch(1)
 
-    if event is not None:
-        if event.status == "failed":
-            inspect_button.setEnabled(True)
-            inspect_button.clicked.connect(
-                lambda _checked=False, group=run_group, failed_entry=entry: window._show_run_error_details(group, failed_entry)
+    if row.failed_entry is not None:
+        inspect_button.setEnabled(True)
+        inspect_button.clicked.connect(
+            lambda _checked=False, group=run_group, failed_entry=row.failed_entry: window._show_run_error_details(group, failed_entry)
+        )
+    if row.status_name is not None:
+        status_icon = QLabel()
+        status_icon.setObjectName("rawLogStatusIcon")
+        fill = window._LOG_ICON_COLORS.get(row.status_name, window._group_icon_color().name())
+        status_icon.setPixmap(
+            render_svg_icon_pixmap(
+                icon_name=window._LOG_ICON_NAMES[row.status_name],
+                size=14,
+                device_pixel_ratio=window.devicePixelRatioF(),
+                fill_color=fill,
+                default_fill_color=window._group_icon_color(),
             )
-        if event.status in {"started", "failed", "success"}:
-            status_name = "failed" if event.status == "failed" else "started" if event.status == "started" else "finished"
-            status_icon = QLabel()
-            status_icon.setObjectName("rawLogStatusIcon")
-            fill = window._LOG_ICON_COLORS.get(status_name, window._group_icon_color().name())
-            status_icon.setPixmap(
-                render_svg_icon_pixmap(
-                    icon_name=window._LOG_ICON_NAMES[status_name],
-                    size=14,
-                    device_pixel_ratio=window.devicePixelRatioF(),
-                    fill_color=fill,
-                    default_fill_color=window._group_icon_color(),
-                )
-            )
-            status_icon.setToolTip(event.status.title())
-            icon_slot_layout.addWidget(status_icon, 0, Qt.AlignmentFlag.AlignVCenter)
+        )
+        tooltip = (
+            row.failed_entry.event.status.title()
+            if row.failed_entry is not None and row.failed_entry.event is not None
+            else row.status_name.title()
+        )
+        status_icon.setToolTip(tooltip)
+        icon_slot_layout.addWidget(status_icon, 0, Qt.AlignmentFlag.AlignVCenter)
 
     layout.addWidget(inspect_slot, 0, Qt.AlignmentFlag.AlignVCenter)
     layout.addWidget(icon_slot, 0, Qt.AlignmentFlag.AlignVCenter)

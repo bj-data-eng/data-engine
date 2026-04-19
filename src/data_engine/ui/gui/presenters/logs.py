@@ -11,8 +11,6 @@ from data_engine.views import (
     build_selected_flow_presentation,
     format_raw_log_message as shared_format_raw_log_message,
 )
-from data_engine.ui.gui.widgets.logs import build_log_run_widget
-
 if TYPE_CHECKING:
     from data_engine.domain import FlowLogEntry, FlowRunState
     from data_engine.ui.gui.app import DataEngineWindow
@@ -38,7 +36,28 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
     previous_maximum = scrollbar.maximum()
 
     card = window.flow_cards.get(window.selected_flow_name or "")
-    run_groups = window.history_query_service.list_flow_runs(window.runtime_binding.log_store, flow_name=(card.name if card is not None else None))
+    current_flow_name = card.name if card is not None else None
+    current_entry_count = len(window.log_store.entries_for_flow(current_flow_name))
+    if (
+        current_flow_name is not None
+        and current_flow_name == window._cached_selected_flow_run_groups_flow_name
+        and current_entry_count == window._cached_selected_flow_entry_count
+        and not window._selected_flow_run_groups_dirty
+    ):
+        run_groups = window._cached_selected_flow_run_groups
+    else:
+        run_groups = tuple(
+            window.history_query_service.list_flow_runs(
+                window.runtime_binding.log_store,
+                flow_name=current_flow_name,
+            )
+        )
+        window._cached_selected_flow_run_groups = run_groups
+        window._cached_selected_flow_run_groups_flow_name = current_flow_name
+        window._cached_selected_flow_entry_count = current_entry_count
+        window._selected_flow_run_groups_dirty = False
+    window._selected_flow_has_logs_flow_name = current_flow_name
+    window._selected_flow_has_logs = bool(run_groups)
     workspace_snapshot = getattr(window, "workspace_snapshot", None)
     presentation = build_selected_flow_presentation(
         card=card,
@@ -58,11 +77,18 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
     )
     visible_run_key_signature = presentation.run_group_signature
     visible_row_signature = tuple(_row_signature(run_group) for run_group in presentation.visible_run_groups)
-    current_flow_name = card.name if card is not None else None
     if (
         current_flow_name == window._last_log_view_flow_name
         and visible_row_signature == window._last_log_view_signature
     ):
+        scrollbar.setValue(
+            next_log_scroll_value(
+                previous_value=previous_value,
+                previous_maximum=previous_maximum,
+                current_maximum=scrollbar.maximum(),
+                force_scroll_to_bottom=force_scroll_to_bottom,
+            )
+        )
         return
 
     window.log_view.setUpdatesEnabled(False)
@@ -71,7 +97,10 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
         and visible_run_key_signature == window._last_log_view_run_keys
         and window.log_view.count() == len(presentation.visible_run_groups)
     ):
+        previous_row_signature = window._last_log_view_signature
         for index, run_group in enumerate(presentation.visible_run_groups):
+            if index < len(previous_row_signature) and previous_row_signature[index] == visible_row_signature[index]:
+                continue
             update_log_run_item(window, index, run_group)
     else:
         window.log_view.clear()
@@ -95,20 +124,15 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
 
 def add_log_run_item(window: "DataEngineWindow", run_group: "FlowRunState") -> None:
     item = QListWidgetItem(run_group.display_label)
-    widget = build_log_run_widget(window, run_group)
-    item.setSizeHint(widget.sizeHint())
+    window.log_view.set_run_group(item, run_group)
     window.log_view.addItem(item)
-    window.log_view.setItemWidget(item, widget)
 
 
 def update_log_run_item(window: "DataEngineWindow", index: int, run_group: "FlowRunState") -> None:
     item = window.log_view.item(index)
     if item is None:
         return
-    widget = build_log_run_widget(window, run_group)
-    item.setText(run_group.display_label)
-    item.setSizeHint(widget.sizeHint())
-    window.log_view.setItemWidget(item, widget)
+    window.log_view.set_run_group(item, run_group)
 
 
 def format_raw_log_message(entry: "FlowLogEntry") -> str:

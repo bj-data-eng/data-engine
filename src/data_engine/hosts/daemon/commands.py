@@ -36,10 +36,28 @@ class DaemonCommandHandler:
             if command == "daemon_status":
                 since_version_raw = payload.get("since_version")
                 since_version = int(since_version_raw) if isinstance(since_version_raw, int | float) else None
-                return {"ok": True, "status": self.state_sync.status_payload(since_version=since_version)}
+                since_event_sequence_raw = payload.get("since_event_sequence")
+                since_event_sequence = (
+                    int(since_event_sequence_raw)
+                    if isinstance(since_event_sequence_raw, int | float)
+                    else None
+                )
+                return {
+                    "ok": True,
+                    "status": self.state_sync.status_payload(
+                        since_version=since_version,
+                        since_event_sequence=since_event_sequence,
+                    ),
+                }
             if command == "wait_for_daemon_status":
                 since_version_raw = payload.get("since_version")
                 since_version = int(since_version_raw) if isinstance(since_version_raw, int | float) else 0
+                since_event_sequence_raw = payload.get("since_event_sequence")
+                since_event_sequence = (
+                    int(since_event_sequence_raw)
+                    if isinstance(since_event_sequence_raw, int | float)
+                    else 0
+                )
                 timeout_ms_raw = payload.get("timeout_ms")
                 timeout_ms = int(timeout_ms_raw) if isinstance(timeout_ms_raw, int | float) else 0
                 timeout_seconds = min(max(timeout_ms / 1000.0, 0.0), 30.0)
@@ -47,6 +65,7 @@ class DaemonCommandHandler:
                     "ok": True,
                     "status": self.state_sync.wait_for_status_payload(
                         since_version=since_version,
+                        since_event_sequence=since_event_sequence,
                         timeout_seconds=timeout_seconds,
                     ),
                 }
@@ -69,7 +88,10 @@ class DaemonCommandHandler:
             if command == "start_engine":
                 return self.runtime_commands.start_engine(request_id=request_id)
             if command == "stop_engine":
-                return self.runtime_commands.stop_engine(request_id=request_id)
+                return self.runtime_commands.stop_engine(
+                    request_id=request_id,
+                    shutdown_when_idle=bool(payload.get("shutdown_when_idle", False)),
+                )
             if command == "stop_flow":
                 return self.runtime_commands.stop_flow(str(payload.get("name", "")), request_id=request_id)
             if command == "shutdown_daemon":

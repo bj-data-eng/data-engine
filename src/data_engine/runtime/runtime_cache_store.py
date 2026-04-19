@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Self
 
+from data_engine.domain.time import utcnow_text
 from data_engine.domain.source_state import SourceSignature
 from data_engine.platform.paths import normalized_path_text, stable_absolute_path
 from data_engine.platform.workspace_models import (
@@ -120,14 +121,15 @@ class RuntimeRunRepository:
         flow_name: str,
         group_name: str,
         source_path: str | None,
-        started_at_utc: str,
+        started_at_utc: str | None,
     ) -> None:
+        effective_started_at_utc = utcnow_text() if started_at_utc is None else started_at_utc
         self._store._connection().execute(
             """
             INSERT INTO runs(run_id, flow_name, group_name, source_path, status, started_at_utc)
             VALUES (?, ?, ?, ?, 'started', ?)
             """,
-            (run_id, flow_name, group_name, source_path, started_at_utc),
+            (run_id, flow_name, group_name, source_path, effective_started_at_utc),
         )
 
     def record_finished(
@@ -147,6 +149,46 @@ class RuntimeRunRepository:
             (status, finished_at_utc, error_text, run_id),
         )
         self.prune_history(retention_days=self._store.HISTORY_RETENTION_DAYS)
+
+    def get(self, run_id: str) -> PersistedRun | None:
+        row = self._store._connection().execute(
+            """
+            SELECT run_id, flow_name, group_name, source_path, status, started_at_utc, finished_at_utc, error_text
+            FROM runs
+            WHERE run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return PersistedRun(
+            run_id=str(row["run_id"]),
+            flow_name=str(row["flow_name"]),
+            group_name=str(row["group_name"]),
+            source_path=row["source_path"],
+            status=str(row["status"]),
+            started_at_utc=str(row["started_at_utc"]),
+            finished_at_utc=row["finished_at_utc"],
+            error_text=row["error_text"],
+        )
+
+    def finish_active(
+        self,
+        *,
+        status: str,
+        finished_at_utc: str,
+        error_text: str | None = None,
+    ) -> int:
+        """Mark all nonterminal runs as finished and return the affected row count."""
+        cursor = self._store._connection().execute(
+            """
+            UPDATE runs
+            SET status = ?, finished_at_utc = ?, error_text = COALESCE(error_text, ?)
+            WHERE status NOT IN ('success', 'failed', 'stopped')
+            """,
+            (status, finished_at_utc, error_text),
+        )
+        return int(cursor.rowcount or 0)
 
     def list(self, *, flow_name: str | None = None) -> tuple[PersistedRun, ...]:
         if flow_name is None:
@@ -298,13 +340,14 @@ class RuntimeStepOutputRepository:
     def __init__(self, store: _RuntimeCacheSchema) -> None:
         self._store = store
 
-    def record_started(self, *, run_id: str, flow_name: str, step_label: str, started_at_utc: str) -> int:
+    def record_started(self, *, run_id: str, flow_name: str, step_label: str, started_at_utc: str | None) -> int:
+        effective_started_at_utc = utcnow_text() if started_at_utc is None else started_at_utc
         cursor = self._store._connection().execute(
             """
             INSERT INTO step_runs(run_id, flow_name, step_label, status, started_at_utc)
             VALUES (?, ?, ?, 'started', ?)
             """,
-            (run_id, flow_name, step_label, started_at_utc),
+            (run_id, flow_name, step_label, effective_started_at_utc),
         )
         return int(cursor.lastrowid)
 
@@ -326,6 +369,48 @@ class RuntimeStepOutputRepository:
             """,
             (status, finished_at_utc, elapsed_ms, error_text, output_path, step_run_id),
         )
+
+    def get(self, step_run_id: int) -> PersistedStepRun | None:
+        row = self._store._connection().execute(
+            """
+            SELECT id, run_id, flow_name, step_label, status, started_at_utc, finished_at_utc, elapsed_ms, error_text, output_path
+            FROM step_runs
+            WHERE id = ?
+            """,
+            (step_run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return PersistedStepRun(
+            id=int(row["id"]),
+            run_id=str(row["run_id"]),
+            flow_name=str(row["flow_name"]),
+            step_label=str(row["step_label"]),
+            status=str(row["status"]),
+            started_at_utc=str(row["started_at_utc"]),
+            finished_at_utc=row["finished_at_utc"],
+            elapsed_ms=row["elapsed_ms"],
+            error_text=row["error_text"],
+            output_path=row["output_path"],
+        )
+
+    def finish_active(
+        self,
+        *,
+        status: str,
+        finished_at_utc: str,
+        error_text: str | None = None,
+    ) -> int:
+        """Mark all nonterminal step rows as finished and return the affected row count."""
+        cursor = self._store._connection().execute(
+            """
+            UPDATE step_runs
+            SET status = ?, finished_at_utc = ?, error_text = COALESCE(error_text, ?)
+            WHERE status NOT IN ('success', 'failed', 'stopped')
+            """,
+            (status, finished_at_utc, error_text),
+        )
+        return int(cursor.rowcount or 0)
 
     def list_for_run(self, run_id: str) -> tuple[PersistedStepRun, ...]:
         rows = self._store._connection().execute(
@@ -497,7 +582,7 @@ class SourceSignatureRepository:
             return True
         if int(row["mtime_ns"]) != signature.mtime_ns or int(row["size_bytes"]) != signature.size_bytes:
             return True
-        return str(row["last_status"]) != "success"
+        return False
 
     def upsert_file_state(
         self,
@@ -852,7 +937,7 @@ class RuntimeExecutionStateRepository:
         self.step_outputs = step_outputs
         self.source_signatures = source_signatures
 
-    def record_run_started(self, *, run_id: str, flow_name: str, group_name: str, source_path: str | None, started_at_utc: str) -> None:
+    def record_run_started(self, *, run_id: str, flow_name: str, group_name: str, source_path: str | None, started_at_utc: str | None = None) -> None:
         self.runs.record_started(
             run_id=run_id,
             flow_name=flow_name,
@@ -864,7 +949,7 @@ class RuntimeExecutionStateRepository:
     def record_run_finished(self, *, run_id: str, status: str, finished_at_utc: str, error_text: str | None = None) -> None:
         self.runs.record_finished(run_id=run_id, status=status, finished_at_utc=finished_at_utc, error_text=error_text)
 
-    def record_step_started(self, *, run_id: str, flow_name: str, step_label: str, started_at_utc: str) -> int:
+    def record_step_started(self, *, run_id: str, flow_name: str, step_label: str, started_at_utc: str | None = None) -> int:
         return self.step_outputs.record_started(run_id=run_id, flow_name=flow_name, step_label=step_label, started_at_utc=started_at_utc)
 
     def record_step_finished(
@@ -952,6 +1037,34 @@ class RuntimeCacheLedger(_RuntimeCacheSchema):
             raise
         else:
             connection.commit()
+
+    def reconcile_orphaned_activity(
+        self,
+        *,
+        status: str,
+        finished_at_utc: str,
+        error_text: str | None = None,
+    ) -> tuple[int, int]:
+        """Mark orphaned nonterminal runs and steps as terminal and return affected counts."""
+        connection = self._connection()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            run_count = self.runs.finish_active(
+                status=status,
+                finished_at_utc=finished_at_utc,
+                error_text=error_text,
+            )
+            step_count = self.step_outputs.finish_active(
+                status=status,
+                finished_at_utc=finished_at_utc,
+                error_text=error_text,
+            )
+        except Exception:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+        return run_count, step_count
 
 
 __all__ = [

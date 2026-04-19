@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.primitives import FlowContext
 from data_engine.runtime.execution.single import FlowRuntime, RuntimeCacheLedgerService, default_runtime_cache_ledger_service
-from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
+from data_engine.services.runtime_ports import RuntimeCacheStore
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow
@@ -26,10 +26,11 @@ class GroupedFlowRuntime:
         runtime_stop_event: threading.Event | None = None,
         flow_stop_event: threading.Event | None = None,
         status_callback: Callable[[str], None] | None = None,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
         runtime_ledger_service: RuntimeCacheLedgerService | None = None,
-        runtime_ledger_factory: Callable[[], RuntimeCacheLedger] | None = None,
+        runtime_ledger_factory: Callable[[], RuntimeCacheStore] | None = None,
         run_stop_controller: RuntimeStopController | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         self.flows = tuple(flows)
         self.continuous = continuous
@@ -37,6 +38,7 @@ class GroupedFlowRuntime:
         self.flow_stop_event = flow_stop_event
         self.run_stop_controller = run_stop_controller or RuntimeStopController()
         self.status_callback = status_callback
+        self.workspace_id = workspace_id
         self._runtime_ledger_service = runtime_ledger_service or default_runtime_cache_ledger_service()
         self._runtime_ledger_factory = runtime_ledger_factory or self._runtime_ledger_service.open_runtime_cache_ledger
         self._owns_runtime_ledger = runtime_ledger is None
@@ -55,6 +57,7 @@ class GroupedFlowRuntime:
                 runtime_ledger=self.runtime_ledger,
                 runtime_ledger_service=self._runtime_ledger_service,
                 run_stop_controller=self.run_stop_controller,
+                workspace_id=self.workspace_id,
             ).run()
 
         results_by_group: dict[str, list[FlowContext]] = {name: [] for name in grouped}
@@ -75,6 +78,7 @@ class GroupedFlowRuntime:
                     runtime_ledger_service=self._runtime_ledger_service,
                     runtime_ledger_factory=self._runtime_ledger_factory,
                     run_stop_controller=self.run_stop_controller,
+                    workspace_id=self.workspace_id,
                 )
                 results_by_group[group_name] = runtime.run()
             except Exception as exc:  # pragma: no cover

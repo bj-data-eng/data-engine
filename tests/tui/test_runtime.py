@@ -4,8 +4,9 @@ from dataclasses import replace
 
 import pytest
 
-from data_engine.domain import RuntimeSessionState
+from data_engine.domain import ActiveRunState, FlowActivityState, RuntimeSessionState, RuntimeStepEvent
 from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
+from data_engine.services.daemon_state import DaemonLaneUpdate, DaemonUpdateBatch
 from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, RunLiveSnapshot, WorkspaceSnapshot
 
 from tests.tui.support import (
@@ -23,7 +24,14 @@ from tests.tui.support import (
 async def test_tui_disables_run_and_start_when_workspace_not_owned():
     app = make_tui()
     async with app.run_test():
-        app.runtime_session = replace(app.runtime_session, workspace_owned=False, leased_by_machine_id="other-host")
+        app.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=app.workspace_paths.workspace_id,
+            version=1,
+            control=ControlSnapshot(state="leased", leased_by_machine_id="other-host"),
+            engine=EngineSnapshot(state="idle", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
         app._refresh_buttons()
 
         assert app.query_one("#run-once").disabled is True
@@ -183,11 +191,11 @@ def test_tui_daemon_wait_worker_schedules_sync_when_projection_changes(monkeypat
         return next_snapshot
 
     app.daemon_state_service.wait_for_update = _wait_for_update
-    monkeypatch.setattr(app, "_schedule_daemon_update_sync", lambda: scheduled.append("sync") or app.daemon_subscription.stop())
+    monkeypatch.setattr(app, "_schedule_daemon_update_batch", lambda batch: scheduled.append(batch.snapshot.projection_version) or app.daemon_subscription.stop())
 
     app.runtime_controller.daemon_wait_worker(app)
 
-    assert scheduled == ["sync"]
+    assert scheduled == [2]
 
 
 def test_tui_daemon_wait_worker_skips_sync_when_projection_is_unchanged(monkeypatch):
@@ -213,11 +221,81 @@ def test_tui_daemon_wait_worker_skips_sync_when_projection_is_unchanged(monkeypa
         return previous_snapshot
 
     app.daemon_state_service.wait_for_update = _wait_for_update
-    monkeypatch.setattr(app, "_schedule_daemon_update_sync", lambda: scheduled.append("sync"))
+    monkeypatch.setattr(app, "_schedule_daemon_update_batch", lambda batch: scheduled.append(batch.snapshot.projection_version))
 
     app.runtime_controller.daemon_wait_worker(app)
 
     assert scheduled == []
+
+
+@pytest.mark.anyio
+async def test_tui_apply_daemon_update_batch_streams_step_events_without_log_rebuild():
+    app = make_tui()
+    async with app.run_test():
+        app.selected_flow_name = "poller"
+        app.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=app.workspace_paths.workspace_id,
+            version=8,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+        app.runtime_session = RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=False)
+        app._pending_daemon_update_batch = DaemonUpdateBatch(
+            snapshot=WorkspaceDaemonSnapshot(
+                live=True,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=True,
+                runtime_stopping=False,
+                manual_runs=(),
+                last_checkpoint_at_utc=None,
+                source="daemon",
+                projection_version=9,
+                active_runs=(
+                    ActiveRunState(
+                        run_id="run-1",
+                        flow_name="poller",
+                        group_name="Imports",
+                        source_path="claims.xlsx",
+                        state="running",
+                        current_step_name="Read Excel",
+                        current_step_started_at_utc="2026-04-18T12:00:00+00:00",
+                    ),
+                ),
+                flow_activity=(FlowActivityState(flow_name="poller", active_run_count=1, engine_run_count=1),),
+            ),
+            updates=(
+                DaemonLaneUpdate("run_lifecycle", flow_names=("poller",), run_ids=("run-1",)),
+                DaemonLaneUpdate(
+                    "step_activity",
+                    flow_names=("poller",),
+                    run_ids=("run-1",),
+                    step_events=(
+                        RuntimeStepEvent(
+                            run_id="run-1",
+                            flow_name="poller",
+                            step_name="Read Excel",
+                            source_label="claims.xlsx",
+                            status="started",
+                            elapsed_seconds=None,
+                        ),
+                    ),
+                ),
+            ),
+            requires_full_sync=False,
+        )
+
+        def _fail_rebuild(*args, **kwargs):
+            raise AssertionError("nonterminal step lane should not rebuild from logs")
+
+        app.runtime_controller._refresh_runtime_projection_from_logs = _fail_rebuild
+
+        app._apply_daemon_update_batch()
+
+        assert app.operation_tracker.row_state("poller", "Read Excel").status == "running"
+        assert app.workspace_snapshot.active_runs["run-1"].current_step_name == "Read Excel"
 
 
 @pytest.mark.anyio

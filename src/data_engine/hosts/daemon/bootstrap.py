@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from data_engine.domain.time import utcnow_text
 from data_engine.hosts.daemon.client import _recover_broken_local_lease, _should_force_recover_local_lease
 from data_engine.hosts.daemon.constants import APP_VERSION, STALE_AFTER_SECONDS
 from data_engine.hosts.daemon.ownership import release_workspace_claim
@@ -59,6 +60,16 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
         app_version=APP_VERSION,
     )
     shared_state.hydrate_local_runtime(service.paths, service.runtime_cache_ledger)
+    orphaned_run_count, orphaned_step_count = service.runtime_cache_ledger.reconcile_orphaned_activity(
+        status="stopped",
+        finished_at_utc=utcnow_text(),
+        error_text="Recovered after daemon restart.",
+    )
+    if orphaned_run_count or orphaned_step_count:
+        service._debug_log(
+            "reconciled orphaned runtime rows"
+            f" runs={orphaned_run_count} steps={orphaned_step_count}"
+        )
     service._update_daemon_state(status="starting")
     service._checkpoint_once(status="idle")
     with service._state_lock:

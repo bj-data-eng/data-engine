@@ -271,6 +271,24 @@ def test_format_raw_log_message_handles_flow_level_event_with_escaped_source():
     assert format_raw_log_message(entry) == "claims_summary &gt; input&lt;1&gt;.xlsx &gt; <i>success</i>"
 
 
+def test_format_raw_log_message_includes_elapsed_duration_when_present():
+    entry = FlowLogEntry(
+        line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=success elapsed=1.0",
+        kind="runtime",
+        flow_name="claims_summary",
+        event=RuntimeStepEvent(
+            run_id="abc",
+            flow_name="claims_summary",
+            step_name="Collect Claim Files",
+            source_label="input.xlsx",
+            status="success",
+            elapsed_seconds=1.0,
+        ),
+    )
+
+    assert format_raw_log_message(entry).endswith("<i>success</i> (1.0s)")
+
+
 def test_format_raw_log_message_escapes_html_in_unstructured_lines_and_step_names():
     plain = FlowLogEntry(line="<b>alert</b>", kind="system", flow_name=None)
     structured = FlowLogEntry(
@@ -341,7 +359,7 @@ def test_action_state_builders_cover_control_and_runtime_branches():
     assert tui.refresh_disabled is True
     assert tui.run_once_disabled is True
     assert tui.start_engine_disabled is True
-    assert tui.stop_engine_disabled is False
+    assert tui.stop_engine_disabled is True
     assert tui.view_log_disabled is False
 
 
@@ -364,7 +382,8 @@ def test_action_state_builders_cover_idle_control_available_branches():
     assert gui.flow_run_state == "run"
     assert gui.engine_enabled is False
     assert gui.engine_label == "Start Engine"
-    assert gui.request_control_enabled is True
+    assert gui.request_control_visible is True
+    assert gui.request_control_enabled is False
     assert tui.refresh_disabled is False
     assert tui.run_once_disabled is False
     assert tui.start_engine_disabled is False

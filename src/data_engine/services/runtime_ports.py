@@ -9,10 +9,14 @@ from data_engine.runtime.ledger_models import PersistedFileState, PersistedLogEn
 
 
 class RuntimeRunReader(Protocol):
+    def get(self, run_id: str): ...
+
     def list(self, *, flow_name: str | None = None) -> tuple[PersistedRun, ...]: ...
 
 
 class RuntimeStepOutputReader(Protocol):
+    def get(self, step_run_id: int): ...
+
     def list_for_run(self, run_id: str) -> tuple[PersistedStepRun, ...]: ...
 
     def list(
@@ -56,8 +60,17 @@ class RuntimeExecutionStateWriter(Protocol):
         flow_name: str,
         group_name: str,
         source_path: str | None,
-        started_at_utc: str,
+        started_at_utc: str | None = None,
     ) -> None: ...
+
+    def record_step_started(
+        self,
+        *,
+        run_id: str,
+        flow_name: str,
+        step_label: str,
+        started_at_utc: str | None = None,
+    ) -> int: ...
 
 
 class RuntimeCacheStore(Protocol):

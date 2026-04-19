@@ -32,6 +32,7 @@ class FlowLogEntry:
     kind: LogKind
     event: RuntimeStepEvent | None = None
     flow_name: str | None = None
+    workspace_id: str | None = None
     created_at_utc: datetime = field(default_factory=lambda: datetime.now(UTC))
     persisted_id: int | None = None
 
@@ -51,11 +52,12 @@ class FlowLogEntry:
             event.status,
             event.elapsed_seconds,
         ) if event is not None else None
+        created_at_key = None if event is not None and event.run_id is not None else self.created_at_utc
         return (
             self.kind,
             self.flow_name,
             self.line,
-            self.created_at_utc,
+            created_at_key,
             event_key,
         )
 

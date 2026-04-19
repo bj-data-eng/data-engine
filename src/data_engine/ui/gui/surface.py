@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
 
+from data_engine.platform.identity import APP_INTERNAL_ID
 from data_engine.ui.gui.bootstrap import GuiServices, build_gui_services, default_gui_service_kwargs
 
 if TYPE_CHECKING:
@@ -44,6 +45,7 @@ def handle_show_event(window: "DataEngineWindow", event: "QShowEvent") -> None:
         window._auto_daemon_enabled = True
         QTimer.singleShot(0, window._ensure_daemon_started)
     window._ensure_daemon_wait_worker()
+    QTimer.singleShot(0, window._sync_from_daemon)
 
 
 def handle_close_event(window: "DataEngineWindow", event: "QCloseEvent") -> None:
@@ -58,7 +60,7 @@ def handle_close_event(window: "DataEngineWindow", event: "QCloseEvent") -> None
             pass
     log_handler = getattr(window, "log_handler", None)
     if log_handler is not None:
-        logging.getLogger("data_engine").removeHandler(log_handler)
+        logging.getLogger(APP_INTERNAL_ID).removeHandler(log_handler)
     runtime_stop_event = getattr(window, "engine_runtime_stop_event", None)
     if runtime_stop_event is not None:
         runtime_stop_event.set()
@@ -189,14 +191,15 @@ def poll_log_queue(window: "DataEngineWindow") -> None:
             entry = window.log_queue.get_nowait()
         except Empty:
             break
+        if entry.workspace_id != window.workspace_paths.workspace_id:
+            processed += 1
+            continue
         window.log_service.append_entry(window.runtime_binding.log_store, entry)
         if log_matches_selection(window, entry):
             selected_flow_dirty = True
             action_buttons_dirty = True
         elif entry.kind == "flow":
             action_buttons_dirty = True
-        if entry.event is not None:
-            window._apply_runtime_event(entry.event)
         processed += 1
     if selected_flow_dirty or action_buttons_dirty:
         schedule_ui_refresh(window, log_view=selected_flow_dirty, action_buttons=action_buttons_dirty)

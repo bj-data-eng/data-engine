@@ -33,8 +33,8 @@ def status_color_name(state: str) -> str:
     return shared_status_color_name(state)
 
 
-def icon_label(icon: QIcon, size: int = 18) -> QLabel:
-    label = QLabel()
+def icon_label(icon: QIcon, size: int = 18, *, parent: QFrame | None = None) -> QLabel:
+    label = QLabel(parent)
     label.setObjectName("sidebarIcon")
     pixmap = icon.pixmap(size, size)
     label.setPixmap(QPixmap(pixmap))
@@ -45,7 +45,7 @@ def icon_label(icon: QIcon, size: int = 18) -> QLabel:
 
 def build_group_row_widget(window: "DataEngineWindow", group_name: str, entries: list["QtFlowCard"]) -> QFrame:
     group_display = GroupRowDisplay.from_group(group_name, entries, window.flow_states)
-    frame = QFrame()
+    frame = QFrame(window.sidebar_content)
     frame.setObjectName("sidebarGroupRow")
     frame.setProperty("groupName", group_name)
     frame.setProperty("hovered", False)
@@ -53,7 +53,7 @@ def build_group_row_widget(window: "DataEngineWindow", group_name: str, entries:
     row = QHBoxLayout(frame)
     row.setContentsMargins(0, 8, 0, 2)
     row.setSpacing(8)
-    icon = QLabel()
+    icon = QLabel(frame)
     icon.setObjectName("sidebarIcon")
     icon.setPixmap(window._render_group_icon_pixmap(group_name, 16))
     icon.setFixedSize(24, 24)
@@ -63,9 +63,9 @@ def build_group_row_widget(window: "DataEngineWindow", group_name: str, entries:
     text_col = QVBoxLayout()
     text_col.setContentsMargins(0, 0, 0, 0)
     text_col.setSpacing(1)
-    title = QLabel(group_display.title)
+    title = QLabel(group_display.title, frame)
     title.setObjectName("sidebarGroupTitle")
-    subtitle = QLabel(group_display.secondary)
+    subtitle = QLabel(group_display.secondary, frame)
     subtitle.setObjectName("sidebarGroupMeta")
     text_col.addWidget(title)
     text_col.addWidget(subtitle)
@@ -77,7 +77,7 @@ def build_group_row_widget(window: "DataEngineWindow", group_name: str, entries:
 
 def build_flow_row_widget(window: "DataEngineWindow", card: "QtFlowCard") -> QFrame:
     flow_display = FlowRowDisplay.from_card(card, window.flow_states.get(card.name, card.state), primary="name")
-    frame = QFrame()
+    frame = QFrame(window.sidebar_content)
     frame.setObjectName("sidebarFlowRow")
     frame.setProperty("selected", False)
     frame.setProperty("hovered", False)
@@ -85,23 +85,23 @@ def build_flow_row_widget(window: "DataEngineWindow", card: "QtFlowCard") -> QFr
     row = QHBoxLayout(frame)
     row.setContentsMargins(12, 4, 8, 4)
     row.setSpacing(10)
-    number = QLabel("00")
+    number = QLabel("00", frame)
     number.setObjectName("sidebarFlowNumber")
     row.addWidget(number)
 
     text_col = QVBoxLayout()
     text_col.setContentsMargins(0, 0, 0, 0)
     text_col.setSpacing(1)
-    title = QLabel(flow_primary_text(card))
+    title = QLabel(flow_primary_text(card), frame)
     title.setObjectName("sidebarFlowCode")
-    subtitle = QLabel(flow_display.secondary)
+    subtitle = QLabel(flow_display.secondary, frame)
     subtitle.setObjectName("sidebarFlowMeta")
     subtitle.setProperty("stateColor", flow_display.state_color)
     text_col.addWidget(title)
     text_col.addWidget(subtitle)
     row.addLayout(text_col, 1)
 
-    state_dot = QLabel("\u25cf")
+    state_dot = QLabel("\u25cf", frame)
     state_dot.setObjectName("sidebarStateDot")
     state_dot.setProperty("stateColor", flow_display.state_color)
     state_dot.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)

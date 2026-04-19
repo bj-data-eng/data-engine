@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from data_engine.domain import OperatorActionContext, SelectedFlowState
+from data_engine.domain import OperatorActionContext, PendingWorkspaceActionOverlay, SelectedFlowState
 
 
 class ActionStateApplication:
@@ -23,6 +23,7 @@ class ActionStateApplication:
         workspace_available: bool = True,
         selected_run_group_present: bool = False,
         local_request_pending: bool = False,
+        overlay: PendingWorkspaceActionOverlay | None = None,
     ) -> OperatorActionContext:
         """Return one operator action context from current runtime and selection state."""
         selected_flow = SelectedFlowState.from_runtime(
@@ -42,6 +43,7 @@ class ActionStateApplication:
             workspace_available=workspace_available,
             selected_run_group_present=selected_run_group_present,
             local_request_pending=local_request_pending,
+            overlay=PendingWorkspaceActionOverlay() if overlay is None else overlay,
         )
 
 

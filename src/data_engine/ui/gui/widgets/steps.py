@@ -32,11 +32,11 @@ def set_operation_cards(window: "DataEngineWindow", operation_items: tuple[str, 
         window.operation_row_widgets = []
 
     if not operation_items:
-        empty = QFrame()
+        empty = QFrame(window.operation_container)
         empty.setObjectName("operationCard")
         row = QHBoxLayout(empty)
         row.setContentsMargins(12, 9, 12, 9)
-        label = QLabel("No steps configured.")
+        label = QLabel("No steps configured.", empty)
         label.setObjectName("bodyText")
         row.addWidget(label)
         window.operation_layout.insertWidget(0, empty)
@@ -44,24 +44,24 @@ def set_operation_cards(window: "DataEngineWindow", operation_items: tuple[str, 
         return
 
     for index, name in enumerate(operation_items, start=1):
-        card = QFrame()
+        card = QFrame(window.operation_container)
         card.setObjectName("operationCard")
         row = QHBoxLayout(card)
         row.setContentsMargins(12, 9, 12, 9)
         row.setSpacing(10)
-        step = QLabel(f"{index:02d}")
+        step = QLabel(f"{index:02d}", card)
         step.setObjectName("operationStep")
-        title = QLabel(format_operation_title(name))
+        title = QLabel(format_operation_title(name), card)
         title.setObjectName("operationTitle")
         title.setTextFormat(Qt.TextFormat.RichText)
-        duration = QLabel("")
+        duration = QLabel("", card)
         duration.setObjectName("operationDuration")
         duration.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         inspect_button: QPushButton | None = None
         row.addWidget(step)
         row.addWidget(title, 1)
         if window._is_inspectable_operation(name):
-            inspect_button = QPushButton("Inspect")
+            inspect_button = QPushButton("Inspect", card)
             inspect_button.setObjectName("inspectOutputButton")
             inspect_button.clicked.connect(lambda _checked=False, operation_name=name: window._inspect_step_output(operation_name))
             row.addWidget(inspect_button)

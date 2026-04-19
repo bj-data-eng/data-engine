@@ -5,6 +5,11 @@ from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, 
 from tests.gui.qt.support import _dispose_window, _make_window
 
 
+class _AliveThread:
+    def is_alive(self) -> bool:
+        return True
+
+
 def test_gui_heartbeat_skips_sync_when_subscription_is_healthy(qapp, monkeypatch):
     window = _make_window()
     sync_calls: list[str] = []
@@ -19,7 +24,9 @@ def test_gui_heartbeat_skips_sync_when_subscription_is_healthy(qapp, monkeypatch
         )
         window.daemon_subscription.last_sync_monotonic = 100.0
         window.daemon_subscription.last_subscription_monotonic = 109.0
+        window.daemon_subscription.thread = _AliveThread()
         monkeypatch.setattr(window.daemon_subscription, "clock", lambda: 110.0)
+        monkeypatch.setattr(window, "_ensure_daemon_wait_worker", lambda: None)
         monkeypatch.setattr(window, "_sync_from_daemon", lambda: sync_calls.append("sync"))
 
         window._heartbeat_daemon_sync()
@@ -45,7 +52,9 @@ def test_gui_heartbeat_resyncs_when_subscription_is_stale(qapp, monkeypatch):
         )
         window.daemon_subscription.last_sync_monotonic = 10.0
         window.daemon_subscription.last_subscription_monotonic = 10.0
+        window.daemon_subscription.thread = _AliveThread()
         monkeypatch.setattr(window.daemon_subscription, "clock", lambda: 40.0)
+        monkeypatch.setattr(window, "_ensure_daemon_wait_worker", lambda: None)
         monkeypatch.setattr(window, "_sync_from_daemon", lambda: sync_calls.append("sync"))
 
         window._heartbeat_daemon_sync()

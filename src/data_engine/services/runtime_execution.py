@@ -40,11 +40,13 @@ class RuntimeExecutionService:
         runtime_ledger: RuntimeCacheStore | None = None,
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
+        workspace_id: str | None = None,
     ) -> RuntimeEngine:
         return self._runtime_engine_type(
             runtime_ledger=runtime_ledger,
             runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
+            workspace_id=workspace_id,
             flow_runtime_type=self._flow_runtime_type,
             grouped_runtime_type=self._grouped_runtime_type,
             run_stop_controller=self._run_stop_controller,
@@ -57,12 +59,14 @@ class RuntimeExecutionService:
         runtime_ledger: RuntimeCacheStore | None = None,
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
+        workspace_id: str | None = None,
     ) -> object:
         """Run one flow as a one-shot execution."""
         return self._engine(
             runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             runtime_ledger=runtime_ledger,
+            workspace_id=workspace_id,
         ).run_once(flow)
 
     def run_source(
@@ -73,12 +77,14 @@ class RuntimeExecutionService:
         runtime_ledger: RuntimeCacheStore | None = None,
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
+        workspace_id: str | None = None,
     ) -> object:
         """Run one flow for a specific source path."""
         return self._engine(
             runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             runtime_ledger=runtime_ledger,
+            workspace_id=workspace_id,
         ).run_source(flow, source_path)
 
     def run_batch(
@@ -88,12 +94,14 @@ class RuntimeExecutionService:
         runtime_ledger: RuntimeCacheStore | None = None,
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
+        workspace_id: str | None = None,
     ) -> object:
         """Run one flow once in batch mode."""
         return self._engine(
             runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             runtime_ledger=runtime_ledger,
+            workspace_id=workspace_id,
         ).run_batch(flow)
 
     def preview(
@@ -102,10 +110,12 @@ class RuntimeExecutionService:
         *,
         use: str | None = None,
         runtime_ledger: RuntimeCacheStore | None = None,
+        workspace_id: str | None = None,
     ) -> object:
         """Preview one flow through the one-shot runtime path."""
         return self._engine(
             runtime_ledger=runtime_ledger,
+            workspace_id=workspace_id,
         ).preview(flow, use=use)
 
     def run_manual(
@@ -115,6 +125,7 @@ class RuntimeExecutionService:
         runtime_ledger: RuntimeCacheStore,
         runtime_stop_event: Event,
         flow_stop_event: Event | None = None,
+        workspace_id: str | None = None,
     ) -> object:
         """Run one flow as a manual one-shot execution."""
         return self.run_once(
@@ -122,6 +133,7 @@ class RuntimeExecutionService:
             runtime_ledger=runtime_ledger,
             runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
+            workspace_id=workspace_id,
         )
 
     def run_continuous(
@@ -130,11 +142,13 @@ class RuntimeExecutionService:
         *,
         runtime_ledger: RuntimeCacheStore | None = None,
         flow_stop_event: Event | None = None,
+        workspace_id: str | None = None,
     ) -> object:
         """Run one flow continuously."""
         return self._engine(
             flow_stop_event=flow_stop_event,
             runtime_ledger=runtime_ledger,
+            workspace_id=workspace_id,
         ).run_continuous(flow)
 
     def run_grouped(
@@ -144,12 +158,14 @@ class RuntimeExecutionService:
         runtime_ledger: RuntimeCacheStore,
         runtime_stop_event: Event,
         flow_stop_event: Event,
+        workspace_id: str | None = None,
     ) -> object:
         """Run grouped automated flows continuously."""
         return self._engine(
             runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             runtime_ledger=runtime_ledger,
+            workspace_id=workspace_id,
         ).run_grouped(flows, continuous=True)
 
     def run_automated(
@@ -159,6 +175,7 @@ class RuntimeExecutionService:
         runtime_ledger: RuntimeCacheStore | None = None,
         runtime_stop_event: Event,
         flow_stop_event: Event,
+        workspace_id: str | None = None,
     ) -> object:
         """Run automated poll and schedule flows through separate host timing surfaces."""
         polling_flows, scheduled_flows = self._split_automated_flows(flows)
@@ -169,6 +186,7 @@ class RuntimeExecutionService:
             scheduler_engine = self._engine(
                 flow_stop_event=flow_stop_event,
                 runtime_ledger=runtime_ledger,
+                workspace_id=workspace_id,
             )
             scheduler_host = self._scheduler_host_factory(runtime_engine=scheduler_engine)
             scheduler_jobs = scheduler_host.rebuild_jobs(scheduled_flows)
@@ -181,6 +199,7 @@ class RuntimeExecutionService:
                     runtime_stop_event=runtime_stop_event,
                     flow_stop_event=flow_stop_event,
                     runtime_ledger=runtime_ledger,
+                    workspace_id=workspace_id,
                 ).run_grouped(polling_flows, continuous=True)
             runtime_stop_event.wait()
             return []
@@ -195,6 +214,7 @@ class RuntimeExecutionService:
         runtime_ledger: RuntimeCacheStore | None = None,
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
+        workspace_id: str | None = None,
     ) -> object:
         """Run grouped automated flows continuously with optional runtime controls."""
         return self.run_automated(
@@ -202,6 +222,7 @@ class RuntimeExecutionService:
             runtime_stop_event=runtime_stop_event or Event(),
             flow_stop_event=flow_stop_event or Event(),
             runtime_ledger=runtime_ledger,
+            workspace_id=workspace_id,
         )
 
     def stop(self, run_id: str, *, flow_stop_event: Event | None = None) -> None:

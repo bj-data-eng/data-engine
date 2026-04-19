@@ -6,6 +6,7 @@ from data_engine.platform.workspace_models import DiscoveredWorkspace
 from data_engine.services.ledger import LedgerService
 from data_engine.services.settings import SettingsService
 from data_engine.services.shared_state import SharedStateService
+from data_engine.services.workspace_io import WorkspaceIoLayer
 from data_engine.services.theme import ThemeService
 from data_engine.services.workspaces import WorkspaceService
 
@@ -132,13 +133,14 @@ def test_shared_state_service_hydrates_local_runtime(monkeypatch, tmp_path):
     paths = resolve_workspace_paths(workspace_root=tmp_path / "workspace")
     calls: list[tuple[object, object]] = []
     ledger = object()
-
+    workspace_io = WorkspaceIoLayer()
     monkeypatch.setattr(
-        "data_engine.services.shared_state.hydrate_local_runtime_state",
+        workspace_io,
+        "hydrate_local_runtime",
         lambda paths_arg, ledger_arg: calls.append((paths_arg, ledger_arg)),
     )
 
-    SharedStateService().hydrate_local_runtime(paths, ledger)
+    SharedStateService(workspace_io=workspace_io).hydrate_local_runtime(paths, ledger)
 
     assert calls == [(paths, ledger)]
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from data_engine.application import OperatorControlApplication, RuntimeApplication
-from data_engine.domain import DaemonLifecyclePolicy, RuntimeSessionState
+from data_engine.domain import DaemonLifecyclePolicy, OperatorActionContext, RuntimeSessionState, SelectedFlowState
 from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 
@@ -100,6 +101,42 @@ def _lease_session() -> RuntimeSessionState:
     )
 
 
+def _action_context(
+    *,
+    runtime_session: RuntimeSessionState,
+    flow_name: str | None = None,
+    group_name: str | None = None,
+    flow_mode: str | None = None,
+    group_active: bool = False,
+    live_truth_known: bool = False,
+    live_manual_running: bool = False,
+    live_manual_run_active: bool = False,
+    engine_state: str = "idle",
+    has_automated_flows: bool = True,
+    workspace_available: bool = True,
+    local_request_pending: bool = False,
+) -> OperatorActionContext:
+    card = None
+    if flow_name is not None:
+        card = SimpleNamespace(name=flow_name, group=group_name, mode=flow_mode, valid=True)
+    return OperatorActionContext(
+        runtime_session=runtime_session,
+        selected_flow=SelectedFlowState(
+            card=card,
+            live_truth_known=live_truth_known,
+            live_manual_running=live_manual_running,
+            group_active=group_active,
+        ),
+        has_automated_flows=has_automated_flows,
+        engine_state=engine_state,
+        engine_truth_known=live_truth_known,
+        live_truth_known=live_truth_known,
+        live_manual_run_active=live_manual_run_active,
+        workspace_available=workspace_available,
+        local_request_pending=local_request_pending,
+    )
+
+
 def test_operator_control_application_blocks_run_when_workspace_is_leased(tmp_path: Path, monkeypatch) -> None:
     app_root = tmp_path / "app"
     workspace_root = tmp_path / "workspace"
@@ -117,11 +154,13 @@ def test_operator_control_application_blocks_run_when_workspace_is_leased(tmp_pa
 
     result = control_app.run_selected_flow(
         paths=paths,
-        runtime_session=_lease_session(),
+        action_context=_action_context(
+            runtime_session=_lease_session(),
+            flow_name="poller",
+            group_name="Examples",
+        ),
         selected_flow_name="poller",
         selected_flow_valid=True,
-        selected_flow_group="Examples",
-        selected_flow_group_active=False,
         blocked_status_text="other-machine currently has control of this workspace.",
     )
 
@@ -183,7 +222,7 @@ def test_operator_control_application_start_engine_uses_verbose_fallback_when_ru
 
     result = control_app.start_engine(
         paths=paths,
-        runtime_session=RuntimeSessionState.empty(),
+        action_context=_action_context(runtime_session=RuntimeSessionState.empty()),
         has_automated_flows=True,
         blocked_status_text="blocked",
     )
@@ -214,11 +253,13 @@ def test_operator_control_application_run_selected_flow_uses_verbose_fallback_wh
 
     result = control_app.run_selected_flow(
         paths=paths,
-        runtime_session=RuntimeSessionState.empty(),
+        action_context=_action_context(
+            runtime_session=RuntimeSessionState.empty(),
+            flow_name="poller",
+            group_name="Examples",
+        ),
         selected_flow_name="poller",
         selected_flow_valid=True,
-        selected_flow_group="Examples",
-        selected_flow_group_active=False,
         blocked_status_text="blocked",
     )
 
@@ -248,16 +289,64 @@ def test_operator_control_application_allows_manual_run_while_engine_is_active_f
 
     result = control_app.run_selected_flow(
         paths=paths,
-        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",)),
+        action_context=_action_context(
+            runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",)),
+            flow_name="manual_claims",
+            group_name="Manual",
+            engine_state="running",
+            live_truth_known=True,
+        ),
         selected_flow_name="manual_claims",
         selected_flow_valid=True,
-        selected_flow_group="Manual",
-        selected_flow_group_active=False,
         blocked_status_text="blocked",
     )
 
     assert result.requested is True
     assert result.sync_after is True
+
+
+def test_operator_control_application_blocks_automated_run_while_engine_is_starting(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app_root = tmp_path / "app"
+    workspace_root = tmp_path / "workspace"
+    monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
+    (workspace_root / "flow_modules").mkdir(parents=True)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    run_calls: list[str] = []
+
+    class _RuntimeApplication:
+        def run_flow(self, paths, *, name: str, wait: bool = False, timeout: float = 2.0):
+            del paths, wait, timeout
+            run_calls.append(name)
+            return type("Result", (), {"ok": True, "error": None, "name": name})()
+
+    control_app = OperatorControlApplication(
+        runtime_application=_RuntimeApplication(),
+        daemon_state_service=_FakeDaemonStateService(
+            _snapshot(live=True, runtime_active=False, source="runtime"),
+            control_state=object(),
+        ),
+    )
+
+    result = control_app.run_selected_flow(
+        paths=paths,
+        action_context=_action_context(
+            runtime_session=RuntimeSessionState.empty(),
+            flow_name="poller",
+            group_name="Claims",
+            flow_mode="poll",
+            engine_state="starting",
+            live_truth_known=True,
+        ),
+        selected_flow_name="poller",
+        selected_flow_valid=True,
+        blocked_status_text="blocked",
+    )
+
+    assert result.requested is False
+    assert run_calls == []
 
 
 def test_operator_control_application_allows_manual_run_while_other_group_manual_is_active(tmp_path: Path, monkeypatch) -> None:
@@ -282,11 +371,15 @@ def test_operator_control_application_allows_manual_run_while_other_group_manual
 
     result = control_app.run_selected_flow(
         paths=paths,
-        runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Imports": "claims2_parallel_poll"}),
+        action_context=_action_context(
+            runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Imports": "claims2_parallel_poll"}),
+            flow_name="example_manual",
+            group_name="Manual",
+            live_truth_known=True,
+            live_manual_run_active=True,
+        ),
         selected_flow_name="example_manual",
         selected_flow_valid=True,
-        selected_flow_group="Manual",
-        selected_flow_group_active=False,
         blocked_status_text="blocked",
     )
 
@@ -321,11 +414,17 @@ def test_operator_control_application_blocks_manual_run_when_selected_group_is_a
 
     result = control_app.run_selected_flow(
         paths=paths,
-        runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Manual": "example_manual"}),
+        action_context=_action_context(
+            runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Manual": "example_manual"}),
+            flow_name="other_manual_flow",
+            group_name="Manual",
+            group_active=True,
+            live_truth_known=True,
+            live_manual_running=True,
+            live_manual_run_active=True,
+        ),
         selected_flow_name="other_manual_flow",
         selected_flow_valid=True,
-        selected_flow_group="Manual",
-        selected_flow_group_active=True,
         blocked_status_text="blocked",
     )
 
@@ -360,8 +459,12 @@ def test_operator_control_application_stop_pipeline_targets_only_active_manual_f
 
     result = control_app.stop_pipeline(
         paths=paths,
-        runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Manual": "example_manual"}),
-        selected_flow_group="Different Group",
+        action_context=_action_context(
+            runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Manual": "example_manual"}),
+            flow_name="different_manual",
+            group_name="Different Group",
+        ),
+        selected_flow_name="different_manual",
         blocked_status_text="blocked",
     )
 
@@ -404,8 +507,17 @@ def test_operator_control_application_stop_pipeline_prefers_selected_manual_flow
 
     result = control_app.stop_pipeline(
         paths=paths,
-        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",)).with_manual_runs_map({"Manual": "manual_review"}),
-        selected_flow_group="Manual",
+        action_context=_action_context(
+            runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",)).with_manual_runs_map({"Manual": "manual_review"}),
+            flow_name="manual_review",
+            group_name="Manual",
+            group_active=True,
+            live_truth_known=True,
+            live_manual_running=True,
+            live_manual_run_active=True,
+            engine_state="running",
+        ),
+        selected_flow_name="manual_review",
         blocked_status_text="blocked",
     )
 
@@ -427,7 +539,10 @@ def test_operator_control_application_blocks_refresh_while_active(tmp_path: Path
 
     result = control_app.refresh_flows(
         paths=paths,
-        runtime_session=RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=True).with_active_runtime_flow_names(("poller",)),
+        action_context=_action_context(
+            runtime_session=RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=True).with_active_runtime_flow_names(("poller",)),
+            engine_state="stopping",
+        ),
         has_authored_workspace=True,
     )
 
@@ -447,7 +562,7 @@ def test_operator_control_application_refreshes_locally_when_no_authored_workspa
 
     result = control_app.refresh_flows(
         paths=paths,
-        runtime_session=RuntimeSessionState.empty(),
+        action_context=_action_context(runtime_session=RuntimeSessionState.empty()),
         has_authored_workspace=False,
     )
 
@@ -468,7 +583,7 @@ def test_operator_control_application_refresh_reports_daemon_warning_but_keeps_r
 
     result = control_app.refresh_flows(
         paths=paths,
-        runtime_session=RuntimeSessionState.empty(),
+        action_context=_action_context(runtime_session=RuntimeSessionState.empty()),
         has_authored_workspace=True,
     )
 

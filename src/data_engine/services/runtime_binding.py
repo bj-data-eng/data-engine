@@ -12,11 +12,11 @@ from data_engine.domain.catalog import FlowCatalogLike
 from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager
 from data_engine.platform.workspace_models import WorkspacePaths
-from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.services.daemon_state import DaemonStateService
 from data_engine.services.ledger import RuntimeControlLedgerService
 from data_engine.services.logs import LogService
 from data_engine.services.runtime_history import RuntimeHistoryService
+from data_engine.services.runtime_io import RuntimeIoLayer, default_runtime_io_layer
 from data_engine.services.runtime_ports import RuntimeCacheStore, RuntimeControlStore
 from data_engine.views.logs import FlowLogStore
 
@@ -92,6 +92,23 @@ class _NullRuntimeExecutionStateRepository:
         """Ignore execution-state writes for an unconfigured workspace selection."""
         del kwargs
 
+    def record_run_finished(self, **kwargs: object) -> None:
+        """Ignore execution-state writes for an unconfigured workspace selection."""
+        del kwargs
+
+    def record_step_started(self, **kwargs: object) -> int:
+        """Ignore execution-state writes for an unconfigured workspace selection."""
+        del kwargs
+        return 0
+
+    def record_step_finished(self, **kwargs: object) -> None:
+        """Ignore execution-state writes for an unconfigured workspace selection."""
+        del kwargs
+
+    def upsert_file_state(self, **kwargs: object) -> None:
+        """Ignore source-state writes for an unconfigured workspace selection."""
+        del kwargs
+
 
 class _NullClientSessionRepository:
     """No-op client-session repository for an unconfigured workspace selection."""
@@ -145,17 +162,19 @@ class WorkspaceRuntimeBindingService:
         log_service: LogService,
         daemon_state_service: DaemonStateService,
         runtime_history_service: RuntimeHistoryService,
+        runtime_io_layer: RuntimeIoLayer | None = None,
     ) -> None:
         self.ledger_service = ledger_service
         self.log_service = log_service
         self.daemon_state_service = daemon_state_service
         self.runtime_history_service = runtime_history_service
+        self.runtime_io_layer = runtime_io_layer or default_runtime_io_layer()
         self._step_output_cache: dict[int, tuple[tuple[object, ...], int | None, StepOutputIndex]] = {}
 
     def open_binding(self, workspace_paths: WorkspacePaths) -> WorkspaceRuntimeBinding:
         """Open one concrete runtime binding for a workspace selection."""
         if workspace_paths.workspace_configured:
-            runtime_cache_ledger = RuntimeCacheLedger(workspace_paths.runtime_cache_db_path)
+            runtime_cache_ledger = self.runtime_io_layer.open_cache_store(workspace_paths.runtime_cache_db_path)
             runtime_control_ledger = self.ledger_service.open_for_workspace(workspace_paths.workspace_root)
         else:
             runtime_cache_ledger = _NullRuntimeCacheLedger()

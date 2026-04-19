@@ -55,6 +55,7 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 
 - Use semi-permanent worker lanes for high-throughput parallel work: `C:\DEV_PROJECT\data-engine-worktrees\mini-1` through `C:\DEV_PROJECT\data-engine-worktrees\mini-6`.
 - The coordinator owns task slicing, architecture decisions, integration, final tests, and commits. Mini workers own bounded implementation or audit tasks inside their assigned lane.
+- Do not stop passively after landing one local fix in an active refactor. When a boundary changes, proactively chase the migration through the surrounding codebase: callers, read models, command gating, tests, and UI surfaces. Prefer finishing the conversion over leaving mixed old/new paths in place.
 - Treat `main` after the latest accepted commit as the source of truth. Before starting a new parallel batch, reset every mini worktree to that accepted commit and confirm each lane is clean.
 - Prefer fresh worker agents per task while reusing the same worktree lane. Keep worker prompts small: objective, lane path, branch name, owned files/modules, tests to run, and expected report format. Do not include broad repo history unless it is directly needed.
 - Use stable lane themes when possible to reduce context reload: runtime/state, scheduler/daemon host, UI boundary, platform compatibility, authoring surface/tests, and audit-only.
@@ -83,6 +84,7 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 
 - Shared workspace state lives inside a workspace under `.workspace_state/`.
 - Machine-local runtime state lives under the local app data runtime artifacts directory.
+- When moving runtime/control behavior to a new architecture, remove redundant fallback paths as you go. Do not leave old session/history/snapshot heuristics in place beside the new event-stream or service-owned truth unless a temporary bridge is explicitly documented and scheduled for removal.
 - The GUI must not create real runtime SQLite bindings for the synthetic unconfigured workspace placeholder.
 - Prefer explicit `runtime_cache_ledger` and `runtime_control_ledger` names in new internal code. Keep the public `RuntimeLedger` and `runtime_ledger` aliases only where needed for API/test compatibility.
 - Do not add internal compatibility shims just to preserve old project-internal call shapes during refactors. Update the affected internal callers to the new boundary instead. Preserve stability for the author-facing surface: flows, flow context, and `data_engine.helpers`.

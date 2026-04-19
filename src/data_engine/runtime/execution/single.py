@@ -18,23 +18,29 @@ from data_engine.runtime.execution.runner import FlowRunExecutionPorts, FlowRunE
 from data_engine.runtime.file_watch import PollingWatcher
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
+from data_engine.services.runtime_io import default_runtime_io_layer
+from data_engine.services.runtime_ports import RuntimeCacheStore
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow as CoreFlow
 
 
-def _open_default_runtime_cache_ledger() -> RuntimeCacheLedger:
+def _open_default_runtime_cache_ledger() -> RuntimeCacheStore:
     """Open the default runtime ledger for authored flow execution."""
-    return RuntimeCacheLedger.open_default()
+    ledger = RuntimeCacheLedger.open_default()
+    try:
+        return default_runtime_io_layer().open_cache_store(ledger.db_path)
+    finally:
+        ledger.close()
 
 
 @dataclass(frozen=True)
 class RuntimeCacheLedgerService:
     """Own how authored flow execution opens its runtime ledger."""
 
-    open_runtime_cache_ledger_func: Callable[[], RuntimeCacheLedger]
+    open_runtime_cache_ledger_func: Callable[[], RuntimeCacheStore]
 
-    def open_runtime_cache_ledger(self) -> RuntimeCacheLedger:
+    def open_runtime_cache_ledger(self) -> RuntimeCacheStore:
         """Open one runtime ledger for authored flow execution."""
         return self.open_runtime_cache_ledger_func()
 
@@ -55,10 +61,11 @@ class FlowRuntime:
         runtime_stop_event: threading.Event | None = None,
         flow_stop_event: threading.Event | None = None,
         status_callback: Callable[[str], None] | None = None,
-        runtime_ledger: RuntimeCacheLedger | None = None,
+        runtime_ledger: RuntimeCacheStore | None = None,
         runtime_ledger_service: RuntimeCacheLedgerService | None = None,
-        runtime_ledger_factory: Callable[[], RuntimeCacheLedger] | None = None,
+        runtime_ledger_factory: Callable[[], RuntimeCacheStore] | None = None,
         run_stop_controller: RuntimeStopController | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         self.flows = tuple(flows)
         self.continuous = continuous
@@ -72,7 +79,7 @@ class FlowRuntime:
         self.runtime_ledger = runtime_ledger or self._runtime_ledger_factory()
         self.context_builder = RuntimeContextBuilder()
         self._queued_log_sink = acquire_queued_runtime_log_sink(self.runtime_ledger.logs)
-        self.log_emitter = RuntimeLogEmitter(self._queued_log_sink)
+        self.log_emitter = RuntimeLogEmitter(self._queued_log_sink, workspace_id=workspace_id)
         self.polling = RuntimePollingSupport(self.runtime_ledger.source_signatures)
         self.run_executor = FlowRunExecutor(
             FlowRunExecutionPorts(

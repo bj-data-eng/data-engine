@@ -5,35 +5,28 @@ from __future__ import annotations
 from typing import Any
 
 from data_engine.platform.workspace_models import WorkspacePaths
-from data_engine.runtime.shared_state import (
-    checkpoint_workspace_state as checkpoint_runtime_workspace_state,
-    claim_workspace as claim_runtime_workspace,
-    hydrate_local_runtime_state,
-    initialize_workspace_state,
-    lease_is_stale,
-    read_control_request,
-    read_lease_metadata,
-    recover_stale_workspace,
-    release_workspace,
-    remove_control_request,
-    remove_lease_metadata,
-    RuntimeSnapshotStore,
-    write_control_request,
-    write_lease_metadata,
-)
+from data_engine.runtime.shared_state import RuntimeSnapshotStore
+from data_engine.services.workspace_io import WorkspaceIoLayer, default_workspace_io_layer
 
 
 class DaemonSharedStateAdapter:
     """Own host-facing access to shared lease, control-request, and snapshot state."""
 
+    def __init__(
+        self,
+        *,
+        workspace_io: WorkspaceIoLayer | None = None,
+    ) -> None:
+        self.workspace_io = workspace_io or default_workspace_io_layer()
+
     def initialize_workspace(self, paths: WorkspacePaths) -> None:
-        initialize_workspace_state(paths)
+        self.workspace_io.initialize_workspace(paths)
 
     def claim_workspace(self, paths: WorkspacePaths) -> bool:
-        return claim_runtime_workspace(paths)
+        return self.workspace_io.claim_workspace(paths)
 
     def release_workspace(self, paths: WorkspacePaths) -> None:
-        release_workspace(paths)
+        self.workspace_io.release_workspace(paths)
 
     def recover_stale_workspace(
         self,
@@ -43,7 +36,7 @@ class DaemonSharedStateAdapter:
         stale_after_seconds: float,
         reclaim: bool = True,
     ) -> bool:
-        return recover_stale_workspace(
+        return self.workspace_io.recover_stale_workspace(
             paths,
             machine_id=machine_id,
             stale_after_seconds=stale_after_seconds,
@@ -51,10 +44,10 @@ class DaemonSharedStateAdapter:
         )
 
     def lease_is_stale(self, paths: WorkspacePaths, *, stale_after_seconds: float) -> bool:
-        return lease_is_stale(paths, stale_after_seconds=stale_after_seconds)
+        return self.workspace_io.lease_is_stale(paths, stale_after_seconds=stale_after_seconds)
 
     def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> None:
-        hydrate_local_runtime_state(paths, ledger)
+        self.workspace_io.hydrate_local_runtime(paths, ledger)
 
     def checkpoint_workspace_state(
         self,
@@ -70,7 +63,7 @@ class DaemonSharedStateAdapter:
         last_checkpoint_at_utc: str,
         app_version: str | None,
     ) -> None:
-        checkpoint_runtime_workspace_state(
+        self.workspace_io.checkpoint_workspace_state(
             paths,
             ledger,
             workspace_id=workspace_id,
@@ -84,8 +77,7 @@ class DaemonSharedStateAdapter:
         )
 
     def read_lease_metadata(self, paths: WorkspacePaths) -> dict[str, Any] | None:
-        metadata = read_lease_metadata(paths)
-        return metadata if isinstance(metadata, dict) else None
+        return self.workspace_io.read_lease_metadata(paths)
 
     def write_lease_metadata(
         self,
@@ -100,7 +92,7 @@ class DaemonSharedStateAdapter:
         last_checkpoint_at_utc: str,
         app_version: str | None,
     ) -> None:
-        write_lease_metadata(
+        self.workspace_io.write_lease_metadata(
             paths,
             workspace_id=workspace_id,
             machine_id=machine_id,
@@ -113,11 +105,10 @@ class DaemonSharedStateAdapter:
         )
 
     def remove_lease_metadata(self, paths: WorkspacePaths) -> None:
-        remove_lease_metadata(paths)
+        self.workspace_io.remove_lease_metadata(paths)
 
     def read_control_request(self, paths: WorkspacePaths) -> dict[str, Any] | None:
-        metadata = read_control_request(paths)
-        return metadata if isinstance(metadata, dict) else None
+        return self.workspace_io.read_control_request(paths)
 
     def write_control_request(
         self,
@@ -130,7 +121,7 @@ class DaemonSharedStateAdapter:
         requester_client_kind: str,
         requested_at_utc: str,
     ) -> None:
-        write_control_request(
+        self.workspace_io.write_control_request(
             paths,
             workspace_id=workspace_id,
             requester_machine_id=requester_machine_id,
@@ -141,7 +132,7 @@ class DaemonSharedStateAdapter:
         )
 
     def remove_control_request(self, paths: WorkspacePaths) -> None:
-        remove_control_request(paths)
+        self.workspace_io.remove_control_request(paths)
 
 
 __all__ = ["DaemonSharedStateAdapter"]

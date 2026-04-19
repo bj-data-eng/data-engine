@@ -70,10 +70,11 @@ def test_daemon_status_returns_unchanged_when_projection_version_matches(tmp_pat
         full_status = service._handle_command({"command": "daemon_status"})  # noqa: SLF001 - direct daemon contract test
         assert full_status["ok"] is True
         version = int(full_status["status"]["projection_version"])
+        event_sequence = int(full_status["status"]["event_sequence"])
         assert version >= 1
 
         unchanged = service._handle_command(  # noqa: SLF001 - direct daemon contract test
-            {"command": "daemon_status", "since_version": version}
+            {"command": "daemon_status", "since_version": version, "since_event_sequence": event_sequence}
         )
 
         assert unchanged["ok"] is True
@@ -81,6 +82,7 @@ def test_daemon_status_returns_unchanged_when_projection_version_matches(tmp_pat
             "workspace_id": "default",
             "daemon_id": service.daemon_id,
             "projection_version": version,
+            "event_sequence": event_sequence,
             "unchanged": True,
         }
     finally:
@@ -99,6 +101,7 @@ def test_wait_for_daemon_status_returns_after_projection_change(tmp_path, monkey
     try:
         initial = service._handle_command({"command": "daemon_status"})  # noqa: SLF001
         version = int(initial["status"]["projection_version"])
+        event_sequence = int(initial["status"]["event_sequence"])
 
         def _refresh_projection() -> None:
             service.runtime_execution_ledger.execution_state.record_run_started(
@@ -114,13 +117,18 @@ def test_wait_for_daemon_status_returns_after_projection_change(tmp_path, monkey
         thread.start()
         try:
             waited = service._handle_command(  # noqa: SLF001
-                {"command": "wait_for_daemon_status", "since_version": version, "timeout_ms": 500}
+                {
+                    "command": "wait_for_daemon_status",
+                    "since_version": version,
+                    "since_event_sequence": event_sequence,
+                    "timeout_ms": 500,
+                }
             )
         finally:
             thread.join(timeout=1.0)
 
         assert waited["ok"] is True
-        assert waited["status"]["projection_version"] > version
+        assert waited["status"]["event_sequence"] > event_sequence
         assert waited["status"]["active_runs"][0]["run_id"] == "run-1"
     finally:
         service._shutdown()  # noqa: SLF001
@@ -445,6 +453,44 @@ def test_daemon_status_includes_active_runs_from_runtime_execution_bridge(tmp_pa
                 "running_step_counts": {"Emit Value": 1},
             }
         ]
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
+def test_initialize_service_reconciles_orphaned_active_runtime_rows(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    ledger = RuntimeCacheLedger(paths.runtime_cache_db_path)
+    started_at = utcnow_text()
+    ledger.execution_state.record_run_started(
+        run_id="run-1",
+        flow_name="demo",
+        group_name="Demo",
+        source_path="claims.xlsx",
+        started_at_utc=started_at,
+    )
+    ledger.execution_state.record_step_started(
+        run_id="run-1",
+        flow_name="demo",
+        step_label="Emit Value",
+        started_at_utc=started_at,
+    )
+    ledger.close()
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        status = service._handle_command({"command": "daemon_status"})  # noqa: SLF001
+
+        assert status["ok"] is True
+        assert status["status"]["active_runs"] == []
+        assert status["status"]["flow_activity"] == []
+        assert service.runtime_cache_ledger.runs.list_active() == ()
+        assert service.runtime_cache_ledger.step_outputs.list_active() == ()
     finally:
         service._shutdown()  # noqa: SLF001
 

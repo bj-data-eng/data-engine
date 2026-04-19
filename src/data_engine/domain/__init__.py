@@ -1,6 +1,6 @@
 """Domain models for Data Engine."""
 
-from data_engine.domain.actions import OperatorActionContext, SelectedFlowState
+from data_engine.domain.actions import OperatorActionContext, PendingWorkspaceActionOverlay, SelectedFlowState
 from data_engine.domain.catalog import FlowCatalogEntry, FlowCatalogLike, FlowCatalogState, default_flow_state, flow_category
 from data_engine.domain.diagnostics import ClassifiedProcessInfo, DoctorCheck, ProcessInfo, WorkspaceLeaseDiagnostic
 from data_engine.domain.details import (
@@ -42,6 +42,7 @@ from data_engine.domain.workspace import WorkspaceRootState, WorkspaceSelectionS
 
 __all__ = [
     "OperatorActionContext",
+    "PendingWorkspaceActionOverlay",
     "SelectedFlowState",
     "FlowCatalogEntry",
     "FlowCatalogLike",

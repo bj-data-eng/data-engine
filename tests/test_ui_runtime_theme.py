@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from queue import Queue
 
-import pytest
-
 from data_engine.domain import FlowLogEntry, RuntimeStepEvent
 from data_engine.platform.theme import GITHUB_DARK, GITHUB_LIGHT
 from data_engine.ui.gui import runtime as gui_runtime
@@ -27,15 +25,17 @@ class _RecordingHandler(gui_runtime.QueueLogHandler):
         self.handled = True
 
 
-@pytest.mark.parametrize("handler_cls", [gui_runtime.QueueLogHandler, tui_runtime.QueueLogHandler])
-def test_queue_log_handlers_emit_flow_and_system_entries(handler_cls):
+def test_gui_queue_log_handler_requires_workspace_scoped_records():
     queue: Queue[FlowLogEntry] = Queue()
-    handler = handler_cls(queue)
+    handler = gui_runtime.QueueLogHandler(queue)
 
     flow_record = logging.makeLogRecord(
-        {"msg": "run=abc flow=claims_poll step=Write Parquet source=C:/input.xlsx status=success elapsed=1.25"}
+        {
+            "msg": "run=abc flow=claims_poll step=Write Parquet source=C:/input.xlsx status=success elapsed=1.25",
+            "workspace_id": "claims2",
+        }
     )
-    system_record = logging.makeLogRecord({"msg": "daemon started at /tmp/data_engine.log"})
+    system_record = logging.makeLogRecord({"msg": "daemon started at /tmp/data_engine.log", "workspace_id": "claims2"})
 
     handler.emit(flow_record)
     handler.emit(system_record)
@@ -61,9 +61,39 @@ def test_queue_log_handlers_emit_flow_and_system_entries(handler_cls):
     assert system_entry.event is None
 
 
+def test_gui_queue_log_handler_drops_unscoped_shared_records():
+    queue: Queue[FlowLogEntry] = Queue()
+    handler = gui_runtime.QueueLogHandler(queue)
+
+    handler.emit(logging.makeLogRecord({"msg": "run=abc flow=claims_poll source=C:/input.xlsx status=started"}))
+
+    assert queue.empty()
+
+
+def test_tui_queue_log_handler_emits_flow_and_system_entries():
+    queue: Queue[FlowLogEntry] = Queue()
+    handler = tui_runtime.QueueLogHandler(queue)
+
+    flow_record = logging.makeLogRecord(
+        {"msg": "run=abc flow=claims_poll step=Write Parquet source=C:/input.xlsx status=success elapsed=1.25"}
+    )
+    system_record = logging.makeLogRecord({"msg": "daemon started at /tmp/data_engine.log"})
+
+    handler.emit(flow_record)
+    handler.emit(system_record)
+
+    flow_entry = queue.get_nowait()
+    system_entry = queue.get_nowait()
+
+    assert flow_entry.kind == "flow"
+    assert flow_entry.flow_name == "claims_poll"
+    assert flow_entry.line == "claims_poll  Write Parquet  success  input.xlsx"
+    assert system_entry.kind == "system"
+
+
 def test_queue_log_handler_calls_handle_error_when_queue_write_fails():
     handler = _RecordingHandler(_FailingQueue())
-    record = logging.makeLogRecord({"msg": "run=abc flow=alpha source=/tmp/input.xlsx status=started"})
+    record = logging.makeLogRecord({"msg": "run=abc flow=alpha source=/tmp/input.xlsx status=started", "workspace_id": "claims2"})
 
     handler.emit(record)
 

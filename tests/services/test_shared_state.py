@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import polars as pl
@@ -572,5 +573,49 @@ def test_read_lease_metadata_retries_after_transient_parquet_error(tmp_path, mon
 
     metadata = read_lease_metadata(paths)
 
+    assert metadata is not None
+    assert metadata["workspace_id"] == "default"
+
+
+def test_checkpoint_workspace_state_retries_atomic_replace_after_access_denied(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+    claim_workspace(paths)
+
+    ledger = RuntimeCacheLedger(paths.runtime_db_path)
+    started = utcnow_text()
+
+    original_replace = os.replace
+    attempts = {"count": 0}
+
+    def flaky_replace(source, target):
+        if Path(target) == paths.lease_metadata_path and attempts["count"] == 0:
+            attempts["count"] += 1
+            error = PermissionError(13, "Access is denied")
+            error.winerror = 5
+            raise error
+        return original_replace(source, target)
+
+    monkeypatch.setattr("data_engine.helpers.polars.os.replace", flaky_replace)
+
+    checkpoint_workspace_state(
+        paths,
+        ledger,
+        workspace_id="default",
+        machine_id="machine-a",
+        daemon_id="daemon-a",
+        pid=101,
+        status="idle",
+        started_at_utc=started,
+        last_checkpoint_at_utc=started,
+        app_version="0.1.0",
+    )
+
+    metadata = read_lease_metadata(paths)
+
+    assert attempts["count"] == 1
     assert metadata is not None
     assert metadata["workspace_id"] == "default"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from data_engine.domain import FlowCatalogEntry, FlowLogEntry, OperationSessionState, RuntimeStepEvent
 from data_engine.services.runtime_state import RunLiveSnapshot
 from data_engine.views import build_selected_flow_presentation
@@ -74,7 +76,7 @@ def test_selected_flow_presentation_prefers_daemon_live_runs_for_nonterminal_his
 
     assert tuple(group.key[1] for group in presentation.run_groups) == ("run-0", "run-1", "run-2", "run-3")
     assert all(group.status == "started" for group in presentation.run_groups)
-    assert presentation.run_groups == run_groups[:4]
+    assert all(group.steps[-1].step_name == "Normalize" for group in presentation.run_groups)
 
 
 def test_selected_flow_presentation_keeps_terminal_history_and_adds_daemon_only_live_runs() -> None:
@@ -141,6 +143,102 @@ def test_selected_flow_presentation_overlays_live_step_statuses_on_detail_rows()
 
     assert presentation.detail_state is not None
     assert [row.status for row in presentation.detail_state.operation_rows] == ["idle", "running", "idle"]
+
+
+def test_selected_flow_presentation_represents_parallel_live_steps_without_serializing_them() -> None:
+    card = FlowCatalogEntry(
+        **{**_card().__dict__, "parallelism": "4"}
+    )
+    now = datetime.now(UTC)
+    live_runs = {
+        "live-1": RunLiveSnapshot(
+            run_id="live-1",
+            flow_name=card.name,
+            group_name=card.group,
+            source_path="live-1.xlsx",
+            state="running",
+            current_step_name="Read",
+            current_step_started_at_utc=(now - timedelta(seconds=4)).isoformat(),
+            started_at_utc=(now - timedelta(seconds=60)).isoformat(),
+            elapsed_seconds=60.0,
+        ),
+        "live-2": RunLiveSnapshot(
+            run_id="live-2",
+            flow_name=card.name,
+            group_name=card.group,
+            source_path="live-2.xlsx",
+            state="running",
+            current_step_name="Normalize",
+            current_step_started_at_utc=(now - timedelta(seconds=3)).isoformat(),
+            started_at_utc=(now - timedelta(seconds=65)).isoformat(),
+            elapsed_seconds=65.0,
+        ),
+        "live-3": RunLiveSnapshot(
+            run_id="live-3",
+            flow_name=card.name,
+            group_name=card.group,
+            source_path="live-3.xlsx",
+            state="running",
+            current_step_name="Normalize",
+            current_step_started_at_utc=(now - timedelta(seconds=2)).isoformat(),
+            started_at_utc=(now - timedelta(seconds=70)).isoformat(),
+            elapsed_seconds=70.0,
+        ),
+    }
+
+    presentation = build_selected_flow_presentation(
+        card=card,
+        tracker=OperationSessionState.empty(),
+        flow_states={},
+        run_groups=(),
+        selected_run_key=None,
+        live_runs=live_runs,
+        live_truth_authoritative=True,
+    )
+
+    assert presentation.detail_state is not None
+    rows = {row.name: row for row in presentation.detail_state.operation_rows}
+    assert rows["Read"].status == "running"
+    assert rows["Read"].active_count == 1
+    assert rows["Read"].live_started_at_utc == live_runs["live-1"].current_step_started_at_utc
+    assert rows["Read"].live_elapsed_seconds is not None
+    assert 0.0 <= rows["Read"].live_elapsed_seconds <= 10.0
+    assert rows["Normalize"].status == "running"
+    assert rows["Normalize"].active_count == 2
+    assert rows["Normalize"].live_elapsed_seconds is None
+    assert rows["Write"].status == "idle"
+
+
+def test_selected_flow_presentation_overlays_existing_nonterminal_group_with_live_run_data() -> None:
+    card = _card()
+    run_groups = (_entry_to_group(_run_group("run-1")),)
+    live_runs = {
+        "run-1": RunLiveSnapshot(
+            run_id="run-1",
+            flow_name=card.name,
+            group_name=card.group,
+            source_path="run-1.xlsx",
+            state="running",
+            current_step_name="Write",
+            current_step_started_at_utc="2026-04-18T12:05:00+00:00",
+            started_at_utc="2026-04-18T12:00:00+00:00",
+            elapsed_seconds=300.0,
+        )
+    }
+
+    presentation = build_selected_flow_presentation(
+        card=card,
+        tracker=OperationSessionState.empty(),
+        flow_states={},
+        run_groups=run_groups,
+        selected_run_key=None,
+        live_runs=live_runs,
+        live_truth_authoritative=True,
+    )
+
+    assert presentation.run_groups[0].key == (card.name, "run-1")
+    assert presentation.run_groups[0].status == "started"
+    assert presentation.run_groups[0].steps[-1].step_name == "Write"
 
 
 def _entry_to_group(entry: FlowLogEntry):

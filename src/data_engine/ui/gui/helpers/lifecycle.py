@@ -64,8 +64,36 @@ def shutdown_daemon_on_close(window: "DataEngineWindow") -> None:
             candidate = None
         if isinstance(candidate, type) and issubclass(candidate, BaseException):
             client_error_type = candidate
+    workspace_snapshot = getattr(window, "workspace_snapshot", None)
+    runtime_session = getattr(window, "runtime_session", None)
+    engine_state = (
+        str(getattr(getattr(workspace_snapshot, "engine", None), "state", "") or "").strip().lower()
+        if workspace_snapshot is not None
+        else ""
+    )
+    if not engine_state:
+        runtime_active = bool(getattr(runtime_session, "runtime_active", False))
+        runtime_stopping = bool(getattr(runtime_session, "runtime_stopping", False))
+        engine_state = "stopping" if runtime_stopping else "running" if runtime_active else "idle"
+    manual_run_active = bool(getattr(runtime_session, "manual_run_active", False))
+    if workspace_snapshot is not None:
+        engine_flow_names = set(getattr(workspace_snapshot.engine, "active_flow_names", ()))
+        manual_run_active = any(
+            run.flow_name not in engine_flow_names
+            and run.state in {"starting", "running", "stopping"}
+            for run in getattr(workspace_snapshot, "active_runs", {}).values()
+        )
     try:
         if not window._is_daemon_live(window.workspace_paths):
+            return
+        if engine_state in {"starting", "running", "stopping"}:
+            window._daemon_request(
+                window.workspace_paths,
+                {"command": "stop_engine", "shutdown_when_idle": True},
+                timeout=1.5,
+            )
+            return
+        if manual_run_active:
             return
         window._daemon_request(window.workspace_paths, {"command": "shutdown_daemon"}, timeout=1.5)
     except client_error_type:

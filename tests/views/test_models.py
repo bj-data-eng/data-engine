@@ -8,6 +8,7 @@ from data_engine.domain import (
     FlowRunState,
     OperationSessionState,
     OperatorActionContext,
+    PendingWorkspaceActionOverlay,
     ManualRunState,
     RuntimeStepEvent,
     RunStepState,
@@ -215,7 +216,9 @@ def test_shared_action_state_builders_cover_runtime_stopping_and_workspace_owned
     )
     selected = SelectedFlowState(
         card=card,
-        state="running",
+        live_truth_known=True,
+        live_state="stopping",
+        live_manual_running=True,
         group_active=True,
         has_logs=False,
     )
@@ -230,7 +233,7 @@ def test_shared_action_state_builders_cover_runtime_stopping_and_workspace_owned
     gui = GuiActionState.from_context(context)
     tui = TuiActionState.from_context(context)
 
-    assert gui.flow_run_label == "Stop Flow"
+    assert gui.flow_run_label == "Stopping..."
     assert gui.flow_run_enabled is False
     assert gui.engine_enabled is False
     assert gui.engine_label == "Stopping..."
@@ -241,7 +244,7 @@ def test_shared_action_state_builders_cover_runtime_stopping_and_workspace_owned
     assert tui.refresh_disabled is True
     assert tui.run_once_disabled is True
     assert tui.start_engine_disabled is True
-    assert tui.stop_engine_disabled is False
+    assert tui.stop_engine_disabled is True
     assert tui.view_config_disabled is False
     assert tui.view_log_disabled is True
     assert tui.clear_flow_log_disabled is True
@@ -268,9 +271,25 @@ def test_action_state_builders_allow_run_once_when_other_group_manual_run_is_act
     assert tui.run_once_disabled is False
 
 
+def test_gui_action_state_hides_request_control_when_takeover_is_already_available():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_review", group="Manual"), description=None))
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState(workspace_owned=False, leased_by_machine_id=None),
+        selected_flow=SelectedFlowState(card=card),
+        has_automated_flows=True,
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+
+    assert gui.request_control_visible is True
+    assert gui.request_control_enabled is False
+
+
 def test_action_state_builders_block_run_once_when_selected_group_is_active():
     card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_review", group="Manual"), description=None))
-    selected = SelectedFlowState(card=card, state="running", group_active=True, has_logs=False)
+    selected = SelectedFlowState(card=card, live_truth_known=True, live_state="running", live_manual_running=True, group_active=True, has_logs=False)
     session = RuntimeSessionState.empty().with_manual_runs_map({"Manual": "manual_review"})
     context = OperatorActionContext(
         runtime_session=session,
@@ -292,12 +311,16 @@ def test_action_state_builders_block_run_once_when_selected_group_is_active():
 
 def test_action_state_builders_show_stop_flow_for_active_manual_run_while_engine_runs_elsewhere():
     card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_review", group="Manual"), description=None))
-    selected = SelectedFlowState(card=card, state="running", group_active=True, has_logs=False)
+    selected = SelectedFlowState(card=card, live_truth_known=True, live_state="running", live_manual_running=True, group_active=True, has_logs=False)
     session = RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",)).with_manual_runs_map({"Manual": "manual_review"})
     context = OperatorActionContext(
         runtime_session=session,
         selected_flow=selected,
         has_automated_flows=True,
+        engine_state="running",
+        engine_truth_known=True,
+        live_truth_known=True,
+        live_manual_run_active=True,
         workspace_available=True,
         selected_run_group_present=False,
     )
@@ -311,9 +334,75 @@ def test_action_state_builders_show_stop_flow_for_active_manual_run_while_engine
     assert gui.engine_enabled is True
 
 
+def test_action_state_builders_do_not_show_stop_flow_for_engine_owned_selected_flow():
+    card = qt_flow_card_from_entry(
+        flow_catalog_entry_from_flow(
+            Flow(name="poller", label="Poller", group="Claims").watch(
+                mode="poll",
+                source="/tmp/in",
+                interval="5s",
+            ),
+            description=None,
+        )
+    )
+    selected = SelectedFlowState(
+        card=card,
+        live_truth_known=True,
+        live_state="running",
+        live_manual_running=False,
+        group_active=True,
+        has_logs=True,
+    )
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",)),
+        selected_flow=selected,
+        has_automated_flows=True,
+        engine_state="running",
+        engine_truth_known=True,
+        live_truth_known=True,
+        live_manual_run_active=False,
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+
+    assert gui.flow_run_label == "Running..."
+    assert gui.flow_run_state == "run"
+    assert gui.flow_run_enabled is False
+    assert gui.engine_label == "Stop Engine"
+    assert gui.engine_enabled is True
+
+
+def test_action_state_builders_keep_stop_engine_enabled_while_manual_run_is_starting():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_review", group="Manual"), description=None))
+    selected = SelectedFlowState(card=card, live_truth_known=True, group_active=False, has_logs=False)
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",)),
+        selected_flow=selected,
+        has_automated_flows=True,
+        engine_state="running",
+        engine_truth_known=True,
+        live_truth_known=True,
+        live_manual_run_active=False,
+        workspace_available=True,
+        selected_run_group_present=False,
+        overlay=PendingWorkspaceActionOverlay(
+            pending_manual_run_groups=frozenset({"Manual"}),
+        ),
+    )
+
+    gui = GuiActionState.from_context(context)
+
+    assert gui.flow_run_label == "Starting..."
+    assert gui.flow_run_enabled is False
+    assert gui.engine_label == "Stop Engine"
+    assert gui.engine_enabled is True
+
+
 def test_action_state_builders_use_daemon_live_stopping_state_for_selected_flow():
     card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_review", group="Manual"), description=None))
-    selected = SelectedFlowState(card=card, live_state="stopping", group_active=True, has_logs=False)
+    selected = SelectedFlowState(card=card, live_truth_known=True, live_state="stopping", group_active=True, has_logs=False)
     context = OperatorActionContext(
         runtime_session=RuntimeSessionState.empty(),
         selected_flow=selected,
@@ -329,6 +418,30 @@ def test_action_state_builders_use_daemon_live_stopping_state_for_selected_flow(
     assert gui.flow_run_state == "stop"
     assert gui.flow_run_enabled is False
     assert tui.run_once_disabled is True
+
+
+def test_action_state_builders_prefer_empty_daemon_live_truth_over_stale_manual_session():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_review", group="Manual"), description=None))
+    selected = SelectedFlowState(
+        card=card,
+        live_truth_known=True,
+        live_manual_running=False,
+        group_active=False,
+        has_logs=False,
+    )
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Manual": "manual_review"}),
+        selected_flow=selected,
+        has_automated_flows=True,
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+
+    assert gui.flow_run_label == "Run Once"
+    assert gui.flow_run_state == "run"
+    assert gui.flow_run_enabled is True
 
 
 def test_action_state_builders_disable_runtime_controls_while_engine_is_starting():
@@ -353,6 +466,109 @@ def test_action_state_builders_disable_runtime_controls_while_engine_is_starting
     assert tui.start_engine_disabled is True
     assert tui.stop_engine_disabled is True
     assert tui.clear_flow_log_disabled is True
+
+
+def test_action_state_builders_preserve_idle_daemon_engine_truth_over_stale_session_flags():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState(runtime_active=True, runtime_stopping=True, active_runtime_flow_names=("poller",)),
+        selected_flow=SelectedFlowState(card=card, has_logs=True),
+        has_automated_flows=True,
+        engine_state="idle",
+        engine_truth_known=True,
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+    tui = TuiActionState.from_context(context)
+
+    assert gui.engine_label == "Start Engine"
+    assert gui.engine_enabled is True
+    assert tui.start_engine_disabled is False
+
+
+def test_action_state_builders_fallback_to_session_when_no_live_truth_exists():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState(runtime_active=True, runtime_stopping=True, active_runtime_flow_names=("poller",)).with_manual_runs_map({"Claims": "claims_summary"}),
+        selected_flow=SelectedFlowState(card=card, state="running", group_active=True, has_logs=True),
+        has_automated_flows=True,
+        engine_state="idle",
+        engine_truth_known=False,
+        live_truth_known=False,
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+    tui = TuiActionState.from_context(context)
+
+    assert gui.flow_run_label == "Stop Flow"
+    assert gui.engine_label == "Stopping..."
+    assert gui.engine_enabled is False
+    assert tui.run_once_disabled is True
+
+
+def test_action_state_builders_block_run_once_when_another_flow_in_same_group_is_active_live():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_review", group="Manual"), description=None))
+    selected = SelectedFlowState.from_runtime(
+        card=card,
+        flow_states={card.name: "manual"},
+        runtime_session=RuntimeSessionState.empty(),
+        flow_groups_by_name={card.name: card.group},
+        active_flow_states={"running", "polling", "scheduled", "stopping flow", "stopping runtime"},
+        has_logs=False,
+        live_runs={
+            "run-other": type(
+                "_Run",
+                (),
+                {
+                    "flow_name": "other_manual_flow",
+                    "group_name": "Manual",
+                    "state": "running",
+                },
+            )(),
+        },
+    )
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState.empty(),
+        selected_flow=selected,
+        has_automated_flows=True,
+        workspace_available=True,
+        selected_run_group_present=False,
+        live_truth_known=True,
+        live_manual_run_active=True,
+    )
+
+    gui = GuiActionState.from_context(context)
+    tui = TuiActionState.from_context(context)
+
+    assert selected.group_active is True
+    assert gui.flow_run_label == "Run Once"
+    assert gui.flow_run_enabled is False
+    assert tui.run_once_disabled is True
+    assert tui.start_engine_disabled is True
+
+
+def test_action_state_builders_disable_stop_engine_without_control():
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState(workspace_owned=False, leased_by_machine_id="remote", runtime_active=True),
+        selected_flow=SelectedFlowState(card=card, has_logs=True),
+        has_automated_flows=True,
+        engine_state="running",
+        engine_truth_known=True,
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+    tui = TuiActionState.from_context(context)
+
+    assert gui.engine_label == "Stop Engine"
+    assert gui.engine_enabled is False
+    assert tui.stop_engine_disabled is True
 
 
 def test_shared_action_state_builders_cover_control_unavailable_without_workspace_owner():

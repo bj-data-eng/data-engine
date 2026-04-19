@@ -47,3 +47,100 @@ def test_operation_session_state_normalizes_completed_success_rows():
 
     assert normalized.row_state("claims_summary", "Read").status == "idle"
     assert normalized.row_state("claims_summary", "Read").elapsed_seconds == 0.25
+
+
+def test_operation_session_state_clears_prior_success_when_next_step_starts():
+    session = OperationSessionState.empty().ensure_flow("claims_summary", ("Read", "Write"))
+    session, _ = session.apply_event(
+        "claims_summary",
+        ("Read", "Write"),
+        _event(status="success", step_name="Read", elapsed_seconds=0.25),
+        now=9.0,
+    )
+
+    session, _ = session.apply_event(
+        "claims_summary",
+        ("Read", "Write"),
+        _event(status="started", step_name="Write"),
+        now=9.1,
+    )
+
+    assert session.row_state("claims_summary", "Read").status == "idle"
+    assert session.row_state("claims_summary", "Read").elapsed_seconds == 0.25
+    assert session.row_state("claims_summary", "Write").status == "running"
+
+
+def test_operation_session_state_preserves_older_completed_step_durations_across_multiple_starts():
+    session = OperationSessionState.empty().ensure_flow("claims_summary", ("Read", "Normalize", "Write"))
+    session, _ = session.apply_event(
+        "claims_summary",
+        ("Read", "Normalize", "Write"),
+        _event(status="success", step_name="Read", elapsed_seconds=0.25),
+        now=9.0,
+    )
+    session, _ = session.apply_event(
+        "claims_summary",
+        ("Read", "Normalize", "Write"),
+        _event(status="started", step_name="Normalize"),
+        now=9.1,
+    )
+    session, _ = session.apply_event(
+        "claims_summary",
+        ("Read", "Normalize", "Write"),
+        _event(status="success", step_name="Normalize", elapsed_seconds=0.40),
+        now=9.5,
+    )
+    session, _ = session.apply_event(
+        "claims_summary",
+        ("Read", "Normalize", "Write"),
+        _event(status="started", step_name="Write"),
+        now=9.6,
+    )
+
+    assert session.row_state("claims_summary", "Read").status == "idle"
+    assert session.row_state("claims_summary", "Read").elapsed_seconds == 0.25
+    assert session.row_state("claims_summary", "Normalize").status == "idle"
+    assert session.row_state("claims_summary", "Normalize").elapsed_seconds == 0.40
+    assert session.row_state("claims_summary", "Write").status == "running"
+
+
+def test_operation_session_state_clears_prior_running_row_when_next_step_starts():
+    session = OperationSessionState.empty().ensure_flow("claims_summary", ("Read", "Write"))
+    session, _ = session.apply_event(
+        "claims_summary",
+        ("Read", "Write"),
+        _event(status="started", step_name="Read"),
+        now=9.0,
+    )
+
+    session, _ = session.apply_event(
+        "claims_summary",
+        ("Read", "Write"),
+        _event(status="started", step_name="Write"),
+        now=9.2,
+    )
+
+    assert session.row_state("claims_summary", "Read").status == "idle"
+    assert session.row_state("claims_summary", "Read").elapsed_seconds is None
+    assert session.row_state("claims_summary", "Write").status == "running"
+
+
+def test_operation_session_state_tracks_stopped_step_duration():
+    session = OperationSessionState.empty().ensure_flow("claims_summary", ("Read",))
+    session, _ = session.apply_event(
+        "claims_summary",
+        ("Read",),
+        _event(status="started", step_name="Read"),
+        now=4.0,
+    )
+
+    session, flash_index = session.apply_event(
+        "claims_summary",
+        ("Read",),
+        _event(status="stopped", step_name="Read", elapsed_seconds=0.8),
+        now=4.8,
+    )
+
+    assert flash_index is None
+    assert session.row_state("claims_summary", "Read").status == "stopped"
+    assert session.duration_text("claims_summary", "Read", now=4.8, formatter=lambda seconds: f"{seconds:.1f}s") == "0.8s"

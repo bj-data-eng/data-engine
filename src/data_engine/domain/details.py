@@ -129,6 +129,9 @@ class OperationDetailRow:
     name: str
     status: str
     elapsed_seconds: float | None
+    active_count: int = 0
+    live_elapsed_seconds: float | None = None
+    live_started_at_utc: str | None = None
 
 
 @dataclass(frozen=True)
@@ -149,25 +152,59 @@ class SelectedFlowDetailState:
         *,
         flow_states: dict[str, str] | None = None,
         live_step_statuses: dict[str, str] | None = None,
+        live_step_counts: dict[str, int] | None = None,
+        live_step_elapsed_seconds: dict[str, float | None] | None = None,
+        live_step_started_at_utc: dict[str, str | None] | None = None,
     ) -> "SelectedFlowDetailState":
         """Build the selected-flow detail state for one card."""
         summary_rows = FlowSummaryRow.rows_for_flow(card, flow_states or {})
+        try:
+            parallel = max(int(getattr(card, "parallelism", "1") or "1"), 1) > 1
+        except (TypeError, ValueError):
+            parallel = False
         operation_rows = tuple(
             OperationDetailRow(
                 name=operation_name,
                 status=(
                     live_step_statuses.get(operation_name)
-                    if live_step_statuses is not None and operation_name in live_step_statuses
-                    else (row_state.status if row_state is not None else "idle")
+                    if parallel
+                    and live_step_counts is not None
+                    and live_step_counts.get(operation_name, 0) > 0
+                    and live_step_statuses is not None
+                    and operation_name in live_step_statuses
+                    else (
+                        "idle"
+                        if parallel and live_step_counts is not None
+                        else (
+                            live_step_statuses.get(operation_name)
+                            if live_step_statuses is not None and operation_name in live_step_statuses
+                            else (row_state.status if row_state is not None else "idle")
+                        )
+                    )
                 ),
                 elapsed_seconds=(
-                    row_state.elapsed_seconds
-                    if row_state is not None
-                    and (
-                        live_step_statuses is None
-                        or row_state.status == live_step_statuses.get(operation_name, row_state.status)
+                    None
+                    if parallel and live_step_counts is not None
+                    else (
+                        row_state.elapsed_seconds
+                        if row_state is not None
+                        and (
+                            live_step_statuses is None
+                            or row_state.status == live_step_statuses.get(operation_name, row_state.status)
+                        )
+                        else None
                     )
-                    else None
+                ),
+                active_count=0 if live_step_counts is None else live_step_counts.get(operation_name, 0),
+                live_elapsed_seconds=(
+                    None
+                    if live_step_elapsed_seconds is None
+                    else live_step_elapsed_seconds.get(operation_name)
+                ),
+                live_started_at_utc=(
+                    None
+                    if live_step_started_at_utc is None
+                    else live_step_started_at_utc.get(operation_name)
                 ),
             )
             for operation_name in card.operation_items

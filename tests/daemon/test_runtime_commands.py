@@ -5,6 +5,7 @@ import time
 
 
 from data_engine.authoring.flow import Flow
+from data_engine.domain import DaemonLifecyclePolicy
 from data_engine.hosts.daemon.app import (
     DataEngineDaemonService,
 )
@@ -66,8 +67,8 @@ def test_run_flow_rejects_second_manual_run_in_same_group(tmp_path, monkeypatch)
     release_gate = threading.Event()
     started = threading.Event()
 
-    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event):
-        del flow, runtime_ledger, runtime_stop_event, flow_stop_event
+    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None):
+        del flow, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id
         started.set()
         release_gate.wait(timeout=1.0)
 
@@ -98,8 +99,8 @@ def test_control_handoff_stops_in_flight_manual_run(tmp_path, monkeypatch):
     stop_seen = threading.Event()
     release_gate = threading.Event()
 
-    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event):
-        del flow, runtime_ledger
+    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None):
+        del flow, runtime_ledger, workspace_id
         runtime_stop_event.wait(timeout=1.0)
         if runtime_stop_event.is_set():
             stop_seen.set()
@@ -241,7 +242,7 @@ def test_start_engine_retries_after_empty_automated_flow_snapshot(tmp_path, monk
         monkeypatch.setattr(
             service.runtime_execution_service,
             "run_automated",
-            lambda flows, runtime_ledger, runtime_stop_event, flow_stop_event: [],
+            lambda flows, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None: [],
         )
 
         response = service._handle_command({"command": "start_engine"})  # noqa: SLF001
@@ -321,7 +322,7 @@ def test_run_flow_uses_cached_flow_cards_before_forcing_refresh(tmp_path, monkey
         monkeypatch.setattr(
             service.runtime_execution_service,
             "run_manual",
-            lambda flow, *, runtime_ledger, runtime_stop_event, flow_stop_event: [],
+            lambda flow, *, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None: [],
         )
 
         response = service._handle_command({"command": "run_flow", "name": "demo", "wait": False})  # noqa: SLF001
@@ -350,8 +351,8 @@ def test_run_flow_rejects_duplicate_start_while_first_start_is_loading(tmp_path,
         release_load.wait(timeout=1.0)
         return Flow(name="demo", group="Demo").step(lambda context: 1, label="Emit Value")
 
-    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event):
-        del flow, runtime_ledger, runtime_stop_event, flow_stop_event
+    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None):
+        del flow, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id
         execution_started.set()
 
     monkeypatch.setattr(service.flow_execution_service, "load_flow", _load_flow)
@@ -402,7 +403,7 @@ def test_run_flow_returns_before_slow_flow_load_finishes(tmp_path, monkeypatch):
     monkeypatch.setattr(
         service.runtime_execution_service,
         "run_manual",
-        lambda flow, *, runtime_ledger, runtime_stop_event, flow_stop_event: [],
+        lambda flow, *, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None: [],
     )
 
     service.initialize()
@@ -508,7 +509,7 @@ def test_start_engine_coalesces_duplicate_start_while_first_start_is_loading(tmp
         monkeypatch.setattr(
             service.runtime_execution_service,
             "run_automated",
-            lambda flows, runtime_ledger, runtime_stop_event, flow_stop_event: [],
+            lambda flows, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None: [],
         )
 
         first_result: dict[str, object] = {}
@@ -555,6 +556,74 @@ def test_stop_engine_requests_graceful_runtime_stop_without_flow_interrupt(tmp_p
         assert service.state.engine_flow_stop_event.is_set() is False
         assert service.state.runtime_stopping is True
     finally:
+        service._shutdown()  # noqa: SLF001
+
+
+def test_stop_engine_can_request_shutdown_when_idle_for_last_client_disconnect(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths, lifecycle_policy=DaemonLifecyclePolicy.EPHEMERAL)
+    service.initialize()
+    try:
+        release_engine = threading.Event()
+        monkeypatch.setattr(service.runtime_control_ledger.client_sessions, "count_live", lambda workspace_id: 0)
+        monkeypatch.setattr(
+            service,
+            "_load_flow_cards",
+            lambda *, force=False: (
+                QtFlowCard(
+                    name="demo_poll",
+                    group="Demo",
+                    title="Demo Poll",
+                    description="Automated demo flow.",
+                    source_root="(not set)",
+                    target_root="(not set)",
+                    mode="poll",
+                    interval="5s",
+                    operations="Emit Value",
+                    operation_items=("Emit Value",),
+                    state="poll ready",
+                    valid=True,
+                    category="automated",
+                ),
+            ),
+        )
+        monkeypatch.setattr(
+            service.flow_execution_service,
+            "load_flows",
+            lambda flow_names, workspace_root=None: [
+                Flow(name=flow_name, group="Demo").step(lambda context: 1, label="Emit Value") for flow_name in flow_names
+            ],
+        )
+
+        def _blocking_run(flows, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None):
+            del flows, runtime_ledger, flow_stop_event, workspace_id
+            runtime_stop_event.wait(timeout=1.0)
+            release_engine.wait(timeout=1.0)
+            return []
+
+        monkeypatch.setattr(service.runtime_execution_service, "run_automated", _blocking_run)
+
+        assert service._handle_command({"command": "start_engine"})["ok"] is True  # noqa: SLF001
+        assert service._handle_command({"command": "stop_engine", "shutdown_when_idle": True})["ok"] is True  # noqa: SLF001
+
+        release_engine.set()
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if service.host.shutdown_event.is_set():
+                break
+            threading.Event().wait(0.01)
+
+        assert service.host.shutdown_event.is_set() is True
+        assert service.host.workspace_owned is False
+        assert service.state.shutdown_when_idle is False
+    finally:
+        release_engine.set()
         service._shutdown()  # noqa: SLF001
 
 
@@ -691,8 +760,8 @@ def test_daemon_projection_tracks_engine_lifecycle(tmp_path, monkeypatch):
             ],
         )
 
-        def _blocking_run(flows, runtime_ledger, runtime_stop_event, flow_stop_event):
-            del flows, runtime_ledger, runtime_stop_event, flow_stop_event
+        def _blocking_run(flows, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None):
+            del flows, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id
             release_engine.wait(timeout=1.0)
             return []
 

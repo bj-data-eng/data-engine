@@ -7,6 +7,8 @@ from time import monotonic
 from typing import TYPE_CHECKING
 
 from data_engine.platform.workspace_models import authored_workspace_is_available
+from data_engine.services import DaemonUpdateBatch
+from data_engine.services.daemon_state import merge_update_batches
 
 if TYPE_CHECKING:
     from data_engine.ui.tui.app import DataEngineTui
@@ -59,17 +61,59 @@ class TuiWindowSupportMixin:
         try:
             if not self._is_daemon_live(self.workspace_paths):
                 return
+            workspace_snapshot = getattr(self, "workspace_snapshot", None)
+            runtime_session = getattr(self, "runtime_session", None)
+            engine_state = (
+                str(getattr(getattr(workspace_snapshot, "engine", None), "state", "") or "").strip().lower()
+                if workspace_snapshot is not None
+                else ""
+            )
+            if not engine_state:
+                runtime_active = bool(getattr(runtime_session, "runtime_active", False))
+                runtime_stopping = bool(getattr(runtime_session, "runtime_stopping", False))
+                engine_state = "stopping" if runtime_stopping else "running" if runtime_active else "idle"
+            manual_run_active = bool(getattr(runtime_session, "manual_run_active", False))
+            if workspace_snapshot is not None:
+                engine_flow_names = set(getattr(workspace_snapshot.engine, "active_flow_names", ()))
+                manual_run_active = any(
+                    run.flow_name not in engine_flow_names
+                    and run.state in {"starting", "running", "stopping"}
+                    for run in getattr(workspace_snapshot, "active_runs", {}).values()
+                )
+            if engine_state in {"starting", "running", "stopping"}:
+                self._daemon_request(
+                    self.workspace_paths,
+                    {"command": "stop_engine", "shutdown_when_idle": True},
+                    timeout=1.5,
+                )
+                return
+            if manual_run_active:
+                return
             self._daemon_request(self.workspace_paths, {"command": "shutdown_daemon"}, timeout=1.5)
         except Exception:
             pass
 
     def _schedule_daemon_update_sync(self: "DataEngineTui") -> None:
-        """Queue one daemon-driven sync back onto the Textual app thread."""
+        """Queue one daemon-driven full sync back onto the Textual app thread."""
         if not getattr(self, "is_mounted", False):
             return
         self.daemon_subscription.mark_subscription(self._monotonic())
         try:
             self.call_from_thread(self._sync_daemon_state)
+        except Exception:
+            return
+
+    def _schedule_daemon_update_batch(self: "DataEngineTui", batch: DaemonUpdateBatch) -> None:
+        """Queue one lane-based daemon update back onto the Textual app thread."""
+        if not getattr(self, "is_mounted", False):
+            return
+        self.daemon_subscription.mark_subscription(self._monotonic())
+        self._pending_daemon_update_batch = merge_update_batches(
+            getattr(self, "_pending_daemon_update_batch", None),
+            batch,
+        )
+        try:
+            self.call_from_thread(self._apply_daemon_update_batch)
         except Exception:
             return
 
@@ -88,7 +132,7 @@ class TuiWindowSupportMixin:
 
         self.daemon_subscription.ensure_started(
             workspace_available=lambda: self._has_authored_workspace(),
-            on_update=lambda snapshot: self._schedule_daemon_update_sync(),
+            on_update=lambda batch: self._schedule_daemon_update_batch(batch),
             start_worker=lambda target: _start_daemon_wait_thread(target),
         )
 
