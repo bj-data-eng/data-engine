@@ -24,3 +24,5 @@ documentation/_build/
 data/
 data2/
 workspaces/
+.codex_tmp/
+.codex_tmp_*/
