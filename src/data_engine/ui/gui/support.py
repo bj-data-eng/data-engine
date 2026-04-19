@@ -17,17 +17,20 @@ from data_engine.ui.gui.helpers import (
 )
 from data_engine.ui.gui.presenters import (
     browse_workspace_collection_root_override as present_browse_workspace_collection_root_override,
+    clear_workspace_debug_artifacts as present_clear_workspace_debug_artifacts,
     create_docs_browser as present_create_docs_browser,
     force_shutdown_daemon as present_force_shutdown_daemon,
     initialize_docs_view as present_initialize_docs_view,
     load_docs_page as present_load_docs_page,
     provision_selected_workspace as present_provision_selected_workspace,
+    refresh_debug_artifacts as present_refresh_debug_artifacts,
     reset_workspace as present_reset_workspace,
     rebind_workspace_context as present_rebind_workspace_context,
     refresh_workspace_visibility_panel as present_refresh_workspace_visibility_panel,
     refresh_workspace_root_controls as present_refresh_workspace_root_controls,
     reset_workspace_collection_root_override as present_reset_workspace_collection_root_override,
     save_workspace_collection_root_override as present_save_workspace_collection_root_override,
+    show_selected_debug_artifact as present_show_selected_debug_artifact,
 )
 from data_engine.ui.gui.surface import show_message_box_later as surface_show_message_box_later
 
@@ -243,6 +246,8 @@ class GuiWindowSupportMixin:
 
     def _switch_view(self: "DataEngineWindow", index: int) -> None:
         self.view_stack.setCurrentIndex(index)
+        if index == 1:
+            self._refresh_debug_artifacts()
         if hasattr(self, "workspace_counts_footer_label"):
             self.workspace_counts_footer_label.setVisible(index == 0)
         if hasattr(self, "app_version_footer_label"):
@@ -299,6 +304,18 @@ class GuiWindowSupportMixin:
     def _refresh_workspace_visibility_panel(self: "DataEngineWindow") -> None:
         """Refresh the read-only workspace visibility stats shown in Settings."""
         present_refresh_workspace_visibility_panel(self)
+
+    def _refresh_debug_artifacts(self: "DataEngineWindow") -> None:
+        """Refresh the Debug view artifact selector for the current workspace."""
+        present_refresh_debug_artifacts(self)
+
+    def _show_selected_debug_artifact(self: "DataEngineWindow") -> None:
+        """Render the currently selected Debug artifact."""
+        present_show_selected_debug_artifact(self)
+
+    def _clear_debug_artifacts(self: "DataEngineWindow") -> None:
+        """Delete all saved Debug artifacts for the current workspace."""
+        present_clear_workspace_debug_artifacts(self)
 
     def _create_docs_browser(self: "DataEngineWindow") -> QWidget:
         return present_create_docs_browser(self)

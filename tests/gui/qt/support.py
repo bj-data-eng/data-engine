@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+import json
 import logging
 import os
 from pathlib import Path
@@ -754,6 +755,7 @@ def test_icon_registry_loads_current_file_backed_svg():
 def test_artifact_preview_classification_is_explicit(tmp_path):
     assert classify_artifact_preview(tmp_path / "output.parquet").kind == "parquet"
     assert classify_artifact_preview(tmp_path / "workbook.xlsx").kind == "excel"
+    assert classify_artifact_preview(tmp_path / "debug.json").kind == "json"
     assert classify_artifact_preview(tmp_path / "notes.txt").kind == "text"
     assert classify_artifact_preview(tmp_path / "packet.pdf").kind == "pdf"
     assert classify_artifact_preview(tmp_path / "blob.bin").kind == "unsupported"
@@ -2897,7 +2899,7 @@ def test_debug_nav_button_is_icon_only_and_switches_to_debug_view(qapp, monkeypa
     window = _make_window()
     try:
         assert window.debug_button.text() == ""
-        assert window.debug_button.toolTip() == "Debug"
+        assert window.debug_button.toolTip() == ""
         assert window.view_stack.tabText(1) == "Debug"
         assert window.view_stack.currentIndex() == 0
 
@@ -2906,6 +2908,90 @@ def test_debug_nav_button_is_icon_only_and_switches_to_debug_view(qapp, monkeypa
 
         assert window.view_stack.currentIndex() == 1
         assert window.debug_button.isChecked() is True
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_lists_previews_and_clears_saved_debug_artifacts(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_mirror__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame({"claim_id": [1], "status": ["OPEN"]}).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_mirror",
+                        "step_name": "Read Excel",
+                        "run_id": "run-1",
+                        "source_path": "C:/input/claims_flat_1.xlsx",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_mirror / Read Excel / 2026-04-19T00-00-00Z",
+                    },
+                    "info": {"note": "saved from test"},
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        assert window.debug_artifact_list.count() == 1
+        assert window.debug_artifact_path_label.text() == str(artifact_path)
+        tables = window.findChildren(QTableWidget, "outputPreviewTable")
+        assert len(tables) >= 2
+
+        window.clear_debug_artifacts_button.click()
+        qapp.processEvents()
+
+        assert window.debug_artifact_list.count() == 0
+        assert artifact_path.exists() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_renders_json_artifact_as_table(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Write-Target__2026-04-19T00-00-00Z__summary.json"
+        artifact_path.write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Write Target",
+                    },
+                    "info": {"rows": 3},
+                    "data": {"output_path": "C:/output/example.parquet", "row_count": 3},
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        tables = window.findChildren(QTableWidget, "outputPreviewTable")
+        assert len(tables) >= 2
+        assert any(
+            table.columnCount() == 6
+            and {table.horizontalHeaderItem(index).text() for index in range(table.columnCount())}
+            == {"data.output_path", "data.row_count", "debug.flow_name", "debug.step_name", "debug.workspace_id", "info.rows"}
+            for table in tables
+        )
     finally:
         _dispose_window(qapp, window)
 

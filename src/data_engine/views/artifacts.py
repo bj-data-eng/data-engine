@@ -24,6 +24,8 @@ def classify_artifact_preview(path: Path) -> ArtifactPreviewSpec:
         return ArtifactPreviewSpec(kind="parquet", label="Parquet table preview", previewable=True)
     if suffix in {".xlsx", ".xls", ".xlsm", ".xlsb"}:
         return ArtifactPreviewSpec(kind="excel", label="Excel table preview", previewable=True)
+    if suffix in {".json"}:
+        return ArtifactPreviewSpec(kind="json", label="JSON table preview", previewable=True)
     if suffix in {".pdf"}:
         return ArtifactPreviewSpec(
             kind="pdf",

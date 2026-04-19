@@ -223,12 +223,7 @@ def _build_raw_log_entry_widget(window: "DataEngineWindow", row: _RunLogPreviewR
                 default_fill_color=window._group_icon_color(),
             )
         )
-        tooltip = (
-            row.failed_entry.event.status.title()
-            if row.failed_entry is not None and row.failed_entry.event is not None
-            else row.status_name.title()
-        )
-        status_icon.setToolTip(tooltip)
+        status_icon.setToolTip("")
         icon_slot_layout.addWidget(status_icon, 0, Qt.AlignmentFlag.AlignVCenter)
 
     layout.addWidget(inspect_slot, 0, Qt.AlignmentFlag.AlignVCenter)

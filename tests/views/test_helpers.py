@@ -321,6 +321,7 @@ def test_surface_status_helpers_cover_workspace_and_empty_flow_fallback():
 def test_artifact_preview_classification_keeps_gui_canonical_labels_and_messages(tmp_path):
     assert classify_artifact_preview(tmp_path / "output.parquet").label == "Parquet table preview"
     assert classify_artifact_preview(tmp_path / "workbook.xlsx").label == "Excel table preview"
+    assert classify_artifact_preview(tmp_path / "debug.json").kind == "json"
     assert classify_artifact_preview(tmp_path / "notes.txt").kind == "text"
     assert classify_artifact_preview(tmp_path / "packet.pdf").placeholder_message == (
         "PDF artifacts are recognized, but in-app PDF text inspection is not available yet."

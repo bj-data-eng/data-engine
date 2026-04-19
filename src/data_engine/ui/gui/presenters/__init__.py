@@ -1,6 +1,7 @@
 """Presenter helpers for the desktop UI."""
 
 from data_engine.ui.gui.presenters.logs import add_log_run_item, format_raw_log_message, refresh_log_view
+from data_engine.ui.gui.presenters.debug import clear_workspace_debug_artifacts, refresh_debug_artifacts, show_selected_debug_artifact
 from data_engine.ui.gui.presenters.docs import (
     create_docs_browser,
     initialize_docs_view,
@@ -36,6 +37,7 @@ __all__ = [
     "add_log_run_item",
     "apply_runtime_event",
     "browse_workspace_collection_root_override",
+    "clear_workspace_debug_artifacts",
     "create_docs_browser",
     "duration_text",
     "finish_daemon_startup",
@@ -47,6 +49,7 @@ __all__ = [
     "normalize_completed_operation_rows",
     "rebind_workspace_context",
     "provision_selected_workspace",
+    "refresh_debug_artifacts",
     "reset_workspace",
     "refresh_log_view",
     "refresh_workspace_provisioning_controls",
@@ -60,5 +63,6 @@ __all__ = [
     "repolish_widget_tree",
     "reset_operation_state",
     "save_workspace_collection_root_override",
+    "show_selected_debug_artifact",
     "set_hovered",
 ]

@@ -4,13 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import tomllib
 from typing import Callable, Generic, Iterator, TypeVar
 
 from data_engine.core.helpers import _normalize_extensions, _resolve_flow_path
 from data_engine.core.model import FlowValidationError
+from data_engine.domain.time import utcnow_text
 from data_engine.platform.workspace_models import WORKSPACE_CONFIG_DIR_NAME, WORKSPACE_DATABASES_DIR_NAME
+from data_engine.services.debug_artifacts import (
+    build_debug_metadata,
+    sanitize_debug_name,
+    serializable_json_value,
+    write_debug_metadata,
+)
 
 T = TypeVar("T")
 
@@ -355,6 +363,7 @@ class FlowContext:
     objects: dict[str, object] = field(default_factory=dict)
     metadata: dict[str, object] = field(default_factory=dict)
     config: WorkspaceConfigContext = field(default_factory=WorkspaceConfigContext)
+    debug: FlowDebugContext | None = None
 
     def source_metadata(self) -> SourceMetadata | None:
         """Return filesystem metadata for the current source file when available."""
@@ -403,6 +412,99 @@ class FlowContext:
         path = (self.config.workspace_root / WORKSPACE_DATABASES_DIR_NAME / candidate).resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
+
+
+@dataclass
+class FlowDebugContext:
+    """Author-facing debug artifact helpers for one concrete flow run."""
+
+    root: Path
+    workspace_id: str | None
+    flow_name: str
+    run_id: str | None
+    source_path: str | None
+    step_name: str | None = None
+
+    def __post_init__(self) -> None:
+        self.root = Path(self.root).resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def set_step(self, step_name: str | None) -> None:
+        """Update the active step label used for subsequent debug artifact saves."""
+        self.step_name = step_name
+
+    def save_frame(
+        self,
+        frame,
+        *,
+        name: str | None = None,
+        info: dict[str, object] | None = None,
+    ) -> Path:
+        """Save one dataframe-like value plus linked metadata for in-app debug viewing."""
+        import polars as pl
+
+        materialized = frame.collect() if isinstance(frame, pl.LazyFrame) else frame
+        if not isinstance(materialized, pl.DataFrame):
+            raise FlowValidationError("context.debug.save_frame() requires a Polars DataFrame or LazyFrame.")
+        artifact_path, metadata_path, display_name = self._artifact_paths(name=name, extension=".parquet")
+        materialized.write_parquet(artifact_path)
+        write_debug_metadata(
+            metadata_path,
+            build_debug_metadata(
+                workspace_id=self.workspace_id,
+                flow_name=self.flow_name,
+                step_name=self.step_name,
+                run_id=self.run_id,
+                source_path=self.source_path,
+                artifact_kind="dataframe",
+                artifact_path=artifact_path,
+                saved_at_utc=self._saved_at_from(artifact_path),
+                display_name=display_name,
+                info={str(key): serializable_json_value(value) for key, value in (info or {}).items()},
+            ),
+        )
+        return artifact_path
+
+    def save_json(
+        self,
+        value: object,
+        *,
+        name: str | None = None,
+        info: dict[str, object] | None = None,
+    ) -> Path:
+        """Save one JSON artifact for in-app debug viewing."""
+        artifact_path, _metadata_path, display_name = self._artifact_paths(name=name, extension=".json")
+        payload = build_debug_metadata(
+            workspace_id=self.workspace_id,
+            flow_name=self.flow_name,
+            step_name=self.step_name,
+            run_id=self.run_id,
+            source_path=self.source_path,
+            artifact_kind="json",
+            artifact_path=artifact_path,
+            saved_at_utc=utcnow_text(),
+            display_name=display_name,
+            info={str(key): serializable_json_value(item) for key, item in (info or {}).items()},
+        )
+        payload["data"] = serializable_json_value(value)
+        artifact_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return artifact_path
+
+    def _artifact_paths(self, *, name: str | None, extension: str) -> tuple[Path, Path, str]:
+        saved_at_utc = utcnow_text()
+        timestamp_token = saved_at_utc.replace(":", "-").replace(".", "-").replace("+00:00", "Z")
+        flow_token = sanitize_debug_name(self.flow_name, fallback="flow")
+        step_token = sanitize_debug_name(self.step_name, fallback="step")
+        name_token = sanitize_debug_name(name, fallback="artifact")
+        stem = f"{flow_token}__{step_token}__{timestamp_token}__{name_token}"
+        artifact_path = self.root / f"{stem}{extension}"
+        metadata_path = artifact_path.with_suffix(".json")
+        display_name = f"{self.flow_name} / {(self.step_name or 'Step')} / {timestamp_token}"
+        return artifact_path, metadata_path, display_name
+
+    @staticmethod
+    def _saved_at_from(path: Path) -> str:
+        return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
 
 
 @dataclass(frozen=True)
@@ -517,6 +619,7 @@ __all__ = [
     "Batch",
     "FileRef",
     "FlowContext",
+    "FlowDebugContext",
     "MirrorContext",
     "MirrorSpec",
     "SourceContext",

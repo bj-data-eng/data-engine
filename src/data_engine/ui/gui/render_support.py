@@ -162,14 +162,13 @@ class GuiRenderingMixin:
         status_icon = QLabel()
         status_icon.setObjectName("logStatusIcon")
         status_icon.setPixmap(self._render_svg_icon_pixmap(self._LOG_ICON_NAMES[status_name], 16, fill_color=self._LOG_ICON_COLORS[status_name]))
-        status_icon.setToolTip(run_group.status.title())
+        status_icon.setToolTip("")
         layout.addWidget(status_icon, 0, Qt.AlignmentFlag.AlignVCenter)
 
         view_button = QPushButton()
         view_button.setObjectName("logIconButton")
         view_button.setIcon(self._log_icon("view_log"))
         view_button.setIconSize(QPixmap(16, 16).size())
-        view_button.setToolTip("View Log")
         view_button.clicked.connect(lambda _checked=False, group=run_group: self._show_run_log_preview(group))
         layout.addWidget(view_button, 0, Qt.AlignmentFlag.AlignVCenter)
 

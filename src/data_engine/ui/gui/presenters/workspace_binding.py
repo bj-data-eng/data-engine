@@ -165,6 +165,7 @@ def rebind_workspace_context(
     _sync_workspace_selector(window)
     refresh_workspace_root_controls(window)
     window._load_flows()
+    window._refresh_debug_artifacts()
     window._refresh_log_view(force_scroll_to_bottom=True)
     window._refresh_action_buttons()
     initialize_docs_view(window)

@@ -188,5 +188,9 @@ class DaemonRuntimeCacheProxy:
         """Keep the borrowed daemon ledger open for the owning service."""
         return
 
+    def __getattr__(self, name: str):
+        """Forward unknown runtime-ledger attributes to the wrapped cache store."""
+        return getattr(self._delegate, name)
+
 
 __all__ = ["DaemonRuntimeCacheProxy", "DaemonRuntimeExecutionStatePublisher"]

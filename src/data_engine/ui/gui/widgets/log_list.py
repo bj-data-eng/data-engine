@@ -145,10 +145,9 @@ class LogRunListWidget(QListWidget):
         self.viewport().setMouseTracking(True)
 
     def set_run_group(self, item: QListWidgetItem, run_group: "FlowRunState") -> None:
-        display = RunGroupDisplay.from_run(run_group)
         item.setData(RUN_GROUP_ROLE, run_group)
         item.setText(run_group.display_label)
-        item.setToolTip(display.status_text)
+        item.setToolTip("")
         item.setSizeHint(self._delegate.sizeHint(QStyleOptionViewItem(), None))
 
     def run_group(self, item: QListWidgetItem | None):

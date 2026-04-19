@@ -46,7 +46,6 @@ def build_log_run_widget(window: "DataEngineWindow", run_group: "FlowRunState") 
     view_button.setObjectName("logIconButton")
     view_button.setIcon(window._log_icon("view_log"))
     view_button.setIconSize(QPixmap(16, 16).size())
-    view_button.setToolTip("View Log")
     def callback(_checked: bool = False, *, host: QFrame = frame) -> None:
         del _checked
         group = getattr(host, "_run_group", None)
@@ -80,5 +79,5 @@ def update_log_run_widget(frame: QFrame, window: "DataEngineWindow", run_group: 
                 fill_color=window._LOG_ICON_COLORS[display.status_visual_state],
             )
         )
-        status_icon.setToolTip(display.status_text)
+        status_icon.setToolTip("")
 __all__ = ["build_log_run_widget", "update_log_run_widget"]

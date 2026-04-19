@@ -205,6 +205,8 @@ class FlowRunExecutor:
             self._ensure_runtime_sources_available(flow, context, source_path)
             for step in flow.steps:
                 self.ports.stop_controller.check_run(run_id)
+                if context.debug is not None:
+                    context.debug.set_step(step.label)
                 self._load_current_for_step(context, step)
                 step_run_id = self.ports.state_writer.record_step_started(
                     run_id=run_id,
@@ -321,6 +323,8 @@ class FlowRunExecutor:
         self._ensure_runtime_sources_available(flow, context, source_path)
         for step in flow.steps:
             self.ports.stop_controller.check_run("preview")
+            if context.debug is not None:
+                context.debug.set_step(step.label)
             self._load_current_for_step(context, step)
             try:
                 result = step.fn(context)

@@ -77,7 +77,9 @@ class FlowRuntime:
         self._runtime_ledger_factory = runtime_ledger_factory or runtime_ledger_service.open_runtime_cache_ledger
         self._owns_runtime_ledger = runtime_ledger is None
         self.runtime_ledger = runtime_ledger or self._runtime_ledger_factory()
-        self.context_builder = RuntimeContextBuilder()
+        runtime_db_path = getattr(self.runtime_ledger, "db_path", None)
+        debug_root = Path(runtime_db_path).expanduser().resolve().parent / "debug_artifacts" if runtime_db_path is not None else None
+        self.context_builder = RuntimeContextBuilder(debug_root=debug_root, workspace_id=workspace_id)
         self._queued_log_sink = acquire_queued_runtime_log_sink(self.runtime_ledger.logs)
         self.log_emitter = RuntimeLogEmitter(self._queued_log_sink, workspace_id=workspace_id)
         self.polling = RuntimePollingSupport(self.runtime_ledger.source_signatures)

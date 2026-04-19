@@ -190,10 +190,12 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window._selected_flow_has_logs_flow_name = None
     window._workspace_counts_footer_cache: dict[str, str] = {}
     window._last_gui_action_state = None
+    window._debug_artifact_records = ()
 
     window._build_window()
     window._reload_workspace_options()
     window._load_flows()
+    window._refresh_debug_artifacts()
     style_hints = QGuiApplication.styleHints()
     window._style_hints = style_hints
     if os.environ.get("QT_QPA_PLATFORM") != "offscreen" and hasattr(style_hints, "colorSchemeChanged"):

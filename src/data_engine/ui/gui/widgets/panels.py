@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -91,7 +92,7 @@ def _nav_button(window: "DataEngineWindow", icon_name: str, tooltip: str) -> QTo
     button.setIcon(window._view_rail_icon(icon_name))
     button.setIconSize(QPixmap(18, 18).size())
     button.setFixedSize(40, 40)
-    button.setToolTip(tooltip)
+    del tooltip
     return button
 
 
@@ -129,7 +130,6 @@ def build_docs_view(window: "DataEngineWindow") -> QWidget:
 
 
 def build_debug_view(window: "DataEngineWindow") -> QWidget:
-    del window
     container = QWidget()
     container_layout = QVBoxLayout(container)
     container_layout.setContentsMargins(0, 0, 0, 0)
@@ -145,11 +145,77 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(10)
 
-    status = QLabel("Debug snapshots and structured events will appear here.")
-    status.setWordWrap(True)
-    status.setObjectName("bodyText")
-    layout.addWidget(status)
-    layout.addStretch(1)
+    window.debug_status_label = QLabel("No saved debug artifacts yet.")
+    window.debug_status_label.setWordWrap(True)
+    window.debug_status_label.setObjectName("bodyText")
+    layout.addWidget(window.debug_status_label)
+
+    controls = QHBoxLayout()
+    controls.setContentsMargins(0, 0, 0, 0)
+    controls.setSpacing(8)
+    controls.addStretch(1)
+    window.clear_debug_artifacts_button = QPushButton("Clear")
+    window.clear_debug_artifacts_button.clicked.connect(window._clear_debug_artifacts)
+    controls.addWidget(window.clear_debug_artifacts_button)
+    layout.addLayout(controls)
+
+    splitter = QSplitter(Qt.Orientation.Horizontal)
+    splitter.setChildrenCollapsible(False)
+
+    left_panel = QFrame()
+    left_panel.setObjectName("workspacePanel")
+    left_layout = QVBoxLayout(left_panel)
+    left_layout.setContentsMargins(12, 12, 12, 12)
+    left_layout.setSpacing(8)
+    left_title = QLabel("Saved Artifacts")
+    left_title.setObjectName("sectionTitle")
+    left_layout.addWidget(left_title)
+    window.debug_artifact_list = QListWidget()
+    window.debug_artifact_list.setObjectName("runLogList")
+    window.debug_artifact_list.currentItemChanged.connect(lambda *_args: window._show_selected_debug_artifact())
+    left_layout.addWidget(window.debug_artifact_list, 1)
+
+    right_panel = QFrame()
+    right_panel.setObjectName("workspacePanel")
+    right_layout = QVBoxLayout(right_panel)
+    right_layout.setContentsMargins(12, 12, 12, 12)
+    right_layout.setSpacing(10)
+
+    window.debug_artifact_path_label = QLabel("")
+    window.debug_artifact_path_label.setObjectName("outputPreviewPath")
+    window.debug_artifact_path_label.setWordWrap(True)
+    right_layout.addWidget(window.debug_artifact_path_label)
+
+    window.debug_artifact_source_label = QLabel("")
+    window.debug_artifact_source_label.setObjectName("sectionMeta")
+    window.debug_artifact_source_label.setWordWrap(True)
+    window.debug_artifact_source_label.setVisible(False)
+    right_layout.addWidget(window.debug_artifact_source_label)
+
+    preview_panel = QFrame()
+    preview_panel.setObjectName("outputPreviewBody")
+    window.debug_preview_layout = QVBoxLayout(preview_panel)
+    window.debug_preview_layout.setContentsMargins(0, 0, 0, 0)
+    window.debug_preview_layout.setSpacing(8)
+    right_layout.addWidget(preview_panel, 1)
+
+    metadata_title = QLabel("Metadata")
+    metadata_title.setObjectName("sectionTitle")
+    right_layout.addWidget(metadata_title)
+    metadata_panel = QFrame()
+    metadata_panel.setObjectName("outputPreviewBody")
+    window.debug_metadata_layout = QVBoxLayout(metadata_panel)
+    window.debug_metadata_layout.setContentsMargins(0, 0, 0, 0)
+    window.debug_metadata_layout.setSpacing(8)
+    metadata_panel.setMinimumHeight(160)
+    right_layout.addWidget(metadata_panel, 0)
+
+    splitter.addWidget(left_panel)
+    splitter.addWidget(right_panel)
+    splitter.setStretchFactor(0, 2)
+    splitter.setStretchFactor(1, 5)
+    splitter.setSizes([320, 760])
+    layout.addWidget(splitter, 1)
 
     container_layout.addWidget(panel, 1)
     return container
@@ -365,7 +431,6 @@ def build_action_bar(window: "DataEngineWindow") -> QWidget:
     window.refresh_button.setIcon(window._action_bar_icon("refresh"))
     window.refresh_button.setIconSize(QPixmap(16, 16).size())
     window.refresh_button.setFixedSize(36, 36)
-    window.refresh_button.setToolTip("Refresh Flows")
     window.refresh_button.clicked.connect(window._refresh_flows_requested)
 
     controls_group = QFrame()
@@ -403,7 +468,6 @@ def build_action_bar(window: "DataEngineWindow") -> QWidget:
     window.theme_toggle_button.setIcon(window._action_bar_icon("theme_toggle"))
     window.theme_toggle_button.setIconSize(QPixmap(16, 16).size())
     window.theme_toggle_button.setFixedSize(36, 36)
-    window.theme_toggle_button.setToolTip("Switch Theme")
     window.theme_toggle_button.clicked.connect(window._toggle_theme)
     row.addWidget(window.theme_toggle_button)
     return frame
@@ -509,12 +573,12 @@ def build_right_panel(window: "DataEngineWindow") -> QWidget:
     header = QHBoxLayout()
     header.setContentsMargins(0, 0, 0, 0)
     header.setSpacing(8)
-    header.addWidget(title)
+    header.addWidget(title, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
     header.addStretch(1)
 
     window.clear_flow_log_button = QPushButton("Reset Flow")
     window.clear_flow_log_button.clicked.connect(window._clear_logs)
-    header.addWidget(window.clear_flow_log_button)
+    header.addWidget(window.clear_flow_log_button, 0, Qt.AlignmentFlag.AlignTop)
     layout.addLayout(header)
 
     window.log_view = LogRunListWidget(window)

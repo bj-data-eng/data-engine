@@ -54,7 +54,7 @@ def refresh_sidebar_state_views(window: "DataEngineWindow", changed_flow_names: 
             affected_groups.add(flow_group_name(card))
             state = window.flow_states.get(card.name, card.state)
             flow_display = FlowRowDisplay.from_card(card, state, primary="name")
-            widget.setToolTip(flow_display.tooltip)
+            widget.setToolTip("")
             for label in widget.findChildren(QLabel, "sidebarFlowMeta"):
                 label.setText(flow_display.secondary)
                 label.setProperty("stateColor", flow_display.state_color)
