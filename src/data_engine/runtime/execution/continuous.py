@@ -65,13 +65,13 @@ class ContinuousRuntimeLoop:
                         queued_keys,
                         pending_futures,
                         executor,
-                        results=results,
+                        results=None,
                     )
                     if queue or pending_futures:
                         continue
                     sleep(0.05)
             finally:
-                self.runtime.wait_for_dispatched_jobs(pending_futures, results=results)
+                self.runtime.wait_for_dispatched_jobs(pending_futures, results=None)
                 for entry in watch_entries:
                     watcher = entry["watcher"]
                     if isinstance(watcher, PollingWatcher):

@@ -483,8 +483,46 @@ def test_directory_poll_can_run_source_files_in_parallel_continuously(tmp_path):
 
     results = runtime.run()
 
-    assert len(results) == 3
+    assert results == []
+    assert completed == 3
     assert peak >= 2
+
+
+def test_directory_poll_processes_all_startup_files_continuously_with_serial_polling(tmp_path):
+    source_dir = tmp_path / "input"
+    source_dir.mkdir()
+    for index in range(3):
+        pl.DataFrame({"value": [index]}).write_parquet(source_dir / f"{index}.parquet")
+
+    runtime_stop = threading.Event()
+    started_sources: list[str] = []
+    completed = 0
+    lock = threading.Lock()
+
+    def read_source(context):
+        nonlocal completed
+        with lock:
+            started_sources.append(context.source.path.name)
+            completed += 1
+            if completed >= 3:
+                runtime_stop.set()
+        return pl.read_parquet(context.source.path)
+
+    runtime = FlowRuntime(
+        (
+            Flow(name="serial_poll_continuous", group="Claims")
+            .watch(mode="poll", source=source_dir, interval="5s", extensions=[".parquet"])
+            .step(read_source),
+        ),
+        continuous=True,
+        runtime_stop_event=runtime_stop,
+    )
+
+    results = runtime.run()
+
+    assert results == []
+    assert completed == 3
+    assert sorted(started_sources) == ["0.parquet", "1.parquet", "2.parquet"]
 
 
 def test_runtime_stop_does_not_start_queued_source_jobs(tmp_path):

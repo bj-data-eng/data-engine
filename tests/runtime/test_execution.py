@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from collections import deque
+from concurrent.futures import Future
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from time import sleep
 
 from data_engine.core.model import FlowStoppedError
 from data_engine.core.primitives import FlowContext
+from data_engine.runtime.execution.context import QueuedRunJob
+from data_engine.runtime.execution.single import FlowRuntime
 from data_engine.runtime.execution.runner import FlowRunExecutionPorts, FlowRunExecutor
 
 
@@ -206,3 +211,32 @@ def test_flow_run_executor_elapsed_excludes_start_write_delay() -> None:
     assert success_step_log[1]["elapsed"] < 0.025
     assert success_flow_log[1]["elapsed"] < 0.075
     assert run_finished[1]["status"] == "success"
+
+
+def test_flow_runtime_dispatches_queued_jobs_when_results_collection_is_disabled() -> None:
+    flow = _Flow(
+        name="claims_poll",
+        group="Claims",
+        steps=(_Step("Emit", lambda context: context.current),),
+    )
+    runtime = FlowRuntime(flows=(flow,), continuous=True)
+    try:
+        queue = deque([QueuedRunJob(flow=flow, source_path=None, batch_signatures=())])
+        queued_keys = {runtime.polling.job_key(flow, None)}
+        pending: dict[Future[FlowContext], tuple[object, int]] = {}
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            runtime.dispatch_queued_jobs(
+                queue,
+                queued_keys,
+                pending,
+                executor,
+                results=None,
+            )
+            runtime.wait_for_dispatched_jobs(pending, results=None)
+
+        assert queue == deque()
+        assert queued_keys == set()
+        assert pending == {}
+    finally:
+        runtime._close_runtime_resources()

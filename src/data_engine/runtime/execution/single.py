@@ -246,7 +246,7 @@ class FlowRuntime:
         pending_futures: dict[Future[FlowContext], tuple[QueuedRunJob, int]],
         executor: ThreadPoolExecutor,
         *,
-        results: list[FlowContext],
+        results: list[FlowContext] | None,
     ) -> None:
         """Submit queued source jobs up to each flow's bounded concurrency and drain completions."""
         self._drain_completed_jobs(pending_futures, results=results)
@@ -269,14 +269,15 @@ class FlowRuntime:
                     job.source_path,
                     batch_signatures=job.batch_signatures,
                 )
-                pending_futures[future] = (job, len(results) + len(pending_futures))
+                results_count = len(results) if results is not None else 0
+                pending_futures[future] = (job, results_count + len(pending_futures))
         self._drain_completed_jobs(pending_futures, results=results)
 
     def wait_for_dispatched_jobs(
         self,
         pending_futures: dict[Future[FlowContext], tuple[QueuedRunJob, int]],
         *,
-        results: list[FlowContext],
+        results: list[FlowContext] | None,
     ) -> None:
         """Wait for all pending queued jobs to complete."""
         while pending_futures:
@@ -288,7 +289,7 @@ class FlowRuntime:
         self,
         pending_futures: dict[Future[FlowContext], tuple[QueuedRunJob, int]],
         *,
-        results: list[FlowContext],
+        results: list[FlowContext] | None,
     ) -> None:
         done = [future for future in pending_futures if future.done()]
         for future in done:
@@ -299,11 +300,13 @@ class FlowRuntime:
         future: Future[FlowContext],
         pending_futures: dict[Future[FlowContext], tuple[QueuedRunJob, int]],
         *,
-        results: list[FlowContext],
+        results: list[FlowContext] | None,
     ) -> None:
         pending_futures.pop(future, None)
         try:
-            results.append(future.result())
+            result = future.result()
+            if results is not None:
+                results.append(result)
         except FlowStoppedError:
             if self.flow_stop_event is not None:
                 self.flow_stop_event.clear()
