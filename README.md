@@ -55,7 +55,7 @@ Editable local install:
 python -m pip install -e .
 ```
 
-Notebook-authored flow modules (`.ipynb`) are supported in the normal install. The optional notebook extra is only for authoring inside Jupyter:
+Notebook-authored flow modules (`.ipynb`) work with the base install. Install the optional notebook extra only when you want Jupyter authoring tools:
 
 ```bash
 python -m pip install -e ".[notebook]"
@@ -305,14 +305,14 @@ The inspect modal reuses the same dataframe rendering path.
 
 ## Notebook Preview
 
-For notebook authoring, `preview()` is usually the most useful helper:
+For notebook or REPL-style authoring outside a compiled flow module, `preview()` is usually the most useful helper:
 
 ```python
 build().preview(use="raw_df").head(10)
 build().preview(use="filtered_df")
 ```
 
-`preview(use="name")` runs the flow until that `save_as="name"` object exists, then returns the real object without running later steps.
+`preview(use="name")` runs the flow until that `save_as="name"` object exists, then returns the real object without running later steps. `preview()` is not available from inside compiled flow modules, so use it from an external notebook, REPL, or script while iterating on the flow.
 
 ## Discovery And Compilation
 

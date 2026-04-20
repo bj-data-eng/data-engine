@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide is for someone new to the code-defined Data Engine API and desktop app.
+This guide is for someone new to the code-defined Data Engine API and app surfaces.
 
 By the end, you should understand:
 
@@ -19,7 +19,7 @@ In practice:
 
 - the flow module defines the flow name, group, runtime mode, and ordered steps
 - step functions do real work with native libraries such as Polars, DuckDB, and plain Python
-- the desktop app discovers those flow modules inside the selected workspace and shows them as configurable runnable flows
+- the GUI, TUI, and egui surfaces discover those flow modules inside the selected workspace and show them as configurable runnable flows
 
 The fluent API owns orchestration, while the step callables own your actual business logic.
 
@@ -56,6 +56,8 @@ Flow module sources are authored in:
 Reusable helper modules live in:
 
 - `workspaces/<workspace_id>/flow_modules/flow_helpers/<name>.py`
+
+Notebook-authored flow modules (`.ipynb`) run in the normal install. The optional notebook extra only adds Jupyter authoring tools.
 
 Compiled runtime modules are generated into machine-local artifacts.
 Those runtime artifacts are isolated per workspace, so helper imports with the same module names stay workspace-local.
@@ -219,14 +221,14 @@ flows = discover_flows()
 run(*flows)
 ```
 
-Notebook-authored flows also support preview-oriented authoring:
+For preview-oriented authoring outside a compiled flow module, you can still inspect a flow with:
 
 ```python
 build().preview()
 build().preview(use="raw_df")
 ```
 
-That is often the fastest way to sanity-check a flow while you are still writing it.
+That is often the fastest way to sanity-check a flow while you are still writing it. `preview()` is not available from inside compiled flow modules, so use it from an external notebook, REPL, or script.
 
 For poll flows that watch a folder, `preview(...)` uses one deterministic startup source as a representative notebook preview.
 

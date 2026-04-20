@@ -53,7 +53,7 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 
 ## Parallel Worktrees
 
-- Use semi-permanent worker lanes for high-throughput parallel work: `C:\DEV_PROJECT\data-engine-worktrees\lane-1` through `C:\DEV_PROJECT\data-engine-worktrees\lane-6`.
+- Use semi-permanent worker lanes for high-throughput parallel work: `../data-engine-worktrees/lane-1` through `../data-engine-worktrees/lane-6`.
 - The coordinator owns task slicing, architecture decisions, integration, final tests, and commits. Worker agents own bounded implementation or audit tasks inside their assigned lane.
 - Do not stop passively after landing one local fix in an active refactor. When a boundary changes, proactively chase the migration through the surrounding codebase: callers, read models, command gating, tests, and UI surfaces. Prefer finishing the conversion over leaving mixed old/new paths in place.
 - Treat `main` after the latest accepted commit as the source of truth. Before starting a new parallel batch, reset every lane worktree to that accepted commit and confirm each lane is clean.
@@ -63,7 +63,7 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 - Keep the semi-permanent lane branches generic: `codex/lane-1` through `codex/lane-6`.
 - Worker task branches should be created from the lane branch and be task-scoped, using names like `codex/lane-1-runtime-audit`. After integration, reset the lane branch to the accepted coordinator commit before the next task.
 - Do not add internal compatibility shims just to preserve old project-internal call shapes during refactors. Update affected internal callers to the new boundary instead. Preserve stability for the author-facing surface: flows, flow context, and `data_engine.helpers`.
-- For speed, worker lanes may use the main repo venv at `C:\DEV_PROJECT\data-engine\.venv` for `python -m pytest`, `ruff`, and `pydoclint` when the command runs from the worker worktree root.
+- For speed, worker lanes may use the main repo venv at `../../data-engine/.venv` for `python -m pytest`, `ruff`, and `pydoclint` when the command runs from the worker worktree root.
 - Do not rely on the main repo console scripts, such as `data-engine.exe`, to test worker-lane code; console entry points may resolve to the installed checkout. Use `python -m ...` from the worker root, or create a lane-local `.venv` when testing packaging, console scripts, editable installs, or dependency changes.
 - Workers should return patch-first decision packets, not broad narratives: changed files, short summary, tests run with results, intentional deviations, and blockers only. The coordinator handles synthesis and broader follow-up.
 - For audit-only tasks, ask workers to return only `file:line`, issue, and recommended action. Do not ask audit workers to explain architecture history or edit files unless the coordinator turns a finding into a bounded implementation task.

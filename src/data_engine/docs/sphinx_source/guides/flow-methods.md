@@ -115,6 +115,10 @@ The return value always becomes `context.current`.
 
 This is the default workhorse method. Most flows are easiest to read when they are mostly made of `step(...)` with occasional `collect(...)` and `map(...)` where batching is truly needed.
 
+`save_as=` and `use=` are the normal way to create readable waypoints inside a
+flow. They are also what make notebook previews stop at a named intermediate
+object instead of running the whole flow.
+
 ## `map(fn, use=None, save_as=None, label=None)`
 
 Map one callable across the current batch.
@@ -203,5 +207,15 @@ Behavior:
 - avoids running later write/debug steps once the requested saved object is available
 - if a poll flow has several startup source files, preview uses the first deterministic source candidate for notebook inspection
 
-`preview(...)` is especially useful while authoring notebook-backed flows because it lets you stop at a meaningful intermediate and inspect it directly.
+`preview(...)` is especially useful while authoring a flow from an external notebook, REPL, or script because it lets you stop at a meaningful intermediate and inspect it directly. It is not available from inside compiled flow modules.
 If you want the final one-off result itself, use `preview()` without `use=`.
+
+For dataframe inspection, this is the fastest path during authoring:
+
+```python
+build().preview(use="clean_df").head(10)
+```
+
+For debug artifacts that should show up in the desktop app's Debug view during
+an actual run, use `context.debug.save_frame(...)` inside the step instead of
+`preview(...)`.

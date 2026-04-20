@@ -677,7 +677,7 @@ impl DataEngineEguiApp {
                     ui.label("Choose the folder that contains your workspaces.");
                     ui.separator();
                     ui.label("Current root");
-                    let mut workspace_root = String::from("C:\\DEV_PROJECT\\data-engine\\workspaces");
+                    let mut workspace_root = String::from("workspaces/");
                     let _ = ui.add(
                         egui::TextEdit::singleline(&mut workspace_root)
                             .interactive(false)
@@ -711,7 +711,7 @@ impl DataEngineEguiApp {
                             ui.label("Virtualenv");
                             ui.end_row();
                             ui.label("Executable");
-                            ui.label("C:\\DEV_PROJECT\\data-engine\\.venv\\Scripts\\python.exe");
+                            ui.label(".venv/Scripts/python.exe");
                             ui.end_row();
                         });
                     ui.add_space(12.0);
@@ -765,8 +765,8 @@ fn sample_artifacts() -> Vec<DebugArtifact> {
         DebugArtifact {
             name: "example_schedule__Read Excel__2026-04-19T09-22-14",
             kind: "parquet + json",
-            source: "Source: C:\\DEV_PROJECT\\data-engine\\data2\\Input\\claims_flat\\claims_flat_1.xlsx",
-            path: "C:\\DEV_PROJECT\\data-engine\\debug_artifacts\\example_schedule__Read Excel__2026-04-19T09-22-14.parquet",
+            source: "Source: data/Input/claims_flat/claims_flat_1.xlsx",
+            path: "artifacts/runtime_state/example_workspace/debug_artifacts/example_schedule__Read Excel__2026-04-19T09-22-14.parquet",
             metadata: vec![
                 ("flow_name", "example_schedule"),
                 ("step_name", "Read Excel"),
@@ -777,8 +777,8 @@ fn sample_artifacts() -> Vec<DebugArtifact> {
         DebugArtifact {
             name: "claims2_parallel_poll__Build Workflow Summary__2026-04-19T09-25-03",
             kind: "parquet + json",
-            source: "Source: C:\\DEV_PROJECT\\data-engine\\data2\\Input\\claims_flat\\claims_flat_2.xlsx",
-            path: "C:\\DEV_PROJECT\\data-engine\\debug_artifacts\\claims2_parallel_poll__Build Workflow Summary__2026-04-19T09-25-03.parquet",
+            source: "Source: data/Input/claims_flat/claims_flat_2.xlsx",
+            path: "artifacts/runtime_state/claims2/debug_artifacts/claims2_parallel_poll__Build Workflow Summary__2026-04-19T09-25-03.parquet",
             metadata: vec![
                 ("flow_name", "claims2_parallel_poll"),
                 ("step_name", "Build Workflow Summary"),

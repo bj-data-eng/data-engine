@@ -1,6 +1,6 @@
 # App Runtime and Workspaces
 
-This guide explains how the desktop app, authored workspaces, shared workspace state, and machine-local runtime state fit together.
+This guide explains how the GUI, TUI, and egui surfaces share authored workspaces, shared workspace state, and machine-local runtime state.
 
 If you are writing flows, this is the missing "how the whole thing hangs together" page.
 
@@ -36,7 +36,7 @@ That authored workspace is what the app binds to when you select a workspace in 
 
 ## How the app is structured
 
-The desktop app is a single-window operator surface that binds to one authored workspace at a time.
+The GUI is a single-window operator surface that binds to one authored workspace at a time. The TUI and egui surfaces use the same workspace and runtime model.
 
 When you change the selected workspace, the app rebinds:
 
@@ -295,7 +295,7 @@ Provisioning is deliberately safe and additive.
 Provisioning a workspace creates missing conventional folders without overwriting existing files:
 
 - `flow_modules/`
-- `flow_modules/helpers/`
+- `flow_modules/flow_helpers/`
 - `config/`
 - `databases/`
 - `.vscode/settings.json`

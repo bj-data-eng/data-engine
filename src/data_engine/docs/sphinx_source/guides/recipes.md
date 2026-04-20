@@ -4,6 +4,11 @@ This page collects complete end-to-end examples.
 
 When a recipe matches a shipped starter flow, the starter flow name is called out explicitly.
 
+For quick dataframe inspection while authoring, `save_as=`/`use=` are the
+notebook-friendly way to pause on a named intermediate, and
+`context.debug.save_frame(...)` is the runtime-friendly way to keep a dataframe
+visible in the app's Debug view.
+
 ## Recipe: Mirror every workbook
 
 Starter flow: `example_mirror`
@@ -83,6 +88,17 @@ def build():
 ```
 
 This is the classic "read -> filter -> write" shape, and it is a good default when you want clear previewable intermediates.
+
+If you also want the filtered dataframe to appear in the desktop app's Debug
+view during real runs, you can save it there too:
+
+```python
+def keep_completed(context):
+    frame = context.current.filter(pl.col("Step TO") == "COMPLETED")
+    if context.debug is not None:
+        context.debug.save_frame(frame, name="clean_df", info={"rows": frame.height})
+    return frame
+```
 
 ## Recipe: Capture source metadata during processing
 
@@ -253,6 +269,24 @@ def apply_threshold(context):
 ```
 
 This is a clean way to keep operator-tunable values out of the flow chain while still making the dependency explicit.
+
+## Recipe: Save an intermediate dataframe to the Debug view
+
+```python
+import polars as pl
+
+
+def calculate_totals(context):
+    frame = context.current.with_columns(
+        total=pl.col("amount") + pl.col("tax")
+    )
+    if context.debug is not None:
+        context.debug.save_frame(frame, name="totals_df", info={"rows": frame.height})
+    return frame
+```
+
+Use this pattern when the dataframe is worth inspecting in the app but you do
+not want to turn the debug artifact into the flow's primary output.
 
 ## Recipe: Calculate business days and keep a grouped running total
 

@@ -2,6 +2,8 @@
 
 Per-flow configuration lives in the fluent `Flow` chain, not in TOML.
 
+That applies to both `.py` and `.ipynb` flow modules: the authored `Flow(...)` definition is the runtime contract, and workspace-local TOML in `config/` is for step logic and runtime parameters consumed by your code.
+
 That is an important design choice:
 
 - the runtime shape of a flow belongs in the authored `Flow(...)` definition
@@ -149,7 +151,7 @@ Flow(group="Analytics") \
     .map(read_claims, use="claim_files", save_as="claim_frames")
 ```
 
-`map(...)` is the per-item stage in that pipeline, and `step_each(...)` is the equivalent alias. Both raise immediately when the batch is empty.
+`collect(...)` gathers matching files into a `Batch` of `FileRef` items. `map(...)` is the per-item stage in that pipeline, and `step_each(...)` is the equivalent alias. Both raise immediately when the batch is empty.
 
 This is the standard batch shape:
 
@@ -175,9 +177,10 @@ Examples:
 
 Those fields affect the authoring experience directly:
 
-- `save_as=` creates stable names for later steps and notebook previews
-- `use=` loads one of those saved names into `context.current`
+- `save_as=` creates stable names for later steps and notebook previews by storing the result in `context.objects`
+- `use=` loads one of those saved names into `context.current` before the callable runs
 - `label=` controls the display name in the UI
+- `save_as="current"` is rejected because `current` is owned by the runtime
 
 If you are deciding where a piece of information belongs:
 

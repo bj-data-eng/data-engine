@@ -15,6 +15,7 @@ Common fields and helpers you will read directly:
 - `source`
 - `mirror`
 - `config`
+- `debug`
 - `database(...)`
 - `current`
 - `objects`
@@ -137,6 +138,54 @@ def capture_stats(context):
 The runtime also records step output paths here when a step returns an existing `Path`.
 
 That is what powers the UI `Inspect` button for a step: if a step writes a file and returns its existing path, the UI can enable inspection for that step.
+
+## `debug`
+
+`context.debug` is the in-app debug artifact sink for a concrete flow run.
+
+It is available when the runtime is configured to save debug artifacts for the
+current execution, and it is the best fit when you want the desktop app's
+Debug view to retain an intermediate dataframe without changing the main flow
+result.
+
+The main helper is:
+
+```python
+context.debug.save_frame(context.current, name="clean_df")
+```
+
+`save_frame(...)` accepts a Polars `DataFrame` or `LazyFrame`, materializes the
+dataframe if needed, saves it as a parquet artifact, and writes linked metadata
+for in-app previewing.
+
+Example:
+
+```python
+import polars as pl
+
+
+def keep_completed(context):
+    frame = context.current.filter(pl.col("Step TO") == "COMPLETED")
+    if context.debug is not None:
+        context.debug.save_frame(
+            frame,
+            name="completed_rows",
+            info={"stage": "filtered"},
+        )
+    return frame
+```
+
+Use `context.debug.save_frame(...)` when:
+
+- you want a dataframe visible in the app's Debug tab
+- you want to capture an intermediate result without changing the primary flow output
+- you want extra debug metadata alongside the saved frame
+
+Use `save_as=` and `use=` when:
+
+- later steps in the same flow need to reuse the value
+- you want notebook previewing to stop at a named waypoint
+- the intermediate is part of the flow's normal orchestration, not just an inspection aid
 
 ## `config`
 
@@ -510,6 +559,8 @@ def summarize(context):
     output = context.mirror.file("summary.parquet")
     summary.write_parquet(output)
     context.metadata["summary_path"] = str(output)
+    if context.debug is not None:
+        context.debug.save_frame(summary, name="summary_df", info={"rows": summary.height})
     return output
 
 

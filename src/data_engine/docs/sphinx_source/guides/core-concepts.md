@@ -58,6 +58,8 @@ def step(context) -> object:
 
 The return value always becomes `context.current`.
 
+`use=` on a step loads a saved object from `context.objects` into `context.current` before the callable runs. `save_as=` stores the returned value back into `context.objects` for later steps, previews, or notebook inspection. The runtime owns `current`, so `save_as="current"` is rejected.
+
 This is the main design boundary:
 
 - the fluent API orchestrates runtime behavior
@@ -80,8 +82,10 @@ Steps can save and reuse values:
 
 - `use="name"` loads `context.objects["name"]` into `context.current`
 - `save_as="name"` stores the returned value into `context.objects["name"]`
+- `use="current"` leaves the current runtime value in place
+- `save_as="current"` is invalid
 
-In notebooks, those saved names are also the easiest way to inspect intermediates:
+In an external notebook or REPL, those saved names are also the easiest way to inspect intermediates:
 
 ```python
 build().preview(use="clean_df").head(10)
@@ -116,7 +120,7 @@ flow = (
 )
 ```
 
-Use `map(...)` when the same callable should run once per batch item. `map(...)` raises immediately when the batch is empty.
+`collect(...)` gathers matching files into a `Batch` of `FileRef` items. `map(...)` runs the same callable once per batch item, and `step_each(...)` is the equivalent alias. `map(...)` accepts either `item` or `context, item` and raises immediately when the batch is empty or not iterable.
 
 Batch mapping is especially useful when you want to:
 
@@ -168,7 +172,7 @@ Examples of common patterns:
 
 ## Discovery
 
-The desktop UI and Python entrypoints discover flows from compiled flow modules.
+The desktop UI and Python entrypoints discover flows from compiled `.py` and `.ipynb` flow modules.
 
 Each discovered flow module contributes:
 
@@ -197,6 +201,8 @@ An authored workspace typically contains:
 - `flow_modules/flow_helpers/`
 - `config/`
 - `databases/`
+
+Notebook-authored flows are compiled into the same discovery surface as Python-authored flows, so both authoring styles participate in the same workspace layout and runtime rules.
 
 The desktop app binds to one workspace at a time. When the selected workspace changes, the app reloads:
 

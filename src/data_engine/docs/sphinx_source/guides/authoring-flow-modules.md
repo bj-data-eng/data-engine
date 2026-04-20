@@ -1,6 +1,6 @@
 # Authoring Flow Modules
 
-Flow modules live in:
+Flow modules can be authored as either Python files or notebooks and live in:
 
 - `workspaces/<workspace_id>/flow_modules/<name>.ipynb`
 - `workspaces/<workspace_id>/flow_modules/<name>.py`
@@ -13,6 +13,8 @@ Each flow module should export:
 
 - optional `DESCRIPTION`
 - `build() -> Flow`
+
+Notebook-authored flow modules are compiled into runtime-ready Python modules before discovery and execution. They follow the same contract as `.py` modules: keep top-level cells side-effect free, export `build()`, and use the filename as the durable flow identity.
 
 The flow-module filename is the durable flow identity used by discovery and runtime state. If you rename the file, you are effectively creating a different flow as far as the system is concerned.
 
@@ -41,6 +43,8 @@ Keep module import-time code side-effect free. The app needs to discover flows s
 
 Do that work inside steps instead.
 
+Use `build().preview(use="name")` from an external notebook, REPL, or script while iterating when you want to inspect a saved intermediate result without promoting it to a separate step. `preview()` is not available from inside compiled flow modules.
+
 ## Step style
 
 Every `step(...)` callable receives one `context` argument:
@@ -67,6 +71,8 @@ def validate_pdf_with_context(context, file_ref):
 
 `map(...)` always returns a `Batch`, and `step_each(...)` is the equivalent alias. Both raise immediately when the current batch is empty.
 
+`collect(...)` is the companion batch-creation step. It gathers matching files into a `Batch` of `FileRef` items so later `map(...)` or `step_each(...)` calls can process them one by one.
+
 Use native libraries directly inside those steps:
 
 - Polars for dataframe reads, transforms, and writes
@@ -79,9 +85,9 @@ That simplicity is the intended authoring experience. Flow modules should feel l
 
 - keep import-time code side-effect free
 - keep expensive work inside steps
-- use `save_as=` and `use=` to preserve intermediate objects
-- use `build().preview(use="name")` in notebooks when you want to inspect one saved intermediate object quickly
-- use `collect(...)` when you want a batch of files
+- use `save_as=` and `use=` to preserve intermediate objects in `context.objects`
+- use `build().preview(use="name")` from an external notebook, REPL, or script when you want to inspect one saved intermediate object quickly
+- use `collect(...)` when you want a batch of files as `FileRef` items
 - use `map(...)` or `step_each(...)` when the same callable should run once per batch item
 - use `context.source` for source-relative paths
 - use `context.mirror` for write-ready output paths
