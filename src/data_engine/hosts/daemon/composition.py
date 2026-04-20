@@ -10,11 +10,10 @@ from typing import Callable
 
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
-from data_engine.runtime.runtime_db import RuntimeControlLedger
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger
 from data_engine.services.flow_catalog import FlowCatalogService
 from data_engine.services.flow_execution import FlowExecutionService
 from data_engine.services.ledger import RuntimeControlLedgerService
-from data_engine.services.runtime_io import default_runtime_io_layer
 from data_engine.services.runtime_ports import RuntimeCacheStore
 from data_engine.services.runtime_execution import RuntimeExecutionService
 
@@ -62,7 +61,7 @@ class DaemonHostDependencies:
         ledger_service = ledger_service or RuntimeControlLedgerService()
         factories = factories or default_daemon_host_dependency_factories()
         return cls(
-            runtime_cache_ledger=default_runtime_io_layer().open_cache_store(paths.runtime_cache_db_path),
+            runtime_cache_ledger=RuntimeCacheLedger(paths.runtime_cache_db_path),
             runtime_control_ledger=ledger_service.open_for_workspace(paths.workspace_root),
             flow_catalog_service=factories.flow_catalog_service_factory(),
             flow_execution_service=factories.flow_execution_service_factory(),

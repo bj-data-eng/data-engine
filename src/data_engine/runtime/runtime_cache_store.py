@@ -102,7 +102,10 @@ class _RuntimeCacheSchema(_RuntimeSqliteStore):
             """
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_flow_started ON runs(flow_name, started_at_utc DESC)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_status_started ON runs(status, started_at_utc, run_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_step_runs_run ON step_runs(run_id, id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_step_runs_status_id ON step_runs(status, id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_step_runs_run_status_id ON step_runs(run_id, status, id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_logs_flow_created ON logs(flow_name, created_at_utc, id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_logs_run_created ON logs(run_id, created_at_utc, id)")
         self._checkpoint_wal(passive=True)
@@ -184,7 +187,7 @@ class RuntimeRunRepository:
             """
             UPDATE runs
             SET status = ?, finished_at_utc = ?, error_text = COALESCE(error_text, ?)
-            WHERE status NOT IN ('success', 'failed', 'stopped')
+            WHERE status = 'started'
             """,
             (status, finished_at_utc, error_text),
         )
@@ -230,7 +233,7 @@ class RuntimeRunRepository:
                 """
                 SELECT run_id, flow_name, group_name, source_path, status, started_at_utc, finished_at_utc, error_text
                 FROM runs
-                WHERE status NOT IN ('success', 'failed', 'stopped')
+                WHERE status = 'started'
                 ORDER BY started_at_utc, run_id
                 """
             ).fetchall()
@@ -239,7 +242,7 @@ class RuntimeRunRepository:
                 """
                 SELECT run_id, flow_name, group_name, source_path, status, started_at_utc, finished_at_utc, error_text
                 FROM runs
-                WHERE flow_name = ? AND status NOT IN ('success', 'failed', 'stopped')
+                WHERE flow_name = ? AND status = 'started'
                 ORDER BY started_at_utc, run_id
                 """,
                 (flow_name,),
@@ -406,7 +409,7 @@ class RuntimeStepOutputRepository:
             """
             UPDATE step_runs
             SET status = ?, finished_at_utc = ?, error_text = COALESCE(error_text, ?)
-            WHERE status NOT IN ('success', 'failed', 'stopped')
+            WHERE status = 'started'
             """,
             (status, finished_at_utc, error_text),
         )
@@ -485,7 +488,7 @@ class RuntimeStepOutputRepository:
                 """
                 SELECT id, run_id, flow_name, step_label, status, started_at_utc, finished_at_utc, elapsed_ms, error_text, output_path
                 FROM step_runs
-                WHERE status NOT IN ('success', 'failed', 'stopped')
+                WHERE status = 'started'
                 ORDER BY id
                 """
             ).fetchall()
@@ -494,7 +497,7 @@ class RuntimeStepOutputRepository:
                 """
                 SELECT id, run_id, flow_name, step_label, status, started_at_utc, finished_at_utc, elapsed_ms, error_text, output_path
                 FROM step_runs
-                WHERE run_id = ? AND status NOT IN ('success', 'failed', 'stopped')
+                WHERE run_id = ? AND status = 'started'
                 ORDER BY id
                 """,
                 (run_id,),

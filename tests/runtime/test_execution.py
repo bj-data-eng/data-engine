@@ -9,9 +9,12 @@ from time import sleep
 
 from data_engine.core.model import FlowStoppedError
 from data_engine.core.primitives import FlowContext
+from data_engine.platform.workspace_models import DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR
 from data_engine.runtime.execution.context import QueuedRunJob
 from data_engine.runtime.execution.single import FlowRuntime
+from data_engine.runtime.execution.single import default_runtime_cache_ledger_service
 from data_engine.runtime.execution.runner import FlowRunExecutionPorts, FlowRunExecutor
+from data_engine.runtime.runtime_db import RuntimeCacheLedger
 
 
 @dataclass(frozen=True)
@@ -211,6 +214,34 @@ def test_flow_run_executor_elapsed_excludes_start_write_delay() -> None:
     assert success_step_log[1]["elapsed"] < 0.025
     assert success_flow_log[1]["elapsed"] < 0.075
     assert run_finished[1]["status"] == "success"
+
+
+def test_default_runtime_cache_ledger_service_opens_direct_runtime_cache_ledger(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "runtime_state" / "runtime_cache.sqlite"
+    monkeypatch.setenv(DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR, str(db_path))
+    service = default_runtime_cache_ledger_service()
+
+    ledger = service.open_runtime_cache_ledger()
+    try:
+        assert isinstance(ledger, RuntimeCacheLedger)
+        assert ledger.db_path == db_path.resolve()
+    finally:
+        ledger.close()
+
+
+def test_flow_runtime_discards_completed_contexts_when_results_collection_is_disabled() -> None:
+    runtime = FlowRuntime(flows=(), continuous=True)
+    try:
+        future: Future[FlowContext] = Future()
+        context = FlowContext(flow_name="demo", group="Demo")
+        future.set_result(context)
+        pending: dict[Future[FlowContext], tuple[object, int]] = {future: (object(), 0)}
+
+        runtime._consume_completed_future(future, pending, results=None)
+
+        assert pending == {}
+    finally:
+        runtime._close_runtime_resources()
 
 
 def test_flow_runtime_dispatches_queued_jobs_when_results_collection_is_disabled() -> None:

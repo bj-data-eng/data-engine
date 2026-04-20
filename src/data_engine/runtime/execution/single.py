@@ -18,7 +18,6 @@ from data_engine.runtime.execution.runner import FlowRunExecutionPorts, FlowRunE
 from data_engine.runtime.file_watch import PollingWatcher
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
-from data_engine.services.runtime_io import default_runtime_io_layer
 from data_engine.services.runtime_ports import RuntimeCacheStore
 
 if TYPE_CHECKING:
@@ -26,12 +25,14 @@ if TYPE_CHECKING:
 
 
 def _open_default_runtime_cache_ledger() -> RuntimeCacheStore:
-    """Open the default runtime ledger for authored flow execution."""
-    ledger = RuntimeCacheLedger.open_default()
-    try:
-        return default_runtime_io_layer().open_cache_store(ledger.db_path)
-    finally:
-        ledger.close()
+    """Open the default runtime ledger for authored flow execution.
+
+    Execution writes should use the direct runtime cache ledger rather than the
+    cached Runtime IO wrapper. The IO layer serializes all writes through one
+    process-wide queue, which is useful for operator/UI reads but can throttle
+    unrelated flows when automated runs execute concurrently.
+    """
+    return RuntimeCacheLedger.open_default()
 
 
 @dataclass(frozen=True)

@@ -143,6 +143,7 @@ def test_daemon_host_dependencies_build_default_opens_workspace_runtime_ledger(t
 
     dependencies = DaemonHostDependencies.build_default(paths)
     try:
+        assert isinstance(dependencies.runtime_cache_ledger, RuntimeCacheLedger)
         assert dependencies.runtime_cache_ledger.db_path.name == "runtime_cache.sqlite"
         assert dependencies.runtime_control_ledger.db_path.name == "runtime_control.sqlite"
         assert dependencies.runtime_cache_ledger.db_path.parent.parent.name == "runtime_state"
