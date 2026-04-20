@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -14,12 +15,18 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from data_engine.ui.gui.preview_models import ConfigPreviewRequest, OutputPreviewRequest, RunLogPreviewRequest
-from data_engine.ui.gui.rendering import populate_output_preview, render_svg_icon_pixmap
+from data_engine.ui.gui.rendering import (
+    build_preview_summary_text,
+    classify_artifact_preview,
+    populate_output_preview,
+    render_svg_icon_pixmap,
+)
 from data_engine.ui.gui.widgets import build_config_value, make_label_selectable
 from data_engine.views.presentation import format_seconds
 
@@ -235,7 +242,8 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
     dialog = QDialog(window)
     dialog.setWindowTitle("Inspect Output")
     dialog.setObjectName("outputPreviewDialog")
-    dialog.resize(860, 520)
+    target_width = max(min(window.width() - 50, 1600), 720)
+    dialog.resize(target_width, 520)
     layout = QVBoxLayout(dialog)
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
@@ -244,16 +252,54 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
     header.setObjectName("outputPreviewHeader")
     header_layout = QVBoxLayout(header)
     header_layout.setContentsMargins(14, 14, 14, 14)
-    header_layout.setSpacing(0)
+    header_layout.setSpacing(6)
 
-    path_label = QLabel(str(request.output_path))
+    preview_spec = classify_artifact_preview(request.output_path)
+
+    top_row = QHBoxLayout()
+    top_row.setContentsMargins(0, 0, 0, 0)
+    top_row.setSpacing(8)
+
+    title_label = QLabel("Dataframe")
+    title_label.setObjectName("heroTitle")
+    top_row.addWidget(title_label, 0, Qt.AlignmentFlag.AlignVCenter)
+    top_row.addStretch(1)
+
+    mode_combo = QComboBox()
+    mode_combo.setObjectName("outputPreviewModeCombo")
+    mode_combo.setFixedHeight(36)
+    limit_spin = QSpinBox()
+    limit_spin.setObjectName("outputPreviewLimitSpin")
+    limit_spin.setFixedHeight(36)
+    show_controls = preview_spec.kind == "parquet"
+    mode_combo.setVisible(show_controls)
+    limit_spin.setVisible(show_controls)
+    top_row.addWidget(mode_combo, 0, Qt.AlignmentFlag.AlignVCenter)
+    top_row.addWidget(limit_spin, 0, Qt.AlignmentFlag.AlignVCenter)
+    header_layout.addLayout(top_row)
+
+    summary_label = QLabel(
+        "Loading preview…" if preview_spec.kind == "parquet" else build_preview_summary_text(request.output_path, preview_spec)
+    )
+    summary_label.setObjectName("sectionMeta")
+    header_layout.addWidget(summary_label)
+
+    path_label = QLabel(f"Source: {request.output_path}")
     path_label.setObjectName("outputPreviewPath")
     path_label.setWordWrap(True)
     make_label_selectable(path_label)
     header_layout.addWidget(path_label)
     layout.addWidget(header)
 
-    populate_output_preview(layout, request.output_path)
+    preview_widget = populate_output_preview(
+        layout,
+        request.output_path,
+        preview_spec=preview_spec,
+        show_summary=False,
+        external_preview_controls=(mode_combo, limit_spin),
+    )
+    if hasattr(preview_widget, "summary_changed"):
+        preview_widget.summary_changed.connect(summary_label.setText)
 
     _present_dialog(dialog)
     return dialog

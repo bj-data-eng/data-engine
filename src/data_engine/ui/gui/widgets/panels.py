@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
+    QSpinBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -139,26 +140,6 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     title.setObjectName("heroTitle")
     container_layout.addWidget(title)
 
-    panel = QFrame()
-    panel.setObjectName("workspacePanel")
-    layout = QVBoxLayout(panel)
-    layout.setContentsMargins(18, 18, 18, 18)
-    layout.setSpacing(10)
-
-    window.debug_status_label = QLabel("No saved debug artifacts yet.")
-    window.debug_status_label.setWordWrap(True)
-    window.debug_status_label.setObjectName("bodyText")
-    layout.addWidget(window.debug_status_label)
-
-    controls = QHBoxLayout()
-    controls.setContentsMargins(0, 0, 0, 0)
-    controls.setSpacing(8)
-    controls.addStretch(1)
-    window.clear_debug_artifacts_button = QPushButton("Clear")
-    window.clear_debug_artifacts_button.clicked.connect(window._clear_debug_artifacts)
-    controls.addWidget(window.clear_debug_artifacts_button)
-    layout.addLayout(controls)
-
     splitter = QSplitter(Qt.Orientation.Horizontal)
     splitter.setChildrenCollapsible(False)
 
@@ -167,11 +148,20 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     left_layout = QVBoxLayout(left_panel)
     left_layout.setContentsMargins(12, 12, 12, 12)
     left_layout.setSpacing(8)
+    left_header = QHBoxLayout()
+    left_header.setContentsMargins(0, 0, 0, 0)
+    left_header.setSpacing(8)
     left_title = QLabel("Saved Artifacts")
     left_title.setObjectName("sectionTitle")
-    left_layout.addWidget(left_title)
+    left_header.addWidget(left_title, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+    left_header.addStretch(1)
+    window.clear_debug_artifacts_button = QPushButton("Clear")
+    window.clear_debug_artifacts_button.clicked.connect(window._clear_debug_artifacts)
+    left_header.addWidget(window.clear_debug_artifacts_button, 0, Qt.AlignmentFlag.AlignTop)
+    left_layout.addLayout(left_header)
     window.debug_artifact_list = QListWidget()
     window.debug_artifact_list.setObjectName("runLogList")
+    window.debug_artifact_list.setSpacing(4)
     window.debug_artifact_list.currentItemChanged.connect(lambda *_args: window._show_selected_debug_artifact())
     left_layout.addWidget(window.debug_artifact_list, 1)
 
@@ -180,11 +170,30 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     right_layout = QVBoxLayout(right_panel)
     right_layout.setContentsMargins(12, 12, 12, 12)
     right_layout.setSpacing(10)
+    right_header = QHBoxLayout()
+    right_header.setContentsMargins(0, 0, 0, 0)
+    right_header.setSpacing(8)
+    window.debug_artifact_title_label = QLabel("Dataframe")
+    window.debug_artifact_title_label.setObjectName("sectionTitle")
+    window.debug_artifact_title_label.setWordWrap(True)
+    right_header.addWidget(window.debug_artifact_title_label, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+    right_header.addStretch(1)
+    window.debug_preview_mode_combo = QComboBox()
+    window.debug_preview_mode_combo.setObjectName("outputPreviewModeCombo")
+    window.debug_preview_mode_combo.setFixedHeight(36)
+    window.debug_preview_mode_combo.setVisible(False)
+    right_header.addWidget(window.debug_preview_mode_combo, 0, Qt.AlignmentFlag.AlignTop)
+    window.debug_preview_limit_spin = QSpinBox()
+    window.debug_preview_limit_spin.setObjectName("outputPreviewLimitSpin")
+    window.debug_preview_limit_spin.setFixedHeight(36)
+    window.debug_preview_limit_spin.setVisible(False)
+    right_header.addWidget(window.debug_preview_limit_spin, 0, Qt.AlignmentFlag.AlignTop)
+    right_layout.addLayout(right_header)
 
-    window.debug_artifact_path_label = QLabel("")
-    window.debug_artifact_path_label.setObjectName("outputPreviewPath")
-    window.debug_artifact_path_label.setWordWrap(True)
-    right_layout.addWidget(window.debug_artifact_path_label)
+    window.debug_artifact_summary_label = QLabel("")
+    window.debug_artifact_summary_label.setObjectName("sectionMeta")
+    window.debug_artifact_summary_label.setWordWrap(True)
+    right_layout.addWidget(window.debug_artifact_summary_label)
 
     window.debug_artifact_source_label = QLabel("")
     window.debug_artifact_source_label.setObjectName("sectionMeta")
@@ -199,25 +208,12 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     window.debug_preview_layout.setSpacing(8)
     right_layout.addWidget(preview_panel, 1)
 
-    metadata_title = QLabel("Metadata")
-    metadata_title.setObjectName("sectionTitle")
-    right_layout.addWidget(metadata_title)
-    metadata_panel = QFrame()
-    metadata_panel.setObjectName("outputPreviewBody")
-    window.debug_metadata_layout = QVBoxLayout(metadata_panel)
-    window.debug_metadata_layout.setContentsMargins(0, 0, 0, 0)
-    window.debug_metadata_layout.setSpacing(8)
-    metadata_panel.setMinimumHeight(160)
-    right_layout.addWidget(metadata_panel, 0)
-
     splitter.addWidget(left_panel)
     splitter.addWidget(right_panel)
     splitter.setStretchFactor(0, 2)
     splitter.setStretchFactor(1, 5)
     splitter.setSizes([320, 760])
-    layout.addWidget(splitter, 1)
-
-    container_layout.addWidget(panel, 1)
+    container_layout.addWidget(splitter, 1)
     return container
 
 

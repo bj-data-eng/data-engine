@@ -46,21 +46,14 @@ def list_debug_artifacts(runtime_state_dir: Path) -> tuple[DebugArtifactRecord, 
     for path in sorted(root.iterdir()):
         if not path.is_file():
             continue
-        if path.suffix.lower() == ".json" and path.with_suffix(".parquet").exists():
+        if path.suffix.lower() == ".json":
             continue
         metadata: dict[str, Any] = {}
         artifact_path = path
-        metadata_path = path
-        kind = "json"
-        if path.suffix.lower() != ".json":
-            metadata_path = path.with_suffix(".json")
-            if metadata_path.is_file():
-                metadata = _read_json(metadata_path)
-            kind = classify_artifact_preview(path).kind
-        else:
-            metadata = _read_json(path)
-            if isinstance(metadata.get("artifact"), dict):
-                artifact_path = path
+        metadata_path = path.with_suffix(".json")
+        if metadata_path.is_file():
+            metadata = _read_json(metadata_path)
+        kind = classify_artifact_preview(path).kind
         stem = path.stem
         if stem in seen_stems:
             continue

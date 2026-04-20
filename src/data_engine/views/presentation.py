@@ -47,11 +47,15 @@ def group_cards(cards: tuple[FlowCatalogLike, ...] | list[FlowCatalogLike]) -> t
 
 def flow_secondary_text(mode: str, state: str) -> str:
     """Return the secondary status line for one flow card."""
+    base_label = "poll" if mode == "poll" else "schedule" if mode == "schedule" else "manual"
+    active_label = "polling" if mode == "poll" else "scheduled" if mode == "schedule" else "manual"
+    if state in {"stopping flow", "stopping runtime"}:
+        return f"{base_label} - stopping"
     if mode == "poll":
-        return "Polling" if state in {"poll ready", "polling"} else f"Polling  {state}"
+        return base_label if state in {"poll ready"} else active_label if state in {"polling", "running", "started", "starting"} else f"{base_label} - {state}"
     if mode == "schedule":
-        return "Scheduled" if state in {"schedule ready", "scheduled"} else f"Scheduled  {state}"
-    return "Manual" if state == "manual" else f"Manual  {state}"
+        return base_label if state in {"schedule ready"} else active_label if state in {"scheduled", "running", "started", "starting"} else f"{base_label} - {state}"
+    return base_label if state == "manual" else f"{base_label} - {state}"
 
 
 def group_secondary_text(entries: list[FlowCatalogLike], flow_states: dict[str, str]) -> str:

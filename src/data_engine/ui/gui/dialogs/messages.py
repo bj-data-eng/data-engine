@@ -43,6 +43,8 @@ def show_message_box(window: "DataEngineWindow", *, title: str, text: str, tone:
         summary_grid.setContentsMargins(0, 0, 0, 0)
         summary_grid.setHorizontalSpacing(10)
         summary_grid.setVerticalSpacing(6)
+        summary_grid.setColumnStretch(0, 1)
+        summary_grid.setColumnStretch(1, 2)
         for row_index, field in enumerate(structured.fields):
             label = QLabel(field.label)
             label.setObjectName("fieldLabel")

@@ -149,9 +149,15 @@ def test_qt_flow_cards_from_entries_preserves_order_and_error_fields():
 
 
 def test_shared_flow_secondary_text_matches_mode_and_state():
-    assert flow_secondary_text("poll", "poll ready") == "Polling"
-    assert flow_secondary_text("schedule", "failed") == "Scheduled  failed"
-    assert flow_secondary_text("manual", "manual") == "Manual"
+    assert flow_secondary_text("poll", "poll ready") == "poll"
+    assert flow_secondary_text("poll", "polling") == "polling"
+    assert flow_secondary_text("poll", "stopping runtime") == "poll - stopping"
+    assert flow_secondary_text("schedule", "schedule ready") == "schedule"
+    assert flow_secondary_text("schedule", "scheduled") == "scheduled"
+    assert flow_secondary_text("schedule", "stopping flow") == "schedule - stopping"
+    assert flow_secondary_text("schedule", "failed") == "schedule - failed"
+    assert flow_secondary_text("manual", "manual") == "manual"
+    assert flow_secondary_text("manual", "stopping flow") == "manual - stopping"
 
 
 def test_shared_group_secondary_text_summarizes_counts():
@@ -644,7 +650,7 @@ def test_shared_flow_display_builders_capture_cross_surface_row_text():
     group_display = GroupRowDisplay.from_group("Claims", [card], {card.name: "manual"})
 
     assert flow_display.primary == "Claims Summary"
-    assert "Manual" in flow_display.secondary
+    assert "manual" in flow_display.secondary
     assert "claims_summary" in flow_display.tooltip
     assert group_display.title == "Claims"
     assert group_display.secondary == "1 flow(s)"

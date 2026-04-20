@@ -70,15 +70,15 @@ def test_flow_row_display_keeps_unknown_group_out_of_tooltip_and_uses_name_prima
     display = FlowRowDisplay.from_card(card, "manual", primary="name")
 
     assert display.primary == "manual_review"
-    assert display.secondary == "Manual"
+    assert display.secondary == "manual"
     assert display.state_color == "idle"
     assert display.dot == "·"
     assert "group=" not in display.tooltip
 
 
 def test_presentation_helpers_cover_remaining_state_branches():
-    assert flow_secondary_text("poll", "failed") == "Polling  failed"
-    assert flow_secondary_text("manual", "failed") == "Manual  failed"
+    assert flow_secondary_text("poll", "failed") == "poll - failed"
+    assert flow_secondary_text("manual", "failed") == "manual - failed"
     assert status_color_name("started") == "started"
     assert status_color_name("manual") == "idle"
     assert state_dot("stopping flow") == "~"

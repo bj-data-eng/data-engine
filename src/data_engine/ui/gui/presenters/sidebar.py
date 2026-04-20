@@ -88,11 +88,12 @@ def set_hovered(widget: QFrame, hovered: bool) -> None:
 
 def repolish_widget_tree(widget: QWidget) -> None:
     """Reapply stylesheet state to one widget and its child widgets."""
-    style = widget.style()
-    style.unpolish(widget)
-    style.polish(widget)
-    for child in widget.findChildren(QWidget):
-        child.update()
+    widgets = [widget, *widget.findChildren(QWidget)]
+    for current in widgets:
+        style = current.style()
+        style.unpolish(current)
+        style.polish(current)
+        current.update()
     widget.update()
 
 

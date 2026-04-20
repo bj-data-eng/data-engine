@@ -18,6 +18,8 @@ from data_engine.platform.theme import (
 def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     """Return the application stylesheet for the requested theme."""
     palette = THEMES[resolve_theme_name(theme_name)]
+    selected_sidebar_text = palette.selection_text if palette.name == "dark" else palette.text
+    selected_sidebar_subtext = palette.selection_text if palette.name == "dark" else palette.text
     return f"""
     QWidget {{
         background: {palette.app_bg};
@@ -156,7 +158,7 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarFlowMeta,
     QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarFlowNumber,
     QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarStateDot {{
-        color: {palette.text};
+        color: {selected_sidebar_text};
     }}
     QLabel#sidebarFlowNumber {{
         background: transparent;
@@ -193,6 +195,16 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     }}
     QLabel#sidebarStateDot[stateColor="error"] {{
         color: {palette.error_text};
+    }}
+    QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarFlowMeta,
+    QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarFlowMeta[stateColor="success"],
+    QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarFlowMeta[stateColor="warning"],
+    QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarFlowMeta[stateColor="error"],
+    QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarStateDot,
+    QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarStateDot[stateColor="success"],
+    QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarStateDot[stateColor="warning"],
+    QFrame#sidebarFlowRow[selected="true"] QLabel#sidebarStateDot[stateColor="error"] {{
+        color: {selected_sidebar_subtext};
     }}
     QFrame#operationList {{
         background: transparent;
@@ -512,6 +524,12 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         padding: 9px 12px;
         color: {palette.text};
     }}
+    QLineEdit#outputPreviewFilterInput {{
+        border-radius: 0px;
+        padding: 2px 6px;
+        margin: 0px;
+        font-size: 10px;
+    }}
     QListWidget, QTextEdit {{
         background: transparent;
         border: 1px solid {palette.input_border};
@@ -635,6 +653,10 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border: 1px solid {palette.panel_border};
         border-radius: 5px;
     }}
+    QFrame#outputPreviewBody {{
+        background: transparent;
+        border: none;
+    }}
     QFrame#configPreviewBody {{
         background: {palette.panel_bg};
         border: 1px solid {palette.panel_border};
@@ -677,26 +699,42 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         font-size: 10px;
         font-weight: 600;
     }}
+    QWidget#outputPreviewExplorer {{
+        background: transparent;
+        border: none;
+    }}
     QTableWidget#outputPreviewTable {{
-        background: {palette.panel_bg};
-        alternate-background-color: {palette.tab_bg};
+        background: transparent;
+        alternate-background-color: transparent;
         border: 1px solid {palette.input_border};
-        border-radius: 5px;
+        border-radius: 0px;
         gridline-color: transparent;
         selection-background-color: {palette.selection_bg};
         selection-color: {palette.selection_text};
     }}
     QTableWidget#outputPreviewTable::item {{
-        padding: 6px 8px;
+        padding: 4px 8px;
+        border: none;
+        font-size: 11px;
+    }}
+    QTableWidget#outputPreviewTable QHeaderView {{
+        background: {palette.panel_bg};
         border: none;
     }}
     QTableWidget#outputPreviewTable QHeaderView::section {{
-        background: {palette.summary_bg};
+        background: transparent;
         color: {palette.text};
-        border: none;
-        border-bottom: 1px solid {palette.panel_border};
-        padding: 8px 10px;
+        border-top: 1px solid {palette.input_border};
+        border-bottom: 1px solid {palette.input_border};
+        border-right: 1px solid {palette.input_border};
+        border-left: none;
+        padding: 8px 12px;
         font-weight: 700;
+        font-size: 10px;
+    }}
+    QTableWidget#outputPreviewTable QTableCornerButton::section {{
+        background: {palette.panel_bg};
+        border: none;
     }}
     QTextEdit#outputPreviewText {{
         background: {palette.panel_bg};
