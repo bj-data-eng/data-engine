@@ -54,21 +54,16 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 ## Parallel Worktrees
 
 - Use semi-permanent worker lanes for high-throughput parallel work: `../data-engine-worktrees/lane-1` through `../data-engine-worktrees/lane-6`.
-- The coordinator owns task slicing, architecture decisions, integration, final tests, and commits. Worker agents own bounded implementation or audit tasks inside their assigned lane.
-- Do not stop passively after landing one local fix in an active refactor. When a boundary changes, proactively chase the migration through the surrounding codebase: callers, read models, command gating, tests, and UI surfaces. Prefer finishing the conversion over leaving mixed old/new paths in place.
-- Treat `main` after the latest accepted commit as the source of truth. Before starting a new parallel batch, reset every lane worktree to that accepted commit and confirm each lane is clean.
-- Prefer fresh worker agents per task while reusing the same worktree lane. Keep worker prompts small: objective, lane path, branch name, owned files/modules, tests to run, and expected report format. Do not include broad repo history unless it is directly needed.
-- Use stable lane themes when possible to reduce context reload: runtime/state, scheduler/daemon host, UI boundary, platform compatibility, authoring surface/tests, and audit-only.
-- Give each worker a disjoint write scope. Do not ask multiple workers to edit the same files unless the coordinator explicitly serializes the work.
+- Roles: the coordinator owns slicing, architecture, integration, final tests, and commits. Worker agents own bounded implementation or audit tasks inside one assigned lane.
+- Treat `main` after the latest accepted commit as the source of truth. Before a new parallel batch, reset every lane worktree to that commit, confirm it is clean, and after each accepted integration commit run `git reset --hard <accepted-commit>` plus `git clean -fd` inside every lane.
+- Prefer fresh worker agents per task while reusing the same lane. Keep prompts small: objective, lane path, branch name, owned files/modules, tests to run, and expected report format. Do not include broad repo history unless directly needed.
+- Give each worker a disjoint write scope. Use stable lane themes when helpful to reduce context reload: runtime/state, scheduler/daemon host, UI boundary, platform compatibility, authoring surface/tests, and audit-only.
 - Keep the semi-permanent lane branches generic: `codex/lane-1` through `codex/lane-6`.
 - Worker task branches should be created from the lane branch and be task-scoped, using names like `codex/lane-1-runtime-audit`. After integration, reset the lane branch to the accepted coordinator commit before the next task.
-- Do not add internal compatibility shims just to preserve old project-internal call shapes during refactors. Update affected internal callers to the new boundary instead. Preserve stability for the author-facing surface: flows, flow context, and `data_engine.helpers`.
+- During refactors, finish the migration through callers, read models, command gating, tests, and UI surfaces instead of stopping at one local fix or leaving mixed old/new paths in place. Do not add internal compatibility shims just to preserve old project-internal call shapes; update internal callers to the new boundary instead. Preserve stability for the author-facing surface: flows, flow context, and `data_engine.helpers`.
 - For speed, worker lanes may use the main repo venv at `../../data-engine/.venv` for `python -m pytest`, `ruff`, and `pydoclint` when the command runs from the worker worktree root.
 - Do not rely on the main repo console scripts, such as `data-engine.exe`, to test worker-lane code; console entry points may resolve to the installed checkout. Use `python -m ...` from the worker root, or create a lane-local `.venv` when testing packaging, console scripts, editable installs, or dependency changes.
-- Workers should return patch-first decision packets, not broad narratives: changed files, short summary, tests run with results, intentional deviations, and blockers only. The coordinator handles synthesis and broader follow-up.
-- For audit-only tasks, ask workers to return only `file:line`, issue, and recommended action. Do not ask audit workers to explain architecture history or edit files unless the coordinator turns a finding into a bounded implementation task.
-- The coordinator should integrate from diffs, not prose: inspect `git diff --stat`, review relevant file diffs, selectively apply accepted changes to `main`, run focused tests, then run the full suite when the batch changes runtime behavior.
-- After each accepted integration commit, run `git reset --hard <accepted-commit>` and `git clean -fd` inside each lane worktree. Never do this before the accepted coordinator commit exists.
+- Worker outputs should be patch-first, not broad narratives: changed files, short summary, tests run with results, intentional deviations, and blockers only. Audit-only outputs should be `file:line`, issue, and recommended action. The coordinator integrates from diffs, not prose: inspect `git diff --stat`, review relevant file diffs, selectively apply accepted changes to `main`, run focused tests, then the full suite when runtime behavior changed.
 
 ## Windows And Unix Compatibility
 
@@ -88,7 +83,6 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 - When moving runtime/control behavior to a new architecture, remove redundant fallback paths as you go. Do not leave old session/history/snapshot heuristics in place beside the new event-stream or service-owned truth unless a temporary bridge is explicitly documented and scheduled for removal.
 - The GUI must not create real runtime SQLite bindings for the synthetic unconfigured workspace placeholder.
 - Prefer explicit `runtime_cache_ledger` and `runtime_control_ledger` names in new internal code. Keep the public `RuntimeLedger` and `runtime_ledger` aliases only where needed for API/test compatibility.
-- Do not add internal compatibility shims just to preserve old project-internal call shapes during refactors. Update the affected internal callers to the new boundary instead. Preserve stability for the author-facing surface: flows, flow context, and `data_engine.helpers`.
 - Client-session tracking is important for ephemeral daemon lifetime. If the UI flickers between "has control" and disconnected, inspect the selected workspace control DB and daemon log before changing UI code.
 - Workspace provisioning is target-workspace specific. The Settings view has its own workspace selector and should make the provisioning target explicit.
 
@@ -121,8 +115,8 @@ git status --short
 ## Git Hygiene
 
 - Check `git status --short` before and after edits.
-- Do not stage or commit ignored local workspaces, smoke data, build outputs, or machine-local settings.
-- Do not commit machine-local absolute paths from your development environment. This includes repo-root paths, user-profile paths, local app-data paths, worktree paths, and interpreter paths embedded in docs, samples, UI mock data, or scaffolding code.
-- Prefer relative paths, obvious placeholders, or runtime-resolved paths instead of host-specific absolute paths.
-- When adding or refreshing examples, sample payloads, or UI shell data, sanity-check the diff for local path leakage before commit.
+- Do not stage or commit ignored local workspaces, smoke data, build outputs, machine-local settings, or other runtime residue such as local databases, logs, debug artifacts, temp exports, or repro files.
+- Do not commit machine-local absolute paths from your development environment. This includes repo-root paths, user-profile paths, local app-data paths, worktree paths, and interpreter paths embedded in docs, samples, UI mock data, or scaffolding code. Prefer relative paths, obvious placeholders, or runtime-resolved paths instead.
+- Do not commit secrets or host identity data. Keep API keys, auth headers, cookies, signed URLs, machine IDs, hostnames, usernames, email addresses, and copied production-like identifiers out of the repo unless they are clearly fake and intentional test fixtures.
+- When adding or refreshing examples, sample payloads, UI shell data, or screenshots, sanity-check the diff for local path, sensitive-data, and runtime-residue leakage before commit.
 - Do not revert user edits unless explicitly asked.
