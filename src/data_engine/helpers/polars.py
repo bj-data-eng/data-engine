@@ -143,13 +143,13 @@ def networkdays(
     end_expr = _as_date_expr(end)
     forward_expr = pl.business_day_count(
         start_expr,
-        end_expr + pl.duration(days=1),
+        end_expr.dt.offset_by("1d"),
         week_mask=week_mask,
         holidays=holiday_dates,
     )
     backward_expr = -pl.business_day_count(
         end_expr,
-        start_expr + pl.duration(days=1),
+        start_expr.dt.offset_by("1d"),
         week_mask=week_mask,
         holidays=holiday_dates,
     )
