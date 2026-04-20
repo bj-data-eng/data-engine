@@ -14,6 +14,9 @@
 - Add no-terminal GUI launchers.
   The current `.command` and `.bat` launchers are terminal-oriented. Add platform-appropriate GUI launch paths so the desktop UI can be opened without leaving a console window attached.
 
+- Compare Rust UI stacks once the `egui` experiment is more mature.
+  The current Rust surface is intentionally experimental and exists mainly to prove packaging/runtime viability. Later, build a small like-for-like shell in both `egui` and `Slint` and compare iteration speed, layout clarity, polish, and long-term fit before committing to one Rust UI direction.
+
 - Add PyPDF support.
   PDF-oriented workflows should have a first-class supported dependency and a clearer path for extraction, inspection, and PDF helper utilities inside flow modules.
 

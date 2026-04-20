@@ -8,6 +8,7 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 - Tests live under `tests/`.
 - Installer scripts live under `INSTALL/`.
 - Smoke-data generation lives under `scripts/` and `src/data_engine/devtools/`.
+- Keep untracked persisted reference notes under `workspaces/_local/` when something should remain available locally without becoming tracked repo content.
 - Generated local data/workspaces are intentionally ignored: `data/`, `data2/`, and `workspaces/`.
 - Build artifacts are ignored: `build/`, `dist/`, `*.egg-info/`, and generated docs under `src/data_engine/docs/html/`.
 
