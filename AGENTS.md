@@ -122,4 +122,7 @@ git status --short
 
 - Check `git status --short` before and after edits.
 - Do not stage or commit ignored local workspaces, smoke data, build outputs, or machine-local settings.
+- Do not commit machine-local absolute paths from your development environment. This includes repo-root paths, user-profile paths, local app-data paths, worktree paths, and interpreter paths embedded in docs, samples, UI mock data, or scaffolding code.
+- Prefer relative paths, obvious placeholders, or runtime-resolved paths instead of host-specific absolute paths.
+- When adding or refreshing examples, sample payloads, or UI shell data, sanity-check the diff for local path leakage before commit.
 - Do not revert user edits unless explicitly asked.
