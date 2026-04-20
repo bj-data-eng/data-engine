@@ -14,7 +14,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "py-data-engine"
 dynamic = ["version"]
-description = "Workbook-driven workflow jobs with strict filename parsing and DuckDB-backed processing."
+description = "GUI orchestrator for python-based dataframe transform pipelines."
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
@@ -22,7 +22,7 @@ license-files = ["LICENSE"]
 authors = [
   { name = "Data Engine contributors" },
 ]
-keywords = ["duckdb", "excel", "parquet", "flow", "polars"]
+keywords = ["duckdb", "excel", "parquet", "flow", "polars", "notebook"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",

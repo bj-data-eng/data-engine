@@ -1,12 +1,35 @@
 # Data Engine
 
-Data Engine is a pre-alpha workflow runtime for file-driven jobs. A flow declares:
+Data Engine is a GUI orchestrator for Python-based dataframe transform pipelines.
 
-- a group
-- an optional runtime trigger via `watch(...)`
-- ordered generic `step(...)` callables
+It provides:
 
-The runtime orchestrates source handling, scheduling, and mirrored output routing. Poll freshness is tracked in the runtime ledger rather than by comparing output mtimes. Step functions use native libraries directly, such as Polars for dataframe work and DuckDB for SQL work.
+- a workspace-based runtime for authored flows
+- a desktop GUI for operators
+- a terminal UI for headless/local operation
+- an experimental Rust-backed `egui` surface
+- parquet-first inspect/debug tooling for dataframe outputs
+
+Flows are plain Python modules that declare how source files, settings workbooks, schedules, and manual runs should move through Polars, DuckDB, and file outputs.
+
+## What It Is
+
+Data Engine is not just a dataframe library and not just a scheduler. It is the operator/runtime layer around Python-authored flow modules.
+
+The package handles:
+
+- workspace discovery and selection
+- daemon ownership and control handoff
+- manual, poll, and schedule execution modes
+- mirrored output routing
+- persisted run/log/state history
+- dataframe inspection inside the app
+
+Step functions use normal Python libraries directly. In practice that usually means:
+
+- Polars for dataframe transforms
+- DuckDB for SQL-oriented work
+- pathlib-style file output
 
 ## Install
 
@@ -16,33 +39,67 @@ Use the installer that matches your environment:
 
 - macOS: [INSTALL/INSTALL MAC.command](INSTALL/INSTALL%20MAC.command)
 - Windows: [INSTALL/INSTALL WINDOWS.bat](INSTALL/INSTALL%20WINDOWS.bat)
-- Windows VM / CPU-safe Polars test path: [INSTALL/INSTALL WINDOWS_VM.bat](INSTALL/INSTALL%20WINDOWS_VM.bat)
-
-The macOS and standard Windows installers install the normal base runtime, which now includes Polars directly.
+- Windows VM / CPU-safe Polars path: [INSTALL/INSTALL WINDOWS_VM.bat](INSTALL/INSTALL%20WINDOWS_VM.bat)
 
 ### Manual install
 
-Polars is now part of the regular install:
+Base install:
+
+```bash
+python -m pip install py-data-engine
+```
+
+Editable local install:
+
+```bash
+python -m pip install -e .
+```
+
+Notebook-authored flow modules (`.ipynb`) are supported in the normal install. The optional notebook extra is only for authoring inside Jupyter:
+
+```bash
+python -m pip install -e ".[notebook]"
+```
+
+For contributors:
 
 ```bash
 python -m pip install -e ".[dev]"
 ```
 
-Launch the GUI with:
+Core requirements:
+
+- Python `>=3.14`
+- PySide6 for the desktop GUI
+- Textual for the terminal UI
+
+## Start The App
+
+Desktop GUI:
+
+```bash
+data-engine start gui
+```
+
+Experimental Rust `egui` surface:
+
+```bash
+data-engine start egui
+```
+
+Terminal UI:
+
+```bash
+data-engine start tui
+```
+
+You can also launch from module form if needed:
 
 ```bash
 python -m data_engine.ui.cli.app start gui
 ```
 
-## Public API
-
-```python
-from data_engine import Flow, FlowContext, discover_flows, load_flow, run
-```
-
 ## Headless CLI
-
-Data Engine now ships with a headless CLI:
 
 ```bash
 data-engine list
@@ -52,6 +109,12 @@ data-engine run
 ```
 
 `data-engine run` starts the automated engine headlessly for discovered automated flows and keeps running until stopped. Use `--once` to force a single pass instead.
+
+## Public API
+
+```python
+from data_engine import Flow, FlowContext, discover_flows, load_flow, run
+```
 
 ## Workspace Model
 
@@ -66,18 +129,18 @@ Each immediate child folder containing `flow_modules/` is treated as a workspace
 - `workspaces/example_workspace/flow_modules/`
 - `workspaces/claims2/flow_modules/`
 
-The app resolves per-workspace local artifacts under:
+Shared workspace state lives inside each authored workspace:
+
+- `workspaces/<workspace_id>/.workspace_state/`
+
+Machine-local runtime state lives under the app artifacts root:
 
 - `artifacts/workspace_cache/<workspace_id>/`
 - `artifacts/runtime_state/<workspace_id>/`
 
-Shared lease and checkpoint state lives inside each authored workspace:
+The app's selected workspace and collection-root preference are machine-local settings, not repo-local config.
 
-- `workspaces/<workspace_id>/.workspace_state/`
-
-The app's workspace selection and collection-root preference are machine-local state, not repo-local config checked into the project tree.
-
-## Basic shape
+## Flow Shape
 
 ```python
 from data_engine import Flow
@@ -115,9 +178,30 @@ def build():
     )
 ```
 
-## Batch helpers
+Each flow module exports:
 
-For batch-oriented flows, use `Flow.collect(...)` and either `Flow.map(...)` or `Flow.step_each(...)` instead of importing extra helpers or hand-managing raw lists.
+- optional `DESCRIPTION`
+- `build() -> Flow`
+
+The module filename is the flow identity. Authored flow modules should set `Flow(group=...)` and let the loader inject the final flow name from the module filename.
+
+## Runtime Modes
+
+Flows can run as:
+
+- `manual`
+- `poll`
+- `schedule`
+
+At a high level:
+
+- `manual` runs on operator request
+- `poll` watches source inputs for new or changed files
+- `schedule` runs on a time-based cadence
+
+## Batch Helpers
+
+For batch-oriented flows, use `Flow.collect(...)` plus either `Flow.map(...)` or `Flow.step_each(...)`.
 
 ```python
 from data_engine import Flow
@@ -140,7 +224,7 @@ def build():
     )
 ```
 
-`Flow.collect(...)` returns a `Batch` of `FileRef` items. `Flow.map(...)` applies one callable to each item and returns a new `Batch`. `Flow.step_each(...)` is the equivalent readability-first alias. If the batch is empty, both forms raise immediately so the mapped step gets the useful failure.
+`Flow.collect(...)` returns a `Batch` of `FileRef` items. `Flow.map(...)` applies one callable to each item and returns a new `Batch`. `Flow.step_each(...)` is the equivalent readability-first alias.
 
 ## Flow API
 
@@ -161,18 +245,10 @@ def build():
 - `.show()`
 
 `step()` callables always receive one `FlowContext` parameter and return the next value for `context.current`.
+
 `map()` and `step_each()` callables accept either `(item)` or `(context, item)` and return a mapped `Batch`.
 
-For notebook authoring, `preview()` is usually the most useful inspection helper:
-
-```python
-build().preview(use="raw_df").head(10)
-build().preview(use="filtered_df")
-```
-
-`preview(use="name")` runs the flow until that `save_as="name"` object exists, then returns the real object without running later steps.
-
-## Flow context
+## FlowContext
 
 `FlowContext` exposes the active run state:
 
@@ -182,8 +258,9 @@ build().preview(use="filtered_df")
 - `context.objects`
 - `context.metadata`
 - `context.source_metadata()`
+- `context.debug`
 
-`context.source` is the resolved input namespace for the active source. The most useful helpers are:
+Useful source helpers:
 
 - `context.source.path`
 - `context.source.with_extension(".json")`
@@ -192,67 +269,110 @@ build().preview(use="filtered_df")
 - `context.source.namespaced_file("notes.json")`
 - `context.source.root_file("lookup.csv")`
 
-`context.mirror` is the mirrored output namespace for the active source. The two core helpers are:
+Useful mirror helpers:
 
 - `context.mirror.with_extension(".parquet")`
 - `context.mirror.with_suffix(".parquet")`
 - `context.mirror.file("open_claims.parquet")`
 - `context.mirror.namespaced_file("open_claims.parquet")`
 
-`with_extension(...)` is the clearer extension-changing helper. `with_suffix(...)` remains available as the pathlib-style alias.
-`file(...)` stays in the mirrored/source folder. `namespaced_file(...)` creates a source-stem namespace for multi-output cases.
+`use="name"` loads `context.objects["name"]` into `context.current` before the step runs. `save_as="name"` stores the returned value into `context.objects["name"]`.
 
-When a step writes one inspectable artifact, return that existing `Path`. The UI uses returned output paths to enable the `Inspect` button for that step.
+## Dataframe Debugging
 
-`use="name"` loads `context.objects["name"]` into `context.current` before the step runs. `save_as="name"` stores the returned value into `context.objects["name"]`. Those same saved names are what `build().preview(use="name")` uses in notebooks.
+The app includes a dataframe-first debug pane for saved parquet artifacts.
 
-## Discovery
+From a flow step, save a debug dataframe with:
 
-Flows are code-defined. Starter flow modules live in:
+```python
+context.debug.save_frame(context.current, name="raw_claims")
+```
+
+That writes:
+
+- a parquet artifact for the dataframe
+- companion metadata used by the UI
+
+The desktop GUI can then:
+
+- list saved dataframe artifacts by flow/step/timestamp
+- inspect parquet outputs in-app
+- preview top N, bottom N, or sampled rows
+- filter columns with Excel-style distinct-value popups
+- copy one or more selected cells from the table
+
+The inspect modal reuses the same dataframe rendering path.
+
+## Notebook Preview
+
+For notebook authoring, `preview()` is usually the most useful helper:
+
+```python
+build().preview(use="raw_df").head(10)
+build().preview(use="filtered_df")
+```
+
+`preview(use="name")` runs the flow until that `save_as="name"` object exists, then returns the real object without running later steps.
+
+## Discovery And Compilation
+
+Starter flow modules live in:
 
 - `workspaces/<workspace_id>/flow_modules/`
 - `artifacts/workspace_cache/<workspace_id>/compiled_flow_modules/`
 
-Each flow module must export:
+Authored flow modules compile into:
 
-- optional `DESCRIPTION`
-- `build() -> Flow`
+- `artifacts/workspace_cache/<workspace_id>/compiled_flow_modules/*.py`
 
-The flow-module filename is the flow identity. Authored flow modules should use `Flow(group=...)` and let the loader inject the name from the module filename.
+The runtime loads discovered flows from those compiled modules.
 
-Authored flow modules compile into `artifacts/workspace_cache/<workspace_id>/compiled_flow_modules/*.py`, and the runtime loads discovered flows from those compiled modules.
-
-## Workspace layout
+## Workspace Layout
 
 - `src/data_engine/`
-  Runtime package and desktop UI
+  Runtime package, operator surfaces, and services
 - `workspaces/<workspace_id>/flow_modules/`
   Authored flow sources (`.py` or `.ipynb`)
 - `workspaces/<workspace_id>/.workspace_state/`
   Shared lease markers and checkpoint parquet snapshots
 - `artifacts/workspace_cache/<workspace_id>/compiled_flow_modules/`
-  Generated/importable flow modules
+  Generated importable flow modules
 - `artifacts/runtime_state/<workspace_id>/`
-  Internal runtime ledger state for one workspace
-- `artifacts/documentation/`
-  Generated documentation output
-- `example_data/Input`
-  Example input files
-- `example_data/Settings`
-  Example single-file inputs
-- `example_data/Output`
-  Flow outputs
-- `example_data/databases`
-  DuckDB files created on demand
+  Machine-local runtime and daemon state
+- `src/data_engine/docs/`
+  Packaged documentation content
 
-## Live Smoke Suite
+## Smoke Data
 
-The live smoke suite is intentionally self-contained:
+Generate local smoke data with:
 
-- `tests/daemon/test_live_runtime_suite.py`
+```bash
+python scripts/generate_smoke_data.py --root . --workspace-id example_workspace --workspace-id claims2
+```
 
-It generates temporary workspaces from scratch, generates temporary `example_data/` and `data2/` with the real starter-data generator, adds notebook-authored poll/schedule/manual flows, runs the daemons, and tears the whole environment down afterward. It does not rely on existing `workspaces/example_workspace` or `workspaces/claims2` or live repo data directories.
+Generated local data and workspaces are intentionally ignored:
+
+- `data/`
+- `data2/`
+- `workspaces/`
+
+## Packaging
+
+Distribution name:
+
+- `py-data-engine`
+
+Version source of truth:
+
+- `src/data_engine/platform/identity.py`
+
+Build checks:
+
+```bash
+python -m build
+python -m twine check dist/*
+```
 
 ## Status
 
-This project is pre-alpha. Backwards compatibility is not a goal; the API should stay small and explicit while the runtime architecture settles.
+This project is pre-alpha. Internal architecture is still moving quickly, and backwards compatibility is not a current goal.
