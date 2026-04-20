@@ -751,6 +751,19 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         background: {palette.selection_bg};
         color: {palette.selection_text};
     }}
+    QListWidget#outputPreviewPopupList::indicator {{
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        border: 1px solid {palette.hover_border if palette.name == "dark" else palette.input_border};
+        background: transparent;
+    }}
+    QListWidget#outputPreviewPopupList::indicator:hover {{
+        border: 1px solid {palette.selection_border};
+    }}
+    QListWidget#outputPreviewPopupList::indicator:checked {{
+        image: url(src/data_engine/ui/gui/icons/check-mark-{"dark" if palette.name == "dark" else "light"}.svg);
+    }}
     QTabWidget::pane {{
         background: transparent;
         border: none;
