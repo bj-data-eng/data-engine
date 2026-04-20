@@ -252,7 +252,7 @@ def test_ephemeral_daemon_stays_alive_when_no_live_clients_remain_during_active_
 
         def wait(self, _seconds: float) -> bool:
             self.calls += 1
-            return self._set or self.calls >= 2
+            return self._set or self.calls >= 4
 
         def is_set(self) -> bool:
             return self._set
@@ -262,6 +262,13 @@ def test_ephemeral_daemon_stays_alive_when_no_live_clients_remain_during_active_
 
     service.host.shutdown_event = _SequenceEvent()  # type: ignore[assignment]
     monkeypatch.setattr(service.runtime_control_ledger.client_sessions, "count_live", lambda workspace_id: 0)
+    tick = {"value": 0.0}
+
+    def _fake_monotonic() -> float:
+        tick["value"] += 1.0
+        return tick["value"]
+
+    monkeypatch.setattr("data_engine.hosts.daemon.lifecycle.time.monotonic", _fake_monotonic)
 
     service._checkpoint_loop()  # noqa: SLF001 - direct lifecycle ephemeral policy test
 
@@ -293,7 +300,7 @@ def test_ephemeral_idle_daemon_requests_shutdown_when_no_live_clients_remain(tmp
 
         def wait(self, _seconds: float) -> bool:
             self.calls += 1
-            return self._set or self.calls >= 2
+            return self._set or self.calls >= 4
 
         def is_set(self) -> bool:
             return self._set
@@ -303,6 +310,13 @@ def test_ephemeral_idle_daemon_requests_shutdown_when_no_live_clients_remain(tmp
 
     service.host.shutdown_event = _SequenceEvent()  # type: ignore[assignment]
     monkeypatch.setattr(service.runtime_control_ledger.client_sessions, "count_live", lambda workspace_id: 0)
+    tick = {"value": 0.0}
+
+    def _fake_monotonic() -> float:
+        tick["value"] += 1.0
+        return tick["value"]
+
+    monkeypatch.setattr("data_engine.hosts.daemon.lifecycle.time.monotonic", _fake_monotonic)
 
     service._checkpoint_loop()  # noqa: SLF001 - direct lifecycle ephemeral policy test
 
@@ -310,6 +324,53 @@ def test_ephemeral_idle_daemon_requests_shutdown_when_no_live_clients_remain(tmp
     assert service.host.workspace_owned is False
     assert service.host.runtime_active is False
     assert service.host.status == "client disconnected"
+
+    service._shutdown()  # noqa: SLF001
+
+
+def test_ephemeral_daemon_ignores_transient_zero_client_gap_during_workspace_handoff(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths, lifecycle_policy=DaemonLifecyclePolicy.EPHEMERAL)
+    service.initialize()
+    service.host.runtime_active = True
+    service.host.status = "running"
+
+    class _SequenceEvent:
+        def __init__(self) -> None:
+            self.calls = 0
+            self._set = False
+
+        def wait(self, _seconds: float) -> bool:
+            self.calls += 1
+            return self._set or self.calls >= 3
+
+        def is_set(self) -> bool:
+            return self._set
+
+        def set(self) -> None:
+            self._set = True
+
+    client_counts = iter([0, 1, 1])
+    service.host.shutdown_event = _SequenceEvent()  # type: ignore[assignment]
+    monkeypatch.setattr(
+        service.runtime_control_ledger.client_sessions,
+        "count_live",
+        lambda workspace_id: next(client_counts),
+    )
+
+    service._checkpoint_loop()  # noqa: SLF001 - transient no-client gap should not trigger stop/shutdown
+
+    assert service.host.shutdown_event.is_set() is False
+    assert service.host.workspace_owned is True
+    assert service.host.runtime_active is True
+    assert service.host.status == "running"
+    assert service.state.shutdown_when_idle is False
+    assert service.state.engine_runtime_stop_event.is_set() is False
 
     service._shutdown()  # noqa: SLF001
 

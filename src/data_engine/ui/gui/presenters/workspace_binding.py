@@ -80,13 +80,6 @@ def rebind_workspace_context(
     old_subscription.stop()
     old_thread = old_subscription.thread
     old_binding = window.runtime_binding
-
-    try:
-        window.runtime_binding_service.remove_client_session(window.runtime_binding, window.client_session_id)
-    except Exception:
-        pass
-    _shutdown_old_workspace_if_orphaned(window, old_binding)
-    window.runtime_binding_service.close_binding(window.runtime_binding)
     if override_root is ...:
         override_root = window.workspace_collection_root_override
     window.workspace_paths = window._resolve_workspace_paths(
@@ -113,6 +106,7 @@ def rebind_workspace_context(
         clock=window._monotonic,
     )
     register_client_session(window)
+    window.runtime_binding_service.close_binding(old_binding)
     window._ui_timing_log_path = (
         window.workspace_paths.runtime_state_dir / "ui_timing.log"
         if window.workspace_paths.workspace_configured

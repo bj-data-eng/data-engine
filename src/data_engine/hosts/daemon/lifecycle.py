@@ -23,6 +23,9 @@ if TYPE_CHECKING:
     from data_engine.hosts.daemon.app import DataEngineDaemonService
 
 
+_MISSING_CLIENTS_GRACE_SECONDS = 2.5
+
+
 def checkpoint_loop(service: "DataEngineDaemonService") -> None:
     next_checkpoint_at = time.monotonic() + CHECKPOINT_INTERVAL_SECONDS
     while not service.host.shutdown_event.wait(CONTROL_REQUEST_POLL_INTERVAL_SECONDS):
@@ -146,6 +149,13 @@ def _missing_clients_action(service: "DataEngineDaemonService") -> str | None:
     except Exception:
         return None
     if not no_clients:
+        with service._state_lock:
+            service.state.mark_clients_present()
+        return None
+    now = time.monotonic()
+    with service._state_lock:
+        missing_since = service.state.note_missing_clients(now_monotonic=now)
+    if now - missing_since < _MISSING_CLIENTS_GRACE_SECONDS:
         return None
     if runtime_active or runtime_stopping:
         return "stop_engine"

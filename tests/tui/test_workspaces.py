@@ -38,6 +38,7 @@ async def test_tui_switching_workspaces_reloads_visible_log_runs(monkeypatch, tm
 
     initial_store = FlowLogStore()
     replacement_store = FlowLogStore()
+    remove_calls: list[tuple[object, str]] = []
     app = make_tui(
         discover_workspaces_func=lambda app_root=None, workspace_collection_root=None, explicit_workspace_root=None: (
             type("DW", (), {"workspace_id": "claims", "workspace_root": claims_root})(),
@@ -50,6 +51,13 @@ async def test_tui_switching_workspaces_reloads_visible_log_runs(monkeypatch, tm
         log_service=FakeLogService(stores=(initial_store, replacement_store)),
     )
     async with app.run_test() as pilot:
+        original_remove_client_session = app.runtime_binding_service.remove_client_session
+
+        def _record_remove_client_session(binding, client_id):
+            remove_calls.append((binding, client_id))
+            return original_remove_client_session(binding, client_id)
+
+        app.runtime_binding_service.remove_client_session = _record_remove_client_session
         flow_name = app.flow_cards[0].name
         app.selected_flow_name = flow_name
         app.log_store.append_entry(
@@ -114,6 +122,7 @@ async def test_tui_switching_workspaces_reloads_visible_log_runs(monkeypatch, tm
         switched_groups = app.log_store.runs_for_flow(flow_name)
         assert app.workspace_paths.workspace_id == "claims2"
         assert app.log_store is replacement_store
+        assert remove_calls == []
         assert len(switched_groups) == 2
         assert [group.source_label for group in switched_groups] == ["claims2_a.xlsx", "claims2_b.xlsx"]
         assert len([child for child in run_list.children if isinstance(child, RunGroupListItem)]) == 2
@@ -134,4 +143,3 @@ async def test_tui_empty_workspace_reload_clears_stale_flow_rows():
 
         assert app.selected_flow_name is None
         assert len(list_view.children) == 0
-

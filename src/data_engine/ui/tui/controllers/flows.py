@@ -190,11 +190,7 @@ class _TuiWorkspaceCatalogController:
             window._workspace_switch_suppressed = False
 
     def switch_workspace(self, window: "DataEngineTui", workspace_id: str, presentation: "_TuiFlowPresentationController") -> None:
-        try:
-            window.runtime_binding_service.remove_client_session(window.runtime_binding, window.client_session_id)
-        except Exception:
-            pass
-        window.runtime_binding_service.close_binding(window.runtime_binding)
+        old_binding = window.runtime_binding
         window.workspace_paths = self.workspace_service.resolve_paths(
             workspace_id=workspace_id,
             workspace_collection_root=window.workspace_collection_root_override,
@@ -213,6 +209,7 @@ class _TuiWorkspaceCatalogController:
         ).with_workspace(window.workspace_session_state)
         window.runtime_binding = window.runtime_binding_service.open_binding(window.workspace_paths)
         window._register_client_session()
+        window.runtime_binding_service.close_binding(old_binding)
         window.flow_cards = ()
         window.flow_states = {}
         window.selected_flow_name = None

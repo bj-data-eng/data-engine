@@ -113,6 +113,7 @@ class DaemonHostState:
     consecutive_checkpoint_failures: int
     listener: object | None
     shutdown_when_idle: bool
+    missing_clients_since_monotonic: float | None
 
     @classmethod
     def build(cls, *, started_at_utc: str) -> "DaemonHostState":
@@ -138,6 +139,7 @@ class DaemonHostState:
             consecutive_checkpoint_failures=0,
             listener=None,
             shutdown_when_idle=False,
+            missing_clients_since_monotonic=None,
         )
 
     def claim_workspace(self) -> None:
@@ -261,6 +263,16 @@ class DaemonHostState:
     def clear_shutdown_when_idle(self) -> None:
         """Clear any pending idle-shutdown request."""
         self.shutdown_when_idle = False
+
+    def mark_clients_present(self) -> None:
+        """Clear any transient no-client observation window."""
+        self.missing_clients_since_monotonic = None
+
+    def note_missing_clients(self, *, now_monotonic: float) -> float:
+        """Record the start of one no-client window and return its start time."""
+        if self.missing_clients_since_monotonic is None:
+            self.missing_clients_since_monotonic = now_monotonic
+        return self.missing_clients_since_monotonic
 
 
 class DaemonHostFacade:

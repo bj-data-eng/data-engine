@@ -13,7 +13,7 @@ import pytest
 import polars as pl
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QListWidget, QPushButton, QTableWidget, QTextEdit
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QListWidget, QPushButton, QTableWidget, QTextEdit, QWidget
 from shiboken6 import delete as shiboken_delete
 from shiboken6 import isValid as shiboken_is_valid
 
@@ -886,7 +886,8 @@ def test_show_output_preview_renders_excel_as_table(qapp, monkeypatch, tmp_path)
         )
         table = window.output_preview_dialog.findChild(QTableWidget, "outputPreviewTable")
 
-        assert "Excel table preview" in meta_label.text()
+        assert "2 row(s)" in meta_label.text()
+        assert "2 column(s)" in meta_label.text()
         assert table is not None
         assert table.rowCount() == 2
         assert table.columnCount() == 2
@@ -912,7 +913,7 @@ def test_show_output_preview_pdf_uses_placeholder_message(qapp, monkeypatch, tmp
         )
         body = window.output_preview_dialog.findChild(QTextEdit, "outputPreviewText")
 
-        assert "PDF inspection" in meta_label.text()
+        assert "PDF" in meta_label.text()
         assert body is not None
         assert "not available yet" in body.toPlainText()
     finally:
@@ -2945,9 +2946,16 @@ def test_debug_view_lists_previews_and_clears_saved_debug_artifacts(qapp):
         qapp.processEvents()
 
         assert window.debug_artifact_list.count() == 1
-        assert window.debug_artifact_path_label.text() == str(artifact_path)
-        tables = window.findChildren(QTableWidget, "outputPreviewTable")
-        assert len(tables) >= 2
+        assert window.debug_artifact_title_label.text() == "Dataframe"
+        _process_ui_until(qapp, lambda: "2 column(s)" in window.debug_artifact_summary_label.text())
+        assert "2 column(s)" in window.debug_artifact_summary_label.text()
+        assert window.debug_artifact_source_label.text() == "Source: C:/input/claims_flat_1.xlsx"
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert isinstance(table, QTableWidget)
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+        header_labels = {table.horizontalHeaderItem(index).text() for index in range(table.columnCount())}
+        assert header_labels == {"claim_id \u25be\nInt64", "status \u25be\nString"}
 
         window.clear_debug_artifacts_button.click()
         qapp.processEvents()
@@ -2958,7 +2966,7 @@ def test_debug_view_lists_previews_and_clears_saved_debug_artifacts(qapp):
         _dispose_window(qapp, window)
 
 
-def test_debug_view_renders_json_artifact_as_table(qapp):
+def test_debug_view_ignores_json_only_artifacts(qapp):
     window = _make_window()
     try:
         debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
@@ -2984,14 +2992,303 @@ def test_debug_view_renders_json_artifact_as_table(qapp):
         window.debug_button.click()
         qapp.processEvents()
 
-        tables = window.findChildren(QTableWidget, "outputPreviewTable")
-        assert len(tables) >= 2
-        assert any(
-            table.columnCount() == 6
-            and {table.horizontalHeaderItem(index).text() for index in range(table.columnCount())}
-            == {"data.output_path", "data.row_count", "debug.flow_name", "debug.step_name", "debug.workspace_id", "info.rows"}
-            for table in tables
+        assert window.debug_artifact_list.count() == 0
+        assert window.debug_artifact_list.count() == 0
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_live_parquet_filters_update_preview_rows(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 2001],
+                "status": ["OPEN", "CLOSED", "OPEN"],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
         )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 3)
+        assert table.rowCount() == 3
+
+        explorer._open_filter_popup_for_index(0)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        _process_ui_until(qapp, lambda: popup.findChild(QListWidget, "outputPreviewPopupList").count() > 0)
+        search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
+        assert search is not None
+        search.setText("100")
+        qapp.processEvents()
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "None").click()
+        qapp.processEvents()
+        next(button for button in buttons if button.text() == "All").click()
+        qapp.processEvents()
+        next(button for button in buttons if button.text() == "Apply").click()
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+        assert table.rowCount() == 2
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        _process_ui_until(qapp, lambda: popup.findChild(QListWidget, "outputPreviewPopupList").count() > 0)
+        search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
+        assert search is not None
+        search.setText("closed")
+        qapp.processEvents()
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "None").click()
+        qapp.processEvents()
+        next(button for button in buttons if button.text() == "All").click()
+        qapp.processEvents()
+        next(button for button in buttons if button.text() == "Apply").click()
+        _process_ui_until(qapp, lambda: table.rowCount() == 1)
+        assert table.rowCount() == 1
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_column_filter_reopens_with_other_filters_context(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 2001, 3001],
+                "status": ["OPEN", "OPEN", "CLOSED"],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 3)
+
+        explorer.apply_distinct_filter("claim_id", (1001,), (1001, 2001, 3001), complete_domain=True)
+        _process_ui_until(qapp, lambda: table.rowCount() == 1)
+        explorer.apply_distinct_filter("status", ("OPEN",), ("OPEN", "CLOSED"), complete_domain=True)
+        _process_ui_until(qapp, lambda: table.rowCount() == 1)
+
+        explorer._open_filter_popup_for_index(0)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        _process_ui_until(qapp, lambda: popup.findChild(QListWidget, "outputPreviewPopupList").count() >= 2)
+        values = [popup.findChild(QListWidget, "outputPreviewPopupList").item(i).text() for i in range(popup.findChild(QListWidget, "outputPreviewPopupList").count())]
+        assert "1001" in values
+        assert "2001" in values
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_column_filter_header_click_toggles_popup(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame({"claim_id": [1001, 1002], "status": ["OPEN", "CLOSED"]}).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+
+        header = table.horizontalHeader()
+        header_rect = header.sectionRect(0)
+        QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, header_rect.center())
+        qapp.processEvents()
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None and popup.isVisible()
+
+        QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, header_rect.center())
+        qapp.processEvents()
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is None or popup.isVisible() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_search_subset_apply_filters_single_matching_value(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "workflow": ["Appeals", "Enrollment", "Appeals"],
+                "claim_id": [1001, 1002, 1003],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 3)
+
+        explorer._open_filter_popup_for_index(0)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert search is not None
+        assert values_list is not None
+
+        search.setText("Enroll")
+        qapp.processEvents()
+        _process_ui_until(qapp, lambda: values_list.count() == 1 and values_list.item(0).text() == "Enrollment")
+
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+        _process_ui_until(qapp, lambda: table.rowCount() == 1)
+
+        assert table.rowCount() == 1
+        assert table.item(0, 0).text() == "Enrollment"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_dataframe_table_copies_selected_cells_to_clipboard(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame({"claim_id": [1001, 1002], "status": ["OPEN", "CLOSED"]}).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+
+        table.setFocus()
+        table.setCurrentCell(0, 0)
+        table.clearSelection()
+        table.item(0, 0).setSelected(True)
+        table.item(0, 1).setSelected(True)
+        QTest.keyClick(table, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+
+        assert QApplication.clipboard().text() == "1001\tOPEN"
     finally:
         _dispose_window(qapp, window)
 
@@ -3428,6 +3725,7 @@ def test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon(q
         DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
     )
     shutdown_calls: list[dict[str, object]] = []
+    remove_calls: list[tuple[object, str]] = []
 
     def _resolve(workspace_id=None):
         target = claims_root if workspace_id in (None, "claims") else claims2_root
@@ -3450,9 +3748,17 @@ def test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon(q
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
     )
     try:
+        original_remove_client_session = window.runtime_binding_service.remove_client_session
+
+        def _record_remove_client_session(binding, client_id):
+            remove_calls.append((binding, client_id))
+            return original_remove_client_session(binding, client_id)
+
+        window.runtime_binding_service.remove_client_session = _record_remove_client_session
         window._rebind_workspace_context(workspace_id="claims2")
 
         assert shutdown_calls == []
+        assert remove_calls == []
     finally:
         _dispose_window(qapp, window)
 
