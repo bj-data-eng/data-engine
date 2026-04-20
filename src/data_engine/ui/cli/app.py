@@ -92,6 +92,8 @@ def _infer_project_root_from_cwd(cwd: Path) -> Path | None:
 
 
 def _run_command(args: argparse.Namespace, *, dependencies: CliDependencies) -> int:
+    if args.run_command in {"gui", "egui", "tui"}:
+        return _start_surface(args.run_command)
     if args.run_command == "tests":
         return _run_tests(slice_name=args.slice, list_slices=args.list_slices, dependencies=dependencies)
     raise FlowValidationError(f"Unknown run command: {args.run_command}")

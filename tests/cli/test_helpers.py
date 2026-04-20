@@ -29,6 +29,9 @@ def test_build_parser_exposes_new_public_commands():
 
     assert type(parser._get_formatter()) is _HelpFormatter
     assert parser.parse_args(["start", "gui"]).start_command == "gui"
+    assert parser.parse_args(["run", "gui"]).run_command == "gui"
+    assert parser.parse_args(["run", "egui"]).run_command == "egui"
+    assert parser.parse_args(["run", "tui"]).run_command == "tui"
     assert parser.parse_args(["create", "workspace", "/tmp/example"]).create_command == "workspace"
     assert parser.parse_args(["run", "tests"]).slice == "unit"
     assert parser.parse_args(["run", "tests", "all"]).slice == "all"
