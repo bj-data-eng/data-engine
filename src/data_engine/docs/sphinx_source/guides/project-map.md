@@ -22,30 +22,30 @@ These counts are package-level rollups from the current AST snapshot.
 | `data_engine.core` | 5 | 12 | 15 | 0 | 1412 |
 | `data_engine.devtools` | 3 | 44 | 5 | 0 | 1371 |
 | `data_engine.docs` | 2 | 0 | 0 | 0 | 41 |
-| `data_engine.domain` | 17 | 10 | 44 | 0 | 2224 |
+| `data_engine.domain` | 17 | 10 | 44 | 0 | 2227 |
 | `data_engine.flow_modules` | 3 | 22 | 3 | 0 | 518 |
-| `data_engine.helpers` | 9 | 49 | 7 | 0 | 2774 |
-| `data_engine.hosts` | 20 | 62 | 25 | 0 | 3786 |
+| `data_engine.helpers` | 9 | 62 | 7 | 0 | 3078 |
+| `data_engine.hosts` | 20 | 63 | 25 | 0 | 3970 |
 | `data_engine.platform` | 10 | 43 | 10 | 0 | 1495 |
-| `data_engine.runtime` | 19 | 42 | 48 | 0 | 4044 |
-| `data_engine.services` | 23 | 38 | 81 | 0 | 4967 |
-| `data_engine.ui` | 73 | 217 | 40 | 0 | 11917 |
-| `data_engine.views` | 12 | 44 | 11 | 0 | 1381 |
+| `data_engine.runtime` | 20 | 44 | 48 | 0 | 4333 |
+| `data_engine.services` | 23 | 38 | 81 | 0 | 5153 |
+| `data_engine.ui` | 73 | 226 | 45 | 0 | 13281 |
+| `data_engine.views` | 12 | 44 | 11 | 0 | 1414 |
 
 ## Largest Modules
 
 | Module | Lines | Functions | Classes |
 | --- | ---: | ---: | ---: |
-| `data_engine.helpers.polars` | 1290 | 15 | 2 |
-| `data_engine.runtime.runtime_cache_store` | 1078 | 0 | 8 |
-| `data_engine.services.runtime_state` | 908 | 3 | 12 |
+| `data_engine.helpers.polars` | 1594 | 28 | 2 |
+| `data_engine.ui.gui.rendering.artifacts` | 1171 | 14 | 5 |
+| `data_engine.runtime.runtime_cache_store` | 1095 | 0 | 8 |
+| `data_engine.services.runtime_state` | 930 | 3 | 12 |
 | `data_engine.ui.gui.controllers.flows` | 830 | 0 | 3 |
-| `data_engine.ui.gui.controllers.runtime` | 772 | 0 | 1 |
-| `data_engine.ui.gui.theme` | 762 | 1 | 0 |
+| `data_engine.ui.gui.theme` | 815 | 1 | 0 |
+| `data_engine.ui.gui.controllers.runtime` | 793 | 0 | 1 |
 | `data_engine.devtools.smoke_data` | 759 | 24 | 0 |
 | `data_engine.core.primitives` | 631 | 1 | 11 |
 | `data_engine.runtime.shared_state` | 621 | 33 | 6 |
-| `data_engine.services.daemon_state` | 608 | 7 | 4 |
 
 ## Internal Stitching Points
 
@@ -55,14 +55,14 @@ Modules with higher internal import fan-out tend to be composition or aggregatio
 | --- | ---: | ---: |
 | `data_engine.domain` | 70 | 99 |
 | `data_engine.views` | 65 | 113 |
-| `data_engine.hosts.daemon.app` | 55 | 387 |
+| `data_engine.hosts.daemon.app` | 55 | 390 |
 | `data_engine.helpers` | 44 | 49 |
 | `data_engine.ui.gui.render_support` | 43 | 240 |
 | `data_engine.ui.gui.bootstrap` | 42 | 472 |
 | `data_engine.ui.tui.bootstrap` | 41 | 471 |
 | `data_engine.ui.gui.presenters` | 39 | 68 |
 | `data_engine.platform.workspace_policy` | 38 | 335 |
-| `data_engine.ui.cli.app` | 33 | 170 |
+| `data_engine.ui.cli.app` | 33 | 172 |
 
 ## Practical Mental Model
 
