@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import os
 from pathlib import Path
 import time
 from uuid import uuid4
 
+import numpy as np
 import polars as pl
 
 from data_engine.helpers.duckdb import attach_dimension as _attach_dimension
@@ -141,22 +142,19 @@ def networkdays(
     holiday_dates = _coerce_holiday_dates(holidays)
     start_expr = _as_date_expr(start)
     end_expr = _as_date_expr(end)
-    forward_expr = pl.business_day_count(
-        start_expr,
-        end_expr.dt.offset_by("1d"),
-        week_mask=week_mask,
-        holidays=holiday_dates,
+    return pl.struct(
+        start=start_expr,
+        end=end_expr,
+    ).map_batches(
+        lambda batch: _networkdays_batch(
+            batch.struct.field("start"),
+            batch.struct.field("end"),
+            week_mask=week_mask,
+            holiday_dates=holiday_dates,
+            count_first_day=count_first_day,
+        ),
+        return_dtype=pl.Int64,
     )
-    backward_expr = -pl.business_day_count(
-        end_expr,
-        start_expr.dt.offset_by("1d"),
-        week_mask=week_mask,
-        holidays=holiday_dates,
-    )
-    result = pl.when(start_expr <= end_expr).then(forward_expr).otherwise(backward_expr)
-    if count_first_day:
-        result = result + _forced_first_day_adjustment(start_expr, end_expr, week_mask, holiday_dates)
-    return pl.when(start_expr.is_null() | end_expr.is_null()).then(pl.lit(None, dtype=pl.Int64)).otherwise(result)
 
 
 def workday(
@@ -252,25 +250,19 @@ def workday(
     holiday_dates = _coerce_holiday_dates(holidays)
     start_expr = _as_date_expr(start)
     days_expr = _as_int_expr(days).cast(pl.Int64)
-    is_business = _is_business_day_expr(start_expr, week_mask, holiday_dates)
-    default_result = _workday_result(
-        start_expr,
-        days_expr,
-        week_mask,
-        holiday_dates,
-        count_first_day=False,
-        is_business=is_business,
+    return pl.struct(
+        start=start_expr,
+        days=days_expr,
+    ).map_batches(
+        lambda batch: _workday_batch(
+            batch.struct.field("start"),
+            batch.struct.field("days"),
+            week_mask=week_mask,
+            holiday_dates=holiday_dates,
+            count_first_day=count_first_day,
+        ),
+        return_dtype=pl.Date,
     )
-    counted_result = _workday_result(
-        start_expr,
-        days_expr,
-        week_mask,
-        holiday_dates,
-        count_first_day=True,
-        is_business=is_business,
-    )
-    result = counted_result if count_first_day else default_result
-    return pl.when(start_expr.is_null() | days_expr.is_null()).then(pl.lit(None, dtype=pl.Date)).otherwise(result)
 
 
 def _coerce_week_mask(mask: Iterable[bool] | None) -> WeekMask:
@@ -349,6 +341,318 @@ def _forced_first_day_adjustment(
         .then(pl.when(start_expr <= end_expr).then(pl.lit(1)).otherwise(pl.lit(-1)))
         .otherwise(pl.lit(0))
     )
+
+
+def _networkdays_scalar(
+    start_date: date | None,
+    end_date: date | None,
+    *,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+    count_first_day: bool,
+) -> int | None:
+    if start_date is None or end_date is None:
+        return None
+    if start_date <= end_date:
+        result = _forward_networkdays(start_date, end_date, week_mask=week_mask, holiday_dates=holiday_dates)
+    else:
+        result = -_forward_networkdays(end_date, start_date, week_mask=week_mask, holiday_dates=holiday_dates)
+    if count_first_day and not _is_business_day_scalar(start_date, week_mask=week_mask, holiday_dates=holiday_dates):
+        return result + (1 if start_date <= end_date else -1)
+    return result
+
+
+def _forward_networkdays(
+    start_date: date,
+    end_date: date,
+    *,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+) -> int:
+    delta_days = (end_date - start_date).days + 1
+    full_weeks, extra_days = divmod(delta_days, 7)
+    business_days = (full_weeks + 1) * sum(week_mask)
+    for offset in range(1, 8 - extra_days):
+        trailing_day = end_date + timedelta(days=offset)
+        if week_mask[trailing_day.weekday()]:
+            business_days -= 1
+    for holiday in holiday_dates:
+        if start_date <= holiday <= end_date and week_mask[holiday.weekday()]:
+            business_days -= 1
+    return business_days
+
+
+def _is_business_day_scalar(
+    value: date,
+    *,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+) -> bool:
+    return week_mask[value.weekday()] and value not in holiday_dates
+
+
+def _numpy_weekmask_text(week_mask: WeekMask) -> str:
+    return "".join("1" if allowed else "0" for allowed in week_mask)
+
+
+def _numpy_holiday_array(holiday_dates: tuple[date, ...]) -> np.ndarray:
+    if not holiday_dates:
+        return np.array([], dtype="datetime64[D]")
+    return np.array(holiday_dates, dtype="datetime64[D]")
+
+
+def _numpy_busdaycalendar(week_mask: WeekMask, holiday_dates: tuple[date, ...]) -> np.busdaycalendar:
+    return np.busdaycalendar(
+        weekmask=_numpy_weekmask_text(week_mask),
+        holidays=_numpy_holiday_array(holiday_dates),
+    )
+
+
+def _networkdays_batch(
+    start_series: pl.Series,
+    end_series: pl.Series,
+    *,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+    count_first_day: bool,
+) -> pl.Series:
+    calendar = _numpy_busdaycalendar(week_mask, holiday_dates)
+    starts = start_series.to_numpy()
+    ends = end_series.to_numpy()
+    result = np.full(len(start_series), None, dtype=object)
+    valid = ~(np.isnat(starts) | np.isnat(ends))
+    if valid.any():
+        valid_starts = starts[valid]
+        valid_ends = ends[valid]
+        forward = valid_starts <= valid_ends
+        counts = np.empty(valid_starts.shape[0], dtype=np.int64)
+        if forward.any():
+            counts[forward] = np.busday_count(
+                valid_starts[forward],
+                valid_ends[forward] + np.timedelta64(1, "D"),
+                busdaycal=calendar,
+            )
+        if (~forward).any():
+            counts[~forward] = -np.busday_count(
+                valid_ends[~forward],
+                valid_starts[~forward] + np.timedelta64(1, "D"),
+                busdaycal=calendar,
+            )
+        if count_first_day:
+            start_business = np.is_busday(valid_starts, busdaycal=calendar)
+            counts = counts + np.where(~start_business, np.where(forward, 1, -1), 0)
+        result[valid] = counts.tolist()
+    return pl.Series(result.tolist(), dtype=pl.Int64)
+
+
+def _busday_offset_array(
+    dates: np.ndarray,
+    offsets: np.ndarray,
+    *,
+    calendar: np.busdaycalendar,
+    roll: str,
+) -> np.ndarray:
+    if dates.size == 0:
+        return np.array([], dtype="datetime64[D]")
+    return np.busday_offset(dates, offsets, roll=roll, busdaycal=calendar)
+
+
+def _workday_batch(
+    start_series: pl.Series,
+    days_series: pl.Series,
+    *,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+    count_first_day: bool,
+) -> pl.Series:
+    calendar = _numpy_busdaycalendar(week_mask, holiday_dates)
+    starts = start_series.to_numpy()
+    days_values = days_series.to_numpy()
+    result = np.full(len(start_series), np.datetime64("NaT", "D"), dtype="datetime64[D]")
+    valid = ~np.isnat(starts) & ~np.isnan(days_values)
+    if valid.any():
+        valid_starts = starts[valid]
+        valid_days = days_values[valid].astype(np.int64, copy=False)
+        valid_result = np.full(valid_starts.shape[0], np.datetime64("NaT", "D"), dtype="datetime64[D]")
+        is_business = np.is_busday(valid_starts, busdaycal=calendar)
+        next_business = _busday_offset_array(valid_starts, np.zeros(valid_starts.shape[0], dtype=np.int64), calendar=calendar, roll="forward")
+        prev_business = _busday_offset_array(valid_starts, np.zeros(valid_starts.shape[0], dtype=np.int64), calendar=calendar, roll="backward")
+
+        zero_mask = valid_days == 0
+        pos_mask = valid_days > 0
+        neg_mask = valid_days < 0
+
+        if count_first_day:
+            valid_result[zero_mask] = valid_starts[zero_mask]
+
+            mask = is_business & pos_mask
+            if mask.any():
+                valid_result[mask] = _busday_offset_array(
+                    valid_starts[mask],
+                    valid_days[mask] - 1,
+                    calendar=calendar,
+                    roll="forward",
+                )
+
+            mask = is_business & neg_mask
+            if mask.any():
+                valid_result[mask] = _busday_offset_array(
+                    valid_starts[mask],
+                    valid_days[mask] + 1,
+                    calendar=calendar,
+                    roll="backward",
+                )
+
+            mask = (~is_business) & (valid_days == 1)
+            valid_result[mask] = valid_starts[mask]
+
+            mask = (~is_business) & (valid_days > 1)
+            if mask.any():
+                valid_result[mask] = _busday_offset_array(
+                    next_business[mask],
+                    valid_days[mask] - 2,
+                    calendar=calendar,
+                    roll="forward",
+                )
+
+            mask = (~is_business) & (valid_days == -1)
+            valid_result[mask] = valid_starts[mask]
+
+            mask = (~is_business) & (valid_days < -1)
+            if mask.any():
+                valid_result[mask] = _busday_offset_array(
+                    prev_business[mask],
+                    valid_days[mask] + 2,
+                    calendar=calendar,
+                    roll="backward",
+                )
+        else:
+            mask = is_business & zero_mask
+            valid_result[mask] = valid_starts[mask]
+
+            mask = is_business & pos_mask
+            if mask.any():
+                valid_result[mask] = _busday_offset_array(
+                    valid_starts[mask],
+                    valid_days[mask],
+                    calendar=calendar,
+                    roll="forward",
+                )
+
+            mask = is_business & neg_mask
+            if mask.any():
+                valid_result[mask] = _busday_offset_array(
+                    valid_starts[mask],
+                    valid_days[mask],
+                    calendar=calendar,
+                    roll="backward",
+                )
+
+            mask = (~is_business) & zero_mask
+            valid_result[mask] = next_business[mask]
+
+            mask = (~is_business) & pos_mask
+            if mask.any():
+                valid_result[mask] = _busday_offset_array(
+                    next_business[mask],
+                    valid_days[mask] - 1,
+                    calendar=calendar,
+                    roll="forward",
+                )
+
+            mask = (~is_business) & neg_mask
+            if mask.any():
+                valid_result[mask] = _busday_offset_array(
+                    prev_business[mask],
+                    valid_days[mask] + 1,
+                    calendar=calendar,
+                    roll="backward",
+                )
+
+        result[valid] = valid_result
+    return pl.Series(result.tolist(), dtype=pl.Date)
+
+
+def _next_business_day(
+    value: date,
+    *,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+) -> date:
+    current = value
+    while not _is_business_day_scalar(current, week_mask=week_mask, holiday_dates=holiday_dates):
+        current += timedelta(days=1)
+    return current
+
+
+def _previous_business_day(
+    value: date,
+    *,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+) -> date:
+    current = value
+    while not _is_business_day_scalar(current, week_mask=week_mask, holiday_dates=holiday_dates):
+        current -= timedelta(days=1)
+    return current
+
+
+def _advance_business_days(
+    start_date: date,
+    days: int,
+    *,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+) -> date:
+    current = start_date
+    remaining = days
+    step = 1 if remaining >= 0 else -1
+    while remaining != 0:
+        current += timedelta(days=step)
+        if _is_business_day_scalar(current, week_mask=week_mask, holiday_dates=holiday_dates):
+            remaining -= step
+    return current
+
+
+def _workday_scalar(
+    start_date: date | None,
+    days: int | None,
+    *,
+    week_mask: WeekMask,
+    holiday_dates: tuple[date, ...],
+    count_first_day: bool,
+) -> date | None:
+    if start_date is None or days is None:
+        return None
+    is_business = _is_business_day_scalar(start_date, week_mask=week_mask, holiday_dates=holiday_dates)
+    if count_first_day:
+        if days == 0:
+            return start_date
+        if is_business:
+            if days > 0:
+                return _advance_business_days(start_date, days - 1, week_mask=week_mask, holiday_dates=holiday_dates)
+            return _advance_business_days(start_date, days + 1, week_mask=week_mask, holiday_dates=holiday_dates)
+        if days > 0:
+            if days == 1:
+                return start_date
+            first_business = _next_business_day(start_date, week_mask=week_mask, holiday_dates=holiday_dates)
+            return _advance_business_days(first_business, days - 2, week_mask=week_mask, holiday_dates=holiday_dates)
+        if days == -1:
+            return start_date
+        first_business = _previous_business_day(start_date, week_mask=week_mask, holiday_dates=holiday_dates)
+        return _advance_business_days(first_business, days + 2, week_mask=week_mask, holiday_dates=holiday_dates)
+
+    if is_business:
+        if days == 0:
+            return start_date
+        return _advance_business_days(start_date, days, week_mask=week_mask, holiday_dates=holiday_dates)
+    if days == 0:
+        return _next_business_day(start_date, week_mask=week_mask, holiday_dates=holiday_dates)
+    if days > 0:
+        first_business = _next_business_day(start_date, week_mask=week_mask, holiday_dates=holiday_dates)
+        return _advance_business_days(first_business, days - 1, week_mask=week_mask, holiday_dates=holiday_dates)
+    first_business = _previous_business_day(start_date, week_mask=week_mask, holiday_dates=holiday_dates)
+    return _advance_business_days(first_business, days + 1, week_mask=week_mask, holiday_dates=holiday_dates)
 
 
 def _workday_result(

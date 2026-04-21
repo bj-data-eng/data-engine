@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 
 import polars as pl
@@ -194,6 +194,44 @@ def test_networkdays_accepts_scalar_dates_and_namespace_helpers():
     assert lazy["days"].to_list() == [2]
 
 
+def test_networkdays_honors_holidays_for_branch_derived_date_columns():
+    frame = pl.DataFrame(
+        {
+            "process_flag": [True, True],
+            "received_dt": [datetime(2026, 4, 13, 6, 45), datetime(2026, 4, 13, 18, 5)],
+            "resolved_dt": [datetime(2026, 4, 15, 16, 0), datetime(2026, 4, 15, 18, 0)],
+        }
+    ).with_columns(
+        received_date=pl.col("received_dt").dt.date(),
+        resolved_date=pl.col("resolved_dt").dt.date(),
+        received_time=pl.col("received_dt").dt.time(),
+        resolved_time=pl.col("resolved_dt").dt.time(),
+    ).with_columns(
+        span_days=(pl.col("resolved_date") - pl.col("received_date")).dt.total_days(),
+    ).with_columns(
+        snapped_start=(
+            pl.when(pl.col("received_time") > time(17, 0))
+            .then(pl.col("received_date").dt.offset_by("1d"))
+            .otherwise(pl.col("received_date"))
+        ),
+        snapped_end=(
+            pl.when(
+                (pl.col("received_time") <= time(7, 30))
+                & (pl.col("resolved_time") < time(17, 0))
+                & (pl.col("span_days") > 1)
+            )
+            .then(pl.col("resolved_date").dt.offset_by("-1d"))
+            .otherwise(pl.col("resolved_date"))
+        ),
+    )
+
+    result = frame.select(
+        networkdays("snapped_start", "snapped_end", holidays=[date(2026, 4, 14)]).alias("days")
+    )
+
+    assert result["days"].to_list() == [1, 1]
+
+
 def test_networkdays_returns_null_when_endpoint_is_null():
     result = pl.DataFrame(
         {
@@ -300,6 +338,15 @@ def test_workday_accepts_custom_mask_and_namespace_helpers():
 
     assert eager["target"].to_list() == [date(2026, 4, 19)]
     assert lazy["target"].to_list() == [date(2026, 4, 19)]
+
+
+def test_workday_zero_offset_on_non_business_day_rolls_to_next_business_day_for_custom_mask():
+    frame = pl.DataFrame({"start": [date(2015, 8, 23)], "days": [0]})
+    mask = (False, True, True, True, True, False, False)
+
+    result = frame.select(workday("start", "days", mask=mask).alias("target"))
+
+    assert result["target"].to_list() == [date(2015, 8, 25)]
 
 
 def test_workday_returns_null_when_input_is_null():
