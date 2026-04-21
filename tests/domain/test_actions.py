@@ -174,3 +174,43 @@ def test_selected_flow_state_does_not_treat_engine_owned_flow_as_manual_running(
     assert selected.live_state == "running"
     assert selected.live_manual_running is False
     assert selected.group_active is True
+
+
+def test_selected_flow_state_keeps_group_blocked_when_engine_owns_same_group_without_live_run():
+    card = qt_flow_card_from_entry(
+        flow_catalog_entry_from_flow(
+            Flow(name="manual_review", label="Manual Review", group="Claims"),
+            description=None,
+        )
+    )
+
+    selected = SelectedFlowState.from_runtime(
+        card=card,
+        flow_states={card.name: "manual"},
+        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("claims_summary",)),
+        flow_groups_by_name={
+            card.name: card.group,
+            "claims_summary": "Claims",
+        },
+        active_flow_states={"running", "polling", "scheduled", "stopping flow", "stopping runtime"},
+        has_logs=False,
+        live_runs={},
+        engine_active_flow_names=("claims_summary",),
+    )
+    context = OperatorActionContext(
+        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("claims_summary",)),
+        selected_flow=selected,
+        has_automated_flows=True,
+        engine_state="running",
+        engine_truth_known=True,
+        live_truth_known=True,
+        workspace_available=True,
+        selected_run_group_present=False,
+    )
+
+    gui = GuiActionState.from_context(context)
+    tui = TuiActionState.from_context(context)
+
+    assert selected.group_active is True
+    assert gui.flow_run_enabled is False
+    assert tui.run_once_disabled is True

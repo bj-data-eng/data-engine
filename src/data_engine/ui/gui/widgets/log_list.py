@@ -46,29 +46,8 @@ class LogRunItemDelegate(QStyledItemDelegate):
         painter.setBrush(background)
         painter.drawRoundedRect(frame_rect, 5, 5)
 
-        text_left = frame_rect.left() + 12
-        status_rect = self.status_icon_rect(frame_rect)
-        duration_text = display.duration_text or ""
-        base_font = QFont(self._host_window.font())
-        base_font.setStyleHint(QFont.StyleHint.SansSerif)
-        duration_width = 0
-        if duration_text:
-            duration_font = QFont(base_font)
-            duration_font.setPixelSize(10)
-            duration_font.setWeight(QFont.Weight.Normal)
-            duration_width = QFontMetrics(duration_font).horizontalAdvance(duration_text) + 10
-        duration_rect = QRect(
-            max(text_left, status_rect.left() - duration_width - 16),
-            frame_rect.top(),
-            duration_width,
-            frame_rect.height(),
-        )
-        title_right = duration_rect.left() - 8 if duration_width else status_rect.left() - 8
-        title_rect = QRect(text_left, frame_rect.top(), max(0, title_right - text_left), frame_rect.height())
-
-        title_font = QFont(base_font)
-        title_font.setPixelSize(11)
-        title_font.setWeight(QFont.Weight.Bold)
+        title_rect, duration_rect, button_rect, status_rect = self._layout_rects(frame_rect, display)
+        title_font = self._title_font(self._host_window)
         painter.setFont(title_font)
         painter.setPen(text_color)
         title_text = QFontMetrics(title_font).elidedText(
@@ -77,10 +56,9 @@ class LogRunItemDelegate(QStyledItemDelegate):
             max(title_rect.width(), 0),
         )
         painter.drawText(title_rect, int(Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextSingleLine), title_text)
+        duration_text = display.duration_text or ""
         if duration_text:
-            duration_font = QFont(title_font)
-            duration_font.setPixelSize(10)
-            duration_font.setWeight(QFont.Weight.Normal)
+            duration_font = self._duration_font(self._host_window)
             painter.setFont(duration_font)
             painter.setPen(muted_color)
             painter.drawText(duration_rect, int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight), duration_text)
@@ -92,21 +70,22 @@ class LogRunItemDelegate(QStyledItemDelegate):
         )
         painter.drawPixmap(status_rect, status_icon)
 
-        button_rect = self.view_button_rect(frame_rect)
+        button_active = display.status_visual_state == "failed"
         button_bg = QColor(Qt.GlobalColor.transparent)
         button_border = QColor(Qt.GlobalColor.transparent)
-        if self._button_hovered(option, index.row()):
+        if button_active and self._button_hovered(option, index.row()):
             button_bg = hover_bg
             button_border = hover_border
         painter.setPen(QPen(button_border, 1))
         painter.setBrush(button_bg)
         painter.drawRoundedRect(button_rect, 5, 5)
-        view_icon = self._host_window._log_icon("view_log").pixmap(16, 16)
-        painter.drawPixmap(
-            button_rect.left() + (button_rect.width() - 16) // 2,
-            button_rect.top() + (button_rect.height() - 16) // 2,
-            view_icon,
-        )
+        if button_active:
+            view_icon = self._host_window._log_icon("view_log").pixmap(16, 16)
+            painter.drawPixmap(
+                button_rect.left() + (button_rect.width() - 16) // 2,
+                button_rect.top() + (button_rect.height() - 16) // 2,
+                view_icon,
+            )
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
@@ -114,12 +93,58 @@ class LogRunItemDelegate(QStyledItemDelegate):
         return QSize(0, 42)
 
     @staticmethod
-    def status_icon_rect(frame_rect: QRect) -> QRect:
-        return QRect(frame_rect.right() - 58, frame_rect.top() + (frame_rect.height() - 16) // 2, 16, 16)
+    def _title_font(host_window: "DataEngineWindow") -> QFont:
+        font = QFont(host_window.font())
+        font.setStyleHint(QFont.StyleHint.SansSerif)
+        font.setPixelSize(11)
+        font.setWeight(QFont.Weight.Bold)
+        return font
 
     @staticmethod
-    def view_button_rect(frame_rect: QRect) -> QRect:
-        return QRect(frame_rect.right() - 32, frame_rect.top() + (frame_rect.height() - 22) // 2, 22, 22)
+    def _duration_font(host_window: "DataEngineWindow") -> QFont:
+        font = QFont(LogRunItemDelegate._title_font(host_window))
+        font.setPixelSize(10)
+        font.setWeight(QFont.Weight.Normal)
+        return font
+
+    def button_rect_for_run_group(self, frame_rect: QRect, run_group: "FlowRunState") -> QRect:
+        display = RunGroupDisplay.from_run(run_group)
+        _title_rect, _duration_rect, button_rect, _status_rect = self._layout_rects(frame_rect, display)
+        return button_rect
+
+    def _layout_rects(self, frame_rect: QRect, display: RunGroupDisplay) -> tuple[QRect, QRect, QRect, QRect]:
+        text_left = frame_rect.left() + 12
+        duration_font = self._duration_font(self._host_window)
+        duration_text = display.duration_text or ""
+        duration_width = QFontMetrics(duration_font).horizontalAdvance(duration_text) + 10 if duration_text else 0
+        button_width = 22
+        button_rect = QRect(0, frame_rect.top() + (frame_rect.height() - 22) // 2, button_width, 22)
+        status_rect = QRect(0, frame_rect.top() + (frame_rect.height() - 16) // 2, 16, 16)
+        if display.status_visual_state == "failed":
+            button_rect.moveLeft(frame_rect.right() - 32)
+            status_rect.moveLeft(button_rect.left() - 26)
+            duration_right = status_rect.left() - 8
+            duration_rect = QRect(
+                max(text_left, duration_right - duration_width),
+                frame_rect.top(),
+                duration_width,
+                frame_rect.height(),
+            )
+            title_right = duration_rect.left() - 8 if duration_width else status_rect.left() - 8
+        else:
+            status_rect.moveLeft(frame_rect.right() - 32)
+            duration_right = status_rect.left() - 8
+            duration_rect = QRect(
+                max(text_left, duration_right - duration_width),
+                frame_rect.top(),
+                duration_width,
+                frame_rect.height(),
+            )
+            button_left = (duration_rect.left() - 26) if duration_width else (duration_right - 26)
+            button_rect.moveLeft(max(text_left, button_left))
+            title_right = button_rect.left() - 8
+        title_rect = QRect(text_left, frame_rect.top(), max(0, title_right - text_left), frame_rect.height())
+        return title_rect, duration_rect, button_rect, status_rect
 
     @staticmethod
     def _button_hovered(option: QStyleOptionViewItem, row: int) -> bool:
@@ -177,13 +202,17 @@ class LogRunListWidget(QListWidget):
         item = self.itemAt(event.position().toPoint())
         if item is not None:
             rect = self.visualItemRect(item)
-            button_rect = self._delegate.view_button_rect(rect.adjusted(1, 2, -1, -2))
-            if button_rect.contains(event.position().toPoint()):
-                run_group = self.run_group(item)
-                if run_group is not None:
-                    self._host_window._show_run_log_preview(run_group)
-                    event.accept()
-                    return
+            run_group = self.run_group(item)
+            failed_entry = self._failed_entry_for_run_group(run_group) if run_group is not None else None
+            button_rect = (
+                self._delegate.button_rect_for_run_group(rect.adjusted(1, 2, -1, -2), run_group)
+                if run_group is not None
+                else QRect()
+            )
+            if failed_entry is not None and button_rect.contains(event.position().toPoint()):
+                self._host_window._show_run_error_details(run_group, failed_entry)
+                event.accept()
+                return
         super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
@@ -200,10 +229,30 @@ class LogRunListWidget(QListWidget):
         if item is None:
             return -1
         rect = self.visualItemRect(item)
-        button_rect = self._delegate.view_button_rect(rect.adjusted(1, 2, -1, -2))
+        run_group = self.run_group(item)
+        if run_group is None:
+            return -1
+        if self._failed_entry_for_run_group(run_group) is None:
+            return -1
+        button_rect = self._delegate.button_rect_for_run_group(rect.adjusted(1, 2, -1, -2), run_group)
         if button_rect.contains(pos):
             return self.row(item)
         return -1
+
+    @staticmethod
+    def _failed_entry_for_run_group(run_group: "FlowRunState"):
+        if run_group.status != "failed":
+            return None
+        for entry in reversed(run_group.entries):
+            event = entry.event
+            if event is not None and event.status == "failed":
+                return entry
+        summary_entry = run_group.summary_entry
+        if summary_entry is not None:
+            event = summary_entry.event
+            if event is not None and event.status == "failed":
+                return summary_entry
+        return None
 
     def _set_hovered_button_row(self, row: int) -> None:
         if row == self._hovered_button_row:

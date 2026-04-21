@@ -83,7 +83,7 @@ def show_run_log_preview(window: "DataEngineWindow", request: RunLogPreviewReque
     log_list.setSpacing(6)
     for row in _build_run_log_preview_rows(window, request.run_group):
         item = QListWidgetItem(row.entry.line)
-        widget = _build_raw_log_entry_widget(window, row, run_group=request.run_group)
+        widget = _build_raw_log_entry_widget(window, row, run_group=request.run_group, parent=log_list.viewport())
         item.setSizeHint(widget.sizeHint())
         log_list.addItem(item)
         log_list.setItemWidget(item, widget)
@@ -165,46 +165,52 @@ def _format_preview_log_message(entry: "FlowLogEntry") -> str:
     return f"{flow_name} &gt; <b>{step_name}</b> - <i>{status}</i>"
 
 
-def _build_raw_log_entry_widget(window: "DataEngineWindow", row: _RunLogPreviewRow, *, run_group: "FlowRunState") -> QFrame:
-    frame = QFrame()
+def _build_raw_log_entry_widget(
+    window: "DataEngineWindow",
+    row: _RunLogPreviewRow,
+    *,
+    run_group: "FlowRunState",
+    parent: QWidget | None = None,
+) -> QFrame:
+    frame = QFrame(parent)
     frame.setObjectName("rawLogRow")
     frame.setMinimumHeight(40)
     layout = QHBoxLayout(frame)
     layout.setContentsMargins(8, 6, 8, 6)
     layout.setSpacing(10)
 
-    timestamp = QLabel(row.entry.created_at_utc.astimezone().strftime("%I:%M:%S %p"))
+    timestamp = QLabel(row.entry.created_at_utc.astimezone().strftime("%I:%M:%S %p"), frame)
     timestamp.setObjectName("rawLogTimestamp")
     make_label_selectable(timestamp)
     layout.addWidget(timestamp, 0, Qt.AlignmentFlag.AlignVCenter)
 
-    message = QLabel(row.message_html)
+    message = QLabel(row.message_html, frame)
     message.setObjectName("rawLogMessage")
     message.setTextFormat(Qt.TextFormat.RichText)
     message.setWordWrap(False)
     make_label_selectable(message)
     layout.addWidget(message, 1, Qt.AlignmentFlag.AlignVCenter)
 
-    duration = QLabel(row.duration_text or "")
+    duration = QLabel(row.duration_text or "", frame)
     duration.setObjectName("logDuration")
     duration.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     duration.setVisible(row.duration_text is not None)
     layout.addWidget(duration, 0, Qt.AlignmentFlag.AlignVCenter)
 
-    inspect_slot = QWidget()
+    inspect_slot = QWidget(frame)
     inspect_slot.setObjectName("rawLogInspectSlot")
     inspect_slot.setFixedWidth(108)
     inspect_slot_layout = QHBoxLayout(inspect_slot)
     inspect_slot_layout.setContentsMargins(0, 0, 0, 0)
     inspect_slot_layout.setSpacing(0)
     inspect_slot_layout.addStretch(1)
-    inspect_button = QPushButton("Inspect")
+    inspect_button = QPushButton("Inspect", inspect_slot)
     inspect_button.setObjectName("inspectOutputButton")
     inspect_button.setFixedWidth(96)
     inspect_button.setEnabled(False)
     inspect_slot_layout.addWidget(inspect_button, 0, Qt.AlignmentFlag.AlignVCenter)
 
-    icon_slot = QWidget()
+    icon_slot = QWidget(frame)
     icon_slot.setObjectName("rawLogIconSlot")
     icon_slot.setFixedWidth(20)
     icon_slot_layout = QHBoxLayout(icon_slot)
@@ -218,7 +224,7 @@ def _build_raw_log_entry_widget(window: "DataEngineWindow", row: _RunLogPreviewR
             lambda _checked=False, group=run_group, failed_entry=row.failed_entry: window._show_run_error_details(group, failed_entry)
         )
     if row.status_name is not None:
-        status_icon = QLabel()
+        status_icon = QLabel(icon_slot)
         status_icon.setObjectName("rawLogStatusIcon")
         fill = window._LOG_ICON_COLORS.get(row.status_name, window._group_icon_color().name())
         status_icon.setPixmap(

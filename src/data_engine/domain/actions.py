@@ -190,7 +190,10 @@ class SelectedFlowState:
             live_manual_running=live_manual_running,
             has_logs=has_logs,
             group_active=(
-                live_group_active or live_manual_running or bool(live_state)
+                live_group_active
+                or runtime_session.is_group_active(card.group, flow_groups_by_name)
+                or live_manual_running
+                or bool(live_state)
                 if live_runs is not None
                 else runtime_session.is_group_active(card.group, flow_groups_by_name) or live_manual_running or bool(live_state)
             ),

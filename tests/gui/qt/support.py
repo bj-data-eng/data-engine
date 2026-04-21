@@ -4609,6 +4609,44 @@ def test_run_log_preview_collapses_step_started_and_finished_rows(qapp, monkeypa
         _dispose_window(qapp, window)
 
 
+def test_run_log_preview_rows_are_not_created_as_top_level_windows(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        entries = (
+            FlowLogEntry(
+                line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=success elapsed=0.4",
+                kind="runtime",
+                flow_name="claims_summary",
+                event=RuntimeStepEvent(
+                    run_id="abc",
+                    flow_name="claims_summary",
+                    step_name="Collect Claim Files",
+                    source_label="input.xlsx",
+                    status="success",
+                    elapsed_seconds=0.4,
+                ),
+            ),
+        )
+        run_group = FlowRunState.group_entries(entries)[0]
+
+        window._show_run_log_preview(run_group)
+
+        assert window.run_log_preview_dialog is not None
+        log_list = window.run_log_preview_dialog.findChild(QListWidget, "runLogList")
+        assert log_list is not None
+        assert log_list.count() == 1
+        row_widget = log_list.itemWidget(log_list.item(0))
+        assert row_widget is not None
+        assert row_widget.parent() is log_list.viewport()
+        assert row_widget.isWindow() is False
+        assert all(child.isWindow() is False for child in row_widget.findChildren(QWidget))
+    finally:
+        if window.run_log_preview_dialog is not None:
+            window.run_log_preview_dialog.close()
+        _dispose_window(qapp, window)
+
+
 def test_run_log_preview_keeps_unfinished_started_step_rows_visible(qapp, monkeypatch):
     del monkeypatch
     window = _make_window()
@@ -5125,7 +5163,7 @@ def test_sidebar_row_widgets_are_not_created_as_top_level_windows(qapp):
         _dispose_window(qapp, window)
 
 
-def test_refresh_log_view_reuses_view_log_callback_without_duplicate_preview_open(qapp, monkeypatch):
+def test_refresh_log_view_success_rows_ignore_transparent_log_button(qapp, monkeypatch):
     del monkeypatch
     window = _make_window()
     shown: list[str] = []
@@ -5154,8 +5192,11 @@ def test_refresh_log_view_reuses_view_log_callback_without_duplicate_preview_ope
         item = window.log_view.item(0)
         assert item is not None
         view_rect = window.log_view.visualItemRect(item)
-        click_point = view_rect.center()
-        click_point.setX(view_rect.right() - 18)
+        button_rect = window.log_view._delegate.button_rect_for_run_group(
+            view_rect.adjusted(1, 2, -1, -2),
+            window.log_view.run_group(item),
+        )
+        click_point = button_rect.center()
 
         window.log_store.append_entry(
             FlowLogEntry(
@@ -5176,7 +5217,50 @@ def test_refresh_log_view_reuses_view_log_callback_without_duplicate_preview_ope
         window._refresh_log_view(force_scroll_to_bottom=True)
         QTest.mouseClick(window.log_view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, click_point)
 
-        assert len(shown) == 1
+        assert shown == []
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_log_view_failed_button_opens_error_details_directly(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    shown_errors: list[tuple[tuple[str, str], str]] = []
+    shown_logs: list[tuple[str, str]] = []
+    try:
+        flow_name = "poller"
+        window.selected_flow_name = flow_name
+        window._show_run_error_details = lambda run_group, entry: shown_errors.append((run_group.key, entry.line))
+        window._show_run_log_preview = lambda run_group: shown_logs.append(run_group.key)
+        window.log_store.append_entry(
+            FlowLogEntry(
+                line="run-1 failed",
+                kind="flow",
+                flow_name=flow_name,
+                event=RuntimeStepEvent(
+                    run_id="run-1",
+                    flow_name=flow_name,
+                    step_name=None,
+                    source_label="claims.xlsx",
+                    status="failed",
+                    elapsed_seconds=1.0,
+                ),
+            )
+        )
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+
+        item = window.log_view.item(0)
+        assert item is not None
+        view_rect = window.log_view.visualItemRect(item)
+        button_rect = window.log_view._delegate.button_rect_for_run_group(
+            view_rect.adjusted(1, 2, -1, -2),
+            window.log_view.run_group(item),
+        )
+        QTest.mouseClick(window.log_view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, button_rect.center())
+
+        assert shown_logs == []
+        assert shown_errors == [((flow_name, "run-1"), "run-1 failed")]
     finally:
         _dispose_window(qapp, window)
 
