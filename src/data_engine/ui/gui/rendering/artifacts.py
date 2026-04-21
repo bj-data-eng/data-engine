@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import random
 import polars as pl
 from PySide6.QtCore import QEvent, QPoint, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QKeySequence
@@ -52,12 +53,14 @@ class _ParquetPreviewLoader(QThread):
         output_path: Path,
         *,
         active_value_filters: dict[str, tuple[object, ...]],
+        sort_columns: tuple[tuple[str, bool], ...],
         preview_mode: str,
         preview_row_limit: int,
     ) -> None:
         super().__init__()
         self._output_path = Path(output_path)
         self._active_value_filters = dict(active_value_filters)
+        self._sort_columns = tuple((str(column_name), bool(descending)) for column_name, descending in sort_columns)
         self._preview_mode = preview_mode
         self._preview_row_limit = max(_PREVIEW_ROW_LIMIT_MIN, min(preview_row_limit, _PREVIEW_ROW_LIMIT_MAX))
 
@@ -77,17 +80,38 @@ class _ParquetPreviewLoader(QThread):
                 .get_column("__row_count__")
                 .item()
             )
+            if self._sort_columns:
+                query = query.sort(
+                    [column_name for column_name, _descending in self._sort_columns],
+                    descending=[descending for _column_name, descending in self._sort_columns],
+                )
             if self._preview_mode == _PREVIEW_MODE_BOTTOM:
                 preview = query.tail(self._preview_row_limit).collect()
                 preview_label = f"Showing bottom {self._preview_row_limit} rows"
             elif self._preview_mode == _PREVIEW_MODE_SAMPLE:
-                collected = query.collect()
-                sample_size = min(self._preview_row_limit, collected.height)
-                preview = collected.sample(n=sample_size, shuffle=True, seed=0) if sample_size else collected.head(0)
+                sample_size = min(self._preview_row_limit, row_count)
+                if sample_size <= 0:
+                    preview = query.head(0).collect()
+                elif sample_size >= row_count:
+                    preview = query.collect()
+                else:
+                    sample_indices = sorted(random.Random(0).sample(range(int(row_count)), int(sample_size)))
+                    preview = (
+                        query.with_row_index("__preview_row_index")
+                        .filter(pl.col("__preview_row_index").is_in(sample_indices))
+                        .drop("__preview_row_index")
+                        .collect()
+                    )
                 preview_label = f"Showing sample of {self._preview_row_limit} rows"
             else:
                 preview = query.head(self._preview_row_limit).collect()
                 preview_label = f"Showing top {self._preview_row_limit} rows"
+            if self._sort_columns:
+                sort_summary = ", ".join(
+                    f"{column_name} {'↓' if descending else '↑'}"
+                    for column_name, descending in self._sort_columns
+                )
+                preview_label = f"{preview_label}  •  Sorted by {sort_summary}"
             summary = f"{row_count} row(s)  •  {len(schema.names())} column(s)  •  {preview_label}"
             self.preview_loaded.emit(schema, preview, summary)
         except Exception as exc:  # pragma: no cover - defensive UI fallback
@@ -192,6 +216,31 @@ class _ParquetFilterPopup(QFrame):
         self.status_label.setWordWrap(True)
         self.status_label.setVisible(False)
         layout.addWidget(self.status_label)
+
+        sort_actions = QHBoxLayout()
+        sort_actions.setContentsMargins(0, 0, 0, 0)
+        sort_actions.setSpacing(6)
+        sort_ascending_button = QPushButton("Sort ↑")
+        sort_ascending_button.setObjectName("outputPreviewSortAscendingButton")
+        sort_ascending_button.clicked.connect(lambda: self._apply_sort(descending=False, append=False))
+        sort_actions.addWidget(sort_ascending_button)
+        sort_descending_button = QPushButton("Sort ↓")
+        sort_descending_button.setObjectName("outputPreviewSortDescendingButton")
+        sort_descending_button.clicked.connect(lambda: self._apply_sort(descending=True, append=False))
+        sort_actions.addWidget(sort_descending_button)
+        add_sort_ascending_button = QPushButton("Then ↑")
+        add_sort_ascending_button.setObjectName("outputPreviewAddSortAscendingButton")
+        add_sort_ascending_button.clicked.connect(lambda: self._apply_sort(descending=False, append=True))
+        sort_actions.addWidget(add_sort_ascending_button)
+        add_sort_descending_button = QPushButton("Then ↓")
+        add_sort_descending_button.setObjectName("outputPreviewAddSortDescendingButton")
+        add_sort_descending_button.clicked.connect(lambda: self._apply_sort(descending=True, append=True))
+        sort_actions.addWidget(add_sort_descending_button)
+        clear_sorts_button = QPushButton("Clear Sorts")
+        clear_sorts_button.setObjectName("outputPreviewClearSortsButton")
+        clear_sorts_button.clicked.connect(self._clear_sorts)
+        sort_actions.addWidget(clear_sorts_button)
+        layout.addLayout(sort_actions)
 
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
@@ -343,6 +392,14 @@ class _ParquetFilterPopup(QFrame):
         self._search_token += 1
         self._explorer.request_filter_values(self._column_name, search_text, self._search_token)
 
+    def _apply_sort(self, *, descending: bool, append: bool) -> None:
+        self._explorer.apply_column_sort(self._column_name, descending=descending, append=append)
+        self.close()
+
+    def _clear_sorts(self) -> None:
+        self._explorer.clear_column_sorts()
+        self.close()
+
 
 class _ParquetExplorerWidget(QWidget):
     """Lazy parquet preview with Excel-style header filter popups."""
@@ -374,6 +431,7 @@ class _ParquetExplorerWidget(QWidget):
         self._open_filter_column_index: int | None = None
         self._owns_preview_controls = external_preview_controls is None
         self._table_render_generation = 0
+        self._sort_columns: list[tuple[str, bool]] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -526,6 +584,7 @@ class _ParquetExplorerWidget(QWidget):
                 "preview_mode": self._preview_mode,
                 "row_limit": self.preview_limit_spin.value(),
                 "active_filter_count": len(self._active_value_filters),
+                "sort_column_count": len(self._sort_columns),
             },
         )
         self.status_label.setText("Loading preview…")
@@ -534,6 +593,7 @@ class _ParquetExplorerWidget(QWidget):
         loader = _ParquetPreviewLoader(
             self._output_path,
             active_value_filters=self._active_value_filters,
+            sort_columns=tuple(self._sort_columns),
             preview_mode=self._preview_mode,
             preview_row_limit=self.preview_limit_spin.value(),
         )
@@ -706,6 +766,25 @@ class _ParquetExplorerWidget(QWidget):
         self._preview_mode = str(self.preview_mode_combo.currentData())
         self._refresh_preview()
 
+    def apply_column_sort(self, column_name: str, *, descending: bool, append: bool) -> None:
+        updated_sorts = [
+            (active_name, active_descending)
+            for active_name, active_descending in self._sort_columns
+            if active_name != column_name
+        ]
+        if append:
+            updated_sorts.append((column_name, descending))
+        else:
+            updated_sorts = [(column_name, descending)]
+        self._sort_columns = updated_sorts
+        self._refresh_preview()
+
+    def clear_column_sorts(self) -> None:
+        if not self._sort_columns:
+            return
+        self._sort_columns = []
+        self._refresh_preview()
+
     def eventFilter(self, watched: object, event: object) -> bool:
         header = self.table.horizontalHeader()
         if watched is header.viewport() and isinstance(event, QEvent):
@@ -750,7 +829,12 @@ class _ParquetExplorerWidget(QWidget):
     def _start_table_render(self, preview: pl.DataFrame, *, filtered_columns: set[str], summary: str) -> None:
         self._table_render_generation += 1
         generation = self._table_render_generation
-        _prepare_dataframe_table(self.table, preview, filtered_columns=filtered_columns)
+        _prepare_dataframe_table(
+            self.table,
+            preview,
+            filtered_columns=filtered_columns,
+            sort_columns=self._sort_columns,
+        )
         self.table.setEnabled(False)
         self.status_label.setText("Rendering preview...")
         self.status_label.setVisible(True)
@@ -978,13 +1062,27 @@ def _prepare_dataframe_table(
     frame: pl.DataFrame,
     *,
     filtered_columns: set[str] | None = None,
+    sort_columns: list[tuple[str, bool]] | tuple[tuple[str, bool], ...] | None = None,
 ) -> None:
     preview = frame
     filtered_columns = filtered_columns or set()
+    sort_columns = sort_columns or ()
+    sort_markers = {
+        column_name: (index + 1, descending)
+        for index, (column_name, descending) in enumerate(sort_columns)
+    }
     table.clearContents()
     table.setColumnCount(len(preview.columns))
     table.setHorizontalHeaderLabels(
-        [_header_text(column_name, preview.schema[column_name], filtered=column_name in filtered_columns) for column_name in preview.columns]
+        [
+            _header_text(
+                column_name,
+                preview.schema[column_name],
+                filtered=column_name in filtered_columns,
+                sort_marker=sort_markers.get(column_name),
+            )
+            for column_name in preview.columns
+        ]
     )
     table.setRowCount(preview.height)
 
@@ -998,9 +1096,19 @@ def _populate_dataframe_table_rows(table: QTableWidget, frame: pl.DataFrame, sta
             table.setItem(row_index, column_index, item)
 
 
-def _header_text(column_name: str, dtype: pl.DataType, *, filtered: bool) -> str:
+def _header_text(
+    column_name: str,
+    dtype: pl.DataType,
+    *,
+    filtered: bool,
+    sort_marker: tuple[int, bool] | None = None,
+) -> str:
     marker = "* " if filtered else ""
-    return f"{marker}{column_name} \u25be\n{dtype}"
+    sort_text = ""
+    if sort_marker is not None:
+        sort_rank, descending = sort_marker
+        sort_text = f" {sort_rank}{'↓' if descending else '↑'}"
+    return f"{marker}{column_name}{sort_text} \u25be\n{dtype}"
 
 
 def _build_distinct_value_filter_expression(column_name: str, selected_values: tuple[object, ...]):

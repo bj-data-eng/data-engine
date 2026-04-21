@@ -11,7 +11,7 @@ import threading
 
 import pytest
 import polars as pl
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QListWidget, QPushButton, QTableWidget, QTextEdit, QWidget
 from shiboken6 import delete as shiboken_delete
@@ -46,6 +46,7 @@ from data_engine.views import flow_category
 from data_engine.ui.gui.icons import ICON_ASSETS, load_svg_icon_text
 from data_engine.ui.gui.app import DataEngineWindow
 from data_engine.ui.gui.rendering import classify_artifact_preview, theme_svg_paths
+from data_engine.ui.gui.rendering.artifacts import _ParquetPreviewLoader
 from data_engine.ui.gui.runtime import QueueLogHandler
 from data_engine.domain import FlowLogEntry
 from data_engine.domain import RuntimeStepEvent, parse_runtime_event
@@ -920,6 +921,38 @@ def test_show_output_preview_pdf_uses_placeholder_message(qapp, monkeypatch, tmp
         if window.output_preview_dialog is not None:
             window.output_preview_dialog.close()
         _dispose_window(qapp, window)
+
+
+def test_parquet_preview_loader_sample_mode_collects_only_preview_rows(tmp_path):
+    output_path = tmp_path / "preview.parquet"
+    pl.DataFrame(
+        {
+            "claim_id": list(range(20)),
+            "status": ["OPEN" if index % 2 == 0 else "CLOSED" for index in range(20)],
+        }
+    ).write_parquet(output_path)
+
+    loader = _ParquetPreviewLoader(
+        output_path,
+        active_value_filters={},
+        sort_columns=(),
+        preview_mode="sample",
+        preview_row_limit=5,
+    )
+    loaded: list[tuple[object, object, str]] = []
+    failures: list[str] = []
+    loader.preview_loaded.connect(lambda schema, preview, summary: loaded.append((schema, preview, summary)))
+    loader.load_failed.connect(failures.append)
+
+    loader.run()
+
+    assert failures == []
+    assert len(loaded) == 1
+    _schema, preview, summary = loaded[0]
+    assert preview.height == 5
+    assert preview.columns == ["claim_id", "status"]
+    assert "20 row(s)" in summary
+    assert "Showing sample of 5 rows" in summary
 
 
 def test_format_seconds_truncates_and_changes_units(qapp, monkeypatch):
@@ -3180,6 +3213,98 @@ def test_debug_view_column_filter_header_click_toggles_popup(qapp):
         qapp.processEvents()
         popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
         assert popup is None or popup.isVisible() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_column_filter_popup_supports_multi_column_sort(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "workflow": ["B", "A", "B", "A"],
+                "claim_id": [2, 2, 1, 1],
+                "status": ["open", "open", "closed", "closed"],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 4)
+
+        header = table.horizontalHeader()
+        workflow_header_pos = header.sectionViewportPosition(0)
+        workflow_header_center = header.viewport().rect().topLeft() + QPoint(
+            workflow_header_pos + max(1, header.sectionSize(0) // 2),
+            max(1, header.height() // 2),
+        )
+        QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, workflow_header_center)
+        qapp.processEvents()
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None and popup.isVisible()
+        sort_button = popup.findChild(QPushButton, "outputPreviewSortAscendingButton")
+        assert sort_button is not None
+        QTest.mouseClick(sort_button, Qt.MouseButton.LeftButton)
+        _process_ui_until(
+            qapp,
+            lambda: table.isEnabled()
+            and table.item(0, 0) is not None
+            and table.item(1, 0) is not None
+            and "1↑" in header.model().headerData(0, Qt.Orientation.Horizontal),
+        )
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+        popup = explorer._filter_popup
+        assert popup is not None and popup.isVisible()
+        add_sort_button = popup.findChild(QPushButton, "outputPreviewAddSortAscendingButton")
+        assert add_sort_button is not None
+        QTest.mouseClick(add_sort_button, Qt.MouseButton.LeftButton)
+        _process_ui_until(
+            qapp,
+            lambda: table.item(0, 0) is not None
+            and table.item(0, 1) is not None
+            and table.item(1, 0) is not None
+            and table.item(1, 1) is not None
+            and table.item(2, 0) is not None
+            and table.item(2, 1) is not None
+            and table.item(3, 0) is not None
+            and table.item(3, 1) is not None
+            and "1↑" in header.model().headerData(0, Qt.Orientation.Horizontal)
+            and "2↑" in header.model().headerData(1, Qt.Orientation.Horizontal),
+        )
+
+        assert [(table.item(row, 0).text(), table.item(row, 1).text()) for row in range(4)] == [
+            ("A", "1"),
+            ("A", "2"),
+            ("B", "1"),
+            ("B", "2"),
+        ]
     finally:
         _dispose_window(qapp, window)
 

@@ -2,6 +2,7 @@
 
 from .support import (
     test_artifact_preview_classification_is_explicit,
+    test_debug_view_column_filter_popup_supports_multi_column_sort,
     test_flow_category_matches_mode,
     test_format_seconds_truncates_and_changes_units,
     test_icon_registry_loads_current_file_backed_svg,
