@@ -35,6 +35,7 @@ _MINIMUM_WINDOW_SIZE = (1180, 760)
 _STARTUP_SCREEN_WIDTH_RATIO = 0.78
 _STARTUP_SCREEN_HEIGHT_RATIO = 0.84
 _DAEMON_HEARTBEAT_INTERVAL_MS = 2000
+_GUI_LOG_QUEUE_MAXSIZE = 5000
 
 
 def initial_window_size_for_screen(screen: object | None) -> tuple[int, int]:
@@ -108,7 +109,7 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.settings_workspace_target_id = window.workspace_paths.workspace_id
     window._settings_workspace_target_pinned = False
 
-    window.log_queue: Queue[FlowLogEntry] = Queue()
+    window.log_queue: Queue[FlowLogEntry] = Queue(maxsize=_GUI_LOG_QUEUE_MAXSIZE)
     window.log_handler = QueueLogHandler(window.log_queue)
     logger = logging.getLogger(APP_INTERNAL_ID)
     logger.addHandler(window.log_handler)

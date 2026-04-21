@@ -4306,6 +4306,87 @@ def test_refresh_log_view_skips_row_rebuild_when_visible_runs_are_unchanged(qapp
         _dispose_window(qapp, window)
 
 
+def test_refresh_log_view_reloads_ledger_runs_when_log_store_is_unchanged(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        flow_name = "poller"
+        window.selected_flow_name = flow_name
+        started_entry = FlowLogEntry(
+            line="run=run-1 flow=poller source=claims.xlsx status=started",
+            kind="flow",
+            flow_name=flow_name,
+            event=RuntimeStepEvent(
+                run_id="run-1",
+                flow_name=flow_name,
+                step_name=None,
+                source_label="claims.xlsx",
+                status="started",
+                elapsed_seconds=None,
+            ),
+        )
+        finished_entry = FlowLogEntry(
+            line="run=run-1 flow=poller source=claims.xlsx status=success elapsed=8.0",
+            kind="flow",
+            flow_name=flow_name,
+            event=RuntimeStepEvent(
+                run_id="run-1",
+                flow_name=flow_name,
+                step_name=None,
+                source_label="claims.xlsx",
+                status="success",
+                elapsed_seconds=8.0,
+            ),
+        )
+        started_group = FlowRunState(
+            key=(flow_name, "run-1"),
+            display_label="2026-04-20 09:00:00 AM",
+            source_label="claims.xlsx",
+            status="started",
+            elapsed_seconds=None,
+            summary_entry=started_entry,
+            steps=(),
+            entries=(started_entry,),
+        )
+        finished_group = FlowRunState(
+            key=(flow_name, "run-1"),
+            display_label="2026-04-20 09:00:00 AM",
+            source_label="claims.xlsx",
+            status="success",
+            elapsed_seconds=8.0,
+            summary_entry=finished_entry,
+            steps=(),
+            entries=(finished_entry,),
+        )
+        ledger_results = [started_group, finished_group]
+
+        def list_flow_runs_from_ledger(_ledger, *, flow_name=None, limit=50):
+            del _ledger, limit
+            if flow_name != "poller":
+                return ()
+            result = ledger_results.pop(0) if ledger_results else finished_group
+            return (result,)
+
+        monkeypatch.setattr(
+            window.history_query_service,
+            "list_flow_runs_from_ledger",
+            list_flow_runs_from_ledger,
+        )
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+        item = window.log_view.item(0)
+        first_group = window.log_view.run_group(item)
+
+        window._selected_flow_run_groups_dirty = False
+        window._refresh_log_view(force_scroll_to_bottom=True)
+        second_group = window.log_view.run_group(item)
+
+        assert first_group is not None and first_group.status == "started"
+        assert second_group is not None and second_group.status == "success"
+        assert second_group.elapsed_seconds == 8.0
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_run_log_preview_collapses_step_started_and_finished_rows(qapp, monkeypatch):
     del monkeypatch
     window = _make_window()

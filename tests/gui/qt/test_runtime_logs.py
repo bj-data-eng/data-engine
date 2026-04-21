@@ -9,6 +9,7 @@ from .support import (
     test_poll_log_queue_yields_when_backlog_exceeds_tick_limit,
     test_rebuild_runtime_snapshot_drops_stopping_runtime_state_for_completed_flows,
     test_refresh_log_view_skips_row_rebuild_when_visible_runs_are_unchanged,
+    test_refresh_log_view_reloads_ledger_runs_when_log_store_is_unchanged,
     test_build_log_run_widget_is_not_created_as_top_level_window,
     test_sidebar_row_widgets_are_not_created_as_top_level_windows,
     test_refresh_log_view_updates_only_changed_rows_when_one_live_duration_changes,

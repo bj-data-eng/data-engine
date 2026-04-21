@@ -124,31 +124,53 @@ class GuiControlMixin:
         refresh_external_state = getattr(self.runtime_binding.runtime_cache_ledger, "refresh_external_state", None)
         if callable(refresh_external_state):
             refresh_external_state()
-        persisted_run = self.runtime_binding.runtime_cache_ledger.runs.get(run_group.key[1])
+        detailed_run_group = self.history_query_service.get_run_group_detail(
+            self.runtime_binding.runtime_cache_ledger,
+            run_id=run_group.key[1],
+            flow_name=run_group.key[0],
+        )
+        if detailed_run_group is None:
+            detailed_run_group = run_group
+        persisted_run = self.runtime_binding.runtime_cache_ledger.runs.get(detailed_run_group.key[1])
         source_path = None if persisted_run is None else persisted_run.source_path
         self.run_log_preview_dialog = show_run_log_preview(
             self,
-            RunLogPreviewRequest.from_run(run_group, source_path=source_path),
+            RunLogPreviewRequest.from_run(detailed_run_group, source_path=source_path),
         )
+        dialog = self.run_log_preview_dialog
+        if dialog is not None:
+            dialog.destroyed.connect(
+                lambda *_args, host=self, current_dialog=dialog: (
+                    setattr(host, "run_log_preview_dialog", None)
+                    if getattr(host, "run_log_preview_dialog", None) is current_dialog
+                    else None
+                )
+            )
 
     def _show_run_error_details(self: "DataEngineWindow", run_group: FlowRunState, entry: FlowLogEntry) -> None:
         """Show persisted failure detail for one failed run or step entry."""
         refresh_external_state = getattr(self.runtime_binding.runtime_cache_ledger, "refresh_external_state", None)
         if callable(refresh_external_state):
             refresh_external_state()
+        detailed_run_group = self.history_query_service.get_run_group_detail(
+            self.runtime_binding.runtime_cache_ledger,
+            run_id=run_group.key[1],
+            flow_name=run_group.key[0],
+        )
+        effective_run_group = detailed_run_group or run_group
         event = entry.event
         title, detail_text = self.runtime_binding_service.error_text_for_entry(
             self.runtime_binding,
-            run_group,
+            effective_run_group,
             entry,
         )
         if event is not None and event.step_name is not None:
             fallback_text = (
                 f'No persisted error detail was available for failed step "{event.step_name}" '
-                f'in run "{run_group.key[0]}".'
+                f'in run "{effective_run_group.key[0]}".'
             )
         else:
-            fallback_text = f'No persisted error detail was available for failed run "{run_group.key[0]}".'
+            fallback_text = f'No persisted error detail was available for failed run "{effective_run_group.key[0]}".'
         self._show_message_box(
             title=title,
             text=detail_text.strip() if isinstance(detail_text, str) and detail_text.strip() else fallback_text,

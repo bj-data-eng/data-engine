@@ -52,6 +52,9 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 .\.venv\Scripts\python.exe -m twine check dist\*
 ```
 
+- When instrumentation has been discussed and explicitly chosen for a debugging session, flip the dev instrumentation env var default in code to `1` for the duration of that work and flip it back when done.
+- For that toggle-only instrumentation-default change, do not run tests just to verify the flip; we already know that change is safe on its own.
+
 ## Parallel Worktrees
 
 - Use semi-permanent worker lanes for high-throughput parallel work: `../data-engine-worktrees/lane-1` through `../data-engine-worktrees/lane-6`.

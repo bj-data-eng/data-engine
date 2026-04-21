@@ -70,6 +70,29 @@ def test_gui_queue_log_handler_drops_unscoped_shared_records():
     assert queue.empty()
 
 
+def test_gui_queue_log_handler_discards_oldest_entries_when_queue_is_full():
+    queue: Queue[FlowLogEntry] = Queue(maxsize=2)
+    handler = gui_runtime.QueueLogHandler(queue)
+
+    for index in range(3):
+        handler.emit(
+            logging.makeLogRecord(
+                {
+                    "msg": f"run=run-{index} flow=claims_poll source=C:/input-{index}.xlsx status=started",
+                    "workspace_id": "claims2",
+                }
+            )
+        )
+
+    first = queue.get_nowait()
+    second = queue.get_nowait()
+
+    assert first.event is not None
+    assert second.event is not None
+    assert first.event.run_id == "run-1"
+    assert second.event.run_id == "run-2"
+
+
 def test_tui_queue_log_handler_emits_flow_and_system_entries():
     queue: Queue[FlowLogEntry] = Queue()
     handler = tui_runtime.QueueLogHandler(queue)

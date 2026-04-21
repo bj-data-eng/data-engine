@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from queue import Queue
+from queue import Empty, Full, Queue
 
 from PySide6.QtCore import QObject, Signal
 
@@ -28,7 +28,7 @@ class QueueLogHandler(logging.Handler):
                 return
             event = parse_runtime_event(record)
             kind = "flow" if event is not None and event.flow_name is not None else "system"
-            self.queue.put_nowait(
+            self._enqueue_entry(
                 FlowLogEntry(
                     line=format_log_line(record),
                     kind=kind,
@@ -39,6 +39,19 @@ class QueueLogHandler(logging.Handler):
             )
         except Exception:
             self.handleError(record)
+
+    def _enqueue_entry(self, entry: FlowLogEntry) -> None:
+        """Enqueue one UI log entry while bounding burst memory usage."""
+        try:
+            self.queue.put_nowait(entry)
+            return
+        except Full:
+            pass
+        try:
+            self.queue.get_nowait()
+        except Empty:
+            pass
+        self.queue.put_nowait(entry)
 
 
 class UiSignals(QObject):
