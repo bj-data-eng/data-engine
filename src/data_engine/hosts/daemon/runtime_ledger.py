@@ -15,7 +15,13 @@ if TYPE_CHECKING:
 class _RuntimeEventPublisher(Protocol):
     """Callable contract for publishing daemon runtime events."""
 
-    def __call__(self, event_type: str, *, payload: dict[str, Any] | None = None) -> None: ...
+    def __call__(
+        self,
+        event_type: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        include_state: bool = True,
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,7 @@ class DaemonRuntimeExecutionStatePublisher:
                 "source_path": source_path,
                 "started_at_utc": run.started_at_utc if run is not None else started_at_utc,
             },
+            include_state=False,
         )
 
     def record_run_finished(
@@ -81,6 +88,7 @@ class DaemonRuntimeExecutionStatePublisher:
                 "status": status,
                 "error_text": error_text,
             },
+            include_state=False,
         )
 
     def record_step_started(
@@ -109,6 +117,7 @@ class DaemonRuntimeExecutionStatePublisher:
                 "source_path": run.source_path if run is not None else None,
                 "started_at_utc": step_run.started_at_utc if step_run is not None else started_at_utc,
             },
+            include_state=False,
         )
         return step_run_id
 
@@ -147,6 +156,7 @@ class DaemonRuntimeExecutionStatePublisher:
                 "error_text": error_text,
                 "output_path": output_path,
             },
+            include_state=False,
         )
 
     def upsert_file_state(

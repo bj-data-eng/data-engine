@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from data_engine.core.model import FlowValidationError
-from data_engine.domain import FlowCatalogLike, FlowCatalogState, FlowRunState, FlowSummaryRow
+from data_engine.domain import FlowCatalogLike, FlowCatalogState, FlowLogEntry, FlowRunState, FlowSummaryRow, RuntimeStepEvent, short_source_label
+from data_engine.domain.time import parse_utc_text
 from data_engine.services.flow_catalog import FlowCatalogService
 from data_engine.services.logs import LogService
 from data_engine.services.runtime_ports import RuntimeCacheStore
@@ -170,6 +171,14 @@ class HistoryPort(Protocol):
 
     def list_flow_runs(self, store: FlowLogStore, *, flow_name: str | None) -> tuple[FlowRunState, ...]: ...
 
+    def list_flow_runs_from_ledger(
+        self,
+        ledger: RuntimeCacheStore,
+        *,
+        flow_name: str | None,
+        limit: int = 50,
+    ) -> tuple[FlowRunState, ...]: ...
+
     def list_run_groups(self, store: FlowLogStore, *, flow_name: str | None, limit: int = 50) -> tuple[RunGroupSummary, ...]: ...
 
     def get_run_steps(self, ledger: RuntimeCacheStore, *, run_id: str) -> tuple[RunStepDetail, ...]: ...
@@ -182,6 +191,15 @@ class HistoryPort(Protocol):
         flow_name: str | None = None,
         limit: int = 500,
     ) -> tuple[RunLogEntry, ...]: ...
+
+    def get_run_group_detail(
+        self,
+        ledger: RuntimeCacheStore,
+        *,
+        run_id: str,
+        flow_name: str | None = None,
+        limit: int = 500,
+    ) -> FlowRunState | None: ...
 
 
 class CatalogQueryService:
@@ -326,6 +344,21 @@ class HistoryQueryService:
         """Return grouped run states for one flow."""
         return self.log_service.runs_for_flow(store, flow_name)
 
+    def list_flow_runs_from_ledger(
+        self,
+        ledger: RuntimeCacheStore,
+        *,
+        flow_name: str | None,
+        limit: int = 50,
+    ) -> tuple[FlowRunState, ...]:
+        """Return grouped run summaries queried directly from the runtime ledger."""
+        if flow_name is None:
+            return ()
+        persisted_runs = tuple(reversed(ledger.runs.list(flow_name=flow_name)))
+        if limit >= 0:
+            persisted_runs = persisted_runs[-limit:]
+        return tuple(self._summary_flow_run(run) for run in persisted_runs)
+
     def list_run_groups(self, store: FlowLogStore, *, flow_name: str | None, limit: int = 50) -> tuple[RunGroupSummary, ...]:
         """Return grouped run summaries for one flow."""
         run_groups = self.log_service.runs_for_flow(store, flow_name)
@@ -375,6 +408,80 @@ class HistoryQueryService:
         if limit >= 0:
             filtered = filtered[-limit:]
         return tuple(filtered)
+
+    def get_run_group_detail(
+        self,
+        ledger: RuntimeCacheStore,
+        *,
+        run_id: str,
+        flow_name: str | None = None,
+        limit: int = 500,
+    ) -> FlowRunState | None:
+        """Return one detailed grouped run queried on demand from the runtime ledger."""
+        entries_from_ledger = getattr(self.log_service, "entries_from_ledger", None)
+        if callable(entries_from_ledger):
+            entries = entries_from_ledger(
+                ledger,
+                flow_name=flow_name,
+                run_id=run_id,
+                limit=limit,
+            )
+        else:
+            entries = ()
+        grouped = FlowRunState.group_entries(entries)
+        for group in grouped:
+            if group.key[1] == run_id:
+                return group
+        persisted_run = ledger.runs.get(run_id)
+        if persisted_run is None:
+            return None
+        return self._summary_flow_run(persisted_run)
+
+    @staticmethod
+    def _summary_flow_run(run) -> FlowRunState:
+        """Return one grouped-run summary value synthesized from a persisted run row."""
+        created_at = parse_utc_text(run.started_at_utc)
+        if created_at is None:
+            created_at = parse_utc_text(run.finished_at_utc)
+        if created_at is None:
+            raise ValueError(f"Persisted run {run.run_id!r} has no parseable timestamps.")
+        status = run.status if run.status in {"success", "failed", "stopped"} else "started"
+        summary_event = RuntimeStepEvent(
+            run_id=run.run_id,
+            flow_name=run.flow_name,
+            step_name=None,
+            source_label=short_source_label(run.source_path),
+            status=status,
+            elapsed_seconds=run.elapsed_seconds,
+        )
+        summary_entry = FlowLogEntry(
+            line=(
+                run.error_text
+                if status == "failed" and isinstance(run.error_text, str) and run.error_text.strip()
+                else FlowLogEntry.format_runtime_message(
+                    f"run={run.run_id} flow={run.flow_name} source={run.source_path or '-'} status={status}"
+                    + (
+                        f" elapsed={run.elapsed_seconds:.6f}"
+                        if isinstance(run.elapsed_seconds, (int, float))
+                        else ""
+                    )
+                )
+            ),
+            kind="flow",
+            event=summary_event,
+            flow_name=run.flow_name,
+            created_at_utc=created_at,
+        )
+        return FlowRunState(
+            key=(run.flow_name, run.run_id),
+            display_label=created_at.astimezone().strftime("%Y-%m-%d %I:%M:%S %p"),
+            source_label=short_source_label(run.source_path),
+            status=status,
+            elapsed_seconds=run.elapsed_seconds,
+            summary_entry=summary_entry,
+            steps=(),
+            entries=(),
+        )
 
 
 __all__ = [

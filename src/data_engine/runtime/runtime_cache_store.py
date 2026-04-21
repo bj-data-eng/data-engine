@@ -765,6 +765,7 @@ class RuntimeLogRepository:
         flow_name: str | None = None,
         run_id: str | None = None,
         after_id: int | None = None,
+        limit: int | None = None,
     ) -> tuple[PersistedLogEntry, ...]:
         clauses: list[str] = []
         params: list[object] = []
@@ -778,15 +779,28 @@ class RuntimeLogRepository:
             clauses.append("id > ?")
             params.append(after_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = self._store._connection().execute(
-            f"""
-            SELECT id, run_id, flow_name, step_label, level, message, created_at_utc
-            FROM logs
-            {where}
-            ORDER BY created_at_utc, id
-            """,
-            params,
-        ).fetchall()
+        if limit is None:
+            rows = self._store._connection().execute(
+                f"""
+                SELECT id, run_id, flow_name, step_label, level, message, created_at_utc
+                FROM logs
+                {where}
+                ORDER BY created_at_utc, id
+                """,
+                params,
+            ).fetchall()
+        else:
+            rows = self._store._connection().execute(
+                f"""
+                SELECT id, run_id, flow_name, step_label, level, message, created_at_utc
+                FROM logs
+                {where}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                [*params, max(int(limit), 0)],
+            ).fetchall()
+            rows.reverse()
         return tuple(
             PersistedLogEntry(
                 id=int(row["id"]),

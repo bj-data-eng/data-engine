@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from time import monotonic, sleep
 from typing import TYPE_CHECKING
 
@@ -68,8 +68,12 @@ class ContinuousRuntimeLoop:
                         results=None,
                     )
                     if queue or pending_futures:
+                        self._wait_for_activity(
+                            watch_entries=watch_entries,
+                            pending_futures=pending_futures,
+                        )
                         continue
-                    sleep(0.05)
+                    self._sleep_until_next_poll(watch_entries)
             finally:
                 self.runtime.wait_for_dispatched_jobs(pending_futures, results=None)
                 for entry in watch_entries:
@@ -77,6 +81,43 @@ class ContinuousRuntimeLoop:
                     if isinstance(watcher, PollingWatcher):
                         watcher.stop()
         return results
+
+    def _wait_for_activity(
+        self,
+        *,
+        watch_entries: list[dict[str, object]],
+        pending_futures: dict[Future["FlowContext"], tuple[QueuedRunJob, int]],
+    ) -> None:
+        """Block until either a queued run finishes or the next watcher poll is due."""
+        timeout_seconds = self._next_poll_timeout_seconds(watch_entries)
+        if not pending_futures:
+            if timeout_seconds is None:
+                sleep(0.05)
+            elif timeout_seconds > 0.0:
+                sleep(timeout_seconds)
+            return
+        wait(
+            tuple(pending_futures),
+            timeout=timeout_seconds,
+            return_when=FIRST_COMPLETED,
+        )
+
+    def _sleep_until_next_poll(self, watch_entries: list[dict[str, object]]) -> None:
+        """Sleep for a bounded interval while the continuous runtime is idle."""
+        timeout_seconds = self._next_poll_timeout_seconds(watch_entries)
+        if timeout_seconds is None:
+            sleep(0.05)
+            return
+        if timeout_seconds > 0.0:
+            sleep(timeout_seconds)
+
+    def _next_poll_timeout_seconds(self, watch_entries: list[dict[str, object]]) -> float | None:
+        """Return how long the loop can wait before the next watcher poll is due."""
+        if not watch_entries:
+            return None
+        now = monotonic()
+        next_poll_at = min(float(entry["next_poll"]) for entry in watch_entries)
+        return max(next_poll_at - now, 0.0)
 
     def _poll_watch_entries(
         self,

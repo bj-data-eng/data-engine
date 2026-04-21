@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from collections import deque
-from concurrent.futures import Future
+from concurrent.futures import FIRST_COMPLETED, Future
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from time import sleep
+from time import monotonic
 
 from data_engine.core.model import FlowStoppedError
 from data_engine.core.primitives import FlowContext
 from data_engine.platform.workspace_models import DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR
+from data_engine.runtime.execution.continuous import ContinuousRuntimeLoop
 from data_engine.runtime.execution.context import QueuedRunJob
 from data_engine.runtime.execution.single import FlowRuntime
 from data_engine.runtime.execution.single import default_runtime_cache_ledger_service
@@ -134,17 +136,22 @@ def _executor(calls: list[tuple[str, object]]) -> FlowRunExecutor:
     )
 
 
-def test_flow_run_executor_logs_success_before_publishing_run_finished_state() -> None:
+def test_flow_run_executor_does_not_emit_routine_success_logs() -> None:
     calls: list[tuple[str, object]] = []
     executor = _executor(calls)
     flow = _Flow(name="claims_summary", group="Claims", steps=(_Step("Emit", lambda context: "ok"),))
 
     executor.run_one(flow, None)
 
-    log_index = next(index for index, call in enumerate(calls) if call[0] == "log_flow_event" and call[1]["status"] == "success")
-    finish_index = next(index for index, call in enumerate(calls) if call[0] == "record_run_finished")
-
-    assert log_index < finish_index
+    assert not any(
+        call[0] == "log_flow_event" and call[1]["status"] == "success"
+        for call in calls
+    )
+    assert not any(
+        call[0] == "log_step_event" and call[1]["status"] in {"started", "success"}
+        for call in calls
+    )
+    assert next(call for call in calls if call[0] == "record_run_finished")[1]["status"] == "success"
 
 
 def test_flow_run_executor_logs_failure_before_publishing_run_finished_state() -> None:
@@ -205,14 +212,14 @@ def test_flow_run_executor_elapsed_excludes_start_write_delay() -> None:
     assert isinstance(step_elapsed_ms, int)
     assert step_elapsed_ms < 25
 
-    success_step_log = next(
-        call for call in calls if call[0] == "log_step_event" and call[1]["status"] == "success"
+    assert not any(
+        call[0] == "log_step_event" and call[1]["status"] in {"started", "success"}
+        for call in calls
     )
-    success_flow_log = next(
-        call for call in calls if call[0] == "log_flow_event" and call[1]["status"] == "success"
+    assert not any(
+        call[0] == "log_flow_event" and call[1]["status"] == "success"
+        for call in calls
     )
-    assert success_step_log[1]["elapsed"] < 0.025
-    assert success_flow_log[1]["elapsed"] < 0.075
     assert run_finished[1]["status"] == "success"
 
 
@@ -233,13 +240,22 @@ def test_flow_runtime_discards_completed_contexts_when_results_collection_is_dis
     runtime = FlowRuntime(flows=(), continuous=True)
     try:
         future: Future[FlowContext] = Future()
-        context = FlowContext(flow_name="demo", group="Demo")
+        context = FlowContext(
+            flow_name="demo",
+            group="Demo",
+            current=object(),
+            objects={"frame": object()},
+            metadata={"started_at_utc": "2026-04-21T00:00:00+00:00", "step_outputs": {"Emit": "artifact"}},
+        )
         future.set_result(context)
         pending: dict[Future[FlowContext], tuple[object, int]] = {future: (object(), 0)}
 
         runtime._consume_completed_future(future, pending, results=None)
 
         assert pending == {}
+        assert context.current is None
+        assert context.objects == {}
+        assert context.metadata == {}
     finally:
         runtime._close_runtime_resources()
 
@@ -271,3 +287,46 @@ def test_flow_runtime_dispatches_queued_jobs_when_results_collection_is_disabled
         assert pending == {}
     finally:
         runtime._close_runtime_resources()
+
+
+def test_continuous_runtime_loop_waits_on_pending_futures(monkeypatch) -> None:
+    loop = ContinuousRuntimeLoop(runtime=object())
+    future: Future[FlowContext] = Future()
+    pending = {future: (object(), 0)}
+    watch_entries = [{"next_poll": monotonic() + 1.0}]
+    recorded: dict[str, object] = {}
+
+    def _fake_wait(futures, *, timeout, return_when):
+        recorded["futures"] = tuple(futures)
+        recorded["timeout"] = timeout
+        recorded["return_when"] = return_when
+        return set(), set(futures)
+
+    def _fake_sleep(seconds: float) -> None:
+        raise AssertionError(f"sleep should not be called while futures are pending: {seconds}")
+
+    monkeypatch.setattr("data_engine.runtime.execution.continuous.wait", _fake_wait)
+    monkeypatch.setattr("data_engine.runtime.execution.continuous.sleep", _fake_sleep)
+
+    loop._wait_for_activity(watch_entries=watch_entries, pending_futures=pending)
+
+    assert recorded["futures"] == (future,)
+    assert isinstance(recorded["timeout"], float)
+    assert 0.0 <= recorded["timeout"] <= 1.0
+    assert recorded["return_when"] == FIRST_COMPLETED
+
+
+def test_continuous_runtime_loop_sleeps_until_next_poll_without_pending_futures(monkeypatch) -> None:
+    loop = ContinuousRuntimeLoop(runtime=object())
+    watch_entries = [{"next_poll": monotonic() + 0.2}]
+    recorded: dict[str, float] = {}
+
+    def _fake_sleep(seconds: float) -> None:
+        recorded["seconds"] = seconds
+
+    monkeypatch.setattr("data_engine.runtime.execution.continuous.sleep", _fake_sleep)
+
+    loop._sleep_until_next_poll(watch_entries)
+
+    assert isinstance(recorded["seconds"], float)
+    assert 0.0 <= recorded["seconds"] <= 0.2

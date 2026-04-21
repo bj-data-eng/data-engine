@@ -267,10 +267,11 @@ class _RuntimeLogsProxy:
         flow_name: str | None = None,
         run_id: str | None = None,
         after_id: int | None = None,
+        limit: int | None = None,
     ) -> tuple[PersistedLogEntry, ...]:
         return self._handle.read_cached(
-            ("logs.list", flow_name, run_id, after_id),
-            lambda: self._delegate.list(flow_name=flow_name, run_id=run_id, after_id=after_id),
+            ("logs.list", flow_name, run_id, after_id, limit),
+            lambda: self._delegate.list(flow_name=flow_name, run_id=run_id, after_id=after_id, limit=limit),
         )
 
     def append(self, **kwargs: object) -> None:

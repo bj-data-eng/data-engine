@@ -406,3 +406,34 @@ def test_flow_log_store_caches_grouped_runs_per_flow(monkeypatch):
     assert len(refreshed) == 1
     assert refreshed[0].status == "success"
     assert len(calls) == 2
+
+
+def test_flow_log_store_prunes_oldest_entries_when_window_is_exceeded():
+    store = FlowLogStore(max_entries=2)
+    store.append_line("first", kind="flow", flow_name="poller")
+    store.append_line("second", kind="flow", flow_name="poller")
+    store.append_line("third", kind="flow", flow_name="poller")
+
+    assert [entry.line for entry in store.entries()] == ["second", "third"]
+
+
+def test_log_service_create_store_hydrates_only_latest_visible_log_window(tmp_path, monkeypatch):
+    ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_ledger.sqlite")
+    created_at = utcnow_text()
+    for message in ("first", "second", "third"):
+        ledger.logs.append(
+            level="INFO",
+            message=f"run=run-{message} flow=poller source=/tmp/{message}.xlsx status=success elapsed=0.250000",
+            created_at_utc=created_at,
+            run_id=f"run-{message}",
+            flow_name="poller",
+        )
+
+    monkeypatch.setattr(LogService, "DEFAULT_VISIBLE_LOG_LIMIT", 2)
+
+    store = LogService().create_store(ledger)
+
+    assert [entry.event.run_id if entry.event is not None else None for entry in store.entries()] == [
+        "run-second",
+        "run-third",
+    ]

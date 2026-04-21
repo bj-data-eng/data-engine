@@ -260,9 +260,12 @@ class DataEngineDaemonService:
         *,
         correlation_id: str | None = None,
         payload: dict[str, object] | None = None,
+        include_state: bool = True,
     ) -> None:
         """Publish one daemon runtime event with the latest full state payload."""
-        event_payload = {"state": self._runtime_state_payload()}
+        event_payload: dict[str, object] = {}
+        if include_state:
+            event_payload["state"] = self._runtime_state_payload()
         if payload:
             event_payload.update(payload)
         self.runtime_event_bus.publish(

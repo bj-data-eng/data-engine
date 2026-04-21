@@ -11,6 +11,7 @@ from data_engine.core.model import FlowExecutionError, FlowStoppedError, FlowVal
 from data_engine.core.primitives import FlowContext, WatchSpec
 from data_engine.domain.source_state import SourceSignature
 from data_engine.domain.time import utcnow_text
+from data_engine.platform.instrumentation import append_timing_line
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow
@@ -161,6 +162,8 @@ class FlowRunExecutionPorts:
     state_writer: RuntimeStateWriterPort
     log_emitter: RuntimeEventWriterPort
     stop_controller: RuntimeStopPort
+    timing_log_path: Path | None = None
+    execution_mode: str = "oneshot"
 
 
 class FlowRunExecutor:
@@ -168,6 +171,35 @@ class FlowRunExecutor:
 
     def __init__(self, ports: FlowRunExecutionPorts) -> None:
         self.ports = ports
+
+    def _mark_timing(
+        self,
+        event: str,
+        *,
+        run_id: str | None,
+        flow_name: str | None,
+        step_label: str | None = None,
+        source_path: Path | str | None = None,
+        elapsed_ms: float | None = None,
+        extra_fields: dict[str, object] | None = None,
+    ) -> None:
+        fields: dict[str, object] = {
+            "execution_mode": self.ports.execution_mode,
+            "run_id": run_id,
+            "flow_name": flow_name,
+            "step_label": step_label,
+            "source_path": str(source_path) if source_path is not None else None,
+        }
+        if extra_fields:
+            fields.update(extra_fields)
+        append_timing_line(
+            self.ports.timing_log_path,
+            scope="runtime.step",
+            event=event,
+            phase="mark",
+            elapsed_ms=elapsed_ms,
+            fields=fields,
+        )
 
     def run_one(self, flow: "Flow", source_path: "Path | None", *, batch_signatures=()) -> FlowContext:
         self.ports.stop_controller.check_run(None)
@@ -187,9 +219,23 @@ class FlowRunExecutor:
         batch_signatures=(),
     ) -> FlowContext:
         context = self.ports.context_builder.build(flow, source_path, run_id=run_id)
+        self._mark_timing(
+            "run_context_built",
+            run_id=run_id,
+            flow_name=context.flow_name,
+            source_path=source_path,
+            extra_fields={"group_name": context.group},
+        )
         signature = self.ports.polling.poll_source_signature(flow, source_path)
         effective_signatures = batch_signatures or ((signature,) if signature is not None else ())
         normalized_source_path = signature.source_path if signature is not None else self.ports.polling.normalized_source_path(source_path)
+        self._mark_timing(
+            "run_record_started_begin",
+            run_id=run_id,
+            flow_name=context.flow_name,
+            source_path=normalized_source_path,
+            extra_fields={"effective_signature_count": len(effective_signatures)},
+        )
         self.ports.state_writer.record_run_started(
             run_id=run_id,
             flow_name=context.flow_name,
@@ -197,30 +243,114 @@ class FlowRunExecutor:
             source_path=normalized_source_path,
             started_at_utc=None,
         )
+        self._mark_timing(
+            "run_record_started_end",
+            run_id=run_id,
+            flow_name=context.flow_name,
+            source_path=normalized_source_path,
+        )
         run_started = monotonic()
         for effective_signature in effective_signatures:
+            self._mark_timing(
+                "file_state_started_begin",
+                run_id=run_id,
+                flow_name=context.flow_name,
+                source_path=effective_signature.source_path,
+            )
             self.ports.state_writer.upsert_file_state(flow_name=context.flow_name, signature=effective_signature, status="started")
-        self.ports.log_emitter.log_flow_event(run_id, context.flow_name, source_path, status="started")
+            self._mark_timing(
+                "file_state_started_end",
+                run_id=run_id,
+                flow_name=context.flow_name,
+                source_path=effective_signature.source_path,
+            )
         try:
             self._ensure_runtime_sources_available(flow, context, source_path)
             for step in flow.steps:
-                self.ports.stop_controller.check_run(run_id)
+                self._mark_timing(
+                    "step_loop_enter",
+                    run_id=run_id,
+                    flow_name=context.flow_name,
+                    step_label=step.label,
+                    source_path=source_path,
+                )
+                try:
+                    self.ports.stop_controller.check_run(run_id)
+                except FlowStoppedError:
+                    self._mark_timing(
+                        "step_stop_detected",
+                        run_id=run_id,
+                        flow_name=context.flow_name,
+                        step_label=step.label,
+                        source_path=source_path,
+                    )
+                    raise
                 if context.debug is not None:
                     context.debug.set_step(step.label)
+                self._mark_timing(
+                    "step_load_current_begin",
+                    run_id=run_id,
+                    flow_name=context.flow_name,
+                    step_label=step.label,
+                    source_path=source_path,
+                )
                 self._load_current_for_step(context, step)
+                self._mark_timing(
+                    "step_load_current_end",
+                    run_id=run_id,
+                    flow_name=context.flow_name,
+                    step_label=step.label,
+                    source_path=source_path,
+                )
+                persist_started = monotonic()
                 step_run_id = self.ports.state_writer.record_step_started(
                     run_id=run_id,
                     flow_name=context.flow_name,
                     step_label=step.label,
                     started_at_utc=None,
                 )
+                self._mark_timing(
+                    "step_record_started_end",
+                    run_id=run_id,
+                    flow_name=context.flow_name,
+                    step_label=step.label,
+                    source_path=source_path,
+                    elapsed_ms=(monotonic() - persist_started) * 1000.0,
+                    extra_fields={"step_run_id": step_run_id},
+                )
                 step_started = monotonic()
-                self.ports.log_emitter.log_step_event(run_id, context.flow_name, step.label, source_path, status="started")
+                self._mark_timing(
+                    "step_fn_begin",
+                    run_id=run_id,
+                    flow_name=context.flow_name,
+                    step_label=step.label,
+                    source_path=source_path,
+                    extra_fields={"step_run_id": step_run_id},
+                )
                 try:
                     result = step.fn(context)
                 except FlowStoppedError:
+                    self._mark_timing(
+                        "step_fn_stopped",
+                        run_id=run_id,
+                        flow_name=context.flow_name,
+                        step_label=step.label,
+                        source_path=source_path,
+                        elapsed_ms=(monotonic() - step_started) * 1000.0,
+                        extra_fields={"step_run_id": step_run_id},
+                    )
                     raise
                 except Exception as exc:
+                    step_elapsed_ms = max(int((monotonic() - step_started) * 1000), 0)
+                    self._mark_timing(
+                        "step_fn_error",
+                        run_id=run_id,
+                        flow_name=context.flow_name,
+                        step_label=step.label,
+                        source_path=source_path,
+                        elapsed_ms=step_elapsed_ms,
+                        extra_fields={"step_run_id": step_run_id, "error": type(exc).__name__},
+                    )
                     failure = FlowExecutionError(
                         flow_name=context.flow_name,
                         phase="step",
@@ -229,7 +359,7 @@ class FlowRunExecutor:
                         source_path=source_path,
                         detail=f"{type(exc).__name__}: {exc}",
                     )
-                    elapsed_ms = max(int((monotonic() - step_started) * 1000), 0)
+                    elapsed_ms = step_elapsed_ms
                     self.ports.state_writer.record_step_finished(
                         step_run_id=step_run_id,
                         status="failed",
@@ -245,6 +375,15 @@ class FlowRunExecutor:
                         step_label=step.label,
                     )
                     raise failure from exc
+                self._mark_timing(
+                    "step_fn_end",
+                    run_id=run_id,
+                    flow_name=context.flow_name,
+                    step_label=step.label,
+                    source_path=source_path,
+                    elapsed_ms=(monotonic() - step_started) * 1000.0,
+                    extra_fields={"step_run_id": step_run_id},
+                )
                 context.current = result
                 if step.save_as is not None:
                     context.objects[step.save_as] = result
@@ -254,6 +393,7 @@ class FlowRunExecutor:
                         step_outputs[step.label] = result
                 elapsed = monotonic() - step_started
                 elapsed_ms = max(int(elapsed * 1000), 0)
+                persist_finished = monotonic()
                 self.ports.state_writer.record_step_finished(
                     step_run_id=step_run_id,
                     status="success",
@@ -261,11 +401,30 @@ class FlowRunExecutor:
                     elapsed_ms=elapsed_ms,
                     output_path=str(result.resolve()) if isinstance(result, Path) and result.exists() else None,
                 )
-                self.ports.log_emitter.log_step_event(run_id, context.flow_name, step.label, source_path, status="success", elapsed=elapsed)
+                self._mark_timing(
+                    "step_record_finished_end",
+                    run_id=run_id,
+                    flow_name=context.flow_name,
+                    step_label=step.label,
+                    source_path=source_path,
+                    elapsed_ms=(monotonic() - persist_finished) * 1000.0,
+                    extra_fields={
+                        "step_run_id": step_run_id,
+                        "step_elapsed_ms": elapsed_ms,
+                    },
+                )
         except FlowStoppedError as exc:
             finished_at_utc = utcnow_text()
             self.ports.log_emitter.log_flow_event(run_id, context.flow_name, source_path, status="stopped", elapsed=monotonic() - run_started)
             self.ports.state_writer.record_run_finished(run_id=run_id, status="stopped", finished_at_utc=finished_at_utc, error_text=str(exc))
+            self._mark_timing(
+                "run_stopped",
+                run_id=run_id,
+                flow_name=context.flow_name,
+                source_path=source_path,
+                elapsed_ms=(monotonic() - run_started) * 1000.0,
+                extra_fields={"error": str(exc)},
+            )
             for effective_signature in effective_signatures:
                 self.ports.state_writer.upsert_file_state(
                     flow_name=context.flow_name,
@@ -279,6 +438,15 @@ class FlowRunExecutor:
             finished_at_utc = utcnow_text()
             failed_step = step.label if "step" in locals() else None
             failure_text = str(exc)
+            self._mark_timing(
+                "run_failed",
+                run_id=run_id,
+                flow_name=context.flow_name,
+                step_label=failed_step,
+                source_path=source_path,
+                elapsed_ms=elapsed * 1000.0,
+                extra_fields={"error": type(exc).__name__},
+            )
             if failed_step is None:
                 self.ports.log_emitter.log_runtime_message(failure_text, level="error", run_id=run_id, flow_name=context.flow_name)
                 self.ports.log_emitter.log_flow_event(run_id, context.flow_name, source_path, status="failed", elapsed=elapsed, level="error", exc_info=True)
@@ -303,10 +471,15 @@ class FlowRunExecutor:
                     error_text=failure_text,
                 )
             raise
-        total = monotonic() - run_started
         finished_at_utc = utcnow_text()
-        self.ports.log_emitter.log_flow_event(run_id, context.flow_name, source_path, status="success", elapsed=total)
         self.ports.state_writer.record_run_finished(run_id=run_id, status="success", finished_at_utc=finished_at_utc)
+        self._mark_timing(
+            "run_finished",
+            run_id=run_id,
+            flow_name=context.flow_name,
+            source_path=source_path,
+            elapsed_ms=(monotonic() - run_started) * 1000.0,
+        )
         for effective_signature in effective_signatures:
             self.ports.state_writer.upsert_file_state(
                 flow_name=context.flow_name,

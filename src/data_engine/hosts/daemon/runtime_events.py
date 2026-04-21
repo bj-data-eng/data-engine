@@ -90,8 +90,6 @@ class DaemonRuntimeProjector:
     def handle(self, event: DaemonRuntimeEvent) -> None:
         """Apply one event to the live projection snapshot."""
         state = event.payload.get("state")
-        if not isinstance(state, dict):
-            return
         with self._condition:
             previous = self._snapshot
             self._event_sequence += 1
@@ -108,12 +106,19 @@ class DaemonRuntimeProjector:
                     },
                 )
             )
-            refreshed = self._snapshot_from_state(
-                workspace_id=previous.workspace_id,
-                state=state,
-                version=previous.version,
-                event_sequence=self._event_sequence,
-            )
+            if isinstance(state, dict):
+                refreshed = self._snapshot_from_state(
+                    workspace_id=previous.workspace_id,
+                    state=state,
+                    version=previous.version,
+                    event_sequence=self._event_sequence,
+                )
+            else:
+                refreshed = self._snapshot_from_event(
+                    previous,
+                    event=event,
+                    event_sequence=self._event_sequence,
+                )
             if self._same_runtime_state(previous, refreshed):
                 self._snapshot = refreshed
             else:
@@ -134,6 +139,143 @@ class DaemonRuntimeProjector:
                     event_sequence=refreshed.event_sequence,
                 )
             self._condition.notify_all()
+
+    @classmethod
+    def _snapshot_from_event(
+        cls,
+        previous: DaemonRuntimeProjectionSnapshot,
+        *,
+        event: DaemonRuntimeEvent,
+        event_sequence: int,
+    ) -> DaemonRuntimeProjectionSnapshot:
+        payload = event.payload
+        event_type = event.event_type
+        active_runs = [dict(item) for item in previous.active_runs]
+        if event_type == "runtime.run_started":
+            run_id = _optional_text(payload.get("run_id"))
+            flow_name = _optional_text(payload.get("flow_name"))
+            group_name = _optional_text(payload.get("group_name"))
+            started_at_utc = _optional_text(payload.get("started_at_utc"))
+            if run_id is not None and flow_name is not None and group_name is not None:
+                active_runs = [item for item in active_runs if _optional_text(item.get("run_id")) != run_id]
+                active_runs.append(
+                    {
+                        "run_id": run_id,
+                        "flow_name": flow_name,
+                        "group_name": group_name,
+                        "source_path": _optional_text(payload.get("source_path")),
+                        "state": "stopping" if previous.runtime_stopping else "running",
+                        "current_step_name": None,
+                        "current_step_started_at_utc": None,
+                        "started_at_utc": started_at_utc,
+                        "finished_at_utc": None,
+                        "elapsed_seconds": None,
+                        "error_text": None,
+                    }
+                )
+        elif event_type == "runtime.run_finished":
+            run_id = _optional_text(payload.get("run_id"))
+            if run_id is not None:
+                active_runs = [item for item in active_runs if _optional_text(item.get("run_id")) != run_id]
+        elif event_type == "runtime.step_started":
+            run_id = _optional_text(payload.get("run_id"))
+            if run_id is not None:
+                for item in active_runs:
+                    if _optional_text(item.get("run_id")) != run_id:
+                        continue
+                    item["current_step_name"] = _optional_text(payload.get("step_label"))
+                    item["current_step_started_at_utc"] = _optional_text(payload.get("started_at_utc"))
+                    break
+        elif event_type == "runtime.step_finished":
+            run_id = _optional_text(payload.get("run_id"))
+            step_label = _optional_text(payload.get("step_label"))
+            if run_id is not None:
+                for item in active_runs:
+                    if _optional_text(item.get("run_id")) != run_id:
+                        continue
+                    if step_label is None or _optional_text(item.get("current_step_name")) == step_label:
+                        item["current_step_name"] = None
+                        item["current_step_started_at_utc"] = None
+                    break
+        flow_activity = cls._flow_activity_from_active_runs(
+            active_runs=tuple(active_runs),
+            previous_flow_activity=previous.flow_activity,
+            active_engine_flow_names=previous.active_engine_flow_names,
+            runtime_stopping=previous.runtime_stopping,
+        )
+        return DaemonRuntimeProjectionSnapshot(
+            workspace_id=previous.workspace_id,
+            version=previous.version,
+            status=previous.status,
+            workspace_owned=previous.workspace_owned,
+            leased_by_machine_id=previous.leased_by_machine_id,
+            runtime_active=previous.runtime_active,
+            runtime_stopping=previous.runtime_stopping,
+            engine_starting=previous.engine_starting,
+            active_engine_flow_names=previous.active_engine_flow_names,
+            active_runs=tuple(active_runs),
+            flow_activity=flow_activity,
+            manual_runs=previous.manual_runs,
+            last_checkpoint_at_utc=previous.last_checkpoint_at_utc,
+            event_sequence=event_sequence,
+        )
+
+    @staticmethod
+    def _flow_activity_from_active_runs(
+        *,
+        active_runs: tuple[dict[str, Any], ...],
+        previous_flow_activity: tuple[dict[str, Any], ...],
+        active_engine_flow_names: tuple[str, ...],
+        runtime_stopping: bool,
+    ) -> tuple[dict[str, Any], ...]:
+        queued_by_flow = {
+            str(item["flow_name"]): int(item.get("queued_run_count", 0))
+            for item in previous_flow_activity
+            if isinstance(item, dict) and isinstance(item.get("flow_name"), str)
+        }
+        active_counts: dict[str, int] = {}
+        engine_counts: dict[str, int] = {}
+        manual_counts: dict[str, int] = {}
+        stopping_counts: dict[str, int] = {}
+        running_step_counts: dict[str, dict[str, int]] = {}
+        active_engine_flow_name_set = set(active_engine_flow_names)
+        for run in active_runs:
+            flow_name = _optional_text(run.get("flow_name"))
+            if flow_name is None:
+                continue
+            active_counts[flow_name] = active_counts.get(flow_name, 0) + 1
+            if flow_name in active_engine_flow_name_set:
+                engine_counts[flow_name] = engine_counts.get(flow_name, 0) + 1
+            else:
+                manual_counts[flow_name] = manual_counts.get(flow_name, 0) + 1
+            if runtime_stopping or _optional_text(run.get("state")) == "stopping":
+                stopping_counts[flow_name] = stopping_counts.get(flow_name, 0) + 1
+            step_name = _optional_text(run.get("current_step_name"))
+            if step_name is not None:
+                counts = running_step_counts.setdefault(flow_name, {})
+                counts[step_name] = counts.get(step_name, 0) + 1
+        flow_names = tuple(
+            sorted(
+                set(queued_by_flow)
+                | set(active_counts)
+                | set(engine_counts)
+                | set(manual_counts)
+                | set(stopping_counts)
+                | set(running_step_counts)
+            )
+        )
+        return tuple(
+            {
+                "flow_name": flow_name,
+                "active_run_count": active_counts.get(flow_name, 0),
+                "queued_run_count": queued_by_flow.get(flow_name, 0),
+                "engine_run_count": engine_counts.get(flow_name, 0),
+                "manual_run_count": manual_counts.get(flow_name, 0),
+                "stopping_run_count": stopping_counts.get(flow_name, 0),
+                "running_step_counts": dict(sorted(running_step_counts.get(flow_name, {}).items())),
+            }
+            for flow_name in flow_names
+        )
 
     def refresh(self, state: dict[str, Any]) -> None:
         """Refresh the live projection from the current daemon-owned state."""
@@ -282,6 +424,10 @@ def _coerce_optional_text(value: object) -> str | None:
         return None
     text = value.strip()
     return text or None
+
+
+def _optional_text(value: object) -> str | None:
+    return _coerce_optional_text(value)
 
 
 __all__ = [

@@ -123,3 +123,20 @@ def test_runtime_binding_service_opens_runtime_io_cache_store(tmp_path: Path) ->
         assert binding.runtime_cache_ledger.runs.list(flow_name="claims_manual")
     finally:
         service.close_binding(binding)
+
+
+def test_runtime_io_logs_proxy_supports_limited_tail_reads(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime_state" / "runtime_cache.sqlite"
+    ledger = RuntimeCacheLedger(db_path)
+    created_at = utcnow_text()
+    ledger.logs.append(level="INFO", message="first", created_at_utc=created_at, run_id="run-1", flow_name="claims_manual")
+    ledger.logs.append(level="INFO", message="second", created_at_utc=created_at, run_id="run-1", flow_name="claims_manual")
+    ledger.logs.append(level="INFO", message="third", created_at_utc=created_at, run_id="run-1", flow_name="claims_manual")
+
+    store = RuntimeIoLayer(cache_ttl_seconds=60.0).open_cache_store(db_path)
+    try:
+        tail = store.logs.list(flow_name="claims_manual", limit=2)
+        assert [entry.message for entry in tail] == ["second", "third"]
+    finally:
+        store.close()
+        ledger.close()

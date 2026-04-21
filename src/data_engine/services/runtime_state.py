@@ -471,9 +471,14 @@ class RuntimeStateService:
         self.runtime_binding_service.reload_logs(binding)
         flow_cards_by_name = {card.name: card for card in flow_cards_tuple}
         step_output_index = self.runtime_binding_service.rebuild_step_outputs(binding, flow_cards_by_name)
+        transient_entries = getattr(self.log_service, "transient_entries", None)
         presentation = runtime_application.build_runtime_snapshot(
             flow_cards=flow_cards_tuple,
-            log_entries=self.log_service.all_entries(binding.log_store),
+            log_entries=(
+                transient_entries(binding.log_store)
+                if callable(transient_entries)
+                else self.log_service.all_entries(binding.log_store)
+            ),
             runtime_session=runtime_session,
             now=now,
         )
@@ -508,10 +513,6 @@ class RuntimeStateService:
         flow_states: dict[str, str],
     ) -> WorkspaceSnapshot:
         workspace_id = binding.workspace_paths.workspace_id
-        runs_by_flow = {
-            card.name: self.log_service.runs_for_flow(binding.log_store, card.name)
-            for card in flow_cards
-        }
         flow_summaries: dict[str, FlowLiveSummary] = {}
         active_runs: dict[str, RunLiveSnapshot] = {}
         if daemon_active_runs:
@@ -533,7 +534,6 @@ class RuntimeStateService:
             }
 
         for card in flow_cards:
-            run_groups = runs_by_flow.get(card.name, ())
             daemon_activity = next((item for item in daemon_flow_activity if item.flow_name == card.name), None)
             flow_state_name = self._live_flow_state_name(
                 card,
@@ -541,7 +541,7 @@ class RuntimeStateService:
                 daemon_active_flow_names=daemon_active_flow_names,
                 daemon_activity=daemon_activity,
             )
-            last_started_at, last_finished_at, last_error_text = self._latest_run_times(run_groups)
+            last_started_at, last_finished_at, last_error_text = self._latest_run_times_for_flow(binding, card.name)
             flow_summaries[card.name] = FlowLiveSummary(
                 flow_name=card.name,
                 group_name=card.group or "",
@@ -594,6 +594,28 @@ class RuntimeStateService:
         self._publish_snapshot_events(previous, snapshot)
         self._last_workspace_snapshots[workspace_id] = snapshot
         return snapshot
+
+    def _latest_run_times_for_flow(
+        self,
+        binding: WorkspaceRuntimeBinding,
+        flow_name: str,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Return recent run timing/error summary for one flow.
+
+        Prefer persisted run rows from the runtime ledger so the workspace
+        snapshot does not depend on replaying retained log entries. Fall back to
+        the in-memory grouped log store only for narrow test scaffolds or
+        transitional bindings that do not expose a runtime ledger.
+        """
+        runs_repo = getattr(getattr(binding, "runtime_cache_ledger", None), "runs", None)
+        if runs_repo is not None and hasattr(runs_repo, "list"):
+            persisted_runs = tuple(runs_repo.list(flow_name=flow_name))
+            if persisted_runs:
+                newest = persisted_runs[-1]
+                return newest.started_at_utc, newest.finished_at_utc, newest.error_text
+            return None, None, None
+        run_groups = self.log_service.runs_for_flow(binding.log_store, flow_name)
+        return self._latest_run_times(run_groups)
 
     def incremental_snapshot_from_daemon(
         self,

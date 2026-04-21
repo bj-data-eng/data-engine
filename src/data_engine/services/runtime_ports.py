@@ -34,6 +34,7 @@ class RuntimeLogReader(Protocol):
         flow_name: str | None = None,
         run_id: str | None = None,
         after_id: int | None = None,
+        limit: int | None = None,
     ) -> tuple[PersistedLogEntry, ...]: ...
 
 
