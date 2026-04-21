@@ -264,6 +264,9 @@ def test_daemon_host_state_transitions_cover_core_mutators():
     assert state.runtime_active is False
     assert state.runtime_stopping is False
     assert state.status == "idle"
+    assert state.engine_thread is None
+    assert state.engine_runtime_stop_event.is_set() is False
+    assert state.engine_flow_stop_event.is_set() is False
 
     state.set_checkpoint_time("2026-04-06T00:01:00+00:00", status="degraded")
     assert state.last_checkpoint_at_utc == "2026-04-06T00:01:00+00:00"
@@ -279,6 +282,13 @@ def test_daemon_host_state_transitions_cover_core_mutators():
     assert state.engine_runtime_stop_event is runtime_stop_event
     assert state.engine_flow_stop_event is flow_stop_event
     assert state.engine_thread is engine_thread
+
+    state.end_runtime(status="idle")
+    assert state.engine_thread is None
+    assert state.engine_runtime_stop_event is not runtime_stop_event
+    assert state.engine_flow_stop_event is not flow_stop_event
+    assert state.engine_runtime_stop_event.is_set() is False
+    assert state.engine_flow_stop_event.is_set() is False
 
     state.register_manual_run(
         "demo",
@@ -455,6 +465,61 @@ def test_daemon_status_includes_active_runs_from_runtime_execution_bridge(tmp_pa
             }
         ]
     finally:
+        service._shutdown()  # noqa: SLF001
+
+
+def test_runtime_execution_events_update_projection_without_full_state_refresh(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        started_at = utcnow_text()
+        original_runtime_state_payload = service._runtime_state_payload
+        monkeypatch.setattr(
+            service,
+            "_runtime_state_payload",
+            lambda: (_ for _ in ()).throw(AssertionError("hot runtime events should not rebuild full state")),
+        )
+
+        service.runtime_execution_ledger.execution_state.record_run_started(
+            run_id="run-1",
+            flow_name="demo",
+            group_name="Demo",
+            source_path="claims.xlsx",
+            started_at_utc=started_at,
+        )
+        service.runtime_execution_ledger.execution_state.record_step_started(
+            run_id="run-1",
+            flow_name="demo",
+            step_label="Emit Value",
+            started_at_utc=started_at,
+        )
+
+        status = service._handle_command({"command": "daemon_status"})  # noqa: SLF001
+
+        assert status["ok"] is True
+        assert status["status"]["active_runs"] == [
+            {
+                "run_id": "run-1",
+                "flow_name": "demo",
+                "group_name": "Demo",
+                "source_path": "claims.xlsx",
+                "state": "running",
+                "current_step_name": "Emit Value",
+                "current_step_started_at_utc": started_at,
+                "started_at_utc": started_at,
+                "finished_at_utc": None,
+                "elapsed_seconds": None,
+                "error_text": None,
+            }
+        ]
+    finally:
+        monkeypatch.setattr(service, "_runtime_state_payload", original_runtime_state_payload)
         service._shutdown()  # noqa: SLF001
 
 

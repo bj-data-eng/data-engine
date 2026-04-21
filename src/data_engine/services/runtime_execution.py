@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Callable
 from data_engine.core.primitives import WatchSpec
 from data_engine.hosts.scheduler import SchedulerHost
 from data_engine.runtime.execution import FlowRuntime, GroupedFlowRuntime
-from data_engine.runtime.engine import RuntimeEngine
+from data_engine.runtime.engine import RuntimeEngine, release_completed_results
 from data_engine.runtime.stop import RuntimeStopController
 from data_engine.services.runtime_ports import RuntimeCacheStore
 
@@ -128,13 +128,14 @@ class RuntimeExecutionService:
         workspace_id: str | None = None,
     ) -> object:
         """Run one flow as a manual one-shot execution."""
-        return self.run_once(
+        result = self.run_once(
             flow,
             runtime_ledger=runtime_ledger,
             runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             workspace_id=workspace_id,
         )
+        return release_completed_results(result)
 
     def run_continuous(
         self,

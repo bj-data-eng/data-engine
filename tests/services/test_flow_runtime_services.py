@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from threading import Event
-
 import pytest
 
 from data_engine.authoring.flow import Flow
 from data_engine.core.model import FlowStoppedError
+from data_engine.core.primitives import FlowContext, FlowDebugContext, MirrorContext, SourceContext, WorkspaceConfigContext
 from data_engine.runtime.stop import RuntimeStopController
 from data_engine.services.flow_execution import FlowExecutionService
 from data_engine.services.runtime_execution import RuntimeExecutionService
@@ -101,6 +102,71 @@ def test_runtime_execution_service_constructs_runtime_objects():
     assert _Runtime.instances[2].runtime_stop_event is runtime_stop
     assert _GroupedRuntime.instances[0].runtime_stop_event is runtime_stop
     assert _GroupedRuntime.instances[1].flow_stop_event is flow_stop
+
+
+def test_runtime_execution_service_run_manual_releases_completed_flow_contexts() -> None:
+    flow = Flow(name="claims", group="Claims").step(lambda context: {"claim_id": 1}, save_as="result")
+    runtime_stop = Event()
+    flow_stop = Event()
+    ledger = object()
+
+    class _Runtime:
+        def __init__(
+            self,
+            flows,
+            *,
+            continuous,
+            runtime_stop_event=None,
+            flow_stop_event=None,
+            runtime_ledger=None,
+            run_stop_controller=None,
+        ):
+            self.flows = flows
+            self.continuous = continuous
+            self.runtime_stop_event = runtime_stop_event
+            self.flow_stop_event = flow_stop_event
+            self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
+
+        def run(self):
+            return [
+                FlowContext(
+                    flow_name="claims",
+                    group="Claims",
+                    source=SourceContext(root=Path("/tmp/source"), path=Path("/tmp/source/claims.xlsx"), relative_path=Path("claims.xlsx")),
+                    mirror=MirrorContext(root=Path("/tmp/output"), source_path=Path("/tmp/source/claims.xlsx"), relative_path=Path("claims.xlsx")),
+                    current={"claim_id": 1},
+                    objects={"result": {"claim_id": 1}},
+                    metadata={"started_at_utc": "2026-04-21T00:00:00+00:00"},
+                    config=WorkspaceConfigContext(workspace_root=Path("/tmp/workspace")),
+                    debug=FlowDebugContext(
+                        root=Path("/tmp/debug"),
+                        workspace_id="claims",
+                        flow_name="claims",
+                        run_id="run-1",
+                        source_path="/tmp/source/claims.xlsx",
+                    ),
+                )
+            ]
+
+    service = RuntimeExecutionService(flow_runtime_type=_Runtime)
+    result = service.run_manual(
+        flow,
+        runtime_ledger=ledger,
+        runtime_stop_event=runtime_stop,
+        flow_stop_event=flow_stop,
+    )
+
+    assert isinstance(result, list)
+    assert len(result) == 1
+    context = result[0]
+    assert context.source is None
+    assert context.mirror is None
+    assert context.current is None
+    assert context.objects == {}
+    assert context.metadata == {}
+    assert context.config.workspace_root is None
+    assert context.debug is None
 
 
 def test_runtime_execution_service_exposes_explicit_engine_commands(tmp_path):

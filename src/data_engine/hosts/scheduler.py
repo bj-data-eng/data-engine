@@ -11,7 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from data_engine.core.primitives import WatchSpec
-from data_engine.runtime.engine import RuntimeEngine
+from data_engine.runtime.engine import RuntimeEngine, release_completed_results
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow
@@ -126,7 +126,8 @@ class SchedulerHost:
         return tuple(jobs)
 
     def _run_flow(self, flow: "Flow") -> object:
-        return self.runtime_engine.run_once(flow)
+        result = self.runtime_engine.run_once(flow)
+        return release_completed_results(result)
 
     def _job_id(self, flow: "Flow", suffix: str) -> str:
         return f"{self.job_id_prefix}{flow.name}:{suffix}"

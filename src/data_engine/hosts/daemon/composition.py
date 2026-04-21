@@ -174,6 +174,9 @@ class DaemonHostState:
         self.runtime_active = False
         self.runtime_stopping = False
         self.active_engine_flow_names = ()
+        self.engine_thread = None
+        self.engine_runtime_stop_event = threading.Event()
+        self.engine_flow_stop_event = threading.Event()
         if self.status != "failed":
             self.status = status
 

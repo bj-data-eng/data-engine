@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.primitives import FlowContext
 from data_engine.runtime.execution import FlowRuntime, GroupedFlowRuntime
+from data_engine.runtime.result_cleanup import release_completed_results
 from data_engine.runtime.stop import RuntimeStopController
 from data_engine.services.runtime_ports import RuntimeCacheStore
 
@@ -49,6 +50,10 @@ class RuntimeEngine:
         """Run one flow once using its configured startup sources."""
         runtime = self._flow_runtime((flow,), continuous=False)
         return runtime.run()
+
+    @staticmethod
+    def release_completed_results(result: object) -> object:
+        return release_completed_results(result)
 
     def run_source(self, flow: "CoreFlow", source_path: str | Path) -> FlowContext:
         """Run one flow for a specific source path."""
@@ -117,4 +122,4 @@ class RuntimeEngine:
         return kwargs
 
 
-__all__ = ["RuntimeEngine"]
+__all__ = ["RuntimeEngine", "release_completed_results"]

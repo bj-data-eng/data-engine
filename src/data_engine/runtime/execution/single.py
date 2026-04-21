@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.model import FlowStoppedError, FlowValidationError
 from data_engine.core.primitives import FlowContext, WatchSpec
+from data_engine.runtime.result_cleanup import release_context_values
 from data_engine.runtime.execution.continuous import ContinuousRuntimeLoop
 from data_engine.runtime.execution.context import QueuedRunJob, RuntimeContextBuilder
 from data_engine.runtime.execution.logging import RuntimeLogEmitter, acquire_queued_runtime_log_sink
@@ -19,6 +20,7 @@ from data_engine.runtime.file_watch import PollingWatcher
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.runtime.stop import RuntimeStopController
 from data_engine.services.runtime_ports import RuntimeCacheStore
+from data_engine.platform.instrumentation import append_timing_line
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow as CoreFlow
@@ -80,6 +82,7 @@ class FlowRuntime:
         self.runtime_ledger = runtime_ledger or self._runtime_ledger_factory()
         runtime_db_path = getattr(self.runtime_ledger, "db_path", None)
         debug_root = Path(runtime_db_path).expanduser().resolve().parent / "debug_artifacts" if runtime_db_path is not None else None
+        self._timing_log_path = Path(runtime_db_path).expanduser().resolve().parent / "daemon_timing.log" if runtime_db_path is not None else None
         self.context_builder = RuntimeContextBuilder(debug_root=debug_root, workspace_id=workspace_id)
         self._queued_log_sink = acquire_queued_runtime_log_sink(self.runtime_ledger.logs)
         self.log_emitter = RuntimeLogEmitter(self._queued_log_sink, workspace_id=workspace_id)
@@ -91,6 +94,8 @@ class FlowRuntime:
                 state_writer=self.runtime_ledger.execution_state,
                 log_emitter=self.log_emitter,
                 stop_controller=self,
+                timing_log_path=self._timing_log_path,
+                execution_mode="continuous" if continuous else "oneshot",
             )
         )
         self.continuous_loop = ContinuousRuntimeLoop(self)
@@ -308,11 +313,17 @@ class FlowRuntime:
             result = future.result()
             if results is not None:
                 results.append(result)
+            else:
+                self._release_completed_context(result)
         except FlowStoppedError:
             if self.flow_stop_event is not None:
                 self.flow_stop_event.clear()
         except Exception:
             return
+
+    def _release_completed_context(self, context: FlowContext) -> None:
+        """Drop bulky run-owned references once a completed context is no longer needed."""
+        release_context_values(context)
 
     def _preview_one(self, flow: "CoreFlow", source_path: "Path | None", *, use: str | None) -> FlowContext:
         return self.run_executor.preview_one(flow, source_path, use=use)
@@ -349,6 +360,13 @@ class FlowRuntime:
     def check_run(self, run_id: str | None) -> None:
         """Raise when runtime-wide or run-id stop has been requested."""
         if self.flow_stop_event is not None and self.flow_stop_event.is_set():
+            append_timing_line(
+                self._timing_log_path,
+                scope="runtime.step",
+                event="stop_check_flow_event",
+                phase="mark",
+                fields={"run_id": run_id, "execution_mode": "continuous" if self.continuous else "oneshot"},
+            )
             raise FlowStoppedError("Flow stop requested by operator.")
         self.run_stop_controller.check_run(run_id)
 
