@@ -223,7 +223,8 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border: 1px solid {palette.panel_border};
         border-radius: 5px;
     }}
-    QFrame#operationCard[stepState="running"] {{
+    QFrame#operationCard[stepState="running"],
+    QFrame#operationCard[stepState="stopping"] {{
         background: {palette.button_hover};
         border: 1px solid {palette.button_checked_border};
     }}
@@ -352,7 +353,8 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QFrame#operationCard[flashState="complete"] QLabel#operationDuration {{
         color: {palette.text};
     }}
-    QFrame#operationCard[stepState="running"] QLabel#operationTitle {{
+    QFrame#operationCard[stepState="running"] QLabel#operationTitle,
+    QFrame#operationCard[stepState="stopping"] QLabel#operationTitle {{
         color: {palette.text};
     }}
     QLabel#operationDuration {{

@@ -37,6 +37,9 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
 
     card = window.flow_cards.get(window.selected_flow_name or "")
     current_flow_name = card.name if card is not None else None
+    refresh_external_state = getattr(window.runtime_binding.runtime_cache_ledger, "refresh_external_state", None)
+    if callable(refresh_external_state):
+        refresh_external_state()
     run_groups = tuple(
         window.history_query_service.list_flow_runs_from_ledger(
             window.runtime_binding.runtime_cache_ledger,

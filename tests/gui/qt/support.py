@@ -4387,6 +4387,47 @@ def test_refresh_log_view_reloads_ledger_runs_when_log_store_is_unchanged(qapp, 
         _dispose_window(qapp, window)
 
 
+def test_refresh_log_view_refreshes_runtime_cache_before_querying_ledger_runs(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        flow_name = "poller"
+        window.selected_flow_name = flow_name
+
+        # Prime the runtime-IO read cache with an empty run list before an external daemon write.
+        assert window.runtime_binding.runtime_cache_ledger.runs.list(flow_name=flow_name) == ()
+
+        direct_ledger = RuntimeCacheLedger(window.workspace_paths.runtime_cache_db_path)
+        try:
+            started_at = "2026-04-20T09:00:00+00:00"
+            direct_ledger.execution_state.record_run_started(
+                run_id="run-1",
+                flow_name=flow_name,
+                group_name="Imports",
+                source_path="claims.xlsx",
+                started_at_utc=started_at,
+            )
+            direct_ledger.execution_state.record_run_finished(
+                run_id="run-1",
+                status="success",
+                finished_at_utc="2026-04-20T09:00:08+00:00",
+            )
+        finally:
+            direct_ledger.close()
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+
+        assert window.log_view.count() == 1
+        item = window.log_view.item(0)
+        run_group = window.log_view.run_group(item)
+        assert run_group is not None
+        assert run_group.key == (flow_name, "run-1")
+        assert run_group.status == "success"
+        assert run_group.source_label == "claims.xlsx"
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_run_log_preview_collapses_step_started_and_finished_rows(qapp, monkeypatch):
     del monkeypatch
     window = _make_window()
