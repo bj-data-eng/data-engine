@@ -469,7 +469,7 @@ def _write_step_runs(path: Path, rows: tuple[PersistedStepRun, ...], *, snapshot
 
 def _write_logs(path: Path, rows: tuple[PersistedLogEntry, ...], *, snapshot_generation_id: str) -> None:
     if not rows:
-        remove_file_if_exists(path)
+        write_parquet_atomic(_frame_with_schema([], _LOGS_SCHEMA), path)
         return
     write_parquet_atomic(
         _frame_with_schema(
