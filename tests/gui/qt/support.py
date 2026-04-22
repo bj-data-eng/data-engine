@@ -3432,8 +3432,9 @@ def test_debug_view_filter_popup_select_all_checkbox_tracks_visible_values(qapp)
         _process_ui_until(qapp, lambda: values_list.count() == 2)
         assert select_all.checkState() == Qt.CheckState.Checked
 
-        select_all.setCheckState(Qt.CheckState.Unchecked)
+        QTest.mouseClick(select_all, Qt.MouseButton.LeftButton)
         qapp.processEvents()
+        assert select_all.checkState() == Qt.CheckState.Unchecked
         assert all(values_list.item(i).checkState() == Qt.CheckState.Unchecked for i in range(values_list.count()))
 
         values_list.item(0).setCheckState(Qt.CheckState.Checked)
@@ -3445,7 +3446,7 @@ def test_debug_view_filter_popup_select_all_checkbox_tracks_visible_values(qapp)
         _process_ui_until(qapp, lambda: values_list.count() == 1 and values_list.item(0).text() == "Enrollment")
 
         assert select_all.checkState() == Qt.CheckState.Unchecked
-        select_all.setCheckState(Qt.CheckState.Checked)
+        QTest.mouseClick(select_all, Qt.MouseButton.LeftButton)
         qapp.processEvents()
         assert values_list.item(0).checkState() == Qt.CheckState.Checked
         assert select_all.checkState() == Qt.CheckState.Checked

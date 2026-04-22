@@ -43,6 +43,15 @@ _PREVIEW_MODE_SAMPLE = "sample"
 _NULL_FILTER_VALUE = object()
 
 
+class _VisualTristateCheckBox(QCheckBox):
+    """Checkbox that displays a partial state but toggles like a normal checkbox."""
+
+    def nextCheckState(self) -> None:  # noqa: N802
+        self.setCheckState(
+            Qt.CheckState.Unchecked if self.checkState() == Qt.CheckState.Checked else Qt.CheckState.Checked
+        )
+
+
 class _ParquetPreviewLoader(QThread):
     """Background loader for parquet preview slices and summary text."""
 
@@ -246,7 +255,7 @@ class _ParquetFilterPopup(QFrame):
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(6)
-        self.select_all_checkbox = QCheckBox("Select All", self)
+        self.select_all_checkbox = _VisualTristateCheckBox("Select All", self)
         self.select_all_checkbox.setObjectName("outputPreviewSelectAllCheckbox")
         self.select_all_checkbox.setTristate(True)
         self.select_all_checkbox.checkStateChanged.connect(self._apply_select_all_state)
