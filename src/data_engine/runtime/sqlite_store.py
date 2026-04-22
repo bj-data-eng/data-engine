@@ -51,6 +51,14 @@ class _RuntimeSqliteStore:
         for connection in connections:
             connection.close()
 
+    def close_current_thread_connection(self) -> None:
+        """Close the SQLite connection owned by the current thread when present."""
+        thread_id = threading.get_ident()
+        with self._connections_lock:
+            connection = self._connections.pop(thread_id, None)
+        if connection is not None:
+            connection.close()
+
     def __del__(self) -> None:
         """Best-effort cleanup for store connections when callers forget to close."""
         try:

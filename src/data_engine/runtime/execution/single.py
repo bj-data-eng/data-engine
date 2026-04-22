@@ -151,6 +151,9 @@ class FlowRuntime:
     def _close_runtime_resources(self) -> None:
         """Drain queued log writes and close the runtime ledger when owned by this runtime."""
         self._queued_log_sink.close()
+        close_current_thread_connection = getattr(self.runtime_ledger, "close_current_thread_connection", None)
+        if callable(close_current_thread_connection):
+            close_current_thread_connection()
         if not self._owns_runtime_ledger:
             return
         self.runtime_ledger.close()
@@ -221,12 +224,7 @@ class FlowRuntime:
                     index, job = next(job_iter)
                 except StopIteration:
                     return False
-                future = executor.submit(
-                    self.run_executor.run_one,
-                    job.flow,
-                    job.source_path,
-                    batch_signatures=job.batch_signatures,
-                )
+                future = executor.submit(self._execute_job_in_thread, job)
                 future_to_index[future] = index
                 return True
 
@@ -269,15 +267,23 @@ class FlowRuntime:
                     queue.append(job)
                     continue
                 queued_keys.discard(key)
-                future = executor.submit(
-                    self.run_executor.run_one,
-                    job.flow,
-                    job.source_path,
-                    batch_signatures=job.batch_signatures,
-                )
+                future = executor.submit(self._execute_job_in_thread, job)
                 results_count = len(results) if results is not None else 0
                 pending_futures[future] = (job, results_count + len(pending_futures))
         self._drain_completed_jobs(pending_futures, results=results)
+
+    def _execute_job_in_thread(self, job: QueuedRunJob) -> FlowContext:
+        """Execute one queued job and clean thread-local runtime resources after completion."""
+        try:
+            return self.run_executor.run_one(
+                job.flow,
+                job.source_path,
+                batch_signatures=job.batch_signatures,
+            )
+        finally:
+            close_current_thread_connection = getattr(self.runtime_ledger, "close_current_thread_connection", None)
+            if callable(close_current_thread_connection):
+                close_current_thread_connection()
 
     def wait_for_dispatched_jobs(
         self,

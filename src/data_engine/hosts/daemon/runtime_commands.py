@@ -116,6 +116,7 @@ class DaemonRuntimeCommandHandler:
                             correlation_id=request_id,
                             payload={"flow_name": name},
                         )
+                        service.runtime_cache_ledger.close_current_thread_connection()
 
                 thread = threading.Thread(target=_target, daemon=True)
                 with service._state_lock:

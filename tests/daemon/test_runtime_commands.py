@@ -56,6 +56,38 @@ def test_manual_run_does_not_break_daemon_shutdown_cleanup(tmp_path, monkeypatch
     assert (paths.leased_markers_dir / paths.workspace_id).exists() is False
 
 
+def test_manual_run_closes_worker_sqlite_connection(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    worker_thread_ids: list[int] = []
+
+    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None):
+        del flow, runtime_stop_event, flow_stop_event, workspace_id
+        worker_thread_ids.append(threading.get_ident())
+        runtime_ledger.runs.list()
+
+    monkeypatch.setattr(service.runtime_execution_service, "run_manual", _run_manual)
+
+    service.initialize()
+    try:
+        baseline_connection_ids = set(service.runtime_cache_ledger._connections)  # noqa: SLF001 - test inspects connection retention
+
+        for _ in range(2):
+            response = service._handle_command({"command": "run_flow", "name": "demo", "wait": True})  # noqa: SLF001
+            assert response["ok"] is True
+            worker_thread_id = worker_thread_ids[-1]
+            assert worker_thread_id not in service.runtime_cache_ledger._connections  # noqa: SLF001 - proves worker connection was closed
+
+        assert set(service.runtime_cache_ledger._connections) == baseline_connection_ids  # noqa: SLF001 - no worker-thread connections accumulate
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
 def test_run_flow_rejects_second_manual_run_in_same_group(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
