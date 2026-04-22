@@ -3555,6 +3555,9 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `run_once`
       - param `self`
       - param `flow: 'CoreFlow'`
+    - method `run_once_and_discard`
+      - param `self`
+      - param `flow: 'CoreFlow'`
     - method `release_completed_results`
       - param `result: object`
     - method `run_source`
@@ -4049,6 +4052,8 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `workspace_id: str | None=None`
     - method `run`
       - param `self`
+    - method `run_and_discard`
+      - param `self`
     - method `preview`
       - param `self`
       - param `*`
@@ -4066,12 +4071,16 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
     - method `_run_once_all`
       - param `self`
+      - param `*`
+      - param `collect_results: bool=True`
     - method `max_parallel_for_flow`
       - param `self`
       - param `flow: 'CoreFlow'`
     - method `_run_jobs`
       - param `self`
       - param `jobs: list[QueuedRunJob]`
+      - param `*`
+      - param `collect_results: bool=True`
     - method `dispatch_queued_jobs`
       - param `self`
       - param `queue`
@@ -4080,6 +4089,9 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `executor: ThreadPoolExecutor`
       - param `*`
       - param `results: list[FlowContext] | None`
+    - method `_execute_job_in_thread`
+      - param `self`
+      - param `job: QueuedRunJob`
     - method `wait_for_dispatched_jobs`
       - param `self`
       - param `pending_futures: dict[Future[FlowContext], tuple[QueuedRunJob, int]]`
@@ -4767,6 +4779,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `_connection`
       - param `self`
     - method `close`
+      - param `self`
+    - method `close_current_thread_connection`
       - param `self`
     - method `__del__`
       - param `self`
@@ -5703,6 +5717,14 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `runtime_ledger: RuntimeCacheStore | None=None`
       - param `workspace_id: str | None=None`
     - method `run_manual`
+      - param `self`
+      - param `flow: 'CoreFlow'`
+      - param `*`
+      - param `runtime_ledger: RuntimeCacheStore`
+      - param `runtime_stop_event: Event`
+      - param `flow_stop_event: Event | None=None`
+      - param `workspace_id: str | None=None`
+    - method `run_manual_and_discard`
       - param `self`
       - param `flow: 'CoreFlow'`
       - param `*`

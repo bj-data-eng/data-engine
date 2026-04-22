@@ -25,10 +25,10 @@ These counts are package-level rollups from the current AST snapshot.
 | `data_engine.domain` | 17 | 10 | 44 | 0 | 2227 |
 | `data_engine.flow_modules` | 3 | 22 | 3 | 0 | 518 |
 | `data_engine.helpers` | 9 | 62 | 7 | 0 | 3078 |
-| `data_engine.hosts` | 20 | 63 | 25 | 0 | 3970 |
+| `data_engine.hosts` | 20 | 63 | 25 | 0 | 3980 |
 | `data_engine.platform` | 10 | 43 | 10 | 0 | 1495 |
-| `data_engine.runtime` | 20 | 44 | 48 | 0 | 4333 |
-| `data_engine.services` | 23 | 38 | 81 | 0 | 5153 |
+| `data_engine.runtime` | 20 | 44 | 48 | 0 | 4405 |
+| `data_engine.services` | 23 | 38 | 81 | 0 | 5170 |
 | `data_engine.ui` | 73 | 227 | 45 | 0 | 13292 |
 | `data_engine.views` | 12 | 44 | 11 | 0 | 1414 |
 
