@@ -183,7 +183,11 @@ class SelectedFlowDetailState:
                     )
                 ),
                 elapsed_seconds=(
-                    None
+                    (
+                        None
+                        if active_count > 0
+                        else (row_state.elapsed_seconds if row_state is not None else None)
+                    )
                     if parallel and live_step_counts is not None
                     else (
                         row_state.elapsed_seconds
@@ -195,7 +199,7 @@ class SelectedFlowDetailState:
                         else None
                     )
                 ),
-                active_count=0 if live_step_counts is None else live_step_counts.get(operation_name, 0),
+                active_count=active_count,
                 live_elapsed_seconds=(
                     None
                     if live_step_elapsed_seconds is None
@@ -209,6 +213,7 @@ class SelectedFlowDetailState:
             )
             for operation_name in card.operation_items
             for row_state in (tracker.row_state(card.name, operation_name),)
+            for active_count in (0 if live_step_counts is None else live_step_counts.get(operation_name, 0),)
         )
         return cls(
             title=card.title,

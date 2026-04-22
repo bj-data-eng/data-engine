@@ -209,6 +209,42 @@ def test_selected_flow_presentation_represents_parallel_live_steps_without_seria
     assert rows["Write"].status == "idle"
 
 
+def test_selected_flow_presentation_keeps_finished_duration_for_parallel_flow_when_operation_is_no_longer_active() -> None:
+    card = FlowCatalogEntry(
+        **{**_card().__dict__, "parallelism": "4"}
+    )
+    tracker = OperationSessionState.empty().ensure_flow(card.name, card.operation_items)
+    tracker, _ = tracker.apply_event(
+        card.name,
+        card.operation_items,
+        RuntimeStepEvent(
+            run_id="run-1",
+            flow_name=card.name,
+            step_name="Read",
+            source_label="live-1.xlsx",
+            status="success",
+            elapsed_seconds=4.2,
+        ),
+        now=0.0,
+    )
+
+    presentation = build_selected_flow_presentation(
+        card=card,
+        tracker=tracker,
+        flow_states={},
+        run_groups=(),
+        selected_run_key=None,
+        live_runs={},
+        live_truth_authoritative=True,
+    )
+
+    assert presentation.detail_state is not None
+    rows = {row.name: row for row in presentation.detail_state.operation_rows}
+    assert rows["Read"].status == "idle"
+    assert rows["Read"].active_count == 0
+    assert rows["Read"].elapsed_seconds == 4.2
+
+
 def test_selected_flow_presentation_overlays_existing_nonterminal_group_with_live_run_data() -> None:
     card = _card()
     run_groups = (_entry_to_group(_run_group("run-1")),)
