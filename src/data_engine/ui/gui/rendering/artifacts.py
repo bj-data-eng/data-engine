@@ -1030,7 +1030,7 @@ def _build_dataframe_table(frame: pl.DataFrame) -> QTableWidget:
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
     table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-    table.setShowGrid(False)
+    table.setShowGrid(True)
     table.verticalHeader().setVisible(False)
     table.verticalHeader().setDefaultSectionSize(24)
     table.setWordWrap(False)

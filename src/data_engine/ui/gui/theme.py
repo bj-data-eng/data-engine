@@ -720,7 +720,7 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         alternate-background-color: transparent;
         border: 1px solid {palette.input_border};
         border-radius: 0px;
-        gridline-color: transparent;
+        gridline-color: {palette.input_border};
         selection-background-color: {palette.selection_bg};
         selection-color: {palette.selection_text};
     }}
