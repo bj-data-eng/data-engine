@@ -28,12 +28,12 @@ def show_message_box(window: "DataEngineWindow", *, title: str, text: str, tone:
     layout.setSpacing(14)
 
     structured = structured_error_content(text) if tone == "error" else None
-    title_label = QLabel(structured.title if structured is not None else title)
+    title_label = QLabel(structured.title if structured is not None else title, dialog)
     title_label.setObjectName("sectionTitle")
     layout.addWidget(title_label)
 
     if structured is None:
-        body_label = QLabel(text)
+        body_label = QLabel(text, dialog)
         body_label.setWordWrap(True)
         body_label.setObjectName("errorText" if tone == "error" else "bodyText")
         make_label_selectable(body_label)
@@ -46,9 +46,9 @@ def show_message_box(window: "DataEngineWindow", *, title: str, text: str, tone:
         summary_grid.setColumnStretch(0, 1)
         summary_grid.setColumnStretch(1, 2)
         for row_index, field in enumerate(structured.fields):
-            label = QLabel(field.label)
+            label = QLabel(field.label, dialog)
             label.setObjectName("fieldLabel")
-            value = QLabel(field.value)
+            value = QLabel(field.value, dialog)
             value.setObjectName("fieldValue")
             value.setWordWrap(True)
             make_label_selectable(value)
@@ -56,22 +56,22 @@ def show_message_box(window: "DataEngineWindow", *, title: str, text: str, tone:
             summary_grid.addWidget(value, row_index, 1)
         layout.addLayout(summary_grid)
 
-        detail_label = QLabel("Error")
+        detail_label = QLabel("Error", dialog)
         detail_label.setObjectName("fieldLabel")
         layout.addWidget(detail_label)
 
-        detail_body = QTextEdit()
+        detail_body = QTextEdit(dialog)
         detail_body.setObjectName("outputPreviewText")
         detail_body.setReadOnly(True)
         detail_body.setPlainText(structured.detail)
         detail_body.setMinimumHeight(88)
         layout.addWidget(detail_body, 1)
 
-        raw_label = QLabel("Details")
+        raw_label = QLabel("Details", dialog)
         raw_label.setObjectName("fieldLabel")
         layout.addWidget(raw_label)
 
-        raw_body = QTextEdit()
+        raw_body = QTextEdit(dialog)
         raw_body.setObjectName("outputPreviewText")
         raw_body.setReadOnly(True)
         raw_body.setPlainText(structured.raw_text)
@@ -80,7 +80,7 @@ def show_message_box(window: "DataEngineWindow", *, title: str, text: str, tone:
 
     action_row = QHBoxLayout()
     action_row.addStretch(1)
-    close_button = QPushButton("OK")
+    close_button = QPushButton("OK", dialog)
     close_button.clicked.connect(dialog.accept)
     action_row.addWidget(close_button)
     layout.addLayout(action_row)

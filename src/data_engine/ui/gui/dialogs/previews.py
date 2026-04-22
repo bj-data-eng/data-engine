@@ -54,31 +54,31 @@ def show_run_log_preview(window: "DataEngineWindow", request: RunLogPreviewReque
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
 
-    header = QFrame()
+    header = QFrame(dialog)
     header.setObjectName("outputPreviewHeader")
     header_layout = QVBoxLayout(header)
     header_layout.setContentsMargins(14, 14, 14, 14)
     header_layout.setSpacing(4)
 
-    title_label = QLabel(detail.display_label)
+    title_label = QLabel(detail.display_label, header)
     title_label.setObjectName("heroTitle")
     header_layout.addWidget(title_label)
 
     summary_parts = [detail.status.title()]
     if detail.elapsed_seconds is not None:
         summary_parts.append(window._format_seconds(detail.elapsed_seconds))
-    summary_label = QLabel("  •  ".join(summary_parts))
+    summary_label = QLabel("  •  ".join(summary_parts), header)
     summary_label.setObjectName("sectionMeta")
     header_layout.addWidget(summary_label)
     if request.source_path not in {None, "", "-"}:
-        source_path_label = QLabel(str(request.source_path))
+        source_path_label = QLabel(str(request.source_path), header)
         source_path_label.setObjectName("outputPreviewPath")
         source_path_label.setWordWrap(True)
         make_label_selectable(source_path_label)
         header_layout.addWidget(source_path_label)
     layout.addWidget(header)
 
-    log_list = QListWidget()
+    log_list = QListWidget(dialog)
     log_list.setObjectName("runLogList")
     log_list.setSpacing(6)
     for row in _build_run_log_preview_rows(window, request.run_group):
@@ -254,7 +254,7 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
 
-    header = QFrame()
+    header = QFrame(dialog)
     header.setObjectName("outputPreviewHeader")
     header_layout = QVBoxLayout(header)
     header_layout.setContentsMargins(14, 14, 14, 14)
@@ -266,15 +266,15 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
     top_row.setContentsMargins(0, 0, 0, 0)
     top_row.setSpacing(8)
 
-    title_label = QLabel("Dataframe")
+    title_label = QLabel("Dataframe", header)
     title_label.setObjectName("heroTitle")
     top_row.addWidget(title_label, 0, Qt.AlignmentFlag.AlignVCenter)
     top_row.addStretch(1)
 
-    mode_combo = QComboBox()
+    mode_combo = QComboBox(header)
     mode_combo.setObjectName("outputPreviewModeCombo")
     mode_combo.setFixedHeight(36)
-    limit_spin = QSpinBox()
+    limit_spin = QSpinBox(header)
     limit_spin.setObjectName("outputPreviewLimitSpin")
     limit_spin.setFixedHeight(36)
     show_controls = preview_spec.kind == "parquet"
@@ -285,12 +285,13 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
     header_layout.addLayout(top_row)
 
     summary_label = QLabel(
-        "Loading preview…" if preview_spec.kind == "parquet" else build_preview_summary_text(request.output_path, preview_spec)
+        "Loading preview…" if preview_spec.kind == "parquet" else build_preview_summary_text(request.output_path, preview_spec),
+        header,
     )
     summary_label.setObjectName("sectionMeta")
     header_layout.addWidget(summary_label)
 
-    path_label = QLabel(f"Source: {request.output_path}")
+    path_label = QLabel(f"Source: {request.output_path}", header)
     path_label.setObjectName("outputPreviewPath")
     path_label.setWordWrap(True)
     make_label_selectable(path_label)
@@ -321,24 +322,24 @@ def show_config_preview(window: "DataEngineWindow", request: ConfigPreviewReques
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
 
-    header = QFrame()
+    header = QFrame(dialog)
     header.setObjectName("outputPreviewHeader")
     header_layout = QVBoxLayout(header)
     header_layout.setContentsMargins(14, 14, 14, 14)
     header_layout.setSpacing(4)
 
-    title_label = QLabel(preview_state.title)
+    title_label = QLabel(preview_state.title, header)
     title_label.setObjectName("heroTitle")
     title_label.setWordWrap(True)
     header_layout.addWidget(title_label)
     if preview_state.description:
-        description_label = QLabel(preview_state.description)
+        description_label = QLabel(preview_state.description, header)
         description_label.setObjectName("bodyText")
         description_label.setWordWrap(True)
         header_layout.addWidget(description_label)
     layout.addWidget(header)
 
-    body = QFrame()
+    body = QFrame(dialog)
     body.setObjectName("configPreviewBody")
     body_layout = QVBoxLayout(body)
     body_layout.setContentsMargins(14, 14, 14, 14)

@@ -16,15 +16,15 @@ def make_label_selectable(label: QLabel) -> QLabel:
 
 def build_config_value(layout: QVBoxLayout, label: str) -> QLabel:
     """Build one two-column config row and return the mutable value label."""
-    row_frame = QFrame()
+    row_frame = QFrame(layout.parentWidget())
     row_frame.setObjectName("configRow")
     row_layout = QHBoxLayout(row_frame)
     row_layout.setContentsMargins(0, 6, 0, 6)
     row_layout.setSpacing(10)
 
-    title = QLabel(label)
+    title = QLabel(label, row_frame)
     title.setObjectName("fieldLabel")
-    value = QLabel("-")
+    value = QLabel("-", row_frame)
     value.setWordWrap(True)
     make_label_selectable(value)
     value.setObjectName("fieldValue")
