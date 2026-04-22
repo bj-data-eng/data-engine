@@ -10,6 +10,7 @@ from PySide6.QtGui import QFont, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QFrame,
     QHeaderView,
@@ -245,14 +246,11 @@ class _ParquetFilterPopup(QFrame):
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(6)
-        select_all_button = QPushButton("All", self)
-        select_all_button.setObjectName("filterPopupActionButton")
-        select_all_button.clicked.connect(self._select_all_visible)
-        actions.addWidget(select_all_button)
-        clear_button = QPushButton("None", self)
-        clear_button.setObjectName("filterPopupActionButton")
-        clear_button.clicked.connect(self._clear_all_visible)
-        actions.addWidget(clear_button)
+        self.select_all_checkbox = QCheckBox("Select All", self)
+        self.select_all_checkbox.setObjectName("outputPreviewSelectAllCheckbox")
+        self.select_all_checkbox.setTristate(True)
+        self.select_all_checkbox.checkStateChanged.connect(self._apply_select_all_state)
+        actions.addWidget(self.select_all_checkbox)
         actions.addStretch(1)
         layout.addLayout(actions)
 
@@ -260,6 +258,7 @@ class _ParquetFilterPopup(QFrame):
         self.values_list.setObjectName("outputPreviewPopupList")
         self.values_list.setMinimumWidth(220)
         self.values_list.setMinimumHeight(240)
+        self.values_list.itemChanged.connect(self._sync_select_all_checkbox)
         layout.addWidget(self.values_list, 1)
 
         footer = QHBoxLayout()
@@ -354,18 +353,44 @@ class _ParquetFilterPopup(QFrame):
                 else Qt.CheckState.Unchecked
             )
             self.values_list.addItem(item)
+        self._sync_select_all_checkbox()
 
-    def _select_all_visible(self) -> None:
+    def _apply_select_all_state(self, state: Qt.CheckState | int) -> None:
+        if state == Qt.CheckState.PartiallyChecked:
+            return
+        target_state = Qt.CheckState.Checked if state == Qt.CheckState.Checked else Qt.CheckState.Unchecked
+        self.values_list.blockSignals(True)
+        try:
+            for index in range(self.values_list.count()):
+                item = self.values_list.item(index)
+                if not item.isHidden():
+                    item.setCheckState(target_state)
+        finally:
+            self.values_list.blockSignals(False)
+        self._sync_select_all_checkbox()
+
+    def _sync_select_all_checkbox(self) -> None:
+        visible_total = 0
+        visible_checked = 0
         for index in range(self.values_list.count()):
             item = self.values_list.item(index)
-            if not item.isHidden():
-                item.setCheckState(Qt.CheckState.Checked)
-
-    def _clear_all_visible(self) -> None:
-        for index in range(self.values_list.count()):
-            item = self.values_list.item(index)
-            if not item.isHidden():
-                item.setCheckState(Qt.CheckState.Unchecked)
+            if item.isHidden():
+                continue
+            visible_total += 1
+            if item.checkState() == Qt.CheckState.Checked:
+                visible_checked += 1
+        self.select_all_checkbox.blockSignals(True)
+        try:
+            if visible_total == 0:
+                self.select_all_checkbox.setCheckState(Qt.CheckState.Unchecked)
+            elif visible_checked == 0:
+                self.select_all_checkbox.setCheckState(Qt.CheckState.Unchecked)
+            elif visible_checked == visible_total:
+                self.select_all_checkbox.setCheckState(Qt.CheckState.Checked)
+            else:
+                self.select_all_checkbox.setCheckState(Qt.CheckState.PartiallyChecked)
+        finally:
+            self.select_all_checkbox.blockSignals(False)
 
     def _apply_selection(self) -> None:
         selected_values: list[object] = []

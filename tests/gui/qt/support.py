@@ -3078,14 +3078,17 @@ def test_debug_view_live_parquet_filters_update_preview_rows(qapp):
         assert popup is not None
         _process_ui_until(qapp, lambda: popup.findChild(QListWidget, "outputPreviewPopupList").count() > 0)
         search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
+        select_all = popup.findChild(QCheckBox, "outputPreviewSelectAllCheckbox")
         assert search is not None
+        assert select_all is not None
         search.setText("100")
         qapp.processEvents()
+        _process_ui_until(qapp, lambda: select_all.checkState() == Qt.CheckState.Checked)
+        select_all.setCheckState(Qt.CheckState.Unchecked)
+        qapp.processEvents()
+        select_all.setCheckState(Qt.CheckState.Checked)
+        qapp.processEvents()
         buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
-        next(button for button in buttons if button.text() == "None").click()
-        qapp.processEvents()
-        next(button for button in buttons if button.text() == "All").click()
-        qapp.processEvents()
         next(button for button in buttons if button.text() == "Apply").click()
         _process_ui_until(qapp, lambda: table.rowCount() == 2)
         assert table.rowCount() == 2
@@ -3096,14 +3099,17 @@ def test_debug_view_live_parquet_filters_update_preview_rows(qapp):
         assert popup is not None
         _process_ui_until(qapp, lambda: popup.findChild(QListWidget, "outputPreviewPopupList").count() > 0)
         search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
+        select_all = popup.findChild(QCheckBox, "outputPreviewSelectAllCheckbox")
         assert search is not None
+        assert select_all is not None
         search.setText("closed")
         qapp.processEvents()
+        _process_ui_until(qapp, lambda: select_all.checkState() == Qt.CheckState.Checked)
+        select_all.setCheckState(Qt.CheckState.Unchecked)
+        qapp.processEvents()
+        select_all.setCheckState(Qt.CheckState.Checked)
+        qapp.processEvents()
         buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
-        next(button for button in buttons if button.text() == "None").click()
-        qapp.processEvents()
-        next(button for button in buttons if button.text() == "All").click()
-        qapp.processEvents()
         next(button for button in buttons if button.text() == "Apply").click()
         _process_ui_until(qapp, lambda: table.rowCount() == 1)
         assert table.rowCount() == 1
@@ -3368,6 +3374,81 @@ def test_debug_view_search_subset_apply_filters_single_matching_value(qapp):
 
         assert table.rowCount() == 1
         assert table.item(0, 0).text() == "Enrollment"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_filter_popup_select_all_checkbox_tracks_visible_values(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "workflow": ["Appeals", "Enrollment", "Appeals"],
+                "claim_id": [1001, 1002, 1003],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 3)
+
+        explorer._open_filter_popup_for_index(0)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        select_all = popup.findChild(QCheckBox, "outputPreviewSelectAllCheckbox")
+        search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
+        assert values_list is not None
+        assert select_all is not None
+        assert search is not None
+
+        _process_ui_until(qapp, lambda: values_list.count() == 2)
+        assert select_all.checkState() == Qt.CheckState.Checked
+
+        select_all.setCheckState(Qt.CheckState.Unchecked)
+        qapp.processEvents()
+        assert all(values_list.item(i).checkState() == Qt.CheckState.Unchecked for i in range(values_list.count()))
+
+        values_list.item(0).setCheckState(Qt.CheckState.Checked)
+        qapp.processEvents()
+        assert select_all.checkState() == Qt.CheckState.PartiallyChecked
+
+        search.setText("Enroll")
+        qapp.processEvents()
+        _process_ui_until(qapp, lambda: values_list.count() == 1 and values_list.item(0).text() == "Enrollment")
+
+        assert select_all.checkState() == Qt.CheckState.Unchecked
+        select_all.setCheckState(Qt.CheckState.Checked)
+        qapp.processEvents()
+        assert values_list.item(0).checkState() == Qt.CheckState.Checked
+        assert select_all.checkState() == Qt.CheckState.Checked
     finally:
         _dispose_window(qapp, window)
 
