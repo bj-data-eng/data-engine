@@ -31,11 +31,11 @@ def test_gui_queue_log_handler_requires_workspace_scoped_records():
 
     flow_record = logging.makeLogRecord(
         {
-            "msg": "run=abc flow=claims_poll step=Write Parquet source=C:/input.xlsx status=success elapsed=1.25",
-            "workspace_id": "claims2",
+            "msg": "run=abc flow=docs_poll step=Write Parquet source=C:/input.xlsx status=success elapsed=1.25",
+            "workspace_id": "docs2",
         }
     )
-    system_record = logging.makeLogRecord({"msg": "daemon started at /tmp/data_engine.log", "workspace_id": "claims2"})
+    system_record = logging.makeLogRecord({"msg": "daemon started at /tmp/data_engine.log", "workspace_id": "docs2"})
 
     handler.emit(flow_record)
     handler.emit(system_record)
@@ -44,11 +44,11 @@ def test_gui_queue_log_handler_requires_workspace_scoped_records():
     system_entry = queue.get_nowait()
 
     assert flow_entry.kind == "flow"
-    assert flow_entry.flow_name == "claims_poll"
-    assert flow_entry.line == "claims_poll  Write Parquet  success  input.xlsx"
+    assert flow_entry.flow_name == "docs_poll"
+    assert flow_entry.line == "docs_poll  Write Parquet  success  input.xlsx"
     assert flow_entry.event == RuntimeStepEvent(
         run_id="abc",
-        flow_name="claims_poll",
+        flow_name="docs_poll",
         step_name="Write Parquet",
         source_label="input.xlsx",
         status="success",
@@ -65,7 +65,7 @@ def test_gui_queue_log_handler_drops_unscoped_shared_records():
     queue: Queue[FlowLogEntry] = Queue()
     handler = gui_runtime.QueueLogHandler(queue)
 
-    handler.emit(logging.makeLogRecord({"msg": "run=abc flow=claims_poll source=C:/input.xlsx status=started"}))
+    handler.emit(logging.makeLogRecord({"msg": "run=abc flow=docs_poll source=C:/input.xlsx status=started"}))
 
     assert queue.empty()
 
@@ -78,8 +78,8 @@ def test_gui_queue_log_handler_discards_oldest_entries_when_queue_is_full():
         handler.emit(
             logging.makeLogRecord(
                 {
-                    "msg": f"run=run-{index} flow=claims_poll source=C:/input-{index}.xlsx status=started",
-                    "workspace_id": "claims2",
+                    "msg": f"run=run-{index} flow=docs_poll source=C:/input-{index}.xlsx status=started",
+                    "workspace_id": "docs2",
                 }
             )
         )
@@ -98,7 +98,7 @@ def test_tui_queue_log_handler_emits_flow_and_system_entries():
     handler = tui_runtime.QueueLogHandler(queue)
 
     flow_record = logging.makeLogRecord(
-        {"msg": "run=abc flow=claims_poll step=Write Parquet source=C:/input.xlsx status=success elapsed=1.25"}
+        {"msg": "run=abc flow=docs_poll step=Write Parquet source=C:/input.xlsx status=success elapsed=1.25"}
     )
     system_record = logging.makeLogRecord({"msg": "daemon started at /tmp/data_engine.log"})
 
@@ -109,14 +109,14 @@ def test_tui_queue_log_handler_emits_flow_and_system_entries():
     system_entry = queue.get_nowait()
 
     assert flow_entry.kind == "flow"
-    assert flow_entry.flow_name == "claims_poll"
-    assert flow_entry.line == "claims_poll  Write Parquet  success  input.xlsx"
+    assert flow_entry.flow_name == "docs_poll"
+    assert flow_entry.line == "docs_poll  Write Parquet  success  input.xlsx"
     assert system_entry.kind == "system"
 
 
 def test_queue_log_handler_calls_handle_error_when_queue_write_fails():
     handler = _RecordingHandler(_FailingQueue())
-    record = logging.makeLogRecord({"msg": "run=abc flow=alpha source=/tmp/input.xlsx status=started", "workspace_id": "claims2"})
+    record = logging.makeLogRecord({"msg": "run=abc flow=alpha source=/tmp/input.xlsx status=started", "workspace_id": "docs2"})
 
     handler.emit(record)
 
@@ -142,3 +142,4 @@ def test_tui_theme_exports_the_generated_stylesheet_constant():
     assert "#header" in tui_theme.TUI_CSS
     assert "#flow-list-pane" in tui_theme.TUI_CSS
     assert tui_theme.resolve_theme_name("dark") == "dark"
+

@@ -20,7 +20,7 @@ from data_engine.helpers.duckdb import replace_table
 
 
 def test_build_dimension_creates_dimension_and_returns_unique_mapping(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     incoming = pl.DataFrame(
         {
             "member_id": ["a", "a", "b"],
@@ -50,11 +50,11 @@ def test_build_dimension_creates_dimension_and_returns_unique_mapping(tmp_path):
 
 
 def test_build_dimension_quotes_keyword_columns_and_preserves_existing_keys(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     first = pl.DataFrame(
         {
-            "group": ["claims", "eligibility"],
+            "group": ["docs", "eligibility"],
             "status": ["open", "ready"],
         }
     )
@@ -79,7 +79,7 @@ def test_build_dimension_quotes_keyword_columns_and_preserves_existing_keys(tmp_
     )
 
     assert first_mapping.to_dict(as_series=False) == {
-        "group": ["claims", "eligibility"],
+        "group": ["docs", "eligibility"],
         "status": ["open", "ready"],
         "group_key": [1, 2],
     }
@@ -91,7 +91,7 @@ def test_build_dimension_quotes_keyword_columns_and_preserves_existing_keys(tmp_
 
 
 def test_build_dimension_allows_side_effect_only_calls(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     incoming = pl.DataFrame({"category": ["a", "b", "a"]})
 
     result = build_dimension(
@@ -115,7 +115,7 @@ def test_build_dimension_allows_side_effect_only_calls(tmp_path):
 
 
 def test_build_dimension_collects_lazy_frames(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     incoming = pl.DataFrame({"member_id": ["a", "a", "b"], "lob": ["medical", "medical", "dental"]}).lazy()
 
     mapping = build_dimension(
@@ -133,7 +133,7 @@ def test_build_dimension_collects_lazy_frames(tmp_path):
 
 
 def test_build_dimension_rejects_key_column_collisions(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     incoming = pl.DataFrame({"dimension_key": [1], "category": ["a"]})
 
     try:
@@ -178,7 +178,7 @@ def test_build_dimension_rolls_back_and_closes_connection_on_failure(monkeypatch
 
     with pytest.raises(RuntimeError, match="boom"):
         build_dimension(
-            tmp_path / "claims.duckdb",
+            tmp_path / "docs.duckdb",
             "dim_category",
             df=pl.DataFrame({"category": ["a"]}),
         )
@@ -187,7 +187,7 @@ def test_build_dimension_rolls_back_and_closes_connection_on_failure(monkeypatch
 
 
 def test_denormalize_columns_attaches_natural_columns_by_surrogate_key(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     build_dimension(
         db_path,
         "dim_member",
@@ -214,11 +214,11 @@ def test_denormalize_columns_attaches_natural_columns_by_surrogate_key(tmp_path)
 
 
 def test_denormalize_columns_can_select_subset_and_drop_surrogate_key(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     build_dimension(
         db_path,
         "mart.dim_group",
-        df=pl.DataFrame({"group": ["claims", "payments"], "status": ["open", "queued"]}),
+        df=pl.DataFrame({"group": ["docs", "payments"], "status": ["open", "queued"]}),
         key_column="group_key",
     )
 
@@ -235,12 +235,12 @@ def test_denormalize_columns_can_select_subset_and_drop_surrogate_key(tmp_path):
 
     assert denormalized.to_dict(as_series=False) == {
         "count": [3, 4],
-        "group": ["claims", "payments"],
+        "group": ["docs", "payments"],
     }
 
 
 def test_replace_rows_by_file_creates_table_and_returns_frame_with_file_key(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     incoming = pl.DataFrame({"claim_id": [1, 2], "amount": [10, 20]})
 
     returned = replace_rows_by_file(
@@ -265,7 +265,7 @@ def test_replace_rows_by_file_creates_table_and_returns_frame_with_file_key(tmp_
 
 
 def test_replace_rows_by_file_replaces_one_file_slice_without_touching_other_files(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     replace_rows_by_file(
         db_path,
@@ -299,7 +299,7 @@ def test_replace_rows_by_file_replaces_one_file_slice_without_touching_other_fil
 
 
 def test_replace_rows_by_file_expands_schema_for_new_columns(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     replace_rows_by_file(
         db_path,
@@ -310,7 +310,7 @@ def test_replace_rows_by_file_expands_schema_for_new_columns(tmp_path):
     replace_rows_by_file(
         db_path,
         "fact_claim",
-        df=pl.DataFrame({"claim_id": [2], "amount": [20], "group": ["claims"]}),
+        df=pl.DataFrame({"claim_id": [2], "amount": [20], "group": ["docs"]}),
         file_hash="file-b",
     )
 
@@ -322,13 +322,13 @@ def test_replace_rows_by_file_expands_schema_for_new_columns(tmp_path):
     assert persisted.to_dict(as_series=False) == {
         "claim_id": [1, 2],
         "amount": [10, 20],
-        "group": [None, "claims"],
+        "group": [None, "docs"],
         "file_key": ["file-a", "file-b"],
     }
 
 
 def test_replace_rows_by_file_allows_side_effect_only_calls(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     result = replace_rows_by_file(
         db_path,
@@ -342,7 +342,7 @@ def test_replace_rows_by_file_allows_side_effect_only_calls(tmp_path):
 
 
 def test_replace_rows_by_file_is_not_dependent_on_df_column_order(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     replace_rows_by_file(
         db_path,
@@ -402,7 +402,7 @@ def test_replace_rows_by_file_rolls_back_and_closes_connection_on_failure(monkey
     monkeypatch.setattr(duckdb_helpers.duckdb, "connect", _connect)
 
     replace_rows_by_file(
-        tmp_path / "claims.duckdb",
+        tmp_path / "docs.duckdb",
         "fact_claim",
         df=pl.DataFrame({"claim_id": [1]}),
         file_hash="file-a",
@@ -410,9 +410,9 @@ def test_replace_rows_by_file_rolls_back_and_closes_connection_on_failure(monkey
 
     with pytest.raises(RuntimeError, match="boom"):
         replace_rows_by_file(
-            tmp_path / "claims.duckdb",
+            tmp_path / "docs.duckdb",
             "fact_claim",
-            df=pl.DataFrame({"claim_id": [2], "group": ["claims"]}),
+            df=pl.DataFrame({"claim_id": [2], "group": ["docs"]}),
             file_hash="file-b",
         )
 
@@ -420,7 +420,7 @@ def test_replace_rows_by_file_rolls_back_and_closes_connection_on_failure(monkey
 
 
 def test_replace_rows_by_values_replaces_one_value_slice_without_touching_other_values(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     replace_rows_by_values(
         db_path,
@@ -478,7 +478,7 @@ def test_replace_rows_by_values_replaces_one_value_slice_without_touching_other_
 
 
 def test_replace_rows_by_values_expands_schema_and_allows_side_effect_only_calls(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     replace_rows_by_values(
         db_path,
@@ -489,7 +489,7 @@ def test_replace_rows_by_values_expands_schema_and_allows_side_effect_only_calls
     result = replace_rows_by_values(
         db_path,
         "fact_claim",
-        df=pl.DataFrame({"claim_id": [2], "status": ["ready"], "group": ["claims"]}),
+        df=pl.DataFrame({"claim_id": [2], "status": ["ready"], "group": ["docs"]}),
         column="status",
         return_df=False,
     )
@@ -504,12 +504,12 @@ def test_replace_rows_by_values_expands_schema_and_allows_side_effect_only_calls
     assert persisted.to_dict(as_series=False) == {
         "claim_id": [1, 2],
         "status": ["open", "ready"],
-        "group": [None, "claims"],
+        "group": [None, "docs"],
     }
 
 
 def test_replace_rows_by_values_is_not_dependent_on_df_column_order(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     replace_rows_by_values(
         db_path,
@@ -537,7 +537,7 @@ def test_replace_rows_by_values_is_not_dependent_on_df_column_order(tmp_path):
 
 
 def test_replace_rows_by_values_replaces_null_value_slice(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     replace_rows_by_values(
         db_path,
@@ -609,7 +609,7 @@ def test_replace_rows_by_values_rolls_back_and_closes_connection_on_failure(monk
     monkeypatch.setattr(duckdb_helpers.duckdb, "connect", _connect)
 
     replace_rows_by_values(
-        tmp_path / "claims.duckdb",
+        tmp_path / "docs.duckdb",
         "fact_claim",
         df=pl.DataFrame({"claim_id": [1], "status": ["open"]}),
         column="status",
@@ -617,9 +617,9 @@ def test_replace_rows_by_values_rolls_back_and_closes_connection_on_failure(monk
 
     with pytest.raises(RuntimeError, match="boom"):
         replace_rows_by_values(
-            tmp_path / "claims.duckdb",
+            tmp_path / "docs.duckdb",
             "fact_claim",
-            df=pl.DataFrame({"claim_id": [2], "status": ["ready"], "group": ["claims"]}),
+            df=pl.DataFrame({"claim_id": [2], "status": ["ready"], "group": ["docs"]}),
             column="status",
         )
 
@@ -627,7 +627,7 @@ def test_replace_rows_by_values_rolls_back_and_closes_connection_on_failure(monk
 
 
 def test_attach_dimension_joins_existing_dimension_without_dropping_key_columns_by_default(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     df = pl.DataFrame(
         {
             "member_id": ["a", "a", "b"],
@@ -659,7 +659,7 @@ def test_attach_dimension_joins_existing_dimension_without_dropping_key_columns_
 
 
 def test_normalize_columns_can_return_mapping_only(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     df = pl.DataFrame(
         {
             "member_id": ["a", "a", "b"],
@@ -685,7 +685,7 @@ def test_normalize_columns_can_return_mapping_only(tmp_path):
 
 
 def test_attach_dimension_can_drop_key_columns_when_requested(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     df = pl.DataFrame({"status": ["open", "ready", "open"], "amount": [10, 20, 30]})
     build_dimension(
         db_path,
@@ -710,7 +710,7 @@ def test_attach_dimension_can_drop_key_columns_when_requested(tmp_path):
 
 
 def test_normalize_columns_returns_normalized_frame_for_composite_keys_by_default(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     df = pl.DataFrame(
         {
             "member_id": ["a", "a", "b"],
@@ -734,7 +734,7 @@ def test_normalize_columns_returns_normalized_frame_for_composite_keys_by_defaul
 
 
 def test_normalize_columns_collects_lazy_frames(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     lazy_df = pl.DataFrame({"status": ["open", "ready", "open"], "amount": [10, 20, 30]}).lazy()
 
     normalized = normalize_columns(
@@ -752,7 +752,7 @@ def test_normalize_columns_collects_lazy_frames(tmp_path):
 
 
 def test_read_rows_by_values_returns_selected_columns_for_matching_rows(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     replace_rows_by_file(
         db_path,
         "fact_claim",
@@ -781,13 +781,13 @@ def test_read_rows_by_values_returns_selected_columns_for_matching_rows(tmp_path
 
 
 def test_read_rows_by_values_quotes_reserved_identifiers_and_supports_single_selected_column(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     replace_rows_by_file(
         db_path,
         "mart.fact_group",
         df=pl.DataFrame(
             {
-                "group": ["claims", "eligibility"],
+                "group": ["docs", "eligibility"],
                 "status": ["open", "ready"],
             }
         ),
@@ -798,7 +798,7 @@ def test_read_rows_by_values_quotes_reserved_identifiers_and_supports_single_sel
         db_path,
         "mart.fact_group",
         column="group",
-        is_in=["claims"],
+        is_in=["docs"],
         select="status",
     )
 
@@ -806,7 +806,7 @@ def test_read_rows_by_values_quotes_reserved_identifiers_and_supports_single_sel
 
 
 def test_read_rows_by_values_returns_empty_frame_when_values_list_is_empty(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     replace_rows_by_file(
         db_path,
         "fact_claim",
@@ -827,7 +827,7 @@ def test_read_rows_by_values_returns_empty_frame_when_values_list_is_empty(tmp_p
 
 
 def test_read_rows_by_values_supports_nulls_without_losing_lookup_order(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     replace_rows_by_file(
         db_path,
         "fact_claim",
@@ -856,7 +856,7 @@ def test_read_rows_by_values_supports_nulls_without_losing_lookup_order(tmp_path
 
 
 def test_read_sql_returns_query_result_as_polars_dataframe(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     replace_rows_by_file(
         db_path,
         "fact_claim",
@@ -876,7 +876,7 @@ def test_read_sql_returns_query_result_as_polars_dataframe(tmp_path):
 
 
 def test_read_table_supports_select_where_and_limit(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     replace_rows_by_file(
         db_path,
         "fact_claim",
@@ -905,7 +905,7 @@ def test_read_table_supports_select_where_and_limit(tmp_path):
 
 
 def test_compact_database_drops_all_null_columns_and_can_target_specific_tables(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     with duckdb.connect(db_path) as connection:
         connection.execute(
@@ -955,7 +955,7 @@ def test_compact_database_drops_all_null_columns_and_can_target_specific_tables(
 
 
 def test_compact_database_preserves_at_least_one_all_null_column_and_reports_vacuum(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     with duckdb.connect(db_path) as connection:
         connection.execute(
@@ -984,7 +984,7 @@ def test_compact_database_preserves_at_least_one_all_null_column_and_reports_vac
 
 
 def test_compact_database_rejects_missing_tables(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     with duckdb.connect(db_path) as connection:
         connection.execute("CREATE TABLE fact_claim AS SELECT 1 AS claim_id")
@@ -994,7 +994,7 @@ def test_compact_database_rejects_missing_tables(tmp_path):
 
 
 def test_replace_table_replaces_existing_rows_and_can_return_df(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     replace_rows_by_file(
         db_path,
         "fact_claim",
@@ -1022,7 +1022,7 @@ def test_replace_table_replaces_existing_rows_and_can_return_df(tmp_path):
 
 
 def test_replace_table_expands_schema_and_allows_side_effect_only_calls(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     replace_table(
         db_path,
         "fact_claim",
@@ -1032,7 +1032,7 @@ def test_replace_table_expands_schema_and_allows_side_effect_only_calls(tmp_path
     result = replace_table(
         db_path,
         "fact_claim",
-        df=pl.DataFrame({"claim_id": [2], "amount": [20], "group": ["claims"]}),
+        df=pl.DataFrame({"claim_id": [2], "amount": [20], "group": ["docs"]}),
         return_df=False,
     )
 
@@ -1046,12 +1046,12 @@ def test_replace_table_expands_schema_and_allows_side_effect_only_calls(tmp_path
     assert persisted.to_dict(as_series=False) == {
         "claim_id": [2],
         "amount": [20],
-        "group": ["claims"],
+        "group": ["docs"],
     }
 
 
 def test_replace_table_collects_lazy_frames(tmp_path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     lazy_df = pl.DataFrame({"claim_id": [1, 2], "amount": [10, 20]}).lazy()
 
     returned = replace_table(
@@ -1064,3 +1064,4 @@ def test_replace_table_collects_lazy_frames(tmp_path):
         "claim_id": [1, 2],
         "amount": [10, 20],
     }
+

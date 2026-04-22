@@ -23,7 +23,7 @@ from data_engine.views.status import WORKSPACE_UNAVAILABLE_TEXT, surface_control
 from data_engine.views.text import format_optional_seconds, pad, render_run_group_lines, run_group_row_text, short_datetime
 
 
-def _card(name: str, *, group: str | None = "Claims", mode: str = "manual", valid: bool = True):
+def _card(name: str, *, group: str | None = "Docs", mode: str = "manual", valid: bool = True):
     flow = Flow(name=name, group=group)
     if mode == "poll":
         flow = flow.watch(mode="poll", source="/tmp/input", interval="5s")
@@ -51,7 +51,7 @@ def test_flow_row_display_uses_failed_dot_for_invalid_cards():
 
     assert display.primary == "broken_flow"
     assert display.dot == "!"
-    assert display.tooltip.endswith("| group=Claims")
+    assert display.tooltip.endswith("| group=Docs")
 
 
 def test_flow_row_display_keeps_state_color_from_requested_state_for_invalid_card():
@@ -104,7 +104,7 @@ def test_text_helpers_cover_padding_datetime_and_optional_duration_edges():
 
 def test_run_group_row_text_uses_default_duration_placeholder():
     run_state = FlowRunState(
-        key=("claims_summary", "run-1"),
+        key=("docs_summary", "run-1"),
         display_label="2026-04-06 09:15:00 AM",
         source_label="input.xlsx",
         status="running",
@@ -125,10 +125,10 @@ def test_render_run_group_lines_keeps_placeholder_duration_for_missing_step_elap
     step_entry = FlowLogEntry(
         line="step",
         kind="flow",
-        flow_name="claims_summary",
+        flow_name="docs_summary",
         event=RuntimeStepEvent(
             run_id="run-1",
-            flow_name="claims_summary",
+            flow_name="docs_summary",
             step_name="Read Excel",
             source_label="input.xlsx",
             status="failed",
@@ -136,7 +136,7 @@ def test_render_run_group_lines_keeps_placeholder_duration_for_missing_step_elap
         ),
     )
     run_state = FlowRunState(
-        key=("claims_summary", "run-1"),
+        key=("docs_summary", "run-1"),
         display_label="2026-04-06 09:15:00 AM",
         source_label="input.xlsx",
         status="failed",
@@ -161,7 +161,7 @@ def test_render_run_group_lines_keeps_placeholder_duration_for_missing_step_elap
 
 def test_run_group_display_uses_gui_canonical_status_mapping():
     run_state = FlowRunState(
-        key=("claims_summary", "run-1"),
+        key=("docs_summary", "run-1"),
         display_label="2026-04-06 09:15:00 AM",
         source_label="input.xlsx",
         status="stopped",
@@ -181,7 +181,7 @@ def test_run_group_display_uses_gui_canonical_status_mapping():
 
 def test_run_group_display_maps_started_runs_to_started_visual_state_without_duration():
     run_state = FlowRunState(
-        key=("claims_summary", "run-2"),
+        key=("docs_summary", "run-2"),
         display_label="2026-04-06 09:16:00 AM",
         source_label="-",
         status="started",
@@ -200,7 +200,7 @@ def test_run_group_display_maps_started_runs_to_started_visual_state_without_dur
 
 def test_run_group_display_maps_success_runs_to_finished_visual_state():
     run_state = FlowRunState(
-        key=("claims_summary", "run-3"),
+        key=("docs_summary", "run-3"),
         display_label="2026-04-06 09:17:00 AM",
         source_label="input.xlsx",
         status="success",
@@ -219,12 +219,12 @@ def test_run_group_display_maps_success_runs_to_finished_visual_state():
 
 def test_format_raw_log_message_omits_placeholder_source_separator():
     entry = FlowLogEntry(
-        line="run=abc flow=claims_summary step=Collect Claim Files source=None status=started",
+        line="run=abc flow=docs_summary step=Collect Claim Files source=None status=started",
         kind="runtime",
-        flow_name="claims_summary",
+        flow_name="docs_summary",
         event=RuntimeStepEvent(
             run_id="abc",
-            flow_name="claims_summary",
+            flow_name="docs_summary",
             step_name="Collect Claim Files",
             source_label="-",
             status="started",
@@ -233,52 +233,52 @@ def test_format_raw_log_message_omits_placeholder_source_separator():
 
     rendered = format_raw_log_message(entry)
 
-    assert "claims_summary &gt; &gt;" not in rendered
-    assert rendered == "claims_summary &gt; <b>Collect Claim Files</b> - <i>started</i>"
+    assert "docs_summary &gt; &gt;" not in rendered
+    assert rendered == "docs_summary &gt; <b>Collect Claim Files</b> - <i>started</i>"
 
 
 def test_format_raw_log_message_handles_flow_level_event_without_source():
     entry = FlowLogEntry(
-        line="run=abc flow=claims_summary source=None status=success",
+        line="run=abc flow=docs_summary source=None status=success",
         kind="runtime",
-        flow_name="claims_summary",
+        flow_name="docs_summary",
         event=RuntimeStepEvent(
             run_id="abc",
-            flow_name="claims_summary",
+            flow_name="docs_summary",
             step_name=None,
             source_label="-",
             status="success",
         ),
     )
 
-    assert format_raw_log_message(entry) == "claims_summary &gt; <i>success</i>"
+    assert format_raw_log_message(entry) == "docs_summary &gt; <i>success</i>"
 
 
 def test_format_raw_log_message_handles_flow_level_event_with_escaped_source():
     entry = FlowLogEntry(
-        line="run=abc flow=claims_summary source=input<1>.xlsx status=success",
+        line="run=abc flow=docs_summary source=input<1>.xlsx status=success",
         kind="runtime",
-        flow_name="claims_summary",
+        flow_name="docs_summary",
         event=RuntimeStepEvent(
             run_id="abc",
-            flow_name="claims_summary",
+            flow_name="docs_summary",
             step_name=None,
             source_label="input<1>.xlsx",
             status="success",
         ),
     )
 
-    assert format_raw_log_message(entry) == "claims_summary &gt; input&lt;1&gt;.xlsx &gt; <i>success</i>"
+    assert format_raw_log_message(entry) == "docs_summary &gt; input&lt;1&gt;.xlsx &gt; <i>success</i>"
 
 
 def test_format_raw_log_message_includes_elapsed_duration_when_present():
     entry = FlowLogEntry(
-        line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=success elapsed=1.0",
+        line="run=abc flow=docs_summary step=Collect Claim Files source=input.xlsx status=success elapsed=1.0",
         kind="runtime",
-        flow_name="claims_summary",
+        flow_name="docs_summary",
         event=RuntimeStepEvent(
             run_id="abc",
-            flow_name="claims_summary",
+            flow_name="docs_summary",
             step_name="Collect Claim Files",
             source_label="input.xlsx",
             status="success",
@@ -294,11 +294,11 @@ def test_format_raw_log_message_escapes_html_in_unstructured_lines_and_step_name
     structured = FlowLogEntry(
         line="ignored",
         kind="runtime",
-        flow_name="claims_summary",
+        flow_name="docs_summary",
         event=RuntimeStepEvent(
             run_id="abc",
-            flow_name="claims_summary",
-            step_name="Collect <Claims>",
+            flow_name="docs_summary",
+            step_name="Collect <Docs>",
             source_label="input<1>.xlsx",
             status="started",
         ),
@@ -306,7 +306,7 @@ def test_format_raw_log_message_escapes_html_in_unstructured_lines_and_step_name
 
     assert format_raw_log_message(plain) == "&lt;b&gt;alert&lt;/b&gt;"
     assert format_raw_log_message(structured) == (
-        "claims_summary &gt; input&lt;1&gt;.xlsx &gt; <b>Collect &lt;Claims&gt;</b> - <i>started</i>"
+        "docs_summary &gt; input&lt;1&gt;.xlsx &gt; <b>Collect &lt;Docs&gt;</b> - <i>started</i>"
     )
 
 
@@ -337,7 +337,7 @@ def test_artifact_preview_text_detection_covers_mimetype_fallback_and_unknown_su
 
 
 def test_action_state_builders_cover_control_and_runtime_branches():
-    card = _card("claims_summary")
+    card = _card("docs_summary")
     selected = SelectedFlowState(card=card, state="running", group_active=True, has_logs=True)
     session = RuntimeSessionState(runtime_active=True)
     context = OperatorActionContext(
@@ -365,7 +365,7 @@ def test_action_state_builders_cover_control_and_runtime_branches():
 
 
 def test_action_state_builders_cover_idle_control_available_branches():
-    card = _card("claims_summary")
+    card = _card("docs_summary")
     selected = SelectedFlowState(card=card, state="manual", group_active=False, has_logs=False)
     session = RuntimeSessionState(workspace_owned=False, leased_by_machine_id=None, runtime_active=False, runtime_stopping=False)
     context = OperatorActionContext(
@@ -417,16 +417,17 @@ def test_action_state_builders_cover_no_selection_idle_branches():
 
 
 def test_group_row_display_from_bucket_uses_shared_group_title_and_error_summary():
-    first = _card("claims_poll", group="Claims", mode="poll")
-    second = _card("claims_manual", group="Claims")
+    first = _card("docs_poll", group="Docs", mode="poll")
+    second = _card("docs_manual", group="Docs")
     display = GroupRowDisplay.from_bucket(
         FlowGroupBucket(
-            group_name="Claims",
+            group_name="Docs",
             entries=(first, second),
         ),
-        {"claims_poll": "failed", "claims_manual": "manual"},
+        {"docs_poll": "failed", "docs_manual": "manual"},
     )
 
-    assert display.title == "Claims"
-    assert display.uppercase_title == "CLAIMS"
+    assert display.title == "Docs"
+    assert display.uppercase_title == "DOCS"
     assert display.secondary == "2 flow(s)  Error: 1"
+

@@ -342,7 +342,7 @@ class TableSchema:
             {
                 "step_to": ["review"],
                 "time": ["09:30:00"],
-                "workflow_to": ["claims"],
+                "workflow_to": ["docs"],
                 "workflow_from": ["intake"],
                 "ssn": ["000-00-0000"],
             }
@@ -361,7 +361,7 @@ class TableSchema:
 
     .. code-block:: python
 
-        df = pl.DataFrame({"Workflow\\tTo": ["claims"]})
+        df = pl.DataFrame({"Workflow\\tTo": ["docs"]})
         df = schema.normalize_column_names(df)
 
         assert df.columns == ["workflow_to"]

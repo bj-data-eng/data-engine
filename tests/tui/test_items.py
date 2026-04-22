@@ -6,9 +6,9 @@ from data_engine.views.models import QtFlowCard
 
 def test_flow_list_item_refresh_view_updates_label():
     card = QtFlowCard(
-        name="claims_summary",
-        group="Claims",
-        title="Claims Summary",
+        name="docs_summary",
+        group="Docs",
+        title="Docs Summary",
         description="",
         source_root="/tmp/in",
         target_root="/tmp/out",
@@ -26,6 +26,7 @@ def test_flow_list_item_refresh_view_updates_label():
     item.refresh_view("success")
 
     rendered = item.label.render().plain
-    assert "Claims Summary" in rendered
+    assert "Docs Summary" in rendered
     assert "success" in rendered
+
 

@@ -765,7 +765,7 @@ fn sample_artifacts() -> Vec<DebugArtifact> {
         DebugArtifact {
             name: "example_schedule__Read Excel__2026-04-19T09-22-14",
             kind: "parquet + json",
-            source: "Source: data/Input/claims_flat/claims_flat_1.xlsx",
+            source: "Source: data/Input/docs_flat/docs_flat_1.xlsx",
             path: "artifacts/runtime_state/example_workspace/debug_artifacts/example_schedule__Read Excel__2026-04-19T09-22-14.parquet",
             metadata: vec![
                 ("flow_name", "example_schedule"),
@@ -775,12 +775,12 @@ fn sample_artifacts() -> Vec<DebugArtifact> {
             ],
         },
         DebugArtifact {
-            name: "claims2_parallel_poll__Build Workflow Summary__2026-04-19T09-25-03",
+            name: "docs2_parallel_poll__Build Workflow Summary__2026-04-19T09-25-03",
             kind: "parquet + json",
-            source: "Source: data/Input/claims_flat/claims_flat_2.xlsx",
-            path: "artifacts/runtime_state/claims2/debug_artifacts/claims2_parallel_poll__Build Workflow Summary__2026-04-19T09-25-03.parquet",
+            source: "Source: data/Input/docs_flat/docs_flat_2.xlsx",
+            path: "artifacts/runtime_state/docs2/debug_artifacts/docs2_parallel_poll__Build Workflow Summary__2026-04-19T09-25-03.parquet",
             metadata: vec![
-                ("flow_name", "claims2_parallel_poll"),
+                ("flow_name", "docs2_parallel_poll"),
                 ("step_name", "Build Workflow Summary"),
                 ("row_count", "128"),
                 ("saved_at_utc", "2026-04-19T13:25:03Z"),

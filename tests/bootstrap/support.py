@@ -23,9 +23,9 @@ class FakeSettingsStore:
 def bundle_inputs():
     discovered = (SimpleNamespace(name="workspace-a"),)
     resolved = SimpleNamespace(workspace_id="example", workspace_root=Path("/tmp/workspace"))
-    definition_flow = Flow(name="alpha", group="Claims")
+    definition_flow = Flow(name="alpha", group="Docs")
     definition = SimpleNamespace(name="alpha", description="Example flow", build=lambda: definition_flow)
-    loaded_flow = Flow(name="beta", group="Claims")
+    loaded_flow = Flow(name="beta", group="Docs")
     requests: list[dict[str, object]] = []
 
     def discover_workspaces_func(*, app_root=None, workspace_collection_root=None):
@@ -108,4 +108,5 @@ class FakeScreen:
 
     def availableGeometry(self) -> FakeGeometry:
         return self._geometry
+
 

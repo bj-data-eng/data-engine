@@ -15,7 +15,7 @@ def test_iter_candidate_paths_filters_temp_files_and_extensions(tmp_path):
     (tmp_path / "~$draft.xlsx").write_text("x", encoding="utf-8")
     (tmp_path / ".hidden.xlsx").write_text("x", encoding="utf-8")
     (tmp_path / "notes.csv").write_text("x", encoding="utf-8")
-    good = tmp_path / "claims.xlsx"
+    good = tmp_path / "docs.xlsx"
     good.write_text("x", encoding="utf-8")
 
     paths = list(iter_candidate_paths(tmp_path, extensions=(".xlsx",)))
@@ -45,8 +45,8 @@ def test_iter_candidate_paths_can_tolerate_missing_root_when_requested(tmp_path)
 
 
 def test_iter_candidate_paths_does_not_round_trip_through_path_constructor(tmp_path, monkeypatch):
-    left = tmp_path / "alpha" / "claims.xlsx"
-    right = tmp_path / "beta" / "claims.xlsx"
+    left = tmp_path / "alpha" / "docs.xlsx"
+    right = tmp_path / "beta" / "docs.xlsx"
     left.parent.mkdir(parents=True)
     right.parent.mkdir(parents=True)
     left.write_text("x", encoding="utf-8")
@@ -71,7 +71,7 @@ def test_polling_watcher_detects_new_and_modified_files_after_settle(tmp_path):
     watcher = PollingWatcher(tmp_path, extensions=(".xlsx",), settle=1)
     watcher.start()
 
-    created = tmp_path / "claims.xlsx"
+    created = tmp_path / "docs.xlsx"
     created.write_text("v1", encoding="utf-8")
 
     assert watcher.drain_events() == []
@@ -84,7 +84,7 @@ def test_polling_watcher_detects_new_and_modified_files_after_settle(tmp_path):
 
 
 def test_polling_watcher_supports_single_file_roots_and_stop(tmp_path):
-    target = tmp_path / "claims.xlsx"
+    target = tmp_path / "docs.xlsx"
     target.write_text("v1", encoding="utf-8")
 
     watcher = PollingWatcher(target, settle=0)
@@ -98,7 +98,7 @@ def test_polling_watcher_supports_single_file_roots_and_stop(tmp_path):
 
 
 def test_polling_watcher_ignores_preexisting_file_on_start(tmp_path):
-    existing = tmp_path / "claims.xlsx"
+    existing = tmp_path / "docs.xlsx"
     existing.write_text("v1", encoding="utf-8")
 
     watcher = PollingWatcher(tmp_path, extensions=(".xlsx",), settle=1)
@@ -108,7 +108,7 @@ def test_polling_watcher_ignores_preexisting_file_on_start(tmp_path):
 
 
 def test_polling_watcher_reprocesses_deleted_then_recreated_file(tmp_path):
-    target = tmp_path / "claims.xlsx"
+    target = tmp_path / "docs.xlsx"
     target.write_text("v1", encoding="utf-8")
 
     watcher = PollingWatcher(tmp_path, extensions=(".xlsx",), settle=1)
@@ -123,7 +123,7 @@ def test_polling_watcher_reprocesses_deleted_then_recreated_file(tmp_path):
 
 
 def test_polling_watcher_can_start_before_single_file_exists(tmp_path):
-    target = tmp_path / "claims.xlsx"
+    target = tmp_path / "docs.xlsx"
 
     watcher = PollingWatcher(target, settle=0)
     watcher.start()
@@ -136,3 +136,4 @@ def test_polling_watcher_can_start_before_single_file_exists(tmp_path):
 def test_polling_watcher_rejects_negative_settle(tmp_path):
     with pytest.raises(FlowValidationError, match="zero or greater"):
         PollingWatcher(tmp_path, settle=-1)
+

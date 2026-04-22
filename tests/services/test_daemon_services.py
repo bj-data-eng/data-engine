@@ -273,7 +273,7 @@ def test_daemon_state_service_diff_update_batch_tracks_run_and_step_lanes():
                         "run_id": "run-1",
                         "flow_name": "poller",
                         "step_label": "Read Excel",
-                        "source_path": "claims.xlsx",
+                        "source_path": "docs.xlsx",
                         "started_at_utc": "2026-04-18T12:00:00+00:00",
                         "finished_at_utc": "2026-04-18T12:00:05+00:00",
                         "status": "success",
@@ -287,7 +287,7 @@ def test_daemon_state_service_diff_update_batch_tracks_run_and_step_lanes():
                     "payload": {
                         "run_id": "run-1",
                         "flow_name": "poller",
-                        "source_path": "claims.xlsx",
+                        "source_path": "docs.xlsx",
                         "started_at_utc": "2026-04-18T12:00:00+00:00",
                         "finished_at_utc": "2026-04-18T12:00:05+00:00",
                         "status": "success",
@@ -352,7 +352,7 @@ def test_daemon_state_service_diff_update_batch_marks_stopping_run_as_stopped():
                         "run_id": "run-1",
                         "flow_name": "poller",
                         "step_label": "Read Excel",
-                        "source_path": "claims.xlsx",
+                        "source_path": "docs.xlsx",
                         "started_at_utc": "2026-04-18T12:00:00+00:00",
                         "finished_at_utc": "2026-04-18T12:00:03.500000+00:00",
                         "status": "stopped",
@@ -366,7 +366,7 @@ def test_daemon_state_service_diff_update_batch_marks_stopping_run_as_stopped():
                     "payload": {
                         "run_id": "run-1",
                         "flow_name": "poller",
-                        "source_path": "claims.xlsx",
+                        "source_path": "docs.xlsx",
                         "started_at_utc": "2026-04-18T12:00:00+00:00",
                         "finished_at_utc": "2026-04-18T12:00:03.500000+00:00",
                         "status": "stopped",
@@ -384,7 +384,7 @@ def test_daemon_state_service_diff_update_batch_marks_stopping_run_as_stopped():
             run_id="run-1",
             flow_name="poller",
             step_name="Read Excel",
-            source_label="claims.xlsx",
+            source_label="docs.xlsx",
             status="stopped",
             elapsed_seconds=3.5,
         ),
@@ -428,7 +428,7 @@ def test_daemon_state_service_diff_update_batch_tracks_started_events_without_ac
                         "run_id": "run-1",
                         "flow_name": "poller",
                         "group_name": "Imports",
-                        "source_path": "claims.xlsx",
+                        "source_path": "docs.xlsx",
                         "started_at_utc": "2026-04-18T12:00:00+00:00",
                     }
                 },
@@ -441,7 +441,7 @@ def test_daemon_state_service_diff_update_batch_tracks_started_events_without_ac
                         "run_id": "run-1",
                         "flow_name": "poller",
                         "step_label": "Read Excel",
-                        "source_path": "claims.xlsx",
+                        "source_path": "docs.xlsx",
                         "started_at_utc": "2026-04-18T12:00:01+00:00",
                     }
                 },
@@ -462,7 +462,7 @@ def test_daemon_state_service_diff_update_batch_tracks_started_events_without_ac
             run_id="run-1",
             flow_name="poller",
             step_name="Read Excel",
-            source_label="claims.xlsx",
+            source_label="docs.xlsx",
             status="started",
             elapsed_seconds=None,
         ),
@@ -506,3 +506,4 @@ def test_merge_update_batches_unions_lane_payloads():
 
     assert merged.snapshot.projection_version == 3
     assert "flow_activity" in {update.lane for update in merged.updates}
+

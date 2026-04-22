@@ -19,7 +19,7 @@ def test_cli_create_workspace_scaffolds_directories_vscode_and_default_selection
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     monkeypatch.delenv("DATA_ENGINE_WORKSPACE_ROOT", raising=False)
 
-    workspace_root = tmp_path / "shared_workspaces" / "claims"
+    workspace_root = tmp_path / "shared_workspaces" / "docs"
 
     result = main(["create", "workspace", str(workspace_root)])
 
@@ -36,11 +36,11 @@ def test_cli_create_workspace_scaffolds_directories_vscode_and_default_selection
     assert collection_vscode_settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(
         workspace_root.parent.resolve()
     )
-    assert vscode_settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
-    assert vscode_settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
+    assert vscode_settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_ID"] == "docs"
+    assert vscode_settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ID"] == "docs"
     assert vscode_settings["python.defaultInterpreterPath"] == expected_vscode_interpreter_path()
     store = LocalSettingsStore.open_default(app_root=app_root)
-    assert store.default_workspace_id() == "claims"
+    assert store.default_workspace_id() == "docs"
     assert store.workspace_collection_root() == workspace_root.parent.resolve()
 
 
@@ -48,7 +48,7 @@ def test_cli_create_workspace_rejects_non_empty_target(monkeypatch, tmp_path, ca
     app_root = tmp_path / "data_engine"
     (app_root / "config").mkdir(parents=True)
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
-    target = tmp_path / "shared_workspaces" / "claims"
+    target = tmp_path / "shared_workspaces" / "docs"
     target.mkdir(parents=True)
     (target / "existing.txt").write_text("busy\n", encoding="utf-8")
 
@@ -60,7 +60,7 @@ def test_cli_create_workspace_rejects_non_empty_target(monkeypatch, tmp_path, ca
 
 def test_workspace_vscode_settings_only_adds_checkout_specific_entries_when_present(tmp_path, monkeypatch):
     app_root = tmp_path / "installed_app"
-    workspace_root = tmp_path / "workspaces" / "claims"
+    workspace_root = tmp_path / "workspaces" / "docs"
 
     settings = _workspace_vscode_settings(workspace_root, app_root=app_root)
 
@@ -69,4 +69,5 @@ def test_workspace_vscode_settings_only_adds_checkout_specific_entries_when_pres
     assert "python.analysis.extraPaths" not in settings
     assert "python.testing.pytestEnabled" not in settings
     assert "python.testing.pytestArgs" not in settings
+
 

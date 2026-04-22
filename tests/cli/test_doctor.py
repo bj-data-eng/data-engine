@@ -18,14 +18,14 @@ from data_engine.ui.cli.app import CliDependencies, main
 def test_cli_doctor_reports_workspace_health(monkeypatch, tmp_path, capsys):
     app_root = tmp_path / "data_engine"
     (app_root / "config").mkdir(parents=True)
-    workspace_root = tmp_path / "shared_workspaces" / "claims"
+    workspace_root = tmp_path / "shared_workspaces" / "docs"
     (workspace_root / "flow_modules").mkdir(parents=True)
     (workspace_root / ".vscode").mkdir(parents=True)
     (workspace_root / ".vscode" / "settings.json").write_text("{}", encoding="utf-8")
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
-    monkeypatch.setenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, "claims")
+    monkeypatch.setenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, "docs")
     store = LocalSettingsStore.open_default(app_root=app_root)
-    store.set_default_workspace_id("claims")
+    store.set_default_workspace_id("docs")
     store.set_workspace_collection_root(workspace_root.parent)
 
     result = main(["doctor"])
@@ -40,13 +40,13 @@ def test_cli_doctor_reports_workspace_health(monkeypatch, tmp_path, capsys):
 def test_cli_doctor_preserves_launch_python_path(monkeypatch, tmp_path, capsys):
     app_root = tmp_path / "data_engine"
     (app_root / "config").mkdir(parents=True)
-    workspace_root = tmp_path / "shared_workspaces" / "claims"
+    workspace_root = tmp_path / "shared_workspaces" / "docs"
     (workspace_root / "flow_modules").mkdir(parents=True)
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
-    monkeypatch.setenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, "claims")
+    monkeypatch.setenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, "docs")
     monkeypatch.setattr("data_engine.ui.cli.commands_doctor.sys.executable", r"C:\venv\Scripts\python.exe")
     store = LocalSettingsStore.open_default(app_root=app_root)
-    store.set_default_workspace_id("claims")
+    store.set_default_workspace_id("docs")
     store.set_workspace_collection_root(workspace_root.parent)
 
     result = main(["doctor"])
@@ -59,12 +59,12 @@ def test_cli_doctor_preserves_launch_python_path(monkeypatch, tmp_path, capsys):
 def test_cli_doctor_daemons_reports_filtered_process_and_lease_state(monkeypatch, tmp_path, capsys):
     app_root = tmp_path / "data_engine"
     (app_root / "config").mkdir(parents=True)
-    workspace_root = tmp_path / "shared_workspaces" / "claims"
+    workspace_root = tmp_path / "shared_workspaces" / "docs"
     (workspace_root / "flow_modules").mkdir(parents=True)
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     monkeypatch.setenv(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR, str(workspace_root.parent))
     store = LocalSettingsStore.open_default(app_root=app_root)
-    store.set_default_workspace_id("claims")
+    store.set_default_workspace_id("docs")
     store.set_workspace_collection_root(workspace_root.parent)
     settings = type(
         "_Settings",
@@ -85,11 +85,11 @@ def test_cli_doctor_daemons_reports_filtered_process_and_lease_state(monkeypatch
     class _WorkspaceService:
         def discover(self, **kwargs):
             del kwargs
-            return (type("DW", (), {"workspace_id": "claims", "workspace_root": workspace_root})(),)
+            return (type("DW", (), {"workspace_id": "docs", "workspace_root": workspace_root})(),)
 
         def resolve_paths(self, **kwargs):
             del kwargs
-            return RuntimeLayoutPolicy().resolve_paths(workspace_root=workspace_root, workspace_id="claims")
+            return RuntimeLayoutPolicy().resolve_paths(workspace_root=workspace_root, workspace_id="docs")
 
     class _SharedStateService:
         def read_lease_metadata(self, paths):
@@ -103,9 +103,9 @@ def test_cli_doctor_daemons_reports_filtered_process_and_lease_state(monkeypatch
     monkeypatch.setattr(
         "data_engine.ui.cli.app._run_process_listing",
         lambda: [
-            ProcessInfo(pid=111, ppid=1, status="Ss", command="python -m data_engine.hosts.daemon.app --workspace /tmp/shared/claims"),
+            ProcessInfo(pid=111, ppid=1, status="Ss", command="python -m data_engine.hosts.daemon.app --workspace /tmp/shared/docs"),
             ProcessInfo(pid=222, ppid=111, status="S+", command="python -m data_engine.ui.gui.launcher"),
-            ProcessInfo(pid=333, ppid=222, status="Z", command="python -m data_engine.hosts.daemon.app --workspace /tmp/shared/claims"),
+            ProcessInfo(pid=333, ppid=222, status="Z", command="python -m data_engine.hosts.daemon.app --workspace /tmp/shared/docs"),
             ProcessInfo(pid=444, ppid=1, status="S", command="python something_else.py"),
         ],
     )
@@ -127,7 +127,7 @@ def test_cli_doctor_daemons_reports_filtered_process_and_lease_state(monkeypatch
     assert f"Live daemons: {expected_live}" in output
     assert f"Defunct daemons: {expected_defunct}" in output
     assert "Related UI processes: 1" in output
-    assert "claims: lease_pid=111 state=live local" in output
+    assert "docs: lease_pid=111 state=live local" in output
 
 
 def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
@@ -140,7 +140,7 @@ def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
                 {
                     "ProcessId": 111,
                     "ParentProcessId": 1,
-                    "CommandLine": "python -m data_engine.hosts.daemon.app --workspace C:\\shared\\claims",
+                    "CommandLine": "python -m data_engine.hosts.daemon.app --workspace C:\\shared\\docs",
                 },
                 {
                     "ProcessId": 222,
@@ -170,7 +170,7 @@ def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
             pid=111,
             ppid=1,
             status="Running",
-            command="python -m data_engine.hosts.daemon.app --workspace C:\\shared\\claims",
+            command="python -m data_engine.hosts.daemon.app --workspace C:\\shared\\docs",
         ),
         ProcessInfo(
             pid=222,
@@ -184,12 +184,12 @@ def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
 def test_cli_doctor_daemons_treats_windows_status_as_non_defunct(monkeypatch, tmp_path, capsys):
     app_root = tmp_path / "data_engine"
     (app_root / "config").mkdir(parents=True)
-    workspace_root = tmp_path / "shared_workspaces" / "claims"
+    workspace_root = tmp_path / "shared_workspaces" / "docs"
     (workspace_root / "flow_modules").mkdir(parents=True)
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     monkeypatch.setenv(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR, str(workspace_root.parent))
     store = LocalSettingsStore.open_default(app_root=app_root)
-    store.set_default_workspace_id("claims")
+    store.set_default_workspace_id("docs")
     store.set_workspace_collection_root(workspace_root.parent)
     settings = type(
         "_Settings",
@@ -206,11 +206,11 @@ def test_cli_doctor_daemons_treats_windows_status_as_non_defunct(monkeypatch, tm
     class _WorkspaceService:
         def discover(self, **kwargs):
             del kwargs
-            return (type("DW", (), {"workspace_id": "claims", "workspace_root": workspace_root})(),)
+            return (type("DW", (), {"workspace_id": "docs", "workspace_root": workspace_root})(),)
 
         def resolve_paths(self, **kwargs):
             del kwargs
-            return RuntimeLayoutPolicy().resolve_paths(workspace_root=workspace_root, workspace_id="claims")
+            return RuntimeLayoutPolicy().resolve_paths(workspace_root=workspace_root, workspace_id="docs")
 
     class _SharedStateService:
         def read_lease_metadata(self, paths):
@@ -231,7 +231,7 @@ def test_cli_doctor_daemons_treats_windows_status_as_non_defunct(monkeypatch, tm
                 pid=111,
                 ppid=1,
                 status="Z",
-                command="python -m data_engine.hosts.daemon.app --workspace C:\\shared\\claims",
+                command="python -m data_engine.hosts.daemon.app --workspace C:\\shared\\docs",
             ),
             ProcessInfo(pid=222, ppid=111, status="Running", command="python -m data_engine.ui.gui.launcher"),
         ],
@@ -245,13 +245,13 @@ def test_cli_doctor_daemons_treats_windows_status_as_non_defunct(monkeypatch, tm
     assert "Live daemons: 1" in output
     assert "Defunct daemons: 0" in output
     assert "orphaned" not in output
-    assert "claims: lease_pid=111 state=live local" in output
+    assert "docs: lease_pid=111 state=live local" in output
 
 
 def test_cli_doctor_daemons_collapses_windows_launcher_parent_processes(monkeypatch, tmp_path, capsys):
     app_root = tmp_path / "data_engine"
     (app_root / "config").mkdir(parents=True)
-    workspace_root = tmp_path / "shared_workspaces" / "claims"
+    workspace_root = tmp_path / "shared_workspaces" / "docs"
     (workspace_root / "flow_modules").mkdir(parents=True)
     settings = type(
         "_Settings",
@@ -268,11 +268,11 @@ def test_cli_doctor_daemons_collapses_windows_launcher_parent_processes(monkeypa
     class _WorkspaceService:
         def discover(self, **kwargs):
             del kwargs
-            return (type("DW", (), {"workspace_id": "claims", "workspace_root": workspace_root})(),)
+            return (type("DW", (), {"workspace_id": "docs", "workspace_root": workspace_root})(),)
 
         def resolve_paths(self, **kwargs):
             del kwargs
-            return RuntimeLayoutPolicy().resolve_paths(workspace_root=workspace_root, workspace_id="claims")
+            return RuntimeLayoutPolicy().resolve_paths(workspace_root=workspace_root, workspace_id="docs")
 
     class _SharedStateService:
         def read_lease_metadata(self, paths):
@@ -294,13 +294,13 @@ def test_cli_doctor_daemons_collapses_windows_launcher_parent_processes(monkeypa
                 pid=20280,
                 ppid=22240,
                 status="Running",
-                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -m data_engine.hosts.daemon.app --workspace C:\\repo\\workspaces\\claims",
+                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -m data_engine.hosts.daemon.app --workspace C:\\repo\\workspaces\\docs",
             ),
             ProcessInfo(
                 pid=320,
                 ppid=20280,
                 status="Running",
-                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -m data_engine.hosts.daemon.app --workspace C:\\repo\\workspaces\\claims",
+                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -m data_engine.hosts.daemon.app --workspace C:\\repo\\workspaces\\docs",
             ),
             ProcessInfo(
                 pid=20288,
@@ -331,7 +331,7 @@ def test_cli_doctor_daemons_collapses_windows_launcher_parent_processes(monkeypa
 def test_cli_main_accepts_injected_dependencies_for_doctor(capsys, tmp_path):
     app_root = tmp_path / "data_engine"
     app_local_root = tmp_path / "app_local" / "data_engine"
-    workspace_root = tmp_path / "shared_workspaces" / "claims"
+    workspace_root = tmp_path / "shared_workspaces" / "docs"
     (app_root / "tests").mkdir(parents=True)
     workspace_root.mkdir(parents=True)
 
@@ -388,4 +388,5 @@ def test_cli_main_accepts_injected_dependencies_for_doctor(capsys, tmp_path):
     assert result == 0
     output = capsys.readouterr().out
     assert f"app root: {str(app_root).replace('\\', '/')}" in output
+
 

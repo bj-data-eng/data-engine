@@ -22,22 +22,22 @@ def test_flow_requires_non_empty_name_group_and_label():
         Flow(group="")
 
     with pytest.raises(FlowValidationError, match="when provided"):
-        Flow(group="Claims", name="")
+        Flow(group="Docs", name="")
 
     with pytest.raises(FlowValidationError, match="label"):
-        Flow(group="Claims", label="")
+        Flow(group="Docs", label="")
 
 
 def test_flow_label_is_distinct_from_internal_name():
-    flow = Flow(name="claims_summary", label="Claims Summary", group="Claims")
+    flow = Flow(name="docs_summary", label="Docs Summary", group="Docs")
 
-    assert flow.name == "claims_summary"
-    assert flow.label == "Claims Summary"
+    assert flow.name == "docs_summary"
+    assert flow.label == "Docs Summary"
 
 
 def test_runtime_uniqueness_remains_based_on_internal_flow_name_not_label():
-    first = Flow(name="name_name", group="Claims")
-    second = Flow(name="NameName", group="Claims")
+    first = Flow(name="name_name", group="Docs")
+    second = Flow(name="NameName", group="Docs")
 
     runtime = FlowRuntime((first.step(lambda context: context.current), second.step(lambda context: context.current)), continuous=False)
 
@@ -45,11 +45,11 @@ def test_runtime_uniqueness_remains_based_on_internal_flow_name_not_label():
 
 
 def test_watch_validates_poll_single_file_and_directory_modes(tmp_path):
-    source_file = tmp_path / "claims.xlsx"
+    source_file = tmp_path / "docs.xlsx"
     source_dir = tmp_path / "input"
     source_dir.mkdir()
 
-    built = Flow(name="claims", group="Claims").watch(
+    built = Flow(name="docs", group="Docs").watch(
         mode="poll",
         source=source_file,
         interval="5s",
@@ -60,7 +60,7 @@ def test_watch_validates_poll_single_file_and_directory_modes(tmp_path):
     assert built.trigger.max_parallel == 1
     assert built.trigger.source == source_file.resolve()
 
-    directory_built = Flow(name="claims_dir", group="Claims").watch(
+    directory_built = Flow(name="docs_dir", group="Docs").watch(
         mode="poll",
         source=source_dir,
         interval="5s",
@@ -77,7 +77,7 @@ def test_watch_validates_max_parallel(tmp_path):
     source_dir = tmp_path / "input"
     source_dir.mkdir()
 
-    built = Flow(name="claims_parallel", group="Claims").watch(
+    built = Flow(name="docs_parallel", group="Docs").watch(
         mode="poll",
         source=source_dir,
         interval="5s",
@@ -88,7 +88,7 @@ def test_watch_validates_max_parallel(tmp_path):
     assert built.trigger.max_parallel == 4
 
     with pytest.raises(FlowValidationError, match="greater than or equal to one"):
-        Flow(name="claims_bad_parallel", group="Claims").watch(
+        Flow(name="docs_bad_parallel", group="Docs").watch(
             mode="poll",
             source=source_dir,
             interval="5s",
@@ -97,7 +97,7 @@ def test_watch_validates_max_parallel(tmp_path):
 
 
 def test_watch_validates_schedule_interval_and_times():
-    built = Flow(name="every_flow", group="Claims").watch(
+    built = Flow(name="every_flow", group="Docs").watch(
         mode="schedule",
         source="/tmp/in",
         interval="10m",
@@ -107,24 +107,24 @@ def test_watch_validates_schedule_interval_and_times():
     assert built.trigger.interval_seconds == 600.0
     assert built.trigger.source is not None
 
-    at_built = Flow(name="at_flow", group="Claims").watch(mode="schedule", time="10:31")
+    at_built = Flow(name="at_flow", group="Docs").watch(mode="schedule", time="10:31")
     assert at_built.trigger is not None
     assert at_built.trigger.times == ("10:31",)
     assert at_built.trigger.time_slots == ((10, 31),)
 
-    multi_at_built = Flow(name="multi_at_flow", group="Claims").watch(mode="schedule", time={"14:45", "08:15", "14:45"})
+    multi_at_built = Flow(name="multi_at_flow", group="Docs").watch(mode="schedule", time={"14:45", "08:15", "14:45"})
     assert multi_at_built.trigger is not None
     assert multi_at_built.trigger.times == ("08:15", "14:45")
     assert multi_at_built.trigger.time_slots == ((8, 15), (14, 45))
 
     with pytest.raises(FlowValidationError, match="exactly one"):
-        Flow(name="bad", group="Claims").watch(mode="schedule")
+        Flow(name="bad", group="Docs").watch(mode="schedule")
 
     with pytest.raises(FlowValidationError, match="exactly one"):
-        Flow(name="bad2", group="Claims").watch(mode="schedule", interval="5m", time="10:31")
+        Flow(name="bad2", group="Docs").watch(mode="schedule", interval="5m", time="10:31")
 
     with pytest.raises(FlowValidationError, match="time must include at least one time"):
-        Flow(name="bad3", group="Claims").watch(mode="schedule", time=[])
+        Flow(name="bad3", group="Docs").watch(mode="schedule", time=[])
 
 
 def test_watch_manual_allows_source_and_batch_directory_context(tmp_path):
@@ -134,7 +134,7 @@ def test_watch_manual_allows_source_and_batch_directory_context(tmp_path):
     (source_dir / "b.xlsx").write_text("b", encoding="utf-8")
 
     result = (
-        Flow(name="manual_batch", group="Claims")
+        Flow(name="manual_batch", group="Docs")
         .watch(mode="manual", source=source_dir, run_as="batch", extensions=[".xlsx"])
         .step(
             lambda context: {
@@ -158,7 +158,7 @@ def test_watch_manual_individual_iterates_directory_files(tmp_path):
     (source_dir / "skip.txt").write_text("x", encoding="utf-8")
 
     results = (
-        Flow(name="manual_individual", group="Claims")
+        Flow(name="manual_individual", group="Docs")
         .watch(mode="manual", source=source_dir, extensions=[".xlsx"])
         .step(lambda context: context.source.path.name)
         .run_once()
@@ -169,51 +169,51 @@ def test_watch_manual_individual_iterates_directory_files(tmp_path):
 
 
 def test_step_requires_callable_and_normalizes_labels():
-    class ClaimsCleaner:
+    class DocsCleaner:
         def __call__(self, context):
             return context.current
 
-    flow = Flow(name="claims", group="Claims").step(ClaimsCleaner())
-    assert flow.steps[0].label == "Claims Cleaner"
+    flow = Flow(name="docs", group="Docs").step(DocsCleaner())
+    assert flow.steps[0].label == "Docs Cleaner"
 
-    explicit = Flow(name="claims2", group="Claims").step(lambda context: context.current, label="Keep Current")
+    explicit = Flow(name="docs2", group="Docs").step(lambda context: context.current, label="Keep Current")
     assert explicit.steps[0].label == "Keep Current"
     assert explicit.steps[0].function_name == "<lambda>"
 
     with pytest.raises(FlowValidationError, match="callable"):
-        Flow(name="bad", group="Claims").step("nope")
+        Flow(name="bad", group="Docs").step("nope")
 
     with pytest.raises(FlowValidationError, match="save_as cannot overwrite"):
-        Flow(name="bad_save", group="Claims").step(lambda context: context.current, save_as="current")
+        Flow(name="bad_save", group="Docs").step(lambda context: context.current, save_as="current")
 
 
 def test_failed_step_records_step_label_and_function_name(tmp_path):
-    source = tmp_path / "claims.parquet"
+    source = tmp_path / "docs.parquet"
     pl.DataFrame({"value": [1]}).write_parquet(source)
 
-    def read_claims(context):
+    def read_docs(context):
         return pl.read_parquet(context.source.path)
 
-    def explode_claims(context):
+    def explode_docs(context):
         raise RuntimeError("boom")
 
     flow = (
-        Flow(name="claims_poll", group="Claims")
+        Flow(name="docs_poll", group="Docs")
         .watch(mode="poll", source=source, interval="5s")
-        .step(read_claims, label="Read Claims")
-        .step(explode_claims, label="Explode Claims")
+        .step(read_docs, label="Read Docs")
+        .step(explode_docs, label="Explode Docs")
     )
 
-    with pytest.raises(FlowValidationError, match='Flow "claims_poll" failed in step "Explode Claims"'):
+    with pytest.raises(FlowValidationError, match='Flow "docs_poll" failed in step "Explode Docs"'):
         flow.run_once()
 
-    run = RuntimeCacheLedger.open_default().runs.list(flow_name="claims_poll")[0]
-    assert 'function explode_claims' in str(run.error_text)
+    run = RuntimeCacheLedger.open_default().runs.list(flow_name="docs_poll")[0]
+    assert 'function explode_docs' in str(run.error_text)
 
 
 def test_runtime_requires_flow_names_before_execution():
     with pytest.raises(FlowValidationError, match="must be set before execution"):
-        Flow(group="Claims").step(lambda context: context.current).run_once()
+        Flow(group="Docs").step(lambda context: context.current).run_once()
 
 
 def test_run_once_updates_current_and_saved_objects():
@@ -240,7 +240,7 @@ def test_run_once_updates_current_and_saved_objects():
 
 def test_flow_context_mirror_prepares_write_ready_paths(tmp_path):
     flow = (
-        Flow(name="claims", group="Claims")
+        Flow(name="docs", group="Docs")
         .watch(mode="poll", source=tmp_path / "input" / "report.xlsx", interval="5s")
         .mirror(root=tmp_path / "output")
         .step(lambda context: context.mirror.with_suffix(".parquet"))
@@ -256,33 +256,33 @@ def test_flow_context_mirror_prepares_write_ready_paths(tmp_path):
 
 def test_flow_context_mirror_file_targets_mirrored_folder_without_namespacing(tmp_path):
     flow = (
-        Flow(name="claims", group="Claims")
+        Flow(name="docs", group="Docs")
         .watch(mode="poll", source=tmp_path / "input" / "nested" / "report.xlsx", interval="5s")
         .mirror(root=tmp_path / "output")
-        .step(lambda context: context.mirror.file("open_claims.parquet"))
+        .step(lambda context: context.mirror.file("open_docs.parquet"))
     )
     flow.trigger.source.parent.mkdir(parents=True)
     flow.trigger.source.write_text("x", encoding="utf-8")
 
     output = flow.run_once()[0].current
 
-    assert output == (tmp_path / "output" / "open_claims.parquet").resolve()
+    assert output == (tmp_path / "output" / "open_docs.parquet").resolve()
     assert output.parent.exists()
 
 
 def test_flow_context_mirror_namespaced_file_uses_source_stem_namespace(tmp_path):
     flow = (
-        Flow(name="claims", group="Claims")
+        Flow(name="docs", group="Docs")
         .watch(mode="poll", source=tmp_path / "input" / "nested" / "report.xlsx", interval="5s")
         .mirror(root=tmp_path / "output")
-        .step(lambda context: context.mirror.namespaced_file("open_claims.parquet"))
+        .step(lambda context: context.mirror.namespaced_file("open_docs.parquet"))
     )
     flow.trigger.source.parent.mkdir(parents=True)
     flow.trigger.source.write_text("x", encoding="utf-8")
 
     output = flow.run_once()[0].current
 
-    assert output == (tmp_path / "output" / "report" / "open_claims.parquet").resolve()
+    assert output == (tmp_path / "output" / "report" / "open_docs.parquet").resolve()
     assert output.parent.exists()
 
 
@@ -323,7 +323,7 @@ def test_collect_files_returns_file_batch_with_name_and_path_access(tmp_path):
     (source_dir / "skip.txt").write_text("x", encoding="utf-8")
 
     result = (
-        Flow(name="pdf_batch", group="Claims")
+        Flow(name="pdf_batch", group="Docs")
         .watch(mode="schedule", run_as="batch", interval="15m", source=source_dir)
         .collect([".pdf"])
         .run_once()[0]
@@ -340,34 +340,34 @@ def test_collect_files_returns_file_batch_with_name_and_path_access(tmp_path):
 
 def test_collect_files_root_resolves_relative_to_compiled_flow_module_dir(tmp_path):
     compiled_dir = tmp_path / "workspace" / "compiled_flow_modules"
-    source_dir = tmp_path / "data" / "Input" / "claims_flat"
+    source_dir = tmp_path / "data" / "Input" / "docs_flat"
     compiled_dir.mkdir(parents=True)
     source_dir.mkdir(parents=True)
-    (source_dir / "claims_a.pdf").write_text("a", encoding="utf-8")
+    (source_dir / "docs_a.pdf").write_text("a", encoding="utf-8")
 
     with compiled_flow_module_context(compiled_dir):
-        flow = Flow(name="pdf_batch", group="Claims").collect([".pdf"], root="../../data/Input/claims_flat")
+        flow = Flow(name="pdf_batch", group="Docs").collect([".pdf"], root="../../data/Input/docs_flat")
 
     result = flow.run_once()[0].current
 
     assert isinstance(result, Batch)
-    assert result.names() == ("claims_a.pdf",)
+    assert result.names() == ("docs_a.pdf",)
 
 
 def test_collect_files_preserves_resolved_root_after_compiled_build_context(tmp_path):
     compiled_dir = tmp_path / "workspace" / "compiled_flow_modules"
-    source_dir = tmp_path / "data" / "Input" / "claims_flat"
+    source_dir = tmp_path / "data" / "Input" / "docs_flat"
     compiled_dir.mkdir(parents=True)
     source_dir.mkdir(parents=True)
-    (source_dir / "claims_a.pdf").write_text("a", encoding="utf-8")
+    (source_dir / "docs_a.pdf").write_text("a", encoding="utf-8")
 
     with compiled_flow_module_context(compiled_dir):
-        flow = Flow(name="pdf_batch", group="Claims").collect([".pdf"], root="../../data/Input/claims_flat")
+        flow = Flow(name="pdf_batch", group="Docs").collect([".pdf"], root="../../data/Input/docs_flat")
 
     result = flow.run_once()[0].current
 
     assert isinstance(result, Batch)
-    assert result.names() == ("claims_a.pdf",)
+    assert result.names() == ("docs_a.pdf",)
 
 
 def test_step_each_maps_batch_items_without_raw_list_access(tmp_path):
@@ -380,7 +380,7 @@ def test_step_each_maps_batch_items_without_raw_list_access(tmp_path):
         return {"name": file_ref.name, "path": file_ref.path, "ok": file_ref.name != "bad.pdf"}
 
     result = (
-        Flow(name="pdf_validation", group="Claims")
+        Flow(name="pdf_validation", group="Docs")
         .watch(mode="schedule", run_as="batch", interval="15m", source=source_dir)
         .collect([".pdf"])
         .map(validate_pdf, label="Validate Pdf")
@@ -396,7 +396,7 @@ def test_step_each_maps_batch_items_without_raw_list_access(tmp_path):
 def test_step_each_can_use_context_and_item(tmp_path):
     source_dir = tmp_path / "input"
     source_dir.mkdir()
-    (source_dir / "claims_a.pdf").write_text("a", encoding="utf-8")
+    (source_dir / "docs_a.pdf").write_text("a", encoding="utf-8")
 
     def annotate_file(context, file_ref: FileRef):
         return {
@@ -406,7 +406,7 @@ def test_step_each_can_use_context_and_item(tmp_path):
         }
 
     result = (
-        Flow(name="pdf_context", group="Claims")
+        Flow(name="pdf_context", group="Docs")
         .watch(mode="schedule", run_as="batch", interval="15m", source=source_dir)
         .collect([".pdf"])
         .map(annotate_file)
@@ -416,20 +416,20 @@ def test_step_each_can_use_context_and_item(tmp_path):
 
     assert isinstance(result, Batch)
     assert result[0]["flow"] == "pdf_context"
-    assert result[0]["name"] == "claims_a.pdf"
+    assert result[0]["name"] == "docs_a.pdf"
 
 
 def test_step_can_iterate_batch_directly_from_context_current(tmp_path):
     source_dir = tmp_path / "input"
     source_dir.mkdir()
-    (source_dir / "claims_a.pdf").write_text("a", encoding="utf-8")
-    (source_dir / "claims_b.pdf").write_text("b", encoding="utf-8")
+    (source_dir / "docs_a.pdf").write_text("a", encoding="utf-8")
+    (source_dir / "docs_b.pdf").write_text("b", encoding="utf-8")
 
     def summarize_batch(context):
         return tuple(file_ref.name for file_ref in context.current)
 
     result = (
-        Flow(name="pdf_names", group="Claims")
+        Flow(name="pdf_names", group="Docs")
         .watch(mode="schedule", run_as="batch", interval="15m", source=source_dir)
         .collect([".pdf"])
         .step(summarize_batch)
@@ -437,7 +437,7 @@ def test_step_can_iterate_batch_directly_from_context_current(tmp_path):
         .current
     )
 
-    assert result == ("claims_a.pdf", "claims_b.pdf")
+    assert result == ("docs_a.pdf", "docs_b.pdf")
 
 
 def test_preview_is_disabled_in_compiled_context():
@@ -509,7 +509,7 @@ def test_preview_uses_first_deterministic_poll_source_when_directory_has_many_fi
         (source_dir / name).write_text("placeholder", encoding="utf-8")
 
     flow = (
-        Flow(name="preview_poll_many", group="Claims")
+        Flow(name="preview_poll_many", group="Docs")
         .watch(mode="poll", source=source_dir, interval="5s", extensions=[".xlsx"])
         .step(lambda context: pl.DataFrame({"source_name": [context.source.path.name]}), save_as="raw_df")
     )
@@ -522,8 +522,8 @@ def test_preview_uses_first_deterministic_poll_source_when_directory_has_many_fi
 
 def test_preview_infers_missing_name_and_workspace_root_for_direct_flow_modules(monkeypatch, tmp_path):
     workspace_root = tmp_path / "workspace"
-    inferred_name = "_draft_claims"
-    flow = Flow(group="Claims").step(lambda context: context.database("claims/warehouse.duckdb"))
+    inferred_name = "_draft_docs"
+    flow = Flow(group="Docs").step(lambda context: context.database("docs/warehouse.duckdb"))
 
     monkeypatch.setattr(
         authoring_flow_module,
@@ -533,13 +533,13 @@ def test_preview_infers_missing_name_and_workspace_root_for_direct_flow_modules(
 
     result = flow.preview()
 
-    assert result == (workspace_root / "databases" / "claims" / "warehouse.duckdb").resolve()
+    assert result == (workspace_root / "databases" / "docs" / "warehouse.duckdb").resolve()
 
 
 def test_run_once_infers_missing_name_and_workspace_root_for_direct_flow_modules(monkeypatch, tmp_path):
     workspace_root = tmp_path / "workspace"
-    inferred_name = "_draft_claims"
-    flow = Flow(group="Claims").step(lambda context: {"flow_name": context.flow_name, "db": context.database("claims/warehouse.duckdb")})
+    inferred_name = "_draft_docs"
+    flow = Flow(group="Docs").step(lambda context: {"flow_name": context.flow_name, "db": context.database("docs/warehouse.duckdb")})
 
     monkeypatch.setattr(
         authoring_flow_module,
@@ -551,7 +551,7 @@ def test_run_once_infers_missing_name_and_workspace_root_for_direct_flow_modules
 
     assert result == {
         "flow_name": inferred_name,
-        "db": (workspace_root / "databases" / "claims" / "warehouse.duckdb").resolve(),
+        "db": (workspace_root / "databases" / "docs" / "warehouse.duckdb").resolve(),
     }
 
 
@@ -569,7 +569,7 @@ def test_runtime_uses_saved_objects_and_collects_step_output_paths(tmp_path):
         return output
 
     results = (
-        Flow(name="claims_poll", group="Claims")
+        Flow(name="docs_poll", group="Docs")
         .watch(mode="poll", source=source, interval="5s")
         .mirror(root=target.parent)
         .step(read_source, save_as="raw_df", label="Read Excel")
@@ -590,18 +590,18 @@ def test_runtime_metadata_file_hash_uses_source_relative_path_for_directory_sour
     source_dir = tmp_path / "incoming"
     nested_dir = source_dir / "2026" / "04"
     nested_dir.mkdir(parents=True)
-    source = nested_dir / "claims.xlsx"
+    source = nested_dir / "docs.xlsx"
     source.write_text("placeholder", encoding="utf-8")
 
     context = (
-        Flow(name="claims_poll_dir", group="Claims")
+        Flow(name="docs_poll_dir", group="Docs")
         .watch(mode="poll", source=source_dir, interval="5s", extensions=[".xlsx"])
         .step(lambda current_context: current_context)
         .run_once()[0]
         .current
     )
 
-    expected = hashlib.sha1("2026/04/claims.xlsx".encode("utf-8")).hexdigest()
+    expected = hashlib.sha1("2026/04/docs.xlsx".encode("utf-8")).hexdigest()
     assert context.metadata["file_hash"] == expected
 
 
@@ -618,7 +618,7 @@ def test_schedule_exposes_bound_paths_in_context(tmp_path):
         }
 
     result = (
-        Flow(name="scheduled_paths", group="Claims")
+        Flow(name="scheduled_paths", group="Docs")
         .watch(mode="schedule", run_as="batch", interval="10m", source=source_file)
         .mirror(root=tmp_path)
         .step(capture)
@@ -634,7 +634,7 @@ def test_schedule_exposes_bound_paths_in_context(tmp_path):
 def test_schedule_missing_source_file_records_failed_run_and_log(tmp_path):
     ledger = RuntimeCacheLedger.open_default(data_root=tmp_path)
     flow = (
-        Flow(name="scheduled_missing_file", group="Claims")
+        Flow(name="scheduled_missing_file", group="Docs")
         .watch(mode="schedule", run_as="batch", interval="10m", source=tmp_path / "missing.xlsx")
         .step(lambda context: {"ok": True})
     )
@@ -655,7 +655,7 @@ def test_flow_context_config_supports_get_require_names_and_all(tmp_path):
     workspace_root = tmp_path / "workspace"
     config_dir = workspace_root / "config"
     config_dir.mkdir(parents=True)
-    (config_dir / "claims.toml").write_text(
+    (config_dir / "docs.toml").write_text(
         """
         [runtime]
         batch_size = 12000
@@ -666,40 +666,40 @@ def test_flow_context_config_supports_get_require_names_and_all(tmp_path):
         + "\n",
         encoding="utf-8",
     )
-    flow = Flow(name="claims", group="Claims")._clone(_workspace_root=workspace_root)
+    flow = Flow(name="docs", group="Docs")._clone(_workspace_root=workspace_root)
     context = FlowRuntime((flow.step(lambda current_context: current_context.config),), continuous=False).run()[0]
     cfg = context.current
 
-    assert cfg.names() == ("claims",)
+    assert cfg.names() == ("docs",)
     assert cfg.get("missing") is None
-    assert cfg.get("claims")["runtime"]["batch_size"] == 12000
-    assert cfg.require("claims")["input"]["pattern"] == "*.xlsx"
-    assert cfg.all()["claims"]["runtime"]["batch_size"] == 12000
+    assert cfg.get("docs")["runtime"]["batch_size"] == 12000
+    assert cfg.require("docs")["input"]["pattern"] == "*.xlsx"
+    assert cfg.all()["docs"]["runtime"]["batch_size"] == 12000
 
 
 def test_flow_context_config_require_raises_for_missing_config(tmp_path):
     workspace_root = tmp_path / "workspace"
     (workspace_root / "config").mkdir(parents=True)
-    flow = Flow(name="claims", group="Claims")._clone(_workspace_root=workspace_root)
+    flow = Flow(name="docs", group="Docs")._clone(_workspace_root=workspace_root)
 
     with pytest.raises(FlowValidationError, match="Required config file was not found"):
-        FlowRuntime((flow.step(lambda context: context.config.require("claims")),), continuous=False).run()
+        FlowRuntime((flow.step(lambda context: context.config.require("docs")),), continuous=False).run()
 
 
 def test_flow_context_database_returns_write_ready_workspace_database_path(tmp_path):
     workspace_root = tmp_path / "workspace"
     (workspace_root / "databases").mkdir(parents=True)
-    flow = Flow(name="claims", group="Claims")._clone(_workspace_root=workspace_root)
+    flow = Flow(name="docs", group="Docs")._clone(_workspace_root=workspace_root)
 
-    context = FlowRuntime((flow.step(lambda current_context: current_context.database("claims/db.duckdb")),), continuous=False).run()[0]
+    context = FlowRuntime((flow.step(lambda current_context: current_context.database("docs/db.duckdb")),), continuous=False).run()[0]
 
-    assert context.current == (workspace_root / "databases" / "claims" / "db.duckdb").resolve()
+    assert context.current == (workspace_root / "databases" / "docs" / "db.duckdb").resolve()
     assert context.current.parent.is_dir()
 
 
 def test_flow_context_database_rejects_absolute_paths(tmp_path):
     workspace_root = tmp_path / "workspace"
-    flow = Flow(name="claims", group="Claims")._clone(_workspace_root=workspace_root)
+    flow = Flow(name="docs", group="Docs")._clone(_workspace_root=workspace_root)
 
     with pytest.raises(FlowValidationError, match="name must be relative"):
         FlowRuntime((flow.step(lambda context: context.database(tmp_path / "outside.duckdb")),), continuous=False).run()
@@ -708,7 +708,7 @@ def test_flow_context_database_rejects_absolute_paths(tmp_path):
 def test_poll_missing_source_dir_records_failed_run_and_log(tmp_path):
     ledger = RuntimeCacheLedger.open_default(data_root=tmp_path)
     flow = (
-        Flow(name="poll_missing_dir", group="Claims")
+        Flow(name="poll_missing_dir", group="Docs")
         .watch(mode="poll", source=tmp_path / "missing_input", interval="5s")
         .step(lambda context: {"ok": True})
     )
@@ -737,7 +737,7 @@ def test_batch_poll_marks_all_stale_source_files_success_in_ledger(tmp_path):
     pl.DataFrame({"value": [2]}).write_parquet(second)
 
     flow = (
-        Flow(name="batch_poll", group="Claims")
+        Flow(name="batch_poll", group="Docs")
         .watch(mode="poll", run_as="batch", source=source_dir, interval="5s", extensions=[".parquet"])
         .step(lambda context: {"root": context.source.root, "path": context.source.path})
     )
@@ -764,7 +764,7 @@ def test_runtime_uses_injected_ledger_factory_once(tmp_path):
         calls.append("called")
         return RuntimeCacheLedger.open_default(data_root=tmp_path)
 
-    flow = Flow(name="factory_runtime", group="Claims").step(lambda context: context.current)
+    flow = Flow(name="factory_runtime", group="Docs").step(lambda context: context.current)
 
     runtime = FlowRuntime((flow,), continuous=False, runtime_ledger_factory=open_ledger)
     runtime.run()
@@ -780,7 +780,7 @@ def test_runtime_uses_injected_ledger_service_once(tmp_path):
             calls.append("called")
             return RuntimeCacheLedger.open_default(data_root=tmp_path)
 
-    flow = Flow(name="service_runtime", group="Claims").step(lambda context: context.current)
+    flow = Flow(name="service_runtime", group="Docs").step(lambda context: context.current)
 
     runtime = FlowRuntime((flow,), continuous=False, runtime_ledger_service=_Service())
     runtime.run()
@@ -861,7 +861,7 @@ def test_grouped_runtime_does_not_close_injected_shared_ledger(tmp_path):
 
 def test_flow_run_once_uses_injected_runtime_execution_service():
     calls: list[Flow] = []
-    flow = Flow(name="service_runtime", group="Claims").step(lambda context: context.current)
+    flow = Flow(name="service_runtime", group="Docs").step(lambda context: context.current)
 
     class _RuntimeExecutionService:
         def run_once(self, flow_arg):
@@ -873,7 +873,7 @@ def test_flow_run_once_uses_injected_runtime_execution_service():
 
 
 def test_load_flow_and_discover_flows_use_injected_flow_execution_service(tmp_path):
-    loaded = Flow(name="loaded", group="Claims").step(lambda context: context.current)
+    loaded = Flow(name="loaded", group="Docs").step(lambda context: context.current)
     discovered = (loaded,)
     calls: list[tuple[str, Path | None] | tuple[str, Path | None]] = []
 
@@ -895,7 +895,7 @@ def test_load_flow_and_discover_flows_use_injected_flow_execution_service(tmp_pa
 
 
 def test_flow_public_entrypoints_accept_injected_services():
-    flow = Flow(name="claims", group="Claims").step(lambda context: context.current)
+    flow = Flow(name="docs", group="Docs").step(lambda context: context.current)
     run_once_calls: list[Flow] = []
     preview_calls: list[tuple[Flow, str | None]] = []
     run_calls: list[tuple[Flow, ...]] = []
@@ -934,24 +934,24 @@ def test_flow_public_entrypoints_accept_injected_services():
     assert flow.run_once(runtime_execution_service=runtime_service) == ["once"]
     assert flow.preview(runtime_execution_service=runtime_service) == "preview"
     assert flow.run(runtime_execution_service=runtime_service) == ["continuous"]
-    assert load_flow("claims", data_root=Path("/tmp/workspace"), flow_execution_service=flow_service) is flow
+    assert load_flow("docs", data_root=Path("/tmp/workspace"), flow_execution_service=flow_service) is flow
     assert discover_flows(data_root=Path("/tmp/workspace"), flow_execution_service=flow_service) == (flow,)
     assert run(flow, runtime_execution_service=runtime_service) == ["grouped"]
 
     assert run_once_calls == [flow]
     assert preview_calls == [(flow, None)]
     assert run_calls == [(flow,), (flow,)]
-    assert load_calls == [("claims", Path("/tmp/workspace"))]
+    assert load_calls == [("docs", Path("/tmp/workspace"))]
     assert discover_calls == [Path("/tmp/workspace")]
 
 
 def test_runtime_requires_all_flows_to_have_steps():
     with pytest.raises(FlowValidationError, match="must define at least one step"):
-        FlowRuntime((Flow(name="empty", group="Claims"),), continuous=False).run()
+        FlowRuntime((Flow(name="empty", group="Docs"),), continuous=False).run()
 
 
 def test_runtime_requires_unique_flow_names():
-    first = Flow(name="duplicate", group="Claims").step(lambda context: context.current)
+    first = Flow(name="duplicate", group="Docs").step(lambda context: context.current)
     second = Flow(name="duplicate", group="Reports").step(lambda context: context.current)
 
     with pytest.raises(FlowValidationError, match="unique"):
@@ -960,7 +960,7 @@ def test_runtime_requires_unique_flow_names():
 
 def test_runtime_raises_when_step_uses_missing_saved_object():
     flow = (
-        Flow(name="missing_saved", group="Claims")
+        Flow(name="missing_saved", group="Docs")
         .step(lambda context: "value")
         .step(lambda context: context.current, use="not_there")
     )
@@ -972,7 +972,7 @@ def test_runtime_raises_when_step_uses_missing_saved_object():
 def test_runtime_stops_when_flow_stop_event_is_set():
     stop_event = threading.Event()
     stop_event.set()
-    flow = Flow(name="stopped", group="Claims").step(lambda context: context.current)
+    flow = Flow(name="stopped", group="Docs").step(lambda context: context.current)
 
     with pytest.raises(Exception, match="stop requested"):
         FlowRuntime((flow,), continuous=False, flow_stop_event=stop_event).run()
@@ -988,7 +988,7 @@ def test_runtime_stops_specific_run_id_between_steps():
     def should_not_run(context):
         raise AssertionError("The stopped run should not reach this step.")
 
-    flow = Flow(name="run_id_stopped", group="Claims").step(request_stop).step(should_not_run)
+    flow = Flow(name="run_id_stopped", group="Docs").step(request_stop).step(should_not_run)
 
     with pytest.raises(FlowStoppedError, match="Run stop requested"):
         FlowRuntime((flow,), continuous=False, run_stop_controller=controller).run()
@@ -999,7 +999,7 @@ def test_poll_rejects_negative_settle(tmp_path):
     source_dir.mkdir()
 
     with pytest.raises(FlowValidationError, match="greater than or equal to zero"):
-        Flow(name="bad_settle", group="Claims").watch(
+        Flow(name="bad_settle", group="Docs").watch(
             mode="poll",
             source=source_dir,
             interval="5s",
@@ -1015,10 +1015,10 @@ def test_step_requires_exactly_one_context_parameter():
         return value
 
     with pytest.raises(FlowValidationError, match="exactly one context parameter"):
-        Flow(name="bad_arity_1", group="Claims").step(no_args)
+        Flow(name="bad_arity_1", group="Docs").step(no_args)
 
     with pytest.raises(FlowValidationError, match="exactly one context parameter"):
-        Flow(name="bad_arity_2", group="Claims").step(two_args)
+        Flow(name="bad_arity_2", group="Docs").step(two_args)
 
 
 def test_map_requires_iterable_current_and_one_item_parameter():
@@ -1026,10 +1026,10 @@ def test_map_requires_iterable_current_and_one_item_parameter():
         return item
 
     with pytest.raises(FlowValidationError, match="either \\(item\\) or \\(context, item\\)"):
-        Flow(name="bad_each_arity", group="Claims").map(three_args)
+        Flow(name="bad_each_arity", group="Docs").map(three_args)
 
     flow = (
-        Flow(name="bad_each_runtime", group="Claims")
+        Flow(name="bad_each_runtime", group="Docs")
         .step(lambda context: "not iterable")
         .map(lambda item: item)
     )
@@ -1043,7 +1043,7 @@ def test_map_rejects_empty_batches(tmp_path):
     source_dir.mkdir()
 
     flow = (
-        Flow(name="empty_map", group="Claims")
+        Flow(name="empty_map", group="Docs")
         .watch(mode="schedule", run_as="batch", interval="15m", source=source_dir)
         .collect([".pdf"])
         .map(lambda item: item, label="Read Pdf")
@@ -1075,3 +1075,4 @@ def test_grouped_runtime_keeps_order_within_group():
     grouped.run()
 
     assert order == ["first", "second"]
+

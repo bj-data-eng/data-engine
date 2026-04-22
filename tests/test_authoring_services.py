@@ -33,11 +33,11 @@ class _FlowExecutionService:
 
     def load_flow(self, name, *, workspace_root=None):
         self.calls.append(("load_flow", name, workspace_root))
-        return Flow(name=name, group="Claims")
+        return Flow(name=name, group="Docs")
 
     def discover_flows(self, *, workspace_root=None):
         self.calls.append(("discover_flows", workspace_root))
-        return (Flow(name="alpha", group="Claims"),)
+        return (Flow(name="alpha", group="Docs"),)
 
 
 def test_default_authoring_services_is_shared_and_cached():
@@ -68,12 +68,12 @@ def test_public_authoring_entrypoints_share_one_bundle():
         runtime_execution_service=runtime_service,
         flow_execution_service=flow_service,
     )
-    flow = Flow(name="claims", group="Claims").step(lambda context: context.current)
+    flow = Flow(name="docs", group="Docs").step(lambda context: context.current)
 
     assert flow.run_once(authoring_services=bundle) == ["once"]
     assert flow.preview(authoring_services=bundle) == "preview"
     assert flow.run(authoring_services=bundle) == ["continuous"]
-    assert load_flow("claims", data_root=Path("/tmp/workspace"), authoring_services=bundle).name == "claims"
+    assert load_flow("docs", data_root=Path("/tmp/workspace"), authoring_services=bundle).name == "docs"
     assert discover_flows(data_root=Path("/tmp/workspace"), authoring_services=bundle)[0].name == "alpha"
     assert run(flow, authoring_services=bundle) == ["grouped"]
 
@@ -84,6 +84,7 @@ def test_public_authoring_entrypoints_share_one_bundle():
         ("run_grouped_continuous", (flow,)),
     ]
     assert flow_service.calls == [
-        ("load_flow", "claims", Path("/tmp/workspace")),
+        ("load_flow", "docs", Path("/tmp/workspace")),
         ("discover_flows", Path("/tmp/workspace")),
     ]
+

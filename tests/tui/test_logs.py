@@ -184,7 +184,7 @@ async def test_tui_run_list_prefers_daemon_live_runs_for_parallel_flow():
                         run_id=f"run-{index}",
                         flow_name=flow_name,
                         step_name=None,
-                        source_label=f"claims_{index}.xlsx",
+                        source_label=f"docs_{index}.xlsx",
                         status="started",
                     ),
                 )
@@ -200,7 +200,7 @@ async def test_tui_run_list_prefers_daemon_live_runs_for_parallel_flow():
                     run_id=f"run-{index}",
                     flow_name=flow_name,
                     group_name="Imports",
-                    source_path=f"claims_{index}.xlsx",
+                    source_path=f"docs_{index}.xlsx",
                     state="running",
                     current_step_name="Normalize",
                     current_step_started_at_utc="2026-04-18T12:00:00+00:00",
@@ -215,3 +215,4 @@ async def test_tui_run_list_prefers_daemon_live_runs_for_parallel_flow():
         run_list = app.query_one("#log-run-list", ListView)
 
         assert len([child for child in run_list.children if isinstance(child, RunGroupListItem)]) == 4
+

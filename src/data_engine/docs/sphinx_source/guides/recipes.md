@@ -18,7 +18,7 @@ from data_engine import Flow
 import polars as pl
 
 
-def read_claims(context):
+def read_docs(context):
     return pl.read_excel(context.source.path)
 
 
@@ -30,15 +30,15 @@ def write_target(context):
 
 def build():
     return (
-        Flow(group="Claims")
+        Flow(group="Docs")
         .watch(
             mode="poll",
-            source="../../example_data/Input/claims_flat",
+            source="../../example_data/Input/docs_flat",
             interval="5s",
             extensions=[".xlsx", ".xlsm"],
         )
         .mirror(root="../../example_data/Output/example_mirror")
-        .step(read_claims, label="Read Excel")
+        .step(read_docs, label="Read Excel")
         .step(write_target, label="Write Parquet")
     )
 ```
@@ -57,7 +57,7 @@ Starter flow: `example_completed`
 import polars as pl
 
 
-def read_claims(context):
+def read_docs(context):
     return pl.read_excel(context.source.path)
 
 
@@ -73,15 +73,15 @@ def write_target(context):
 
 def build():
     return (
-        Flow(group="Claims")
+        Flow(group="Docs")
         .watch(
             mode="poll",
-            source="../../example_data/Input/claims_flat",
+            source="../../example_data/Input/docs_flat",
             interval="5s",
             extensions=[".xlsx", ".xlsm"],
         )
         .mirror(root="../../example_data/Output/example_completed")
-        .step(read_claims, save_as="raw_df")
+        .step(read_docs, save_as="raw_df")
         .step(keep_completed, use="raw_df", save_as="clean_df")
         .step(write_target, use="clean_df")
     )
@@ -105,7 +105,7 @@ def keep_completed(context):
 Starter flow: `example_metadata`
 
 ```python
-def read_claims(context):
+def read_docs(context):
     return pl.read_excel(context.source.path)
 
 
@@ -138,7 +138,7 @@ Starter flow: `example_multisheet`
 
 ```python
 def read_selected_sheets(context):
-    return pl.read_excel(context.source.path, sheet_name=["Claims", "Summary"])
+    return pl.read_excel(context.source.path, sheet_name=["Docs", "Summary"])
 ```
 
 This is a good reminder that step code stays native and can call the underlying dataframe library directly.
@@ -184,21 +184,21 @@ from data_engine import Flow
 import polars as pl
 
 
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path)
 
 
-def combine_claims(context):
+def combine_docs(context):
     return pl.concat(context.current, how="vertical_relaxed")
 
 
 def build():
     return (
         Flow(group="Analytics")
-        .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/claims_flat")
-        .collect([".xlsx"], save_as="claim_files")
-        .map(read_claims, use="claim_files", save_as="claim_frames")
-        .step(combine_claims, use="claim_frames")
+        .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/docs_flat")
+        .collect([".xlsx"], save_as="doc_files")
+        .map(read_docs, use="doc_files", save_as="doc_frames")
+        .step(combine_docs, use="doc_frames")
     )
 ```
 
@@ -212,11 +212,11 @@ Starter flow: `example_summary`
 import duckdb
 
 
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path)
 
 
-def combine_claims(context):
+def combine_docs(context):
     return pl.concat(context.current, how="vertical_relaxed")
 
 
@@ -247,11 +247,11 @@ def write_summary(context):
 def build():
     return (
         Flow(group="Analytics")
-        .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/claims_flat")
+        .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/docs_flat")
         .mirror(root="../../example_data/Output/example_summary")
-        .collect([".xlsx"], save_as="claim_files")
-        .map(read_claims, use="claim_files", save_as="claim_frames")
-        .step(combine_claims, use="claim_frames", save_as="raw_df")
+        .collect([".xlsx"], save_as="doc_files")
+        .map(read_docs, use="doc_files", save_as="doc_frames")
+        .step(combine_docs, use="doc_frames", save_as="raw_df")
         .step(build_summary, use="raw_df", save_as="summary_df")
         .step(write_summary, use="summary_df")
     )
@@ -263,7 +263,7 @@ That last example is a good place to prefer `context.database(...)`, because the
 
 ```python
 def apply_threshold(context):
-    cfg = context.config.require("claims")
+    cfg = context.config.require("docs")
     threshold = cfg.get("filters", {}).get("minimum_amount", 0)
     return context.current.filter(pl.col("amount") >= threshold)
 ```
@@ -344,8 +344,8 @@ for SLA-style deadlines.
 
 ```python
 def write_outputs(context):
-    open_path = context.mirror.namespaced_file("open_claims.parquet")
-    closed_path = context.mirror.namespaced_file("closed_claims.parquet")
+    open_path = context.mirror.namespaced_file("open_docs.parquet")
+    closed_path = context.mirror.namespaced_file("closed_docs.parquet")
     context.current.filter(pl.col("status") == "OPEN").write_parquet(open_path)
     context.current.filter(pl.col("status") == "CLOSED").write_parquet(closed_path)
     return open_path

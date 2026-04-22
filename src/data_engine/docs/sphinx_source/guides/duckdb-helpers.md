@@ -43,7 +43,7 @@ from data_engine.helpers.duckdb import replace_table
 The expected path pattern is:
 
 ```python
-db_path = context.database("claims/analytics.duckdb")
+db_path = context.database("docs/analytics.duckdb")
 ```
 
 You can also use a mirrored output path or any other DuckDB file path you control. The helpers work with any DuckDB path you provide.
@@ -142,7 +142,7 @@ Example:
 attached = attach_dimension(
     context.database("warehouse.duckdb"),
     "mart.dim_member",
-    df=claims_df,
+    df=docs_df,
     on=["member_id", "lob"],
     key_column="member_key",
 )
@@ -181,13 +181,13 @@ Example:
 normalized = normalize_columns(
     context.database("warehouse.duckdb"),
     "mart.dim_member",
-    df=claims_df,
+    df=docs_df,
     on=["member_id", "lob"],
     key_column="member_key",
 )
 ```
 
-If `claims_df` starts with:
+If `docs_df` starts with:
 
 ```text
 member_id | lob | amount
@@ -269,7 +269,7 @@ Example:
 updated = replace_rows_by_file(
     context.database("warehouse.duckdb"),
     "canon.claim_rows",
-    df=claims_df,
+    df=docs_df,
     file_hash=context.metadata["file_hash"],
 )
 ```
@@ -306,7 +306,7 @@ Example:
 updated = replace_rows_by_values(
     context.database("warehouse.duckdb"),
     "mart.fact_claim",
-    df=claims_for_open_status,
+    df=docs_for_open_status,
     column="status",
 )
 ```

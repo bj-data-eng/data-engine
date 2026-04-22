@@ -74,12 +74,13 @@ def test_operator_command_service_normalizes_reset_and_provision_errors(tmp_path
     flow_reset = service.reset_flow(
         paths=paths,
         runtime_cache_ledger=runtime_cache_ledger,
-        flow_name="claims_poll",
+        flow_name="docs_poll",
     )
     provision = service.provision_workspace(paths)
 
     assert workspace_reset.workspace_id == paths.workspace_id
     assert workspace_reset.error_text == "reset boom"
-    assert flow_reset.flow_name == "claims_poll"
+    assert flow_reset.flow_name == "docs_poll"
     assert flow_reset.error_text == "flow boom"
     assert provision.error_text == "Workspace provisioning is not available for this surface."
+

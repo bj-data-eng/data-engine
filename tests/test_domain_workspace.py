@@ -113,12 +113,12 @@ def test_workspace_root_state_reports_unconfigured_workspace_collection_root():
 def test_workspace_selection_state_tracks_current_and_discovered_workspaces():
     selection = WorkspaceSelectionState.from_paths(
         _sample_paths(),
-        discovered_workspace_ids=("example_workspace", "claims2"),
+        discovered_workspace_ids=("example_workspace", "docs2"),
     )
 
     assert selection.current_workspace_id == "example_workspace"
     assert selection.selector_enabled is True
-    assert selection.selector_options == ("example_workspace", "claims2")
+    assert selection.selector_options == ("example_workspace", "docs2")
 
 
 def test_workspace_session_state_rebinds_paths_and_keeps_override():
@@ -127,10 +127,10 @@ def test_workspace_session_state_rebinds_paths_and_keeps_override():
         override_root=Path("/tmp/custom_workspaces"),
         discovered_workspace_ids=("example_workspace",),
     )
-    rebound_paths = _sample_paths().__class__(**{**_sample_paths().__dict__, "workspace_id": "claims2"})
+    rebound_paths = _sample_paths().__class__(**{**_sample_paths().__dict__, "workspace_id": "docs2"})
 
-    rebound = session.with_paths(rebound_paths).with_discovered_workspace_ids(("claims2",))
+    rebound = session.with_paths(rebound_paths).with_discovered_workspace_ids(("docs2",))
 
     assert rebound.workspace_collection_root_override == Path("/tmp/custom_workspaces").resolve()
-    assert rebound.current_workspace_id == "claims2"
-    assert rebound.discovered_workspace_ids == ("claims2",)
+    assert rebound.current_workspace_id == "docs2"
+    assert rebound.discovered_workspace_ids == ("docs2",)

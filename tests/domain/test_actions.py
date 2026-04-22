@@ -10,7 +10,7 @@ from data_engine.views.models import qt_flow_card_from_entry
 def test_selected_flow_state_reflects_running_and_group_activity():
     card = qt_flow_card_from_entry(
         flow_catalog_entry_from_flow(
-            Flow(name="claims_summary", label="Claims Summary", group="Claims").watch(
+            Flow(name="docs_summary", label="Docs Summary", group="Docs").watch(
                 mode="poll",
                 source="/tmp/in",
                 interval="5s",
@@ -18,7 +18,7 @@ def test_selected_flow_state_reflects_running_and_group_activity():
             description=None,
         )
     )
-    session = RuntimeSessionState.empty().with_manual_runs_map({"Claims": "claims_summary"})
+    session = RuntimeSessionState.empty().with_manual_runs_map({"Docs": "docs_summary"})
 
     selected = SelectedFlowState.from_runtime(
         card=card,
@@ -39,7 +39,7 @@ def test_selected_flow_state_reflects_running_and_group_activity():
 def test_action_context_builders_resolve_gui_and_tui_states():
     card = qt_flow_card_from_entry(
         flow_catalog_entry_from_flow(
-            Flow(name="claims_summary", label="Claims Summary", group="Claims"),
+            Flow(name="docs_summary", label="Docs Summary", group="Docs"),
             description=None,
         )
     )
@@ -64,7 +64,7 @@ def test_action_context_builders_resolve_gui_and_tui_states():
 def test_action_states_disable_runtime_controls_when_workspace_is_missing():
     card = qt_flow_card_from_entry(
         flow_catalog_entry_from_flow(
-            Flow(name="claims_summary", label="Claims Summary", group="Claims"),
+            Flow(name="docs_summary", label="Docs Summary", group="Docs"),
             description=None,
         )
     )
@@ -90,7 +90,7 @@ def test_action_states_disable_runtime_controls_when_workspace_is_missing():
 def test_action_states_allow_manual_run_while_engine_is_active_for_another_group():
     card = qt_flow_card_from_entry(
         flow_catalog_entry_from_flow(
-            Flow(name="manual_claims", label="Manual Claims", group="Manual"),
+            Flow(name="manual_docs", label="Manual Docs", group="Manual"),
             description=None,
         )
     )
@@ -114,7 +114,7 @@ def test_action_states_allow_manual_run_while_engine_is_active_for_another_group
 def test_action_states_disable_run_once_for_automated_flow_while_engine_is_starting():
     card = qt_flow_card_from_entry(
         flow_catalog_entry_from_flow(
-            Flow(name="poller", label="Poller", group="Claims").watch(
+            Flow(name="poller", label="Poller", group="Docs").watch(
                 mode="poll",
                 source="/tmp/in",
                 interval="5s",
@@ -141,7 +141,7 @@ def test_action_states_disable_run_once_for_automated_flow_while_engine_is_start
 def test_selected_flow_state_does_not_treat_engine_owned_flow_as_manual_running():
     card = qt_flow_card_from_entry(
         flow_catalog_entry_from_flow(
-            Flow(name="claims_summary", label="Claims Summary", group="Claims").watch(
+            Flow(name="docs_summary", label="Docs Summary", group="Docs").watch(
                 mode="poll",
                 source="/tmp/in",
                 interval="5s",
@@ -153,7 +153,7 @@ def test_selected_flow_state_does_not_treat_engine_owned_flow_as_manual_running(
     selected = SelectedFlowState.from_runtime(
         card=card,
         flow_states={card.name: "polling"},
-        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("claims_summary",)),
+        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("docs_summary",)),
         flow_groups_by_name={card.name: card.group},
         active_flow_states={"running", "polling", "scheduled", "stopping flow", "stopping runtime"},
         has_logs=True,
@@ -162,13 +162,13 @@ def test_selected_flow_state_does_not_treat_engine_owned_flow_as_manual_running(
                 "Run",
                 (),
                 {
-                    "flow_name": "claims_summary",
-                    "group_name": "Claims",
+                    "flow_name": "docs_summary",
+                    "group_name": "Docs",
                     "state": "running",
                 },
             )(),
         },
-        engine_active_flow_names=("claims_summary",),
+        engine_active_flow_names=("docs_summary",),
     )
 
     assert selected.live_state == "running"
@@ -179,7 +179,7 @@ def test_selected_flow_state_does_not_treat_engine_owned_flow_as_manual_running(
 def test_selected_flow_state_keeps_group_blocked_when_engine_owns_same_group_without_live_run():
     card = qt_flow_card_from_entry(
         flow_catalog_entry_from_flow(
-            Flow(name="manual_review", label="Manual Review", group="Claims"),
+            Flow(name="manual_review", label="Manual Review", group="Docs"),
             description=None,
         )
     )
@@ -187,18 +187,18 @@ def test_selected_flow_state_keeps_group_blocked_when_engine_owns_same_group_wit
     selected = SelectedFlowState.from_runtime(
         card=card,
         flow_states={card.name: "manual"},
-        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("claims_summary",)),
+        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("docs_summary",)),
         flow_groups_by_name={
             card.name: card.group,
-            "claims_summary": "Claims",
+            "docs_summary": "Docs",
         },
         active_flow_states={"running", "polling", "scheduled", "stopping flow", "stopping runtime"},
         has_logs=False,
         live_runs={},
-        engine_active_flow_names=("claims_summary",),
+        engine_active_flow_names=("docs_summary",),
     )
     context = OperatorActionContext(
-        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("claims_summary",)),
+        runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("docs_summary",)),
         selected_flow=selected,
         has_automated_flows=True,
         engine_state="running",
@@ -214,3 +214,4 @@ def test_selected_flow_state_keeps_group_blocked_when_engine_owns_same_group_wit
     assert selected.group_active is True
     assert gui.flow_run_enabled is False
     assert tui.run_once_disabled is True
+

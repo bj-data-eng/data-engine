@@ -9,10 +9,10 @@ from data_engine.views import build_selected_flow_presentation
 
 def _card() -> FlowCatalogEntry:
     return FlowCatalogEntry(
-        name="claims_parallel_schedule",
-        group="Claims",
-        title="Claims Parallel Schedule",
-        description="Parallel scheduled claims flow.",
+        name="docs_parallel_schedule",
+        group="Docs",
+        title="Docs Parallel Schedule",
+        description="Parallel scheduled docs flow.",
         source_root="/tmp/source",
         target_root="/tmp/target",
         mode="schedule",
@@ -30,10 +30,10 @@ def _run_group(run_id: str, *, status: str = "started") -> object:
     entry = FlowLogEntry(
         line=f"{run_id} {status}",
         kind="flow",
-        flow_name="claims_parallel_schedule",
+        flow_name="docs_parallel_schedule",
         event=RuntimeStepEvent(
             run_id=run_id,
-            flow_name="claims_parallel_schedule",
+            flow_name="docs_parallel_schedule",
             step_name=None,
             source_label=f"{run_id}.xlsx",
             status=status,
@@ -104,14 +104,14 @@ def test_selected_flow_presentation_keeps_terminal_history_and_adds_daemon_only_
         tracker=OperationSessionState.empty(),
         flow_states={},
         run_groups=run_groups,
-        selected_run_key=("claims_parallel_schedule", "live-1"),
+        selected_run_key=("docs_parallel_schedule", "live-1"),
         live_runs=live_runs,
         live_truth_authoritative=True,
     )
 
     assert tuple(group.key[1] for group in presentation.run_groups) == ("finished-1", "finished-2", "live-1")
     assert presentation.selected_run_group is not None
-    assert presentation.selected_run_group.key == ("claims_parallel_schedule", "live-1")
+    assert presentation.selected_run_group.key == ("docs_parallel_schedule", "live-1")
     assert presentation.selected_run_group.steps[-1].step_name == "Write"
 
 
@@ -245,3 +245,4 @@ def _entry_to_group(entry: FlowLogEntry):
     from data_engine.domain import FlowRunState
 
     return FlowRunState.group_entries((entry,))[0]
+

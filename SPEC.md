@@ -38,7 +38,7 @@ from data_engine import Flow
 import polars as pl
 
 
-def read_claims(context):
+def read_docs(context):
     return pl.read_excel(context.source.path)
 
 
@@ -54,17 +54,17 @@ def write_target(context):
 
 def build():
     return (
-        Flow(group="Claims")
+        Flow(group="Docs")
         .watch(
             mode="poll",
-            source="../example_data/Input/claims_dated",
+            source="../example_data/Input/docs_dated",
             interval="5s",
             extensions=[".xlsx", ".xlsm"],
             settle=1,
             max_parallel=4,
         )
         .mirror(root="../example_data/Output/example_poll")
-        .step(read_claims, save_as="raw_df")
+        .step(read_docs, save_as="raw_df")
         .step(keep_open, use="raw_df", save_as="filtered_df")
         .step(write_target, use="filtered_df")
     )
@@ -78,11 +78,11 @@ import duckdb
 import polars as pl
 
 
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path)
 
 
-def combine_claims(context):
+def combine_docs(context):
     return pl.concat(context.current, how="vertical_relaxed")
 
 
@@ -104,11 +104,11 @@ def write_summary(context):
 def build():
     return (
         Flow(group="Analytics")
-        .watch(mode="schedule", run_as="batch", interval="15m", source="../example_data/Input/claims_flat")
+        .watch(mode="schedule", run_as="batch", interval="15m", source="../example_data/Input/docs_flat")
         .mirror(root="../example_data/Output/example_summary")
-        .collect([".xlsx"], save_as="claim_files")
-        .map(read_claims, use="claim_files", save_as="claim_frames")
-        .step(combine_claims, use="claim_frames", save_as="raw_df")
+        .collect([".xlsx"], save_as="doc_files")
+        .map(read_docs, use="doc_files", save_as="doc_frames")
+        .step(combine_docs, use="doc_frames", save_as="raw_df")
         .step(build_summary, use="raw_df", save_as="summary_df")
         .step(write_summary, use="summary_df")
     )

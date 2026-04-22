@@ -16,7 +16,7 @@ from data_engine.helpers import polars as polars_helpers
 
 
 def test_write_parquet_atomic_writes_and_replaces_target(tmp_path: Path):
-    target = tmp_path / "nested" / "claims.parquet"
+    target = tmp_path / "nested" / "docs.parquet"
     old_frame = pl.DataFrame({"claim_id": [0]})
     new_frame = pl.DataFrame({"claim_id": [1, 2]})
 
@@ -29,7 +29,7 @@ def test_write_parquet_atomic_writes_and_replaces_target(tmp_path: Path):
 
 
 def test_write_parquet_atomic_accepts_polars_write_options(tmp_path: Path):
-    target = tmp_path / "claims.parquet"
+    target = tmp_path / "docs.parquet"
     frame = pl.DataFrame({"claim_id": [1, 2]})
 
     returned_path = write_parquet_atomic(frame, target, compression="uncompressed", statistics=False)
@@ -39,7 +39,7 @@ def test_write_parquet_atomic_accepts_polars_write_options(tmp_path: Path):
 
 
 def test_dataframe_namespace_exposes_atomic_write(tmp_path: Path):
-    target = tmp_path / "claims.parquet"
+    target = tmp_path / "docs.parquet"
     frame = pl.DataFrame({"claim_id": [1]})
 
     returned_path = frame.de.write_parquet_atomic(target)
@@ -49,37 +49,37 @@ def test_dataframe_namespace_exposes_atomic_write(tmp_path: Path):
 
 
 def test_write_excel_atomic_writes_and_replaces_target_with_polars_options(tmp_path: Path):
-    target = tmp_path / "nested" / "claims.xlsx"
+    target = tmp_path / "nested" / "docs.xlsx"
     old_frame = pl.DataFrame({"claim_id": [0]})
     new_frame = pl.DataFrame({"claim_id": [1, 2]})
 
-    write_excel_atomic(old_frame, target, worksheet="Claims", table_name="claims_old")
+    write_excel_atomic(old_frame, target, worksheet="Docs", table_name="docs_old")
     returned_path = write_excel_atomic(
         new_frame,
         target,
-        worksheet="Claims",
-        table_name="claims_new",
+        worksheet="Docs",
+        table_name="docs_new",
         autofit=True,
         include_header=True,
     )
 
     assert returned_path == target.resolve()
-    assert_frame_equal(pl.read_excel(target, sheet_name="Claims"), new_frame)
+    assert_frame_equal(pl.read_excel(target, sheet_name="Docs"), new_frame)
     assert list(target.parent.glob(f".{target.name}.*.tmp")) == []
 
 
 def test_dataframe_namespace_exposes_atomic_excel_write(tmp_path: Path):
-    target = tmp_path / "claims.xlsx"
+    target = tmp_path / "docs.xlsx"
     frame = pl.DataFrame({"claim_id": [1]})
 
-    returned_path = frame.de.write_excel_atomic(target, worksheet="Claims", table_name="claims")
+    returned_path = frame.de.write_excel_atomic(target, worksheet="Docs", table_name="docs")
 
     assert returned_path == target.resolve()
-    assert_frame_equal(pl.read_excel(target, sheet_name="Claims"), frame)
+    assert_frame_equal(pl.read_excel(target, sheet_name="Docs"), frame)
 
 
 def test_dataframe_namespace_normalizes_column_names():
-    frame = pl.DataFrame({"Claim   Id": [1], "Workflow\tTo": ["claims"]})
+    frame = pl.DataFrame({"Claim   Id": [1], "Workflow\tTo": ["docs"]})
 
     result = frame.de.normalize_column_names()
 
@@ -87,7 +87,7 @@ def test_dataframe_namespace_normalizes_column_names():
 
 
 def test_sink_parquet_atomic_writes_lazy_frame(tmp_path: Path):
-    target = tmp_path / "claims.parquet"
+    target = tmp_path / "docs.parquet"
     frame = pl.DataFrame({"claim_id": [1, 2]})
 
     returned_path = sink_parquet_atomic(frame.lazy(), target)
@@ -97,7 +97,7 @@ def test_sink_parquet_atomic_writes_lazy_frame(tmp_path: Path):
 
 
 def test_lazyframe_namespace_exposes_atomic_sink(tmp_path: Path):
-    target = tmp_path / "claims.parquet"
+    target = tmp_path / "docs.parquet"
     frame = pl.DataFrame({"claim_id": [1, 2]})
 
     returned_path = frame.lazy().de.sink_parquet_atomic(target)
@@ -107,7 +107,7 @@ def test_lazyframe_namespace_exposes_atomic_sink(tmp_path: Path):
 
 
 def test_lazyframe_namespace_normalizes_column_names():
-    lazy_frame = pl.DataFrame({"Claim   Id": [1], "Workflow\tTo": ["claims"]}).lazy()
+    lazy_frame = pl.DataFrame({"Claim   Id": [1], "Workflow\tTo": ["docs"]}).lazy()
 
     result = lazy_frame.de.normalize_column_names().collect()
 
@@ -394,7 +394,7 @@ def test_atomic_write_cleans_temporary_file_and_preserves_target_on_replace_fail
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    target = tmp_path / "claims.parquet"
+    target = tmp_path / "docs.parquet"
     old_frame = pl.DataFrame({"claim_id": [0]})
     new_frame = pl.DataFrame({"claim_id": [1]})
     write_parquet_atomic(old_frame, target)
@@ -412,14 +412,14 @@ def test_atomic_write_cleans_temporary_file_and_preserves_target_on_replace_fail
 
 
 def test_sink_parquet_atomic_requires_eager_sink(tmp_path: Path):
-    target = tmp_path / "claims.parquet"
+    target = tmp_path / "docs.parquet"
 
     with pytest.raises(ValueError, match="eager sink"):
         sink_parquet_atomic(pl.DataFrame({"claim_id": [1]}).lazy(), target, lazy=True)
 
 
 def test_dataframe_namespace_builds_and_attaches_dimension(tmp_path: Path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     frame = pl.DataFrame(
         {
             "member_id": ["a", "a", "b"],
@@ -454,7 +454,7 @@ def test_dataframe_namespace_builds_and_attaches_dimension(tmp_path: Path):
 
 
 def test_dataframe_namespace_normalizes_and_denormalizes_columns(tmp_path: Path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     frame = pl.DataFrame(
         {
             "member_id": ["a", "a", "b"],
@@ -489,7 +489,7 @@ def test_dataframe_namespace_normalizes_and_denormalizes_columns(tmp_path: Path)
 
 
 def test_dataframe_namespace_replaces_duckdb_rows(tmp_path: Path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
 
     returned = pl.DataFrame({"claim_id": [1], "amount": [10]}).de.replace_rows_by_file(
         db_path,
@@ -513,7 +513,7 @@ def test_dataframe_namespace_replaces_duckdb_rows(tmp_path: Path):
 
 
 def test_lazyframe_namespace_wraps_duckdb_helpers(tmp_path: Path):
-    db_path = tmp_path / "claims.duckdb"
+    db_path = tmp_path / "docs.duckdb"
     lazy_frame = pl.DataFrame({"status": ["open", "ready", "open"], "amount": [10, 20, 30]}).lazy()
 
     normalized = lazy_frame.de.normalize_columns(
@@ -532,3 +532,4 @@ def test_lazyframe_namespace_wraps_duckdb_helpers(tmp_path: Path):
         "status": ["open", "ready", "open"],
         "amount": [10, 20, 30],
     }
+

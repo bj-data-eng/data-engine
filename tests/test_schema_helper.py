@@ -47,7 +47,7 @@ def test_table_schema_parts_select_cast_drop_and_rename():
         {
             "step_to": [1],
             "time": [time(10, 30)],
-            "workflow_to": ["claims"],
+            "workflow_to": ["docs"],
             "workflow_from": ["legacy"],
             "ssn": ["123-45-6789"],
             "ignored": [100],
@@ -65,7 +65,7 @@ def test_table_schema_parts_select_cast_drop_and_rename():
     assert result.to_dict(as_series=False) == {
         "step": ["1"],
         "time": [time(10, 30)],
-        "workflow": ["claims"],
+        "workflow": ["docs"],
     }
 
 
@@ -164,7 +164,7 @@ def test_normalized_column_renames_only_returns_changed_columns():
 
 
 def test_normalize_column_names_renames_eager_and_lazy_frames():
-    df = pl.DataFrame({"Step   To": [1], "Workflow To": ["claims"], "Claim # Id": [10]})
+    df = pl.DataFrame({"Step   To": [1], "Workflow To": ["docs"], "Claim # Id": [10]})
     eager = normalize_column_names(df)
     lazy = normalize_column_names(df.lazy())
 
@@ -174,7 +174,7 @@ def test_normalize_column_names_renames_eager_and_lazy_frames():
 
 def test_table_schema_can_normalize_column_names():
     schema = TableSchema()
-    df = pl.DataFrame({"Step   To": [1], "Workflow To": ["claims"]})
+    df = pl.DataFrame({"Step   To": [1], "Workflow To": ["docs"]})
 
     result = schema.normalize_column_names(df)
 
@@ -187,8 +187,9 @@ def test_column_selection_can_normalize_specified_column_names():
         dtypes={"Step   To": pl.Int64},
         rename={"Workflow To": "workflow"},
     )
-    df = pl.DataFrame({"Step   To": [1], "Workflow To": ["claims"], "Other Column": ["left alone"]})
+    df = pl.DataFrame({"Step   To": [1], "Workflow To": ["docs"], "Other Column": ["left alone"]})
 
     result = schema.columns.normalize_column_names(df)
 
     assert result.columns == ["step_to", "workflow_to", "Other Column"]
+

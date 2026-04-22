@@ -56,12 +56,12 @@ def test_short_source_label_handles_empty_and_paths():
 
 def test_format_log_line_renders_step_and_flow_records():
     step_record = logging.makeLogRecord(
-        {"msg": "run=abc flow=claims_poll step=Write Parquet source=/tmp/input.xlsx status=success elapsed=0.2"}
+        {"msg": "run=abc flow=docs_poll step=Write Parquet source=/tmp/input.xlsx status=success elapsed=0.2"}
     )
-    flow_record = logging.makeLogRecord({"msg": "run=abc flow=claims_poll source=/tmp/input.xlsx status=started"})
+    flow_record = logging.makeLogRecord({"msg": "run=abc flow=docs_poll source=/tmp/input.xlsx status=started"})
 
-    assert format_log_line(step_record) == "claims_poll  Write Parquet  success  input.xlsx"
-    assert format_log_line(flow_record) == "claims_poll  started  input.xlsx"
+    assert format_log_line(step_record) == "docs_poll  Write Parquet  success  input.xlsx"
+    assert format_log_line(flow_record) == "docs_poll  started  input.xlsx"
 
 
 def test_format_log_line_falls_back_to_filename_compaction():
@@ -99,7 +99,7 @@ def test_flow_category_distinguishes_automated_from_manual():
 
 def test_flow_step_labels_are_reflected_in_operations():
     flow = (
-        Flow(name="claims_poll", group="Claims")
+        Flow(name="docs_poll", group="Docs")
         .step(lambda context: context.current, label="Read Excel")
         .step(lambda context: context.current, label="Write Parquet")
     )
@@ -108,17 +108,17 @@ def test_flow_step_labels_are_reflected_in_operations():
 
 
 def test_flow_card_prefers_flow_label_over_internal_name():
-    flow = Flow(name="claims_summary", label="Claims Summary", group="Claims")
+    flow = Flow(name="docs_summary", label="Docs Summary", group="Docs")
 
     card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(flow, description=None))
 
-    assert card.name == "claims_summary"
-    assert card.title == "Claims Summary"
+    assert card.name == "docs_summary"
+    assert card.title == "Docs Summary"
 
 
 def test_qt_flow_card_round_trips_catalog_entry_fields():
     entry = flow_catalog_entry_from_flow(
-        Flow(name="claims_summary", label="Claims Summary", group="Claims"),
+        Flow(name="docs_summary", label="Docs Summary", group="Docs"),
         description="Review claim output",
     )
 
@@ -129,21 +129,21 @@ def test_qt_flow_card_round_trips_catalog_entry_fields():
 
 
 def test_flow_card_derives_readable_title_from_internal_name_when_label_missing():
-    snake = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
-    camel = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="ClaimsSummary", group="Claims"), description=None))
+    snake = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", group="Docs"), description=None))
+    camel = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="DocsSummary", group="Docs"), description=None))
 
-    assert snake.title == "Claims Summary"
-    assert camel.title == "Claims Summary"
+    assert snake.title == "Docs Summary"
+    assert camel.title == "Docs Summary"
 
 
 def test_qt_flow_cards_from_entries_preserves_order_and_error_fields():
-    first = flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description="Review")
-    second = flow_catalog_entry_from_flow(Flow(name="broken_flow", group="Claims"), description="Broken")
+    first = flow_catalog_entry_from_flow(Flow(name="docs_summary", group="Docs"), description="Review")
+    second = flow_catalog_entry_from_flow(Flow(name="broken_flow", group="Docs"), description="Broken")
     second = second.__class__(**{**second.__dict__, "valid": False, "error": "missing dependency"})
 
     cards = qt_flow_cards_from_entries((first, second))
 
-    assert [card.name for card in cards] == ["claims_summary", "broken_flow"]
+    assert [card.name for card in cards] == ["docs_summary", "broken_flow"]
     assert cards[1].valid is False
     assert cards[1].error == "missing dependency"
 
@@ -162,12 +162,12 @@ def test_shared_flow_secondary_text_matches_mode_and_state():
 
 def test_shared_group_secondary_text_summarizes_counts():
     cards = (
-        qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_poll", group="Claims").watch(mode="poll", source="/tmp/in", interval="5s"), description=None)),
-        qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_validate", group="Claims"), description=None)),
+        qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_poll", group="Docs").watch(mode="poll", source="/tmp/in", interval="5s"), description=None)),
+        qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_validate", group="Docs"), description=None)),
     )
 
-    assert group_secondary_text(list(cards), {"claims_poll": "polling", "claims_validate": "manual"}) == "2 flow(s)  Running: 1"
-    assert group_secondary_text(list(cards), {"claims_poll": "failed", "claims_validate": "manual"}) == "2 flow(s)  Error: 1"
+    assert group_secondary_text(list(cards), {"docs_poll": "polling", "docs_validate": "manual"}) == "2 flow(s)  Running: 1"
+    assert group_secondary_text(list(cards), {"docs_poll": "failed", "docs_validate": "manual"}) == "2 flow(s)  Error: 1"
 
 
 def test_shared_state_markers_and_duration_formatting_are_stable():
@@ -179,7 +179,7 @@ def test_shared_state_markers_and_duration_formatting_are_stable():
 
 
 def test_shared_action_state_builders_capture_surface_enablement_rules():
-    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", label="Claims Summary", group="Claims"), description=None))
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", label="Docs Summary", group="Docs"), description=None))
     session = RuntimeSessionState.empty()
     selected = SelectedFlowState.from_runtime(
         card=card,
@@ -213,12 +213,12 @@ def test_shared_action_state_builders_capture_surface_enablement_rules():
 
 
 def test_shared_action_state_builders_cover_runtime_stopping_and_workspace_owned_branches():
-    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", label="Claims Summary", group="Claims"), description=None))
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", label="Docs Summary", group="Docs"), description=None))
     session = RuntimeSessionState(
         workspace_owned=True,
         runtime_active=True,
         runtime_stopping=True,
-        manual_runs=(ManualRunState(group_name="Claims", flow_name="claims_summary"),),
+        manual_runs=(ManualRunState(group_name="Docs", flow_name="docs_summary"),),
     )
     selected = SelectedFlowState(
         card=card,
@@ -259,7 +259,7 @@ def test_shared_action_state_builders_cover_runtime_stopping_and_workspace_owned
 def test_action_state_builders_allow_run_once_when_other_group_manual_run_is_active():
     card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_review", group="Manual"), description=None))
     selected = SelectedFlowState(card=card, state="manual", group_active=False, has_logs=False)
-    session = RuntimeSessionState.empty().with_manual_runs_map({"Imports": "claims2_parallel_poll"})
+    session = RuntimeSessionState.empty().with_manual_runs_map({"Imports": "docs2_parallel_poll"})
     context = OperatorActionContext(
         runtime_session=session,
         selected_flow=selected,
@@ -343,7 +343,7 @@ def test_action_state_builders_show_stop_flow_for_active_manual_run_while_engine
 def test_action_state_builders_do_not_show_stop_flow_for_engine_owned_selected_flow():
     card = qt_flow_card_from_entry(
         flow_catalog_entry_from_flow(
-            Flow(name="poller", label="Poller", group="Claims").watch(
+            Flow(name="poller", label="Poller", group="Docs").watch(
                 mode="poll",
                 source="/tmp/in",
                 interval="5s",
@@ -451,7 +451,7 @@ def test_action_state_builders_prefer_empty_daemon_live_truth_over_stale_manual_
 
 
 def test_action_state_builders_disable_runtime_controls_while_engine_is_starting():
-    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", group="Docs"), description=None))
     selected = SelectedFlowState(card=card, has_logs=True)
     context = OperatorActionContext(
         runtime_session=RuntimeSessionState.empty(),
@@ -475,7 +475,7 @@ def test_action_state_builders_disable_runtime_controls_while_engine_is_starting
 
 
 def test_action_state_builders_preserve_idle_daemon_engine_truth_over_stale_session_flags():
-    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", group="Docs"), description=None))
     context = OperatorActionContext(
         runtime_session=RuntimeSessionState(runtime_active=True, runtime_stopping=True, active_runtime_flow_names=("poller",)),
         selected_flow=SelectedFlowState(card=card, has_logs=True),
@@ -495,9 +495,9 @@ def test_action_state_builders_preserve_idle_daemon_engine_truth_over_stale_sess
 
 
 def test_action_state_builders_fallback_to_session_when_no_live_truth_exists():
-    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", group="Docs"), description=None))
     context = OperatorActionContext(
-        runtime_session=RuntimeSessionState(runtime_active=True, runtime_stopping=True, active_runtime_flow_names=("poller",)).with_manual_runs_map({"Claims": "claims_summary"}),
+        runtime_session=RuntimeSessionState(runtime_active=True, runtime_stopping=True, active_runtime_flow_names=("poller",)).with_manual_runs_map({"Docs": "docs_summary"}),
         selected_flow=SelectedFlowState(card=card, state="running", group_active=True, has_logs=True),
         has_automated_flows=True,
         engine_state="idle",
@@ -558,7 +558,7 @@ def test_action_state_builders_block_run_once_when_another_flow_in_same_group_is
 
 
 def test_action_state_builders_disable_stop_engine_without_control():
-    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", group="Docs"), description=None))
     context = OperatorActionContext(
         runtime_session=RuntimeSessionState(workspace_owned=False, leased_by_machine_id="remote", runtime_active=True),
         selected_flow=SelectedFlowState(card=card, has_logs=True),
@@ -578,7 +578,7 @@ def test_action_state_builders_disable_stop_engine_without_control():
 
 
 def test_shared_action_state_builders_cover_control_unavailable_without_workspace_owner():
-    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", label="Claims Summary", group="Claims"), description=None))
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", label="Docs Summary", group="Docs"), description=None))
     selected = SelectedFlowState(card=card, state="manual", group_active=False, has_logs=True)
     context = OperatorActionContext(
         runtime_session=RuntimeSessionState(workspace_owned=False, leased_by_machine_id="remote-host"),
@@ -602,7 +602,7 @@ def test_shared_action_state_builders_cover_control_unavailable_without_workspac
 
 
 def test_action_state_builders_disable_reset_and_request_control_while_request_is_pending():
-    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", group="Claims"), description=None))
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", group="Docs"), description=None))
     selected = SelectedFlowState(card=card, state="manual", group_active=False, has_logs=True)
     context = OperatorActionContext(
         runtime_session=RuntimeSessionState(workspace_owned=False, leased_by_machine_id="remote-host"),
@@ -623,10 +623,10 @@ def test_action_state_builders_disable_reset_and_request_control_while_request_i
 
 def test_selected_flow_state_captures_group_activity_and_running_state():
     card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(
-        Flow(name="claims_summary", label="Claims Summary", group="Claims").watch(mode="poll", source="/tmp/in", interval="5s"),
+        Flow(name="docs_summary", label="Docs Summary", group="Docs").watch(mode="poll", source="/tmp/in", interval="5s"),
         description=None,
     ))
-    session = RuntimeSessionState.empty().with_manual_runs_map({"Claims": "claims_summary"})
+    session = RuntimeSessionState.empty().with_manual_runs_map({"Docs": "docs_summary"})
 
     selected = SelectedFlowState.from_runtime(
         card=card,
@@ -644,15 +644,15 @@ def test_selected_flow_state_captures_group_activity_and_running_state():
 
 
 def test_shared_flow_display_builders_capture_cross_surface_row_text():
-    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", label="Claims Summary", group="Claims"), description=None))
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", label="Docs Summary", group="Docs"), description=None))
 
     flow_display = FlowRowDisplay.from_card(card, "manual", primary="title")
-    group_display = GroupRowDisplay.from_group("Claims", [card], {card.name: "manual"})
+    group_display = GroupRowDisplay.from_group("Docs", [card], {card.name: "manual"})
 
-    assert flow_display.primary == "Claims Summary"
+    assert flow_display.primary == "Docs Summary"
     assert "manual" in flow_display.secondary
-    assert "claims_summary" in flow_display.tooltip
-    assert group_display.title == "Claims"
+    assert "docs_summary" in flow_display.tooltip
+    assert group_display.title == "Docs"
     assert group_display.secondary == "1 flow(s)"
 
 
@@ -661,29 +661,29 @@ def test_shared_group_cards_orders_default_surface_buckets_first():
         qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="scheduled", group="schedule").watch(mode="schedule", time="10:30"), description=None)),
         qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="manual_one", group="manual"), description=None)),
         qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="poller", group="poll").watch(mode="poll", source="/tmp/in", interval="5s"), description=None)),
-        qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_custom", group="Claims"), description=None)),
+        qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_custom", group="Docs"), description=None)),
     )
 
     grouped = group_cards(cards)
 
-    assert [bucket.group_name for bucket in grouped] == ["manual", "poll", "schedule", "Claims"]
+    assert [bucket.group_name for bucket in grouped] == ["manual", "poll", "schedule", "Docs"]
     assert isinstance(grouped[0], FlowGroupBucket)
     assert group_label("manual") == "Manual"
-    assert group_label("Claims") == "Claims"
+    assert group_label("Docs") == "Docs"
 
 
 def test_shared_text_renderers_cover_run_rows_and_selected_flow_details():
-    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="claims_summary", label="Claims Summary", group="Claims"), description="Review claims"))
+    card = qt_flow_card_from_entry(flow_catalog_entry_from_flow(Flow(name="docs_summary", label="Docs Summary", group="Docs"), description="Review docs"))
     tracker = OperationSessionState.empty().ensure_flow(card.name, card.operation_items)
     selected_lines = render_selected_flow_lines(card, tracker)
 
     step_entry = FlowLogEntry(
         line="step",
         kind="flow",
-        flow_name="claims_summary",
+        flow_name="docs_summary",
         event=RuntimeStepEvent(
             run_id="run-1",
-            flow_name="claims_summary",
+            flow_name="docs_summary",
             step_name="Read Excel",
             source_label="input.xlsx",
             status="success",
@@ -691,7 +691,7 @@ def test_shared_text_renderers_cover_run_rows_and_selected_flow_details():
         ),
     )
     run_group = FlowRunState(
-        key=("claims_summary", "run-1"),
+        key=("docs_summary", "run-1"),
         display_label="2026-04-04 09:15:00 AM",
         source_label="input.xlsx",
         status="success",
@@ -708,9 +708,10 @@ def test_shared_text_renderers_cover_run_rows_and_selected_flow_details():
         entries=(),
     )
 
-    assert selected_lines[0] == "Claims Summary"
+    assert selected_lines[0] == "Docs Summary"
     assert "Status" not in "\n".join(selected_lines)
     assert "idle" not in "\n".join(selected_lines)
     assert run_group_row_text(run_group).endswith("input.xlsx")
     assert "Read Excel" in "\n".join(render_run_group_lines(run_group))
     assert render_operation_lines(card, tracker)[0].strip().startswith("Step")
+

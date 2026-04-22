@@ -33,47 +33,47 @@ def _build_workspace_surface(workspace_root: Path) -> None:
     """Create a representative authored workspace surface for integration tests."""
     _write_workspace_flow_module(
         workspace_root,
-        "claims_demo",
+        "docs_demo",
         """
         from data_engine import Flow
 
-        DESCRIPTION = "Poll a claims folder and mirror outputs."
+        DESCRIPTION = "Poll a docs folder and mirror outputs."
 
         def build():
             return (
-                Flow(name="claims_demo", group="Claims")
-                .watch(mode="poll", source="../../../data/Input/claims_flat", interval="5s", extensions=[".xlsx"])
-                .mirror(root="../../../data/Output/claims_demo")
-                .step(lambda context: context.current, label="Read Claims")
+                Flow(name="docs_demo", group="Docs")
+                .watch(mode="poll", source="../../../data/Input/docs_flat", interval="5s", extensions=[".xlsx"])
+                .mirror(root="../../../data/Output/docs_demo")
+                .step(lambda context: context.current, label="Read Docs")
             )
         """,
     )
     _write_workspace_flow_module(
         workspace_root,
-        "claims_poll",
+        "docs_poll",
         """
         from data_engine import Flow
 
         def build():
             return (
-                Flow(name="claims_poll", group="Claims")
-                .watch(mode="poll", source="../../../data/Input/claims_dated", interval="5s", extensions=[".xlsx"])
-                .mirror(root="../../../data/Output/claims_poll")
-                .step(lambda context: context.current, label="Read Claims")
+                Flow(name="docs_poll", group="Docs")
+                .watch(mode="poll", source="../../../data/Input/docs_dated", interval="5s", extensions=[".xlsx"])
+                .mirror(root="../../../data/Output/docs_poll")
+                .step(lambda context: context.current, label="Read Docs")
             )
         """,
     )
     _write_workspace_flow_module(
         workspace_root,
-        "claims_summary",
+        "docs_summary",
         """
         from data_engine import Flow
 
         def build():
             return (
-                Flow(name="claims_summary", group="Analytics")
-                .watch(mode="schedule", run_as="batch", time=["08:00", "12:00"], source="../../../data/Input/claims_flat")
-                .mirror(root="../../../data/Output/claims_summary")
+                Flow(name="docs_summary", group="Analytics")
+                .watch(mode="schedule", run_as="batch", time=["08:00", "12:00"], source="../../../data/Input/docs_flat")
+                .mirror(root="../../../data/Output/docs_summary")
                 .step(lambda context: context.current, label="Build Summary")
             )
         """,
@@ -105,12 +105,12 @@ def _build_workspace_surface(workspace_root: Path) -> None:
     )
     _write_workspace_flow_module(
         workspace_root,
-        "manual_claims_demo",
+        "manual_docs_demo",
         """
         from data_engine import Flow
 
         def build():
-            return Flow(name="manual_claims_demo", label="Manual Claims Demo", group="Manual").step(lambda context: context.current, label="Read Claims")
+            return Flow(name="manual_docs_demo", label="Manual Docs Demo", group="Manual").step(lambda context: context.current, label="Read Docs")
         """,
     )
 
@@ -121,16 +121,16 @@ def test_workspace_starter_flows_are_discoverable(tmp_path):
     definitions = discover_flow_module_definitions(data_root=workspace_root)
     names = [definition.name for definition in definitions]
 
-    assert "claims_demo" in names
-    assert "claims_poll" in names
+    assert "docs_demo" in names
+    assert "docs_poll" in names
     assert "daily_settings" in names
-    assert "manual_claims_demo" in names
+    assert "manual_docs_demo" in names
 
 
 def test_loaded_flow_exposes_workspace_toml_config_in_context(tmp_path):
     workspace_root = tmp_path / "workspace"
     (workspace_root / "config").mkdir(parents=True)
-    (workspace_root / "config" / "claims.toml").write_text(
+    (workspace_root / "config" / "docs.toml").write_text(
         """
         [runtime]
         batch_size = 7000
@@ -140,18 +140,18 @@ def test_loaded_flow_exposes_workspace_toml_config_in_context(tmp_path):
     )
     _write_workspace_flow_module(
         workspace_root,
-        "claims_config",
+        "docs_config",
         """
         from data_engine import Flow
 
         def build():
-            return Flow(name="claims_config", group="Claims").step(
-                lambda context: context.config.require("claims")["runtime"]["batch_size"]
+            return Flow(name="docs_config", group="Docs").step(
+                lambda context: context.config.require("docs")["runtime"]["batch_size"]
             )
         """,
     )
 
-    flow = load_flow_module_definition("claims_config", data_root=workspace_root).build()
+    flow = load_flow_module_definition("docs_config", data_root=workspace_root).build()
     result = FlowRuntime((flow,), continuous=False).run()[0]
 
     assert result.current == 7000
@@ -162,29 +162,29 @@ def test_load_flow_and_ui_cards_match_workspace_surface(tmp_path):
     _build_workspace_surface(workspace_root)
     catalog_service = FlowCatalogService()
     execution_service = FlowExecutionService()
-    flow = load_flow("claims_demo", data_root=workspace_root)
+    flow = load_flow("docs_demo", data_root=workspace_root)
     cards = {
         card.name: card
         for card in qt_flow_cards_from_entries(catalog_service.load_entries(workspace_root=workspace_root))
     }
 
-    assert flow.name == "claims_demo"
+    assert flow.name == "docs_demo"
     assert flow.mode == "poll"
     assert len(cards) == 6
-    assert cards["claims_demo"].mode == "poll"
+    assert cards["docs_demo"].mode == "poll"
     assert cards["daily_settings"].mode == "schedule"
     assert cards["long_step_demo"].mode == "manual"
-    assert cards["manual_claims_demo"].mode == "manual"
-    assert cards["manual_claims_demo"].source_root == "(not set)"
+    assert cards["manual_docs_demo"].mode == "manual"
+    assert cards["manual_docs_demo"].source_root == "(not set)"
     assert cards["daily_settings"].source_root.endswith("single_watch.xlsx")
-    assert cards["claims_summary"].target_root.endswith("claims_summary")
-    assert execution_service.load_flow("claims_demo", workspace_root=workspace_root).name == "claims_demo"
+    assert cards["docs_summary"].target_root.endswith("docs_summary")
+    assert execution_service.load_flow("docs_demo", workspace_root=workspace_root).name == "docs_demo"
 
 
 def test_generic_polled_flow_runs_end_to_end_with_native_polars_io(tmp_path):
-    source = tmp_path / "claims.parquet"
+    source = tmp_path / "docs.parquet"
     target_root = tmp_path / "output"
-    target = target_root / "claims.parquet"
+    target = target_root / "docs.parquet"
     pl.DataFrame({"status": ["OPEN", "DONE"], "value": [1, 2]}).write_parquet(source)
 
     def read_source(context):
@@ -199,7 +199,7 @@ def test_generic_polled_flow_runs_end_to_end_with_native_polars_io(tmp_path):
         return output
 
     results = (
-        Flow(name="claims_poll", group="Claims")
+        Flow(name="docs_poll", group="Docs")
         .watch(mode="poll", source=source, interval="5s")
         .mirror(root=target_root)
         .step(read_source, save_as="raw_df", label="Read Parquet")
@@ -283,7 +283,7 @@ def test_directory_poll_processes_many_files_end_to_end(tmp_path):
     target_dir.mkdir()
 
     for idx in range(25):
-        pl.DataFrame({"file": [idx], "value": [idx * 2]}).write_parquet(source_dir / f"claims_{idx}.parquet")
+        pl.DataFrame({"file": [idx], "value": [idx * 2]}).write_parquet(source_dir / f"docs_{idx}.parquet")
 
     def read_source(context):
         return pl.read_parquet(context.source.path)
@@ -294,7 +294,7 @@ def test_directory_poll_processes_many_files_end_to_end(tmp_path):
         return output
 
     results = (
-        Flow(name="many_files", group="Claims")
+        Flow(name="many_files", group="Docs")
         .watch(mode="poll", source=source_dir, interval="5s", extensions=[".parquet"])
         .mirror(root=target_dir)
         .step(read_source, label="Read Parquet")
@@ -312,9 +312,9 @@ def test_directory_poll_filters_mixed_file_types(tmp_path):
     source_dir.mkdir()
     target_dir.mkdir()
 
-    pl.DataFrame({"kind": ["parquet"]}).write_parquet(source_dir / "claims.parquet")
+    pl.DataFrame({"kind": ["parquet"]}).write_parquet(source_dir / "docs.parquet")
     (source_dir / "notes.txt").write_text("ignore", encoding="utf-8")
-    (source_dir / "claims.xlsx").write_text("not really excel", encoding="utf-8")
+    (source_dir / "docs.xlsx").write_text("not really excel", encoding="utf-8")
 
     seen: list[str] = []
 
@@ -328,7 +328,7 @@ def test_directory_poll_filters_mixed_file_types(tmp_path):
         return output
 
     results = (
-        Flow(name="mixed_types", group="Claims")
+        Flow(name="mixed_types", group="Docs")
         .watch(mode="poll", source=source_dir, interval="5s", extensions=[".parquet"])
         .mirror(root=target_dir)
         .step(read_source)
@@ -337,7 +337,7 @@ def test_directory_poll_filters_mixed_file_types(tmp_path):
     )
 
     assert len(results) == 1
-    assert seen == ["claims.parquet"]
+    assert seen == ["docs.parquet"]
 
 
 def test_directory_poll_staleness_uses_runtime_ledger_not_output_timestamps(tmp_path):
@@ -348,12 +348,12 @@ def test_directory_poll_staleness_uses_runtime_ledger_not_output_timestamps(tmp_
     nested_source.mkdir(parents=True)
     nested_target.mkdir(parents=True)
 
-    source = nested_source / "claims.xlsx"
+    source = nested_source / "docs.xlsx"
     source.write_text("placeholder", encoding="utf-8")
-    target = nested_target / "claims.parquet"
+    target = nested_target / "docs.parquet"
     target.write_text("done", encoding="utf-8")
 
-    flow = Flow(name="claims_demo", group="Claims").watch(
+    flow = Flow(name="docs_demo", group="Docs").watch(
         mode="poll",
         source=source_dir,
         interval="5s",
@@ -367,7 +367,7 @@ def test_directory_poll_staleness_uses_runtime_ledger_not_output_timestamps(tmp_
     assert runtime._stale_poll_sources(flow) == [source]
 
     runtime.runtime_ledger.source_signatures.upsert_file_state(
-        flow_name="claims_demo",
+        flow_name="docs_demo",
         signature=signature,
         status="success",
         run_id="run-1",
@@ -393,14 +393,14 @@ def test_directory_poll_assigns_distinct_run_ids_per_source_execution(tmp_path):
         context.current.write_parquet(output)
         return output
 
-    Flow(name="claims_demo", group="Claims").watch(
+    Flow(name="docs_demo", group="Docs").watch(
         mode="poll",
         source=source_dir,
         interval="5s",
         extensions=[".parquet"],
     ).mirror(root=target_dir).step(read_source).step(write_target).run_once()
 
-    runs = RuntimeCacheLedger.open_default().runs.list(flow_name="claims_demo")
+    runs = RuntimeCacheLedger.open_default().runs.list(flow_name="docs_demo")
 
     assert len(runs) == 2
     assert len({run.run_id for run in runs}) == 2
@@ -430,7 +430,7 @@ def test_directory_poll_can_run_source_files_in_parallel_once(tmp_path):
                 active -= 1
 
     results = (
-        Flow(name="parallel_poll_once", group="Claims")
+        Flow(name="parallel_poll_once", group="Docs")
         .watch(mode="poll", source=source_dir, interval="5s", extensions=[".parquet"], max_parallel=3)
         .step(read_source)
         .run_once()
@@ -473,7 +473,7 @@ def test_directory_poll_can_run_source_files_in_parallel_continuously(tmp_path):
 
     runtime = FlowRuntime(
         (
-            Flow(name="parallel_poll_continuous", group="Claims")
+            Flow(name="parallel_poll_continuous", group="Docs")
             .watch(mode="poll", source=source_dir, interval="5s", extensions=[".parquet"], max_parallel=3)
             .step(read_source),
         ),
@@ -510,7 +510,7 @@ def test_directory_poll_processes_all_startup_files_continuously_with_serial_pol
 
     runtime = FlowRuntime(
         (
-            Flow(name="serial_poll_continuous", group="Claims")
+            Flow(name="serial_poll_continuous", group="Docs")
             .watch(mode="poll", source=source_dir, interval="5s", extensions=[".parquet"])
             .step(read_source),
         ),
@@ -550,7 +550,7 @@ def test_runtime_stop_does_not_start_queued_source_jobs(tmp_path):
 
     runtime = FlowRuntime(
         (
-            Flow(name="parallel_poll_stop_boundary", group="Claims")
+            Flow(name="parallel_poll_stop_boundary", group="Docs")
             .watch(mode="poll", source=source_dir, interval="5s", extensions=[".parquet"], max_parallel=2)
             .step(read_source),
         ),
@@ -591,12 +591,12 @@ def test_runtime_stop_does_not_start_queued_source_jobs(tmp_path):
 
 def test_scheduled_flow_can_create_duckdb_in_missing_output_directory(tmp_path):
     source_dir = tmp_path / "input"
-    target_file = tmp_path / "output" / "claims_summary" / "workflow_summary.parquet"
+    target_file = tmp_path / "output" / "docs_summary" / "workflow_summary.parquet"
     source_dir.mkdir(parents=True)
-    pl.DataFrame({"Workflow": ["A", "A", "B"]}).write_parquet(source_dir / "claims.parquet")
+    pl.DataFrame({"Workflow": ["A", "A", "B"]}).write_parquet(source_dir / "docs.parquet")
 
     def read_source(context):
-        return pl.read_parquet(context.source.root_file("claims.parquet"))
+        return pl.read_parquet(context.source.root_file("docs.parquet"))
 
     def build_summary(context):
         conn = duckdb.connect(context.mirror.file("analytics.duckdb"))
@@ -619,7 +619,7 @@ def test_scheduled_flow_can_create_duckdb_in_missing_output_directory(tmp_path):
         return output
 
     result = (
-        Flow(name="claims_summary", group="Analytics")
+        Flow(name="docs_summary", group="Analytics")
         .watch(mode="schedule", run_as="batch", interval="15m", source=source_dir)
         .mirror(root=target_file.parent)
         .step(read_source, save_as="raw_df")
@@ -646,7 +646,7 @@ def test_collect_and_map_support_pdf_style_batch_workflows(tmp_path):
         return tuple(item["name"] for item in context.current if item["ok"])
 
     result = (
-        Flow(name="pdf_batch_flow", group="Claims")
+        Flow(name="pdf_batch_flow", group="Docs")
         .watch(mode="schedule", run_as="batch", interval="15m", source=source_dir)
         .collect([".pdf"], save_as="pdf_files")
         .map(validate_pdf, use="pdf_files", save_as="pdf_results")
@@ -679,7 +679,7 @@ def test_collect_returns_empty_batch_when_directory_has_no_matches(tmp_path):
     source_dir.mkdir()
 
     result = (
-        Flow(name="empty_batch", group="Claims")
+        Flow(name="empty_batch", group="Docs")
         .watch(mode="schedule", run_as="batch", interval="15m", source=source_dir)
         .collect([".pdf"])
         .run_once()[0]
@@ -715,7 +715,7 @@ def test_large_parquet_flow_completes_without_runtime_timeout(tmp_path):
 
     started = time.monotonic()
     results = (
-        Flow(name="large_flow", group="Claims")
+        Flow(name="large_flow", group="Docs")
         .watch(mode="poll", source=source, interval="5s")
         .mirror(root=target_root)
         .step(read_source)
@@ -752,7 +752,7 @@ def test_long_running_step_can_be_canceled_cooperatively():
 
     runtime = FlowRuntime(
         (
-            Flow(name="slow_flow", group="Claims")
+            Flow(name="slow_flow", group="Docs")
             .step(slow_step, save_as="first")
             .step(next_step, use="first"),
         ),
@@ -848,3 +848,4 @@ def test_scheduler_host_keeps_running_when_one_scheduled_flow_fails():
     assert len(jobs) == 2
     assert any(run.status == "failed" for run in failing_runs)
     assert len([run for run in healthy_runs if run.status == "success"]) >= 2
+

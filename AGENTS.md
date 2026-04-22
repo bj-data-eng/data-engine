@@ -95,7 +95,7 @@ This repository is a Python 3.14 package for the Data Engine workflow runtime, G
 - Use the smoke-data generator when live-testing flows:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\generate_smoke_data.py --root . --workspace-id example_workspace --workspace-id claims2
+.\.venv\Scripts\python.exe scripts\generate_smoke_data.py --root . --workspace-id example_workspace --workspace-id docs2
 ```
 
 - Do not commit generated files from `data/`, `data2/`, or `workspaces/`.

@@ -127,7 +127,7 @@ Data Engine discovers workspaces from a collection root resolved from:
 Each immediate child folder containing `flow_modules/` is treated as a workspace, for example:
 
 - `workspaces/example_workspace/flow_modules/`
-- `workspaces/claims2/flow_modules/`
+- `workspaces/docs2/flow_modules/`
 
 Shared workspace state lives inside each authored workspace:
 
@@ -147,7 +147,7 @@ from data_engine import Flow
 import polars as pl
 
 
-def read_claims(context):
+def read_docs(context):
     return pl.read_excel(context.source.path)
 
 
@@ -163,16 +163,16 @@ def write_parquet(context):
 
 def build():
     return (
-        Flow(group="Claims")
+        Flow(group="Docs")
         .watch(
             mode="poll",
-            source="../../../example_data/Input/claims_flat",
+            source="../../../example_data/Input/docs_flat",
             interval="5s",
             extensions=[".xlsx", ".xls", ".xlsm"],
             settle=1,
         )
         .mirror(root="../../../example_data/Output/example_mirror")
-        .step(read_claims, save_as="raw_df")
+        .step(read_docs, save_as="raw_df")
         .step(keep_open, use="raw_df", save_as="filtered_df")
         .step(write_parquet, use="filtered_df")
     )
@@ -217,8 +217,8 @@ def validate_workbook(context, file_ref):
 
 def build():
     return (
-        Flow(group="Claims")
-        .watch(mode="schedule", run_as="batch", interval="15m", source="../../../example_data/Input/claims_flat")
+        Flow(group="Docs")
+        .watch(mode="schedule", run_as="batch", interval="15m", source="../../../example_data/Input/docs_flat")
         .collect([".xlsx"])
         .map(validate_workbook)
     )
@@ -273,8 +273,8 @@ Useful mirror helpers:
 
 - `context.mirror.with_extension(".parquet")`
 - `context.mirror.with_suffix(".parquet")`
-- `context.mirror.file("open_claims.parquet")`
-- `context.mirror.namespaced_file("open_claims.parquet")`
+- `context.mirror.file("open_docs.parquet")`
+- `context.mirror.namespaced_file("open_docs.parquet")`
 
 `use="name"` loads `context.objects["name"]` into `context.current` before the step runs. `save_as="name"` stores the returned value into `context.objects["name"]`.
 
@@ -285,7 +285,7 @@ The app includes a dataframe-first debug pane for saved parquet artifacts.
 From a flow step, save a debug dataframe with:
 
 ```python
-context.debug.save_frame(context.current, name="raw_claims")
+context.debug.save_frame(context.current, name="raw_docs")
 ```
 
 That writes:
@@ -347,7 +347,7 @@ The runtime loads discovered flows from those compiled modules.
 Generate local smoke data with:
 
 ```bash
-python scripts/generate_smoke_data.py --root . --workspace-id example_workspace --workspace-id claims2
+python scripts/generate_smoke_data.py --root . --workspace-id example_workspace --workspace-id docs2
 ```
 
 Generated local data and workspaces are intentionally ignored:

@@ -258,7 +258,7 @@ async def test_tui_apply_daemon_update_batch_streams_step_events_without_log_reb
                         run_id="run-1",
                         flow_name="poller",
                         group_name="Imports",
-                        source_path="claims.xlsx",
+                        source_path="docs.xlsx",
                         state="running",
                         current_step_name="Read Excel",
                         current_step_started_at_utc="2026-04-18T12:00:00+00:00",
@@ -277,7 +277,7 @@ async def test_tui_apply_daemon_update_batch_streams_step_events_without_log_reb
                             run_id="run-1",
                             flow_name="poller",
                             step_name="Read Excel",
-                            source_label="claims.xlsx",
+                            source_label="docs.xlsx",
                             status="started",
                             elapsed_seconds=None,
                         ),
@@ -336,3 +336,4 @@ def test_tui_daemon_startup_uses_verbose_fallback_when_error_text_is_blank():
         "Daemon startup did not provide any additional error details.",
     ]
     assert runtime_controller.sync_calls == [app]
+

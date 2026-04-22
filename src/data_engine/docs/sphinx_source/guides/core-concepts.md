@@ -12,7 +12,7 @@ A `Flow` is an immutable definition with:
 ```python
 from data_engine import Flow
 
-flow = Flow(group="Claims")
+flow = Flow(group="Docs")
 ```
 
 The flow-module filename is the flow identity used for discovery and runtime bookkeeping. `group` is the author-controlled grouping visible in the UI.
@@ -74,8 +74,8 @@ Steps can save and reuse values:
 ```python
 (
     Flow(group="Docs")
-    .step(read_claims, save_as="raw_df")
-    .step(clean_claims, use="raw_df", save_as="clean_df")
+    .step(read_docs, save_as="raw_df")
+    .step(clean_docs, use="raw_df", save_as="clean_df")
     .step(write_output, use="clean_df")
 )
 ```
@@ -103,20 +103,20 @@ That makes it easy to structure flows around a few explicit intermediate states 
 `collect(...)` and `map(...)` are the batch-oriented authoring tools.
 
 ```python
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path)
 
 
-def combine_claims(context):
+def combine_docs(context):
     return pl.concat(context.current, how="vertical_relaxed")
 
 
 flow = (
     Flow(group="Analytics")
-    .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/claims_flat")
-    .collect([".xlsx"], save_as="claim_files")
-    .map(read_claims, use="claim_files", save_as="claim_frames")
-    .step(combine_claims, use="claim_frames")
+    .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/docs_flat")
+    .collect([".xlsx"], save_as="doc_files")
+    .map(read_docs, use="doc_files", save_as="doc_frames")
+    .step(combine_docs, use="doc_frames")
 )
 ```
 
@@ -149,8 +149,8 @@ context.source.root_file("lookup.csv")
 
 context.mirror.with_extension(".parquet")
 context.mirror.with_suffix(".parquet")
-context.mirror.file("open_claims.parquet")
-context.mirror.namespaced_file("open_claims.parquet")
+context.mirror.file("open_docs.parquet")
+context.mirror.namespaced_file("open_docs.parquet")
 context.mirror.root_file("analytics.duckdb")
 ```
 

@@ -29,7 +29,7 @@ These counts are package-level rollups from the current AST snapshot.
 | `data_engine.platform` | 10 | 43 | 10 | 0 | 1495 |
 | `data_engine.runtime` | 20 | 44 | 48 | 0 | 4333 |
 | `data_engine.services` | 23 | 38 | 81 | 0 | 5153 |
-| `data_engine.ui` | 73 | 226 | 45 | 0 | 13281 |
+| `data_engine.ui` | 73 | 227 | 45 | 0 | 13292 |
 | `data_engine.views` | 12 | 44 | 11 | 0 | 1414 |
 
 ## Largest Modules
@@ -41,7 +41,7 @@ These counts are package-level rollups from the current AST snapshot.
 | `data_engine.runtime.runtime_cache_store` | 1095 | 0 | 8 |
 | `data_engine.services.runtime_state` | 930 | 3 | 12 |
 | `data_engine.ui.gui.controllers.flows` | 830 | 0 | 3 |
-| `data_engine.ui.gui.theme` | 815 | 1 | 0 |
+| `data_engine.ui.gui.theme` | 825 | 2 | 0 |
 | `data_engine.ui.gui.controllers.runtime` | 793 | 0 | 1 |
 | `data_engine.devtools.smoke_data` | 759 | 24 | 0 |
 | `data_engine.core.primitives` | 631 | 1 | 11 |

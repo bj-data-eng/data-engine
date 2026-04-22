@@ -19,18 +19,18 @@ def test_short_source_label_collapses_empty_and_path_values():
     assert short_source_label(None) == "-"
     assert short_source_label("") == "-"
     assert short_source_label("None") == "-"
-    assert short_source_label("C:/input/claims.xlsx") == "claims.xlsx"
+    assert short_source_label("C:/input/docs.xlsx") == "docs.xlsx"
     assert short_source_label("relative/path/report.parquet") == "report.parquet"
 
 
 def test_format_runtime_message_formats_step_flow_and_fallback_messages():
-    step_message = "run=run-1 flow=poller step=Read Claims source=C:/input/claims.xlsx status=success elapsed=0.25"
+    step_message = "run=run-1 flow=poller step=Read Docs source=C:/input/docs.xlsx status=success elapsed=0.25"
     flow_message = "run=run-2 flow=poller source=C:/input/report.xlsx status=started"
-    fallback_message = "see /tmp/input/claims.xlsx and /var/log/app.log"
+    fallback_message = "see /tmp/input/docs.xlsx and /var/log/app.log"
 
-    assert format_runtime_message(step_message) == "poller  Read Claims  success  claims.xlsx"
+    assert format_runtime_message(step_message) == "poller  Read Docs  success  docs.xlsx"
     assert format_runtime_message(flow_message) == "poller  started  report.xlsx"
-    assert format_runtime_message(fallback_message) == "see claims.xlsx and app.log"
+    assert format_runtime_message(fallback_message) == "see docs.xlsx and app.log"
 
 
 def test_format_log_line_uses_record_message():
@@ -47,12 +47,12 @@ def test_format_log_line_uses_record_message():
     ("message", "expected"),
     [
         (
-            "run=run-1 flow=poller step=Read Claims source=C:/input/claims.xlsx status=success elapsed=0.25",
+            "run=run-1 flow=poller step=Read Docs source=C:/input/docs.xlsx status=success elapsed=0.25",
             RuntimeStepEvent(
                 run_id="run-1",
                 flow_name="poller",
-                step_name="Read Claims",
-                source_label="claims.xlsx",
+                step_name="Read Docs",
+                source_label="docs.xlsx",
                 status="success",
                 elapsed_seconds=0.25,
             ),
@@ -98,3 +98,4 @@ def test_flow_log_entry_format_runtime_message_staticmethod_delegates_to_module_
     message = "run=run-7 flow=poller source=C:/output/report.xlsx status=started"
 
     assert FlowLogEntry.format_runtime_message(message) == "poller  started  report.xlsx"
+

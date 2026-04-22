@@ -735,7 +735,7 @@ def write_parquet_atomic(df: pl.DataFrame, path: PathLike, **write_options: obje
 
         target = write_parquet_atomic(
             pl.DataFrame({"claim_id": [1, 2]}),
-            "workspaces/example/output/claims.parquet",
+            "workspaces/example/output/docs.parquet",
         )
 
         df = pl.DataFrame({"claim_id": [3]})
@@ -782,14 +782,14 @@ def write_excel_atomic(
 
         target = write_excel_atomic(
             pl.DataFrame({"claim_id": [1, 2]}),
-            "workspaces/example/output/claims.xlsx",
-            worksheet="Claims",
-            table_name="claims",
+            "workspaces/example/output/docs.xlsx",
+            worksheet="Docs",
+            table_name="docs",
             autofit=True,
         )
 
         df = pl.DataFrame({"claim_id": [3]})
-        df.de.write_excel_atomic(target, worksheet="Claims")
+        df.de.write_excel_atomic(target, worksheet="Docs")
     """
     return _write_atomic(
         path,
@@ -832,7 +832,7 @@ def sink_parquet_atomic(lf: pl.LazyFrame, path: PathLike, **sink_options: object
         import data_engine.helpers
 
         lf = pl.DataFrame({"claim_id": [1, 2]}).lazy()
-        lf.de.sink_parquet_atomic("workspaces/example/output/claims.parquet")
+        lf.de.sink_parquet_atomic("workspaces/example/output/docs.parquet")
     """
     if sink_options.get("lazy") is True:
         raise ValueError("Atomic LazyFrame parquet writes require eager sink execution; pass lazy=False or omit lazy.")

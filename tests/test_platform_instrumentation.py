@@ -39,12 +39,12 @@ def test_append_timing_line_writes_only_when_enabled(tmp_path: Path, monkeypatch
         log_path,
         scope="gui.sync",
         event="reload",
-        fields={"workspace": "claims2", "request_id": "req-123"},
+        fields={"workspace": "docs2", "request_id": "req-123"},
     )
     contents = log_path.read_text(encoding="utf-8")
     assert "scope=gui.sync" in contents
     assert "event=reload" in contents
-    assert "workspace=claims2" in contents
+    assert "workspace=docs2" in contents
     assert "request_id=req-123" in contents
 
 
@@ -55,13 +55,13 @@ def test_timed_operation_writes_only_end_when_threshold_is_crossed(tmp_path: Pat
         log_path,
         scope="daemon.runtime",
         event="run_flow",
-        fields={"flow": "claims"},
+        fields={"flow": "docs"},
         threshold_ms=0.0,
     ):
         pass
     lines = log_path.read_text(encoding="utf-8").splitlines()
     assert any("phase=end" in line and "elapsed_ms=" in line for line in lines)
-    assert any("flow=claims" in line for line in lines)
+    assert any("flow=docs" in line for line in lines)
 
 
 def test_timed_operation_skips_fast_operations_below_threshold(tmp_path: Path, monkeypatch) -> None:
@@ -76,3 +76,4 @@ def test_new_request_id_uses_prefix() -> None:
     request_id = new_request_id("run")
     assert request_id.startswith("run-")
     assert len(request_id) > 4
+

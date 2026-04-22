@@ -9,8 +9,8 @@ from pathlib import Path
 from openpyxl import Workbook
 
 
-DEFAULT_WORKSPACE_IDS = ("example_workspace", "claims2")
-_BASE_CLAIMS_COLUMNS = (
+DEFAULT_WORKSPACE_IDS = ("example_workspace", "docs2")
+_BASE_DOCS_COLUMNS = (
     "DCN",
     "Workflow",
     "Step FROM",
@@ -39,7 +39,7 @@ def build_smoke_environment(
     create_app_root: bool = False,
     rows_per_workbook: int = 2,
     parallel_rows_per_workbook: int | None = None,
-    column_count: int = len(_BASE_CLAIMS_COLUMNS),
+    column_count: int = len(_BASE_DOCS_COLUMNS),
 ) -> None:
     """Generate starter data roots plus authored workspaces under one root."""
     root = Path(root).expanduser().resolve()
@@ -60,7 +60,7 @@ def build_smoke_environment(
         rows_per_workbook=rows_per_workbook,
         column_count=column_count,
     )
-    create_parallel_claims_data_root(
+    create_parallel_docs_data_root(
         secondary_data_root,
         file_count=12,
         rows_per_workbook=parallel_rows_per_workbook or rows_per_workbook,
@@ -105,17 +105,17 @@ def create_python_flow_modules(
         flow_dir / "example_database_dimensions.py",
         _python_database_dimensions_source(data_folder_name=data_folder_name),
     )
-    if workspace_id == "claims2":
+    if workspace_id == "docs2":
         write_text_file(
-            flow_dir / "claims2_parallel_poll.py",
+            flow_dir / "docs2_parallel_poll.py",
             _python_parallel_poll_source(data_folder_name=data_folder_name),
         )
         write_text_file(
-            flow_dir / "claims2_parallel_schedule.py",
+            flow_dir / "docs2_parallel_schedule.py",
             _python_parallel_schedule_source(data_folder_name=data_folder_name),
         )
         write_text_file(
-            flow_dir / "claims2_parallel_manual.py",
+            flow_dir / "docs2_parallel_manual.py",
             _python_parallel_manual_source(data_folder_name=data_folder_name),
         )
 
@@ -151,27 +151,27 @@ def create_smoke_data_root(
     data_root: Path,
     *,
     rows_per_workbook: int = 2,
-    column_count: int = len(_BASE_CLAIMS_COLUMNS),
+    column_count: int = len(_BASE_DOCS_COLUMNS),
 ) -> None:
     """Generate one smoke-data root with starter Excel inputs and output folders."""
-    claims_flat = data_root / "Input" / "claims_flat"
+    docs_flat = data_root / "Input" / "docs_flat"
     settings_dir = data_root / "Settings"
     output_dir = data_root / "Output"
     database_dir = data_root / "databases"
-    claims_flat.mkdir(parents=True, exist_ok=True)
+    docs_flat.mkdir(parents=True, exist_ok=True)
     settings_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
     database_dir.mkdir(parents=True, exist_ok=True)
     if rows_per_workbook <= 0:
         raise ValueError("rows_per_workbook must be positive.")
-    if column_count < len(_BASE_CLAIMS_COLUMNS):
+    if column_count < len(_BASE_DOCS_COLUMNS):
         raise ValueError(
-            f"column_count must be at least {len(_BASE_CLAIMS_COLUMNS)} to preserve the starter claims schema."
+            f"column_count must be at least {len(_BASE_DOCS_COLUMNS)} to preserve the starter docs schema."
         )
 
     for index in range(1, 4):
-        workbook_path = claims_flat / f"claims_flat_{index}.xlsx"
-        _write_claims_workbook(
+        workbook_path = docs_flat / f"docs_flat_{index}.xlsx"
+        _write_docs_workbook(
             workbook_path,
             workbook_index=index,
             rows_per_workbook=rows_per_workbook,
@@ -179,7 +179,7 @@ def create_smoke_data_root(
         )
 
     settings_path = settings_dir / "single_watch.xlsx"
-    _write_claims_workbook(
+    _write_docs_workbook(
         settings_path,
         workbook_index=0,
         rows_per_workbook=rows_per_workbook,
@@ -187,33 +187,33 @@ def create_smoke_data_root(
     )
 
 
-def create_parallel_claims_data_root(
+def create_parallel_docs_data_root(
     data_root: Path,
     *,
     file_count: int = 12,
     rows_per_workbook: int = 2,
-    column_count: int = len(_BASE_CLAIMS_COLUMNS),
+    column_count: int = len(_BASE_DOCS_COLUMNS),
 ) -> None:
     """Generate one fixed-size parallel smoke dataset for file-scoped runtime tests."""
-    parallel_dir = data_root / "Input" / "claims_parallel_12"
+    parallel_dir = data_root / "Input" / "docs_parallel_12"
     parallel_dir.mkdir(parents=True, exist_ok=True)
     for index in range(1, file_count + 1):
-        _write_claims_workbook(
-            parallel_dir / f"claims_parallel_{index:02d}.xlsx",
+        _write_docs_workbook(
+            parallel_dir / f"docs_parallel_{index:02d}.xlsx",
             workbook_index=100 + index,
             rows_per_workbook=rows_per_workbook,
             column_count=column_count,
         )
 
 
-def _claims_headers(*, column_count: int) -> tuple[str, ...]:
-    extra_count = column_count - len(_BASE_CLAIMS_COLUMNS)
+def _docs_headers(*, column_count: int) -> tuple[str, ...]:
+    extra_count = column_count - len(_BASE_DOCS_COLUMNS)
     extra_columns = tuple(f"Attribute {index:02d}" for index in range(1, extra_count + 1))
-    return (*_BASE_CLAIMS_COLUMNS, *extra_columns)
+    return (*_BASE_DOCS_COLUMNS, *extra_columns)
 
 
-def _claims_row(*, workbook_index: int, row_number: int, column_count: int) -> tuple[object, ...]:
-    workflow = ("Claims", "Appeals", "Enrollment", "Billing")[row_number % 4]
+def _docs_row(*, workbook_index: int, row_number: int, column_count: int) -> tuple[object, ...]:
+    workflow = ("Docs", "Appeals", "Enrollment", "Billing")[row_number % 4]
     step_from = ("Receive", "Review", "Triage", "Audit")[row_number % 4]
     step_to = ("Review", "Approve", "Finalize", "Queue")[row_number % 4]
     base_values: list[object] = [
@@ -223,7 +223,7 @@ def _claims_row(*, workbook_index: int, row_number: int, column_count: int) -> t
         step_to,
         f"E-{((row_number + workbook_index) % 9000) + 1:04d}",
     ]
-    for extra_index in range(column_count - len(_BASE_CLAIMS_COLUMNS)):
+    for extra_index in range(column_count - len(_BASE_DOCS_COLUMNS)):
         if extra_index % 5 == 0:
             value: object = f"segment-{workbook_index}-{(row_number + extra_index) % 37:02d}"
         elif extra_index % 5 == 1:
@@ -238,7 +238,7 @@ def _claims_row(*, workbook_index: int, row_number: int, column_count: int) -> t
     return tuple(base_values)
 
 
-def _write_claims_workbook(
+def _write_docs_workbook(
     path: Path,
     *,
     workbook_index: int,
@@ -246,14 +246,14 @@ def _write_claims_workbook(
     column_count: int,
 ) -> None:
     workbook = Workbook(write_only=True)
-    claims_sheet = workbook.create_sheet("Claims")
-    claims_sheet.append(_claims_headers(column_count=column_count))
+    docs_sheet = workbook.create_sheet("Docs")
+    docs_sheet.append(_docs_headers(column_count=column_count))
     for row_number in range(1, rows_per_workbook + 1):
-        claims_sheet.append(_claims_row(workbook_index=workbook_index, row_number=row_number, column_count=column_count))
+        docs_sheet.append(_docs_row(workbook_index=workbook_index, row_number=row_number, column_count=column_count))
 
     summary_sheet = workbook.create_sheet("Summary")
     summary_sheet.append(("Sheet", "Rows", "Columns"))
-    summary_sheet.append(("Claims", rows_per_workbook, column_count))
+    summary_sheet.append(("Docs", rows_per_workbook, column_count))
     workbook.save(path)
 
 
@@ -298,7 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace-id",
         dest="workspace_ids",
         action="append",
-        help="Workspace id to generate. Defaults to example_workspace and claims2.",
+        help="Workspace id to generate. Defaults to example_workspace and docs2.",
     )
     parser.add_argument(
         "--primary-data-dir",
@@ -319,13 +319,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--rows-per-workbook",
         type=int,
         default=2,
-        help="Number of claim rows to generate in each workbook.",
+        help="Number of doc rows to generate in each workbook.",
     )
     parser.add_argument(
         "--column-count",
         type=int,
-        default=len(_BASE_CLAIMS_COLUMNS),
-        help="Total number of columns to generate in each claims workbook.",
+        default=len(_BASE_DOCS_COLUMNS),
+        help="Total number of columns to generate in each docs workbook.",
     )
     return parser
 
@@ -359,7 +359,7 @@ from data_engine import Flow
 DESCRIPTION = "Reads workbook inputs and writes mirrored parquet outputs."
 
 
-def read_claims(context):
+def read_docs(context):
     return pl.read_excel(context.source.path)
 
 
@@ -371,16 +371,16 @@ def write_target(context):
 
 def build():
     return (
-        Flow(name="example_mirror", group="Claims")
+        Flow(name="example_mirror", group="Docs")
         .watch(
             mode="poll",
-            source="../../../{data_folder_name}/Input/claims_flat",
+            source="../../../{data_folder_name}/Input/docs_flat",
             interval="5s",
             extensions=[".xlsx", ".xls", ".xlsm"],
             settle=1,
         )
         .mirror(root="../../../{data_folder_name}/Output/example_mirror")
-        .step(read_claims, label="Read Excel")
+        .step(read_docs, label="Read Excel")
         .step(write_target, label="Write Parquet")
     )
 """
@@ -398,8 +398,8 @@ DESCRIPTION = "Reads the settings workbook on a schedule and writes parquet outp
 
 def read_settings(context):
     first_sheet = pl.read_excel(context.source.path, sheet_id=1)
-    claims_sheet = pl.read_excel(context.source.path, sheet_name="Claims")
-    return pl.concat((first_sheet, claims_sheet), how="vertical_relaxed")
+    docs_sheet = pl.read_excel(context.source.path, sheet_name="Docs")
+    return pl.concat((first_sheet, docs_sheet), how="vertical_relaxed")
 
 
 def write_example_schedule(context):
@@ -427,11 +427,11 @@ from data_engine import Flow
 DESCRIPTION = "Manual starter flow that loads one workbook on demand and writes one parquet output."
 
 
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path)
 
 
-def combine_claims(context):
+def combine_docs(context):
     return pl.concat(context.current, how="vertical_relaxed")
 
 
@@ -445,9 +445,9 @@ def build():
     return (
         Flow(name="example_manual", group="Manual")
         .mirror(root="../../../{data_folder_name}/Output/example_manual")
-        .collect([".xlsx"], root="../../../{data_folder_name}/Input/claims_flat", label="Collect Files")
-        .map(read_claims, label="Read Excel")
-        .step(combine_claims, label="Combine Claims")
+        .collect([".xlsx"], root="../../../{data_folder_name}/Input/docs_flat", label="Collect Files")
+        .map(read_docs, label="Read Excel")
+        .step(combine_docs, label="Combine Docs")
         .step(write_target, label="Write Parquet")
     )
 """
@@ -462,10 +462,10 @@ from data_engine.helpers.duckdb import build_dimension
 from data_engine.helpers.duckdb import read_table
 from data_engine.helpers.duckdb import replace_table
 
-DESCRIPTION = "Manual starter flow that writes claims into a workspace-local DuckDB database and builds a surrogate-key dimension."
+DESCRIPTION = "Manual starter flow that writes docs into a workspace-local DuckDB database and builds a surrogate-key dimension."
 
 
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path).rename(
         {{
             "DCN": "claim_id",
@@ -477,38 +477,38 @@ def read_claims(file_ref):
     )
 
 
-def combine_claims(context):
+def combine_docs(context):
     frames = tuple(context.current)
     if not frames:
         return pl.DataFrame()
     return pl.concat(frames, how="vertical_relaxed").unique(maintain_order=True)
 
 
-def persist_claim_warehouse(context):
-    claims_df = context.current
-    db_path = context.database("claims/warehouse.duckdb")
+def persist_doc_warehouse(context):
+    docs_df = context.current
+    db_path = context.database("docs/warehouse.duckdb")
 
-    replace_table(db_path, "stage.claims_flat", df=claims_df, return_df=False)
+    replace_table(db_path, "stage.docs_flat", df=docs_df, return_df=False)
     build_dimension(
         db_path,
         "mart.dim_employee_workflow",
-        df=claims_df.select(["employee_id", "workflow"]).unique(maintain_order=True),
+        df=docs_df.select(["employee_id", "workflow"]).unique(maintain_order=True),
         key_column="employee_workflow_key",
         return_df=False,
     )
-    keyed_claims = attach_dimension(
+    keyed_docs = attach_dimension(
         db_path,
         "mart.dim_employee_workflow",
-        df=claims_df,
+        df=docs_df,
         on=["employee_id", "workflow"],
         key_column="employee_workflow_key",
     )
-    replace_table(db_path, "mart.fact_claim", df=keyed_claims, return_df=False)
-    return read_table(db_path, "mart.fact_claim")
+    replace_table(db_path, "mart.fact_doc", df=keyed_docs, return_df=False)
+    return read_table(db_path, "mart.fact_doc")
 
 
 def write_target(context):
-    output = context.mirror.file("claims_dimension_snapshot.parquet")
+    output = context.mirror.file("docs_dimension_snapshot.parquet")
     context.current.write_parquet(output)
     return output
 
@@ -517,10 +517,10 @@ def build():
     return (
         Flow(name="example_database_dimensions", group="Warehouse")
         .mirror(root="../../../{data_folder_name}/Output/example_database_dimensions")
-        .collect([".xlsx"], root="../../../{data_folder_name}/Input/claims_flat", label="Collect Files")
-        .map(read_claims, label="Read Excel")
-        .step(combine_claims, label="Combine Claims")
-        .step(persist_claim_warehouse, label="Build DuckDB Dimension")
+        .collect([".xlsx"], root="../../../{data_folder_name}/Input/docs_flat", label="Collect Files")
+        .map(read_docs, label="Read Excel")
+        .step(combine_docs, label="Combine Docs")
+        .step(persist_doc_warehouse, label="Build DuckDB Dimension")
         .step(write_target, label="Write Snapshot")
     )
 """
@@ -534,7 +534,7 @@ import polars as pl
 from data_engine.helpers import write_parquet_atomic
 
 
-def read_claims(context):
+def read_docs(context):
     return pl.read_excel(context.source.path)
 
 
@@ -544,7 +544,7 @@ def write_target(context):
     return output
 
 
-SOURCE_ROOT = "../../../{data_folder_name}/Input/claims_parallel_12"
+SOURCE_ROOT = "../../../{data_folder_name}/Input/docs_parallel_12"
 TARGET_ROOT = "../../../{data_folder_name}/Output/{output_folder_name}"
 """
 
@@ -555,15 +555,15 @@ def _python_parallel_poll_source(*, data_folder_name: str) -> str:
 
 from data_engine import Flow
 """
-        + _parallel_runtime_helpers(data_folder_name=data_folder_name, output_folder_name="claims2_parallel_poll")
+        + _parallel_runtime_helpers(data_folder_name=data_folder_name, output_folder_name="docs2_parallel_poll")
         + """
 
-DESCRIPTION = "Claims2 parallel poll demo with 12 source workbooks and bounded file concurrency."
+DESCRIPTION = "Docs2 parallel poll demo with 12 source workbooks and bounded file concurrency."
 
 
 def build():
     return (
-        Flow(name="claims2_parallel_poll", group="Parallel")
+        Flow(name="docs2_parallel_poll", group="Parallel")
         .watch(
             mode="poll",
             source=SOURCE_ROOT,
@@ -573,7 +573,7 @@ def build():
             max_parallel=4,
         )
         .mirror(root=TARGET_ROOT)
-        .step(read_claims, label="Read Excel")
+        .step(read_docs, label="Read Excel")
         .step(write_target, label="Write Parquet")
     )
 """
@@ -586,15 +586,15 @@ def _python_parallel_schedule_source(*, data_folder_name: str) -> str:
 
 from data_engine import Flow
 """
-        + _parallel_runtime_helpers(data_folder_name=data_folder_name, output_folder_name="claims2_parallel_schedule")
+        + _parallel_runtime_helpers(data_folder_name=data_folder_name, output_folder_name="docs2_parallel_schedule")
         + """
 
-DESCRIPTION = "Claims2 parallel schedule demo with 12 source workbooks and bounded file concurrency."
+DESCRIPTION = "Docs2 parallel schedule demo with 12 source workbooks and bounded file concurrency."
 
 
 def build():
     return (
-        Flow(name="claims2_parallel_schedule", group="Parallel")
+        Flow(name="docs2_parallel_schedule", group="Parallel")
         .watch(
             mode="schedule",
             run_as="individual",
@@ -604,7 +604,7 @@ def build():
             max_parallel=4,
         )
         .mirror(root=TARGET_ROOT)
-        .step(read_claims, label="Read Excel")
+        .step(read_docs, label="Read Excel")
         .step(write_target, label="Write Parquet")
     )
 """
@@ -617,15 +617,15 @@ def _python_parallel_manual_source(*, data_folder_name: str) -> str:
 
 from data_engine import Flow
 """
-        + _parallel_runtime_helpers(data_folder_name=data_folder_name, output_folder_name="claims2_parallel_manual")
+        + _parallel_runtime_helpers(data_folder_name=data_folder_name, output_folder_name="docs2_parallel_manual")
         + """
 
-DESCRIPTION = "Claims2 parallel manual demo with 12 source workbooks and bounded file concurrency."
+DESCRIPTION = "Docs2 parallel manual demo with 12 source workbooks and bounded file concurrency."
 
 
 def build():
     return (
-        Flow(name="claims2_parallel_manual", group="Parallel")
+        Flow(name="docs2_parallel_manual", group="Parallel")
         .watch(
             mode="manual",
             source=SOURCE_ROOT,
@@ -633,7 +633,7 @@ def build():
             max_parallel=4,
         )
         .mirror(root=TARGET_ROOT)
-        .step(read_claims, label="Read Excel")
+        .step(read_docs, label="Read Excel")
         .step(write_target, label="Write Parquet")
     )
 """
@@ -650,7 +650,7 @@ from data_engine import Flow
 DESCRIPTION = "Notebook-authored poll flow for smoke testing."
 
 
-def read_claims(context):
+def read_docs(context):
     return pl.read_excel(context.source.path)
 
 
@@ -665,13 +665,13 @@ def build():
         Flow(name="{workspace_id}_nb_poll", group="Notebook")
         .watch(
             mode="poll",
-            source="../../../{data_folder_name}/Input/claims_flat",
+            source="../../../{data_folder_name}/Input/docs_flat",
             interval="5s",
             extensions=[".xlsx", ".xls", ".xlsm"],
             settle=1,
         )
         .mirror(root="../../../{data_folder_name}/Output/{workspace_id}_nb_poll")
-        .step(read_claims, label="Read Excel")
+        .step(read_docs, label="Read Excel")
         .step(write_target, label="Write Parquet")
     )
 """
@@ -689,8 +689,8 @@ DESCRIPTION = "Notebook-authored schedule flow for smoke testing."
 
 def read_settings(context):
     first_sheet = pl.read_excel(context.source.path, sheet_id=1)
-    claims_sheet = pl.read_excel(context.source.path, sheet_name="Claims")
-    return pl.concat((first_sheet, claims_sheet), how="vertical_relaxed")
+    docs_sheet = pl.read_excel(context.source.path, sheet_name="Docs")
+    return pl.concat((first_sheet, docs_sheet), how="vertical_relaxed")
 
 
 def write_example_schedule(context):
@@ -718,11 +718,11 @@ from data_engine import Flow
 DESCRIPTION = "Notebook-authored manual flow for smoke testing."
 
 
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path)
 
 
-def combine_claims(context):
+def combine_docs(context):
     frames = tuple(context.current)
     if not frames:
         return pl.DataFrame()
@@ -730,7 +730,7 @@ def combine_claims(context):
 
 
 def write_target(context):
-    output = context.mirror.file("manual_claims.parquet")
+    output = context.mirror.file("manual_docs.parquet")
     context.current.write_parquet(output)
     return output
 
@@ -739,9 +739,9 @@ def build():
     return (
         Flow(name="{workspace_id}_nb_manual", group="Notebook")
         .mirror(root="../../../{data_folder_name}/Output/{workspace_id}_nb_manual")
-        .collect([".xlsx"], root="../../../{data_folder_name}/Input/claims_flat", label="Collect Files")
-        .map(read_claims, label="Read Excel")
-        .step(combine_claims, label="Combine Claims")
+        .collect([".xlsx"], root="../../../{data_folder_name}/Input/docs_flat", label="Collect Files")
+        .map(read_docs, label="Read Excel")
+        .step(combine_docs, label="Combine Docs")
         .step(write_target, label="Write Parquet")
     )
 """

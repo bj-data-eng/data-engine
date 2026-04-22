@@ -13,7 +13,7 @@ from data_engine.services.runtime_execution import RuntimeExecutionService
 
 
 def test_flow_execution_service_uses_injected_loader_and_discovery(tmp_path):
-    flow = Flow(name="claims", group="Claims")
+    flow = Flow(name="docs", group="Docs")
     load_calls: list[tuple[str, object | None]] = []
     discover_calls: list[object | None] = []
     service = FlowExecutionService(
@@ -21,15 +21,15 @@ def test_flow_execution_service_uses_injected_loader_and_discovery(tmp_path):
         discover_flows_func=lambda *, data_root=None: discover_calls.append(data_root) or (flow,),
     )
 
-    assert service.load_flow("claims", workspace_root=tmp_path) is flow
-    assert service.load_flows(("claims", "claims"), workspace_root=tmp_path) == (flow, flow)
+    assert service.load_flow("docs", workspace_root=tmp_path) is flow
+    assert service.load_flows(("docs", "docs"), workspace_root=tmp_path) == (flow, flow)
     assert service.discover_flows(workspace_root=tmp_path) == (flow,)
-    assert load_calls == [("claims", tmp_path), ("claims", tmp_path), ("claims", tmp_path)]
+    assert load_calls == [("docs", tmp_path), ("docs", tmp_path), ("docs", tmp_path)]
     assert discover_calls == [tmp_path]
 
 
 def test_runtime_execution_service_constructs_runtime_objects():
-    flow = Flow(name="claims", group="Claims")
+    flow = Flow(name="docs", group="Docs")
 
     class _Runtime:
         instances: list["_Runtime"] = []
@@ -87,12 +87,12 @@ def test_runtime_execution_service_constructs_runtime_objects():
     runtime_stop = Event()
     ledger = object()
 
-    assert service.run_once(flow, runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": False}
+    assert service.run_once(flow, runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"flows": ("docs",), "continuous": False}
     assert service.preview(flow, use="csv", runtime_ledger=ledger) == {"preview": "csv", "continuous": False}
-    assert service.run_manual(flow, runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": False}
-    assert service.run_continuous(flow, runtime_ledger=ledger, flow_stop_event=flow_stop) == {"flows": ("claims",), "continuous": True}
-    assert service.run_grouped((flow,), runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"grouped": ("claims",), "continuous": True}
-    assert service.run_grouped_continuous((flow,), runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"grouped": ("claims",), "continuous": True}
+    assert service.run_manual(flow, runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"flows": ("docs",), "continuous": False}
+    assert service.run_continuous(flow, runtime_ledger=ledger, flow_stop_event=flow_stop) == {"flows": ("docs",), "continuous": True}
+    assert service.run_grouped((flow,), runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"grouped": ("docs",), "continuous": True}
+    assert service.run_grouped_continuous((flow,), runtime_ledger=ledger, runtime_stop_event=runtime_stop, flow_stop_event=flow_stop) == {"grouped": ("docs",), "continuous": True}
 
     assert _Runtime.instances[0].continuous is False
     assert _Runtime.instances[1].continuous is False
@@ -105,7 +105,7 @@ def test_runtime_execution_service_constructs_runtime_objects():
 
 
 def test_runtime_execution_service_run_manual_releases_completed_flow_contexts() -> None:
-    flow = Flow(name="claims", group="Claims").step(lambda context: {"claim_id": 1}, save_as="result")
+    flow = Flow(name="docs", group="Docs").step(lambda context: {"claim_id": 1}, save_as="result")
     runtime_stop = Event()
     flow_stop = Event()
     ledger = object()
@@ -131,20 +131,20 @@ def test_runtime_execution_service_run_manual_releases_completed_flow_contexts()
         def run(self):
             return [
                 FlowContext(
-                    flow_name="claims",
-                    group="Claims",
-                    source=SourceContext(root=Path("/tmp/source"), path=Path("/tmp/source/claims.xlsx"), relative_path=Path("claims.xlsx")),
-                    mirror=MirrorContext(root=Path("/tmp/output"), source_path=Path("/tmp/source/claims.xlsx"), relative_path=Path("claims.xlsx")),
+                    flow_name="docs",
+                    group="Docs",
+                    source=SourceContext(root=Path("/tmp/source"), path=Path("/tmp/source/docs.xlsx"), relative_path=Path("docs.xlsx")),
+                    mirror=MirrorContext(root=Path("/tmp/output"), source_path=Path("/tmp/source/docs.xlsx"), relative_path=Path("docs.xlsx")),
                     current={"claim_id": 1},
                     objects={"result": {"claim_id": 1}},
                     metadata={"started_at_utc": "2026-04-21T00:00:00+00:00"},
                     config=WorkspaceConfigContext(workspace_root=Path("/tmp/workspace")),
                     debug=FlowDebugContext(
                         root=Path("/tmp/debug"),
-                        workspace_id="claims",
-                        flow_name="claims",
+                        workspace_id="docs",
+                        flow_name="docs",
                         run_id="run-1",
-                        source_path="/tmp/source/claims.xlsx",
+                        source_path="/tmp/source/docs.xlsx",
                     ),
                 )
             ]
@@ -170,8 +170,8 @@ def test_runtime_execution_service_run_manual_releases_completed_flow_contexts()
 
 
 def test_runtime_execution_service_exposes_explicit_engine_commands(tmp_path):
-    flow = Flow(name="claims", group="Claims")
-    source = tmp_path / "claims.csv"
+    flow = Flow(name="docs", group="Docs")
+    source = tmp_path / "docs.csv"
     source.write_text("claim_id\n1\n", encoding="utf-8")
 
     class _RunExecutor:
@@ -224,14 +224,14 @@ def test_runtime_execution_service_exposes_explicit_engine_commands(tmp_path):
     service = RuntimeExecutionService(flow_runtime_type=_Runtime)
 
     assert service.run_source(flow, source) == {
-        "flow": "claims",
+        "flow": "docs",
         "source_path": source,
         "batch_signatures": (),
     }
     assert service.run_batch(flow) == {
-        "flow": "claims",
+        "flow": "docs",
         "source_path": None,
-        "batch_signatures": ("claims:signature",),
+        "batch_signatures": ("docs:signature",),
     }
 
 
@@ -245,8 +245,8 @@ def test_runtime_execution_service_stop_requests_run_id_on_controller():
 
 
 def test_runtime_execution_service_run_automated_splits_poll_and_schedule_flows():
-    poll_flow = Flow(name="poll_claims", group="Claims").watch(mode="poll", source="/tmp/in", interval="5s").step(lambda context: context.current)
-    schedule_flow = Flow(name="schedule_claims", group="Claims").watch(mode="schedule", interval="10m").step(lambda context: context.current)
+    poll_flow = Flow(name="poll_docs", group="Docs").watch(mode="poll", source="/tmp/in", interval="5s").step(lambda context: context.current)
+    schedule_flow = Flow(name="schedule_docs", group="Docs").watch(mode="schedule", interval="10m").step(lambda context: context.current)
     scheduler_calls: list[tuple[str, object]] = []
 
     class _GroupedRuntime:
@@ -292,19 +292,19 @@ def test_runtime_execution_service_run_automated_splits_poll_and_schedule_flows(
         flow_stop_event=flow_stop,
     )
 
-    assert result == ("poll_claims",)
-    assert tuple(flow.name for flow in _GroupedRuntime.instances[0].flows) == ("poll_claims",)
+    assert result == ("poll_docs",)
+    assert tuple(flow.name for flow in _GroupedRuntime.instances[0].flows) == ("poll_docs",)
     assert _GroupedRuntime.instances[0].runtime_stop_event is runtime_stop
     assert _GroupedRuntime.instances[0].runtime_ledger is ledger
     assert scheduler_calls[1:] == [
-        ("rebuild", ("schedule_claims",)),
+        ("rebuild", ("schedule_docs",)),
         ("start", None),
         ("shutdown", None),
     ]
 
 
 def test_runtime_execution_service_run_automated_waits_for_schedule_only_flows():
-    schedule_flow = Flow(name="schedule_claims", group="Claims").watch(mode="schedule", interval="10m").step(lambda context: context.current)
+    schedule_flow = Flow(name="schedule_docs", group="Docs").watch(mode="schedule", interval="10m").step(lambda context: context.current)
     runtime_stop = Event()
     scheduler_calls: list[str] = []
 
@@ -330,4 +330,5 @@ def test_runtime_execution_service_run_automated_waits_for_schedule_only_flows()
     )
 
     assert result == []
-    assert scheduler_calls == ["rebuild:schedule_claims", "start", "shutdown"]
+    assert scheduler_calls == ["rebuild:schedule_docs", "start", "shutdown"]
+

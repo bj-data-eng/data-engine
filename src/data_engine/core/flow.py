@@ -37,7 +37,7 @@ class Flow:
         from data_engine import Flow
 
         flow = (
-            Flow(group="Claims")
+            Flow(group="Docs")
             .watch(mode="poll", source="incoming", interval="30s", extensions=[".xlsx"])
             .mirror(root="processed")
         )
@@ -112,9 +112,9 @@ class Flow:
 
             from data_engine import Flow
 
-            manual_flow = Flow(group="Claims").watch(mode="manual")
-            poll_flow = Flow(group="Claims").watch(mode="poll", source="incoming", interval="5s")
-            schedule_flow = Flow(group="Claims").watch(mode="schedule", interval="15m")
+            manual_flow = Flow(group="Docs").watch(mode="manual")
+            poll_flow = Flow(group="Docs").watch(mode="poll", source="incoming", interval="5s")
+            schedule_flow = Flow(group="Docs").watch(mode="schedule", interval="15m")
 
             assert manual_flow.mode == "manual"
             assert poll_flow.mode == "poll"
@@ -248,7 +248,7 @@ class Flow:
 
             from data_engine import Flow
 
-            flow = Flow(group="Claims").mirror(root="processed")
+            flow = Flow(group="Docs").mirror(root="processed")
 
             assert str(flow.mirror_spec.root).endswith("processed")
 
@@ -286,10 +286,10 @@ class Flow:
 
             from data_engine import Flow
 
-            def read_claims(context):
+            def read_docs(context):
                 return context.current
 
-            flow = Flow(group="Claims").step(read_claims, save_as="raw_df")
+            flow = Flow(group="Docs").step(read_docs, save_as="raw_df")
 
             assert flow.steps[0].save_as == "raw_df"
 
@@ -357,7 +357,7 @@ class Flow:
             def summarize(file_ref):
                 return file_ref.name
 
-            flow = Flow(group="Claims").collect(extensions=[".xlsx"]).map(fn=summarize)
+            flow = Flow(group="Docs").collect(extensions=[".xlsx"]).map(fn=summarize)
 
             assert len(flow.steps) == 2
 

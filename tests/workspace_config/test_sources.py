@@ -63,21 +63,21 @@ def test_local_workspace_namespace_does_not_require_path_resolve(tmp_path, monke
 
     monkeypatch.setattr(Path, "resolve", _resolve)
 
-    namespace = local_workspace_namespace(tmp_path / "workspace" / ".." / "workspace", "claims")
+    namespace = local_workspace_namespace(tmp_path / "workspace" / ".." / "workspace", "docs")
 
-    assert namespace.startswith("claims_")
+    assert namespace.startswith("docs_")
 
 
 def test_stable_path_identity_text_supports_case_insensitive_comparisons():
-    left = stable_path_identity_text(Path("C:/Workspace/Claims"), case_insensitive=True)
-    right = stable_path_identity_text(Path("c:/workspace/claims"), case_insensitive=True)
+    left = stable_path_identity_text(Path("C:/Workspace/Docs"), case_insensitive=True)
+    right = stable_path_identity_text(Path("c:/workspace/docs"), case_insensitive=True)
 
     assert left == right
 
 
 def test_local_workspace_namespace_uses_platform_default_path_identity():
-    upper = local_workspace_namespace(Path("C:/Workspace/Claims"), "claims")
-    lower = local_workspace_namespace(Path("c:/workspace/claims"), "claims")
+    upper = local_workspace_namespace(Path("C:/Workspace/Docs"), "docs")
+    lower = local_workspace_namespace(Path("c:/workspace/docs"), "docs")
 
     if os.name == "nt":
         assert upper == lower
@@ -145,11 +145,11 @@ def test_load_settings_and_discover_workspaces_from_collection_root(tmp_path, mo
 def test_load_settings_supports_relative_collection_root(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     collection_root = tmp_path / "shared_workspaces"
-    (collection_root / "claims" / "flow_modules").mkdir(parents=True)
+    (collection_root / "docs" / "flow_modules").mkdir(parents=True)
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     store = LocalSettingsStore.open_default(app_root=app_root)
     store.set_workspace_collection_root(collection_root)
-    store.set_default_workspace_id("claims")
+    store.set_default_workspace_id("docs")
     monkeypatch.delenv(DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR, raising=False)
     monkeypatch.delenv(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR, raising=False)
     monkeypatch.delenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, raising=False)
@@ -158,8 +158,8 @@ def test_load_settings_supports_relative_collection_root(tmp_path, monkeypatch):
     discovered = discover_workspaces()
 
     assert settings.workspace_collection_root == collection_root.resolve()
-    assert settings.default_selected == "claims"
-    assert [item.workspace_id for item in discovered] == ["claims"]
+    assert settings.default_selected == "docs"
+    assert [item.workspace_id for item in discovered] == ["docs"]
 
 
 def test_load_settings_leaves_workspace_collection_root_unconfigured_when_unset(tmp_path, monkeypatch):
@@ -187,7 +187,7 @@ def test_unconfigured_workspace_ignores_stale_default_selected_when_no_collectio
     monkeypatch.delenv(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR, raising=False)
     monkeypatch.delenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, raising=False)
     store = LocalSettingsStore.open_default(app_root=app_root)
-    store.set_default_workspace_id("claims")
+    store.set_default_workspace_id("docs")
 
     resolved = resolve_workspace_paths()
 
@@ -215,13 +215,13 @@ def test_write_workspace_settings_persists_default_and_collection_root(tmp_path)
         state_root=state_root,
         runtime_root=state_root / "artifacts",
         workspace_collection_root=tmp_path / "shared_workspaces",
-        default_selected="claims",
+        default_selected="docs",
     )
 
     write_workspace_settings(settings)
 
     store = LocalSettingsStore(settings_path)
-    assert store.default_workspace_id() == "claims"
+    assert store.default_workspace_id() == "docs"
     assert store.workspace_collection_root() == (tmp_path / "shared_workspaces").resolve()
     assert store.runtime_root() == (state_root / "artifacts").resolve()
 
@@ -271,3 +271,4 @@ def test_resolve_workspace_paths_rejects_unsafe_workspace_ids(tmp_path, monkeypa
 def test_local_workspace_namespace_rejects_unsafe_workspace_ids(tmp_path, workspace_id):
     with pytest.raises(InvalidWorkspaceIdError):
         local_workspace_namespace(tmp_path / "workspace", workspace_id)
+

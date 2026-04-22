@@ -558,7 +558,6 @@ def test_stop_engine_requests_graceful_runtime_stop_without_flow_interrupt(tmp_p
     finally:
         service._shutdown()  # noqa: SLF001
 
-
 def test_stop_engine_can_request_shutdown_when_idle_for_last_client_disconnect(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
@@ -793,3 +792,4 @@ def test_daemon_projection_tracks_engine_lifecycle(tmp_path, monkeypatch):
     finally:
         release_engine.set()
         service._shutdown()  # noqa: SLF001
+

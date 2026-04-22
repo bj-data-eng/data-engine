@@ -348,7 +348,7 @@ class FlowContext:
 
         from data_engine.core.primitives import FlowContext
 
-        context = FlowContext(flow_name="claims", group="Claims", current=1)
+        context = FlowContext(flow_name="docs", group="Docs", current=1)
         context.objects["raw"] = context.current
 
         assert context.current == 1
@@ -389,7 +389,7 @@ class FlowContext:
         ----------
         name : str | Path
             Relative database file name, such as ``"analytics.duckdb"`` or
-            ``"claims/analytics.duckdb"``.
+            ``"docs/analytics.duckdb"``.
 
         Returns
         -------

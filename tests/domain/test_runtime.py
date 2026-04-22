@@ -9,7 +9,7 @@ def _sample_cards() -> tuple[FlowCatalogEntry, ...]:
         FlowCatalogEntry(
             name="poller",
             group="Imports",
-            title="Claims Poller",
+            title="Docs Poller",
             description="",
             source_root="/tmp/input",
             target_root="/tmp/output",
@@ -69,7 +69,7 @@ def test_runtime_session_state_prefers_daemon_active_engine_flow_names():
         FlowCatalogEntry(
             name="scheduler",
             group="Imports",
-            title="Claims Schedule",
+            title="Docs Schedule",
             description="",
             source_root="/tmp/input",
             target_root="/tmp/output",
@@ -183,3 +183,4 @@ def test_workspace_control_state_reports_local_request_pending():
 
     assert control.local_request_pending is True
     assert control.control_status_text == "Control requested from other-host"
+

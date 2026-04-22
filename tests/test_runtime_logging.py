@@ -37,8 +37,8 @@ def test_queued_runtime_log_sink_flushes_shared_batches_on_last_close():
     first_emitter = RuntimeLogEmitter(first)
     second_emitter = RuntimeLogEmitter(second)
 
-    first_emitter.log_runtime_message("first", level="info", run_id="run-1", flow_name="claims_poll", step_label="Read Excel")
-    second_emitter.log_runtime_message("second", level="info", run_id="run-1", flow_name="claims_poll", step_label="Write Parquet")
+    first_emitter.log_runtime_message("first", level="info", run_id="run-1", flow_name="docs_poll", step_label="Read Excel")
+    second_emitter.log_runtime_message("second", level="info", run_id="run-1", flow_name="docs_poll", step_label="Write Parquet")
 
     first.close()
     assert sink.rows == []
@@ -53,11 +53,12 @@ def test_queued_runtime_log_sink_flushes_shared_batches_on_last_close():
 def test_queued_runtime_log_sink_can_be_reacquired_after_last_close():
     sink = _FakeLogSink()
     first = acquire_queued_runtime_log_sink(sink, flush_interval_seconds=0.001, max_batch_size=100)
-    RuntimeLogEmitter(first).log_runtime_message("first", level="info", run_id="run-1", flow_name="claims_poll")
+    RuntimeLogEmitter(first).log_runtime_message("first", level="info", run_id="run-1", flow_name="docs_poll")
     first.close()
 
     second = acquire_queued_runtime_log_sink(sink, flush_interval_seconds=0.001, max_batch_size=100)
-    RuntimeLogEmitter(second).log_runtime_message("second", level="info", run_id="run-2", flow_name="claims_poll")
+    RuntimeLogEmitter(second).log_runtime_message("second", level="info", run_id="run-2", flow_name="docs_poll")
     second.close()
 
     assert [row[1] for row in sink.rows] == ["first", "second"]
+

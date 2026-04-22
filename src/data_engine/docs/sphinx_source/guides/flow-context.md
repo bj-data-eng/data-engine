@@ -69,7 +69,7 @@ They are useful when you want to:
 This is why most steps are so small:
 
 ```python
-def clean_claims(context):
+def clean_docs(context):
     return context.current.filter(...)
 ```
 
@@ -85,9 +85,9 @@ Example:
 
 ```python
 (
-    Flow(group="Claims")
-    .step(read_claims, save_as="raw_df")
-    .step(clean_claims, use="raw_df", save_as="clean_df")
+    Flow(group="Docs")
+    .step(read_docs, save_as="raw_df")
+    .step(clean_docs, use="raw_df", save_as="clean_df")
     .step(write_output, use="clean_df")
 )
 ```
@@ -194,8 +194,8 @@ Use `save_as=` and `use=` when:
 Available helpers are:
 
 ```python
-context.config.get("claims")
-context.config.require("claims")
+context.config.get("docs")
+context.config.require("docs")
 context.config.names()
 context.config.all()
 ```
@@ -208,7 +208,7 @@ Use this when the config file is optional:
 
 ```python
 def apply_runtime_config(context):
-    cfg = context.config.get("claims")
+    cfg = context.config.get("docs")
     if cfg is None:
         return context.current
     batch_size = cfg.get("runtime", {}).get("batch_size", 5000)
@@ -235,7 +235,7 @@ def load_required_settings(context):
 Returns available config stems such as:
 
 ```python
-("claims", "runtime")
+("docs", "runtime")
 ```
 
 This is mostly useful for introspection or diagnostics.
@@ -269,12 +269,12 @@ all_config = context.config.all()
 Example:
 
 ```python
-db_path = context.database("claims/db.duckdb")
+db_path = context.database("docs/db.duckdb")
 ```
 
 That resolves to:
 
-- `workspaces/<workspace_id>/databases/claims/db.duckdb`
+- `workspaces/<workspace_id>/databases/docs/db.duckdb`
 
 Rules:
 
@@ -290,7 +290,7 @@ import duckdb
 
 
 def write_summary(context):
-    db_path = context.database("claims/analytics.duckdb")
+    db_path = context.database("docs/analytics.duckdb")
     conn = duckdb.connect(db_path)
     try:
         ...
@@ -352,7 +352,7 @@ The concrete active source file path.
 This is the simplest and most direct read-side path:
 
 ```python
-def read_claims(context):
+def read_docs(context):
     return pl.read_excel(context.source.path)
 ```
 
@@ -423,8 +423,8 @@ context.mirror.dir
 context.mirror.folder
 context.mirror.with_extension(".parquet")
 context.mirror.with_suffix(".parquet")
-context.mirror.file("open_claims.parquet")
-context.mirror.namespaced_file("open_claims.parquet")
+context.mirror.file("open_docs.parquet")
+context.mirror.namespaced_file("open_docs.parquet")
 context.mirror.root_file("analytics.duckdb")
 ```
 
@@ -458,8 +458,8 @@ Use this for multiple outputs derived from one source:
 
 ```python
 def write_outputs(context):
-    open_path = context.mirror.namespaced_file("open_claims.parquet")
-    closed_path = context.mirror.namespaced_file("closed_claims.parquet")
+    open_path = context.mirror.namespaced_file("open_docs.parquet")
+    closed_path = context.mirror.namespaced_file("closed_docs.parquet")
     ...
 ```
 
@@ -520,7 +520,7 @@ That means later steps can work with:
 Example:
 
 ```python
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path)
 ```
 
@@ -537,19 +537,19 @@ import polars as pl
 from data_engine import Flow
 
 
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path)
 
 
-def combine_claims(context):
-    cfg = context.config.get("claims") or {}
+def combine_docs(context):
+    cfg = context.config.get("docs") or {}
     batch_size = cfg.get("runtime", {}).get("batch_size", 5000)
     context.metadata["batch_size"] = batch_size
     return pl.concat(context.current, how="vertical_relaxed")
 
 
 def summarize(context):
-    db_path = context.database("claims/analytics.duckdb")
+    db_path = context.database("docs/analytics.duckdb")
     conn = duckdb.connect(db_path)
     try:
         conn.register("input", context.current)
@@ -566,12 +566,12 @@ def summarize(context):
 
 def build():
     return (
-        Flow(group="Claims")
-        .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/claims_flat")
+        Flow(group="Docs")
+        .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/docs_flat")
         .mirror(root="../../example_data/Output/example_summary")
-        .collect([".xlsx"], save_as="claim_files")
-        .map(read_claims, use="claim_files", save_as="claim_frames")
-        .step(combine_claims, use="claim_frames", save_as="raw_df")
+        .collect([".xlsx"], save_as="doc_files")
+        .map(read_docs, use="doc_files", save_as="doc_frames")
+        .step(combine_docs, use="doc_frames", save_as="raw_df")
         .step(summarize, use="raw_df")
     )
 ```

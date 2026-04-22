@@ -108,7 +108,7 @@ def test_wait_for_daemon_status_returns_after_projection_change(tmp_path, monkey
                 run_id="run-1",
                 flow_name="demo",
                 group_name="Demo",
-                source_path="claims.xlsx",
+                source_path="docs.xlsx",
                 started_at_utc=utcnow_text(),
             )
             service._publish_runtime_event("runtime.execution.changed")  # noqa: SLF001
@@ -425,7 +425,7 @@ def test_daemon_status_includes_active_runs_from_runtime_execution_bridge(tmp_pa
             run_id="run-1",
             flow_name="demo",
             group_name="Demo",
-            source_path="claims.xlsx",
+            source_path="docs.xlsx",
             started_at_utc=started_at,
         )
         service.runtime_execution_ledger.execution_state.record_step_started(
@@ -443,7 +443,7 @@ def test_daemon_status_includes_active_runs_from_runtime_execution_bridge(tmp_pa
                 "run_id": "run-1",
                 "flow_name": "demo",
                 "group_name": "Demo",
-                "source_path": "claims.xlsx",
+                "source_path": "docs.xlsx",
                 "state": "running",
                 "current_step_name": "Emit Value",
                 "current_step_started_at_utc": started_at,
@@ -490,7 +490,7 @@ def test_runtime_execution_events_update_projection_without_full_state_refresh(t
             run_id="run-1",
             flow_name="demo",
             group_name="Demo",
-            source_path="claims.xlsx",
+            source_path="docs.xlsx",
             started_at_utc=started_at,
         )
         service.runtime_execution_ledger.execution_state.record_step_started(
@@ -508,7 +508,7 @@ def test_runtime_execution_events_update_projection_without_full_state_refresh(t
                 "run_id": "run-1",
                 "flow_name": "demo",
                 "group_name": "Demo",
-                "source_path": "claims.xlsx",
+                "source_path": "docs.xlsx",
                 "state": "running",
                 "current_step_name": "Emit Value",
                 "current_step_started_at_utc": started_at,
@@ -536,7 +536,7 @@ def test_initialize_service_reconciles_orphaned_active_runtime_rows(tmp_path, mo
         run_id="run-1",
         flow_name="demo",
         group_name="Demo",
-        source_path="claims.xlsx",
+        source_path="docs.xlsx",
         started_at_utc=started_at,
     )
     ledger.execution_state.record_step_started(

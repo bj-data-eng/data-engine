@@ -15,9 +15,9 @@ from data_engine.views.models import QtFlowCard
 
 def _card(*, mode: str = "poll", state: str = "polling", valid: bool = True) -> QtFlowCard:
     return QtFlowCard(
-        name="claims_poller",
-        group="Claims",
-        title="Claims Poller",
+        name="docs_poller",
+        group="Docs",
+        title="Docs Poller",
         description="Polls for new claim workbooks.",
         source_root="/tmp/input",
         target_root="/tmp/output",
@@ -38,7 +38,7 @@ def _run_group(*, status: str = "success", source_label: str = "input.xlsx", ela
         kind="flow",
         event=RuntimeStepEvent(
             run_id="run-1",
-            flow_name="claims_poller",
+            flow_name="docs_poller",
             step_name="Read",
             source_label=source_label,
             status=status,
@@ -46,7 +46,7 @@ def _run_group(*, status: str = "success", source_label: str = "input.xlsx", ela
         ),
     )
     return FlowRunState(
-        key=("claims_poller", "run-1"),
+        key=("docs_poller", "run-1"),
         display_label="2026-04-04 09:15:00 AM",
         source_label=source_label,
         status=status,
@@ -67,9 +67,9 @@ def _run_group(*, status: str = "success", source_label: str = "input.xlsx", ela
 def test_flow_list_item_renders_and_refreshes_current_state():
     item = FlowListItem(_card(), "polling")
 
-    assert item.card.name == "claims_poller"
+    assert item.card.name == "docs_poller"
     assert item.card_state == "polling"
-    assert "Claims Poller" in item.label.render().plain
+    assert "Docs Poller" in item.label.render().plain
     assert "*" in item.label.render().plain
 
     item.refresh_view("success")
@@ -80,13 +80,13 @@ def test_flow_list_item_renders_and_refreshes_current_state():
 
 
 def test_group_header_list_item_uses_uppercase_title_and_pluralization():
-    singular = GroupHeaderListItem("Claims", 1)
-    plural = GroupHeaderListItem("Claims", 2)
+    singular = GroupHeaderListItem("Docs", 1)
+    plural = GroupHeaderListItem("Docs", 2)
 
-    assert singular.group_name == "Claims"
+    assert singular.group_name == "Docs"
     assert singular.disabled is True
-    assert singular.label.render().plain == "CLAIMS  1 flow"
-    assert plural.label.render().plain == "CLAIMS  2 flows"
+    assert singular.label.render().plain == "DOCS  1 flow"
+    assert plural.label.render().plain == "DOCS  2 flows"
 
 
 def test_run_group_list_item_refreshes_from_current_run_group():
@@ -147,3 +147,4 @@ async def test_info_modal_compose_and_dismiss_bindings_are_wired():
         modal.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="other")))
 
         assert modal.dismissed == [None, None]
+

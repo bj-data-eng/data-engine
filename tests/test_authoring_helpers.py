@@ -99,25 +99,25 @@ def test_title_case_words_normalizes_common_name_shapes(raw: str, expected: str)
 
 
 def test_callable_name_and_identifier_cover_functions_classes_lambdas_and_instances():
-    def build_claims_summary():
+    def build_docs_summary():
         return None
 
-    class ClaimsCleaner:
+    class DocsCleaner:
         def __call__(self):
             return None
 
     class ExplicitClass:
         pass
 
-    instance = ClaimsCleaner()
+    instance = DocsCleaner()
     lambda_fn = lambda: None  # noqa: E731
 
-    assert _callable_name(build_claims_summary) == "Build Claims Summary"
-    assert _callable_identifier(build_claims_summary) == "build_claims_summary"
+    assert _callable_name(build_docs_summary) == "Build Docs Summary"
+    assert _callable_identifier(build_docs_summary) == "build_docs_summary"
     assert _callable_name(ExplicitClass) == "Explicit Class"
     assert _callable_identifier(ExplicitClass) == "ExplicitClass"
-    assert _callable_name(instance) == "Claims Cleaner"
-    assert _callable_identifier(instance) == "ClaimsCleaner"
+    assert _callable_name(instance) == "Docs Cleaner"
+    assert _callable_identifier(instance) == "DocsCleaner"
     assert _callable_name(lambda_fn) == "Lambda"
     assert _callable_identifier(lambda_fn) == "<lambda>"
 
@@ -176,4 +176,5 @@ def test_validate_label_normalizes_valid_values(label: str | None, expected: str
 def test_validate_label_rejects_invalid_values(label):
     with pytest.raises(FlowValidationError):
         _validate_label(method_name="step", label=label)
+
 

@@ -13,7 +13,7 @@ That is an important design choice:
 ## Core fields
 
 ```python
-Flow(group="Claims")
+Flow(group="Docs")
 ```
 
 `group` is author-defined. The flow-module filename provides the flow identity.
@@ -37,9 +37,9 @@ Flow(group="Settings").watch(
 Directory polling:
 
 ```python
-Flow(group="Claims").watch(
+Flow(group="Docs").watch(
     mode="poll",
-    source="../../example_data/Input/claims_flat",
+    source="../../example_data/Input/docs_flat",
     interval="5s",
     extensions=[".xlsx", ".xls", ".xlsm"],
     settle=1,
@@ -55,7 +55,7 @@ Flow(group="Analytics").watch(
     mode="schedule",
     run_as="batch",
     interval="15m",
-    source="../../example_data/Input/claims_flat",
+    source="../../example_data/Input/docs_flat",
 ).mirror(
     root="../../example_data/Output/example_summary",
 )
@@ -130,7 +130,7 @@ Inside steps:
 ```python
 context.mirror.with_suffix(".parquet")
 context.mirror.file("summary.json")
-context.mirror.namespaced_file("open_claims.parquet")
+context.mirror.namespaced_file("open_docs.parquet")
 context.mirror.root_file("analytics.duckdb")
 ```
 
@@ -146,9 +146,9 @@ Use `collect(...)` and `map(...)` or `step_each(...)` together for folder-orient
 
 ```python
 Flow(group="Analytics") \
-    .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/claims_flat") \
-    .collect([".xlsx"], save_as="claim_files") \
-    .map(read_claims, use="claim_files", save_as="claim_frames")
+    .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/docs_flat") \
+    .collect([".xlsx"], save_as="doc_files") \
+    .map(read_docs, use="doc_files", save_as="doc_frames")
 ```
 
 `collect(...)` gathers matching files into a `Batch` of `FileRef` items. `map(...)` is the per-item stage in that pipeline, and `step_each(...)` is the equivalent alias. Both raise immediately when the batch is empty.
@@ -168,9 +168,9 @@ Examples:
 
 ```python
 (
-    Flow(group="Claims")
-    .step(read_claims, save_as="raw_df")
-    .step(clean_claims, use="raw_df", save_as="clean_df")
+    Flow(group="Docs")
+    .step(read_docs, save_as="raw_df")
+    .step(clean_docs, use="raw_df", save_as="clean_df")
     .step(write_output, use="clean_df", label="Write Parquet")
 )
 ```

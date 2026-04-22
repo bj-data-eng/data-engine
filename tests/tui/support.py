@@ -57,7 +57,7 @@ def sample_qt_flow_cards() -> tuple[QtFlowCard, ...]:
         QtFlowCard(
             name="poller",
             group="Imports",
-            title="Claims Poller",
+            title="Docs Poller",
             description="Polls for new claim workbooks.",
             source_root="/tmp/input",
             target_root="/tmp/output",
@@ -422,3 +422,4 @@ def make_tui(
         resolve_workspace_paths_func=resolve_workspace_paths_func or resolve_workspace_paths,
     )
     return app_cls(services=services)
+

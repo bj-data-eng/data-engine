@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace-id",
         dest="workspace_ids",
         action="append",
-        help="Workspace id to exercise. Defaults to example_workspace and claims2 when present.",
+        help="Workspace id to exercise. Defaults to example_workspace and docs2 when present.",
     )
     parser.add_argument(
         "--run-once-flow",
@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     workspace_paths: list[Any] = []
     workspace_ids: list[str] = []
     try:
-        workspace_ids = args.workspace_ids or ["example_workspace", "claims2"]
+        workspace_ids = args.workspace_ids or ["example_workspace", "docs2"]
 
         build_temp_smoke_environment(temp_root=temp_root, workspace_ids=workspace_ids)
         os.environ[DATA_ENGINE_APP_ROOT_ENV_VAR] = str(temp_app_root)

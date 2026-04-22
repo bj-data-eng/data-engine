@@ -128,7 +128,7 @@ def _sample_qt_flow_cards() -> tuple[QtFlowCard, ...]:
         QtFlowCard(
             name="poller",
             group="Imports",
-            title="Claims Poller",
+            title="Docs Poller",
             description="Polls for new claim workbooks.",
             source_root="/tmp/input",
             target_root="/tmp/output",
@@ -165,7 +165,7 @@ def _sample_multi_active_qt_flow_cards() -> tuple[QtFlowCard, ...]:
         QtFlowCard(
             name="poller_a",
             group="Imports",
-            title="Claims Poller A",
+            title="Docs Poller A",
             description="Polls for new claim workbooks.",
             source_root="/tmp/input-a",
             target_root="/tmp/output-a",
@@ -181,7 +181,7 @@ def _sample_multi_active_qt_flow_cards() -> tuple[QtFlowCard, ...]:
         QtFlowCard(
             name="poller_b",
             group="Imports",
-            title="Claims Poller B",
+            title="Docs Poller B",
             description="Polls for new claim workbooks.",
             source_root="/tmp/input-b",
             target_root="/tmp/output-b",
@@ -629,7 +629,7 @@ def test_theme_helpers_cover_light_and_dark():
 def test_parse_runtime_event_extracts_step_elapsed():
     record = logging.makeLogRecord(
         {
-            "msg": "run=run-123 flow=claims_poll step=Write Parquet source=/tmp/input.xlsx status=success elapsed=0.532100"
+            "msg": "run=run-123 flow=docs_poll step=Write Parquet source=/tmp/input.xlsx status=success elapsed=0.532100"
         }
     )
 
@@ -637,7 +637,7 @@ def test_parse_runtime_event_extracts_step_elapsed():
 
     assert event is not None
     assert event.run_id == "run-123"
-    assert event.flow_name == "claims_poll"
+    assert event.flow_name == "docs_poll"
     assert event.step_name == "Write Parquet"
     assert event.source_label == "input.xlsx"
     assert event.status == "success"
@@ -699,18 +699,18 @@ def test_provision_workspace_button_creates_missing_workspace_assets(qapp, tmp_p
                 preserved_paths=(),
             )
 
-    workspace_collection_root = tmp_path / "claims_workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
+    workspace_collection_root = tmp_path / "docs_workspaces"
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
 
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     provisioning_service = _RecordingProvisioningService()
@@ -719,10 +719,10 @@ def test_provision_workspace_button_creates_missing_workspace_assets(qapp, tmp_p
         discover_workspaces_func=lambda app_root=None, workspace_collection_root=None: discovered,
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
     )
-    selected_paths = resolve_workspace_paths(workspace_root=claims2_root, workspace_id="claims2")
+    selected_paths = resolve_workspace_paths(workspace_root=docs2_root, workspace_id="docs2")
 
     try:
-        target_index = window.workspace_settings_selector.findData("claims2")
+        target_index = window.workspace_settings_selector.findData("docs2")
         assert target_index >= 0
         window.workspace_settings_selector.setCurrentIndex(target_index)
         qapp.processEvents()
@@ -736,7 +736,7 @@ def test_provision_workspace_button_creates_missing_workspace_assets(qapp, tmp_p
 
         assert provisioning_service.requested_paths is not None
         assert provisioning_service.requested_paths.workspace_root == selected_paths.workspace_root
-        assert window.workspace_paths.workspace_id == "claims"
+        assert window.workspace_paths.workspace_id == "docs"
         assert (selected_paths.workspace_root / "flow_modules").is_dir()
         assert selected_paths.workspace_id in window.workspace_target_label.text()
         assert f"Provisioned {selected_paths.workspace_root.name}" in window.workspace_provision_status_label.text()
@@ -767,17 +767,17 @@ def test_structured_error_content_parses_step_failure(qapp, monkeypatch):
     window = _make_window()
     try:
         parsed = window._structured_error_content(
-            'Flow "claims_summary" failed in step "Combine Claims" (function combine_claims) '
+            'Flow "docs_summary" failed in step "Combine Docs" (function combine_docs) '
             'for source "/tmp/input.xlsx": ValueError: boom'
         )
 
         assert parsed is not None
         assert parsed.title == "Flow Failed"
         assert tuple((field.label, field.value) for field in parsed.fields) == (
-            ("Flow", "claims_summary"),
+            ("Flow", "docs_summary"),
             ("Phase", "step"),
-            ("Step", "Combine Claims"),
-            ("Function", "combine_claims"),
+            ("Step", "Combine Docs"),
+            ("Function", "combine_docs"),
             ("Source", "/tmp/input.xlsx"),
         )
         assert parsed.detail == "ValueError: boom"
@@ -790,13 +790,13 @@ def test_structured_error_content_parses_build_failure(qapp, monkeypatch):
     window = _make_window()
     try:
         parsed = window._structured_error_content(
-            'Flow module "claims_summary" failed during build() in build: RuntimeError: build boom'
+            'Flow module "docs_summary" failed during build() in build: RuntimeError: build boom'
         )
 
         assert parsed is not None
         assert parsed.title == "Flow Module Failed"
         assert tuple((field.label, field.value) for field in parsed.fields) == (
-            ("Flow Module", "claims_summary"),
+            ("Flow Module", "docs_summary"),
             ("Phase", "build"),
             ("Function", "build"),
         )
@@ -811,7 +811,7 @@ def test_structured_error_content_parses_missing_flow_module_error(qapp, monkeyp
     try:
         parsed = window._structured_error_content(
             "Flow module 'broken_step' is not available in /tmp/workspace/flow_modules. "
-            "Available flow modules: claims_demo, manual_claims_demo."
+            "Available flow modules: docs_demo, manual_docs_demo."
         )
 
         assert parsed is not None
@@ -819,7 +819,7 @@ def test_structured_error_content_parses_missing_flow_module_error(qapp, monkeyp
         assert tuple((field.label, field.value) for field in parsed.fields) == (
             ("Flow Module", "broken_step"),
             ("Workspace", "/tmp/workspace/flow_modules"),
-            ("Available", "claims_demo, manual_claims_demo"),
+            ("Available", "docs_demo, manual_docs_demo"),
         )
         assert "broken_step" in parsed.detail
     finally:
@@ -1005,7 +1005,7 @@ def test_data_engine_window_instantiates_and_loads_flow_cards(qapp, monkeypatch)
         assert set(window.sidebar_flow_widgets) == {"poller", "manual_review"}
         poller_widget = window.sidebar_flow_widgets["poller"]
         primary_label = next(label for label in poller_widget.findChildren(QLabel) if label.objectName() == "sidebarFlowCode")
-        assert primary_label.text() == "Claims Poller"
+        assert primary_label.text() == "Docs Poller"
 
         _click_flow_row(window, "manual_review")
         assert window.selected_flow_name == "manual_review"
@@ -1035,7 +1035,7 @@ def test_data_engine_window_nav_buttons_switch_views(qapp, monkeypatch):
 
 
 def test_refresh_button_reloads_flows(qapp, monkeypatch, tmp_path):
-    workspace_root = tmp_path / "workspaces" / "claims"
+    workspace_root = tmp_path / "workspaces" / "docs"
     (workspace_root / "flow_modules").mkdir(parents=True)
     del monkeypatch
     control_application = _FakeControlApplication()
@@ -1054,7 +1054,7 @@ def test_refresh_button_reloads_flows(qapp, monkeypatch, tmp_path):
         command_service=_command_service_for_test(control_application=control_application),
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: resolve_workspace_paths(
             workspace_root=workspace_root,
-            workspace_id=workspace_id or "claims",
+            workspace_id=workspace_id or "docs",
         ),
     )
     sync_calls = _attach_call_recorder(window, "_sync_from_daemon")
@@ -1130,19 +1130,19 @@ def test_refresh_button_clears_flows_without_spawning_daemon_when_workspace_has_
 
 
 def test_workspace_switch_remains_available_while_current_workspace_runtime_is_active(qapp, monkeypatch, tmp_path):
-    workspace_collection_root = tmp_path / "claims_workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    workspace_collection_root = tmp_path / "docs_workspaces"
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
 
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     window = _make_window(
@@ -1151,42 +1151,42 @@ def test_workspace_switch_remains_available_while_current_workspace_runtime_is_a
         log_service=_FakeLogService(),
     )
     try:
-        assert window.workspace_paths.workspace_id == "claims"
+        assert window.workspace_paths.workspace_id == "docs"
         assert window.workspace_selector.count() == 2
         assert window.workspace_settings_selector.count() == 2
 
         window.runtime_session = replace(window.runtime_session, runtime_active=True)
         window._refresh_action_buttons()
-        target_index = window.workspace_selector.findData("claims2")
+        target_index = window.workspace_selector.findData("docs2")
         assert target_index >= 0
 
         assert window.workspace_selector.isEnabled() is True
         window.workspace_selector.setCurrentIndex(target_index)
         window._flush_deferred_ui_updates()
 
-        assert window.workspace_paths.workspace_id == "claims2"
-        assert window.workspace_selector.currentData() == "claims2"
-        assert window.workspace_settings_selector.currentData() == "claims2"
+        assert window.workspace_paths.workspace_id == "docs2"
+        assert window.workspace_selector.currentData() == "docs2"
+        assert window.workspace_settings_selector.currentData() == "docs2"
     finally:
         _dispose_window(qapp, window)
 
 
 def test_switching_workspace_immediately_syncs_daemon_state_for_selected_workspace(qapp, monkeypatch, tmp_path):
-    workspace_collection_root = tmp_path / "claims_workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    workspace_collection_root = tmp_path / "docs_workspaces"
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
     del monkeypatch
 
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
 
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     window = _make_window(
@@ -1196,33 +1196,33 @@ def test_switching_workspace_immediately_syncs_daemon_state_for_selected_workspa
     sync_calls = _attach_call_recorder(window, "_sync_from_daemon")
     try:
         window._auto_daemon_enabled = True
-        target_index = window.workspace_selector.findData("claims2")
+        target_index = window.workspace_selector.findData("docs2")
         assert target_index >= 0
 
         window.workspace_selector.setCurrentIndex(target_index)
         qapp.processEvents()
 
-        assert window.workspace_paths.workspace_id == "claims2"
+        assert window.workspace_paths.workspace_id == "docs2"
         assert len(sync_calls) == 1
     finally:
         _dispose_window(qapp, window)
 
 
 def test_switching_workspaces_hides_selector_popup_before_rebind(qapp, monkeypatch, tmp_path):
-    workspace_collection_root = tmp_path / "claims_workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    workspace_collection_root = tmp_path / "docs_workspaces"
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
 
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
 
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     window = _make_window(
@@ -1233,7 +1233,7 @@ def test_switching_workspaces_hides_selector_popup_before_rebind(qapp, monkeypat
     monkeypatch.setattr(window.workspace_selector, "hidePopup", lambda: popup_hide_calls.append("selector"))
     monkeypatch.setattr(window.workspace_settings_selector, "hidePopup", lambda: popup_hide_calls.append("settings"))
     try:
-        target_index = window.workspace_selector.findData("claims2")
+        target_index = window.workspace_selector.findData("docs2")
         assert target_index >= 0
 
         window.workspace_selector.setCurrentIndex(target_index)
@@ -1245,14 +1245,14 @@ def test_switching_workspaces_hides_selector_popup_before_rebind(qapp, monkeypat
 
 
 def test_sync_from_daemon_immediately_clears_ui_when_current_workspace_disappears(qapp, monkeypatch, tmp_path):
-    workspace_collection_root = tmp_path / "claims_workspaces"
-    claims_root = workspace_collection_root / "claims"
-    (claims_root / "flow_modules").mkdir(parents=True)
+    workspace_collection_root = tmp_path / "docs_workspaces"
+    docs_root = workspace_collection_root / "docs"
+    (docs_root / "flow_modules").mkdir(parents=True)
     monkeypatch.setenv("DATA_ENGINE_WORKSPACE_COLLECTION_ROOT", str(workspace_collection_root))
 
     def _discover(app_root=None, workspace_collection_root=None):
         del app_root
-        root = Path(workspace_collection_root) if workspace_collection_root is not None else claims_root.parent
+        root = Path(workspace_collection_root) if workspace_collection_root is not None else docs_root.parent
         discovered: list[DiscoveredWorkspace] = []
         if root.exists():
             for candidate in sorted(path for path in root.iterdir() if path.is_dir()):
@@ -1263,17 +1263,17 @@ def test_sync_from_daemon_immediately_clears_ui_when_current_workspace_disappear
     window = _make_window(
         discover_workspaces_func=_discover,
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: resolve_workspace_paths(
-            workspace_root=claims_root if workspace_id in (None, "claims") else claims_root.parent / str(workspace_id),
-            workspace_id="claims" if workspace_id in (None, "claims") else str(workspace_id),
+            workspace_root=docs_root if workspace_id in (None, "docs") else docs_root.parent / str(workspace_id),
+            workspace_id="docs" if workspace_id in (None, "docs") else str(workspace_id),
         ),
     )
     try:
-        assert window.workspace_paths.workspace_id == "claims"
+        assert window.workspace_paths.workspace_id == "docs"
         assert window.selected_flow_name == "poller"
 
-        relocated_root = tmp_path / "elsewhere" / "claims"
+        relocated_root = tmp_path / "elsewhere" / "docs"
         relocated_root.parent.mkdir(parents=True)
-        claims_root.rename(relocated_root)
+        docs_root.rename(relocated_root)
 
         window._sync_from_daemon()
         window._flush_deferred_ui_updates()
@@ -1289,18 +1289,18 @@ def test_sync_from_daemon_immediately_clears_ui_when_current_workspace_disappear
 
 def test_switching_workspaces_reloads_visible_log_runs_from_new_workspace(qapp, monkeypatch, tmp_path):
     workspace_collection_root = tmp_path / "workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
 
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     initial_store = FlowLogStore()
@@ -1315,14 +1315,14 @@ def test_switching_workspaces_reloads_visible_log_runs_from_new_workspace(qapp, 
         window.selected_flow_name = flow_name
         initial_store.append_entry(
             FlowLogEntry(
-                line="run-claims",
+                line="run-docs",
                 kind="flow",
                 flow_name=flow_name,
                 event=RuntimeStepEvent(
-                    run_id="run-claims",
+                    run_id="run-docs",
                     flow_name=flow_name,
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="success",
                     elapsed_seconds=0.3,
                 ),
@@ -1331,18 +1331,18 @@ def test_switching_workspaces_reloads_visible_log_runs_from_new_workspace(qapp, 
         window._refresh_log_view(force_scroll_to_bottom=True)
 
         assert window.log_view.count() == 1
-        assert [group.source_label for group in window.log_store.runs_for_flow(flow_name)] == ["claims.xlsx"]
+        assert [group.source_label for group in window.log_store.runs_for_flow(flow_name)] == ["docs.xlsx"]
 
         replacement_store.append_entry(
             FlowLogEntry(
-                line="run-claims2-a",
+                line="run-docs2-a",
                 kind="flow",
                 flow_name=flow_name,
                 event=RuntimeStepEvent(
-                    run_id="run-claims2-a",
+                    run_id="run-docs2-a",
                     flow_name=flow_name,
                     step_name=None,
-                    source_label="claims2_a.xlsx",
+                    source_label="docs2_a.xlsx",
                     status="success",
                     elapsed_seconds=0.4,
                 ),
@@ -1350,50 +1350,50 @@ def test_switching_workspaces_reloads_visible_log_runs_from_new_workspace(qapp, 
         )
         replacement_store.append_entry(
             FlowLogEntry(
-                line="run-claims2-b",
+                line="run-docs2-b",
                 kind="flow",
                 flow_name=flow_name,
                 event=RuntimeStepEvent(
-                    run_id="run-claims2-b",
+                    run_id="run-docs2-b",
                     flow_name=flow_name,
                     step_name=None,
-                    source_label="claims2_b.xlsx",
+                    source_label="docs2_b.xlsx",
                     status="failed",
                     elapsed_seconds=0.6,
                 ),
             )
         )
 
-        target_index = window.workspace_selector.findData("claims2")
+        target_index = window.workspace_selector.findData("docs2")
         assert target_index >= 0
         window.workspace_selector.setCurrentIndex(target_index)
         qapp.processEvents()
         window.selected_flow_name = flow_name
         window._refresh_log_view(force_scroll_to_bottom=True)
 
-        assert window.workspace_paths.workspace_id == "claims2"
+        assert window.workspace_paths.workspace_id == "docs2"
         assert window.log_store is replacement_store
-        assert [group.source_label for group in window.log_store.runs_for_flow(flow_name)] == ["claims2_a.xlsx", "claims2_b.xlsx"]
-        assert _visible_log_run_primary_labels(window) == ["claims2_a.xlsx", "claims2_b.xlsx"]
+        assert [group.source_label for group in window.log_store.runs_for_flow(flow_name)] == ["docs2_a.xlsx", "docs2_b.xlsx"]
+        assert _visible_log_run_primary_labels(window) == ["docs2_a.xlsx", "docs2_b.xlsx"]
     finally:
         _dispose_window(qapp, window)
 
 
 def test_switching_workspaces_closes_preview_dialogs(qapp, monkeypatch, tmp_path):
     workspace_collection_root = tmp_path / "workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
 
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
 
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     window = _make_window(
@@ -1416,7 +1416,7 @@ def test_switching_workspaces_closes_preview_dialogs(qapp, monkeypatch, tmp_path
     window.run_log_preview_dialog = run_log_dialog
     del monkeypatch
     try:
-        target_index = window.workspace_selector.findData("claims2")
+        target_index = window.workspace_selector.findData("docs2")
         assert target_index >= 0
         window.workspace_selector.setCurrentIndex(target_index)
         qapp.processEvents()
@@ -1608,7 +1608,7 @@ def test_lease_status_shows_countdown_and_disables_run_controls(qapp, monkeypatc
             control=ControlSnapshot(
                 state="leased",
                 leased_by_machine_id="other-host",
-                control_status_text="other-host has control · takeover available in 30s",
+                control_status_text="other-host has control Â· takeover available in 30s",
                 blocked_status_text="other-host currently has control of this workspace.",
                 takeover_remaining_seconds=30,
             ),
@@ -2293,20 +2293,20 @@ def test_workspace_selector_shows_placeholder_when_no_workspaces_are_discovered(
 
 
 def test_settings_workspace_selector_can_switch_the_provisioning_target(qapp, monkeypatch, tmp_path):
-    workspace_collection_root = tmp_path / "claims_workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    workspace_collection_root = tmp_path / "docs_workspaces"
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
 
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
 
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     window = _make_window(
@@ -2314,17 +2314,17 @@ def test_settings_workspace_selector_can_switch_the_provisioning_target(qapp, mo
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
     )
     try:
-        target_index = window.workspace_settings_selector.findData("claims2")
+        target_index = window.workspace_settings_selector.findData("docs2")
         assert target_index >= 0
 
         window.workspace_settings_selector.setCurrentIndex(target_index)
         window._flush_deferred_ui_updates()
 
-        assert window.workspace_paths.workspace_id == "claims"
-        assert window.workspace_selector.currentData() == "claims"
-        assert window.settings_workspace_target_id == "claims2"
-        assert window.workspace_settings_selector.currentData() == "claims2"
-        assert "claims2" in window.workspace_target_label.text()
+        assert window.workspace_paths.workspace_id == "docs"
+        assert window.workspace_selector.currentData() == "docs"
+        assert window.settings_workspace_target_id == "docs2"
+        assert window.workspace_settings_selector.currentData() == "docs2"
+        assert "docs2" in window.workspace_target_label.text()
     finally:
         _dispose_window(qapp, window)
 
@@ -2342,7 +2342,7 @@ def test_load_flows_clears_visible_log_runs_when_reload_fails(qapp, monkeypatch)
                     run_id="run-1",
                     flow_name="poller",
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="started",
                 ),
             )
@@ -2356,7 +2356,7 @@ def test_load_flows_clears_visible_log_runs_when_reload_fails(qapp, monkeypatch)
                     run_id="run-1",
                     flow_name="poller",
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="success",
                 ),
             )
@@ -2391,7 +2391,7 @@ def test_load_flows_clears_visible_log_runs_when_workspace_has_no_flows(qapp, mo
                     run_id="run-1",
                     flow_name="poller",
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="started",
                 ),
             )
@@ -2405,7 +2405,7 @@ def test_load_flows_clears_visible_log_runs_when_workspace_has_no_flows(qapp, mo
                     run_id="run-1",
                     flow_name="poller",
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="success",
                 ),
             )
@@ -2424,7 +2424,7 @@ def test_load_flows_clears_visible_log_runs_when_workspace_has_no_flows(qapp, mo
 
 
 def test_start_runtime_reuses_loaded_flow_cards(qapp, monkeypatch, tmp_path):
-    workspace_root = tmp_path / "workspaces" / "claims"
+    workspace_root = tmp_path / "workspaces" / "docs"
     (workspace_root / "flow_modules").mkdir(parents=True)
     control_application = _FakeControlApplication()
     control_application.start_engine_result = type(
@@ -2452,7 +2452,7 @@ def test_start_runtime_reuses_loaded_flow_cards(qapp, monkeypatch, tmp_path):
         command_service=_command_service_for_test(control_application=control_application),
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: resolve_workspace_paths(
             workspace_root=workspace_root,
-            workspace_id=workspace_id or "claims",
+            workspace_id=workspace_id or "docs",
         ),
     )
     del monkeypatch
@@ -2961,7 +2961,7 @@ def test_debug_view_lists_previews_and_clears_saved_debug_artifacts(qapp):
                         "flow_name": "example_mirror",
                         "step_name": "Read Excel",
                         "run_id": "run-1",
-                        "source_path": "C:/input/claims_flat_1.xlsx",
+                        "source_path": "C:/input/docs_flat_1.xlsx",
                         "artifact_kind": "dataframe",
                         "artifact_path": str(artifact_path),
                         "saved_at_utc": "2026-04-19T00:00:00+00:00",
@@ -2982,7 +2982,7 @@ def test_debug_view_lists_previews_and_clears_saved_debug_artifacts(qapp):
         assert window.debug_artifact_title_label.text() == "Dataframe"
         _process_ui_until(qapp, lambda: "2 column(s)" in window.debug_artifact_summary_label.text())
         assert "2 column(s)" in window.debug_artifact_summary_label.text()
-        assert window.debug_artifact_source_label.text() == "Source: C:/input/claims_flat_1.xlsx"
+        assert window.debug_artifact_source_label.text() == "Source: C:/input/docs_flat_1.xlsx"
         explorer = window.debug_preview_layout.itemAt(0).widget()
         table = explorer.findChild(QTableWidget, "outputPreviewTable")
         assert isinstance(table, QTableWidget)
@@ -3275,7 +3275,7 @@ def test_debug_view_column_filter_popup_supports_multi_column_sort(qapp):
             lambda: table.isEnabled()
             and table.item(0, 0) is not None
             and table.item(1, 0) is not None
-            and "1↑" in header.model().headerData(0, Qt.Orientation.Horizontal),
+            and "1â†‘" in header.model().headerData(0, Qt.Orientation.Horizontal),
         )
 
         explorer._open_filter_popup_for_index(1)
@@ -3295,8 +3295,8 @@ def test_debug_view_column_filter_popup_supports_multi_column_sort(qapp):
             and table.item(2, 1) is not None
             and table.item(3, 0) is not None
             and table.item(3, 1) is not None
-            and "1↑" in header.model().headerData(0, Qt.Orientation.Horizontal)
-            and "2↑" in header.model().headerData(1, Qt.Orientation.Horizontal),
+            and "1â†‘" in header.model().headerData(0, Qt.Orientation.Horizontal)
+            and "2â†‘" in header.model().headerData(1, Qt.Orientation.Horizontal),
         )
 
         assert [(table.item(row, 0).text(), table.item(row, 1).text()) for row in range(4)] == [
@@ -3435,19 +3435,19 @@ def test_reset_flow_button_calls_persistent_reset_path(qapp, monkeypatch):
 
 def test_force_shutdown_daemon_targets_selected_settings_workspace_without_rebinding(qapp, tmp_path, monkeypatch):
     del monkeypatch
-    workspace_collection_root = tmp_path / "claims_workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    workspace_collection_root = tmp_path / "docs_workspaces"
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
 
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     force_shutdown_calls: list[dict[str, object]] = []
@@ -3459,7 +3459,7 @@ def test_force_shutdown_daemon_targets_selected_settings_workspace_without_rebin
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
     )
     try:
-        target_index = window.workspace_settings_selector.findData("claims2")
+        target_index = window.workspace_settings_selector.findData("docs2")
         assert target_index >= 0
         window.workspace_settings_selector.setCurrentIndex(target_index)
         qapp.processEvents()
@@ -3472,9 +3472,9 @@ def test_force_shutdown_daemon_targets_selected_settings_workspace_without_rebin
         )
 
         assert force_shutdown_calls == [
-            {"workspace_id": "claims2", "workspace": claims2_root, "timeout": 0.5}
+            {"workspace_id": "docs2", "workspace": docs2_root, "timeout": 0.5}
         ]
-        assert window.workspace_paths.workspace_id == "claims"
+        assert window.workspace_paths.workspace_id == "docs"
     finally:
         _dispose_window(qapp, window)
 
@@ -3552,7 +3552,7 @@ def test_reset_flow_button_clears_selected_flow_logs_before_rebuild(qapp, monkey
                     run_id="run-1",
                     flow_name="poller",
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="success",
                 ),
                 persisted_id=10,
@@ -3567,7 +3567,7 @@ def test_reset_flow_button_clears_selected_flow_logs_before_rebuild(qapp, monkey
                     run_id="run-2",
                     flow_name="manual_review",
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="success",
                 ),
                 persisted_id=11,
@@ -3735,19 +3735,19 @@ def test_reset_workspace_button_allows_idle_live_daemon(qapp, monkeypatch):
 
 def test_reset_workspace_targets_selected_settings_workspace_without_rebinding(qapp, tmp_path, monkeypatch):
     del monkeypatch
-    workspace_collection_root = tmp_path / "claims_workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    workspace_collection_root = tmp_path / "docs_workspaces"
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
 
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     reset_service = _FakeResetService()
@@ -3758,7 +3758,7 @@ def test_reset_workspace_targets_selected_settings_workspace_without_rebinding(q
     )
     rebind_calls = _attach_call_recorder(window, "_rebind_workspace_context")
     try:
-        target_index = window.workspace_settings_selector.findData("claims2")
+        target_index = window.workspace_settings_selector.findData("docs2")
         assert target_index >= 0
         window.workspace_settings_selector.setCurrentIndex(target_index)
         qapp.processEvents()
@@ -3770,9 +3770,9 @@ def test_reset_workspace_targets_selected_settings_workspace_without_rebinding(q
             and "reset_workspace" not in window._pending_control_actions,
         )
 
-        assert reset_service.workspace_resets == [resolve_workspace_paths(workspace_root=claims2_root, workspace_id="claims2")]
+        assert reset_service.workspace_resets == [resolve_workspace_paths(workspace_root=docs2_root, workspace_id="docs2")]
         assert rebind_calls == []
-        assert window.workspace_paths.workspace_id == "claims"
+        assert window.workspace_paths.workspace_id == "docs"
     finally:
         _dispose_window(qapp, window)
 
@@ -3780,18 +3780,18 @@ def test_reset_workspace_targets_selected_settings_workspace_without_rebinding(q
 def test_rebind_workspace_context_recreates_daemon_subscription_and_clears_log_caches(qapp, monkeypatch, tmp_path):
     del monkeypatch
     workspace_collection_root = tmp_path / "workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
 
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     window = _make_window(
@@ -3804,7 +3804,7 @@ def test_rebind_workspace_context_recreates_daemon_subscription_and_clears_log_c
         window.runtime_session = window.runtime_session.with_manual_runs_map({"Manual": "manual_review"})
         window.operation_tracker = OperationSessionState.empty().reset_flow("manual_review", ("Build Report",))
         window.flow_states = {"manual_review": "stopping flow"}
-        window.workspace_provision_status_label.setText("Provisioned claims")
+        window.workspace_provision_status_label.setText("Provisioned docs")
         window.force_shutdown_daemon_status_label.setText("Force stop failed")
         window.reset_workspace_status_label.setText("Workspace reset failed")
         window._last_log_view_flow_name = "poller"
@@ -3816,16 +3816,16 @@ def test_rebind_workspace_context_recreates_daemon_subscription_and_clears_log_c
         window._selected_flow_has_logs = True
         window._selected_flow_has_logs_flow_name = "poller"
 
-        window._rebind_workspace_context(workspace_id="claims2")
+        window._rebind_workspace_context(workspace_id="docs2")
 
         assert original_subscription.stop_event.is_set() is True
         assert window.daemon_subscription is not original_subscription
-        assert window.workspace_paths.workspace_id == "claims2"
+        assert window.workspace_paths.workspace_id == "docs2"
         assert window.runtime_session == RuntimeSessionState.empty()
         assert window.operation_tracker.row_state("manual_review", "Build Report").status == "idle"
         assert window.flow_states.get("manual_review") != "stopping flow"
         assert window._pending_daemon_update_batch is None
-        assert "Provisioned claims" not in window.workspace_provision_status_label.text()
+        assert "Provisioned docs" not in window.workspace_provision_status_label.text()
         assert "Force stop failed" not in window.force_shutdown_daemon_status_label.text()
         assert "Workspace reset failed" not in window.reset_workspace_status_label.text()
         assert window._last_log_view_run_keys != (("poller", "run-1"),)
@@ -3841,20 +3841,20 @@ def test_rebind_workspace_context_recreates_daemon_subscription_and_clears_log_c
 def test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon(qapp, monkeypatch, tmp_path):
     del monkeypatch
     workspace_collection_root = tmp_path / "workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
     shutdown_calls: list[dict[str, object]] = []
     remove_calls: list[tuple[object, str]] = []
 
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     window = _make_window(
@@ -3880,7 +3880,7 @@ def test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon(q
             return original_remove_client_session(binding, client_id)
 
         window.runtime_binding_service.remove_client_session = _record_remove_client_session
-        window._rebind_workspace_context(workspace_id="claims2")
+        window._rebind_workspace_context(workspace_id="docs2")
 
         assert shutdown_calls == []
         assert remove_calls == []
@@ -4064,20 +4064,20 @@ def test_show_message_box_later_coalesces_same_tick_modal_requests(qapp, monkeyp
 
 
 def test_switching_workspaces_invalidates_stale_deferred_modal_callbacks(qapp, monkeypatch, tmp_path):
-    workspace_collection_root = tmp_path / "claims_workspaces"
-    claims_root = workspace_collection_root / "claims"
-    claims2_root = workspace_collection_root / "claims2"
-    (claims_root / "flow_modules").mkdir(parents=True)
-    (claims2_root / "flow_modules").mkdir(parents=True)
+    workspace_collection_root = tmp_path / "docs_workspaces"
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
 
     discovered = (
-        DiscoveredWorkspace(workspace_id="claims", workspace_root=claims_root),
-        DiscoveredWorkspace(workspace_id="claims2", workspace_root=claims2_root),
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
     )
 
     def _resolve(workspace_id=None):
-        target = claims_root if workspace_id in (None, "claims") else claims2_root
-        target_id = "claims" if workspace_id in (None, "claims") else "claims2"
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
         return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
 
     window = _make_window(
@@ -4098,7 +4098,7 @@ def test_switching_workspaces_invalidates_stale_deferred_modal_callbacks(qapp, m
         window._show_message_box_later(title="Data Engine", text="old workspace", tone="error")
         old_callback = scheduled_callbacks.pop()
 
-        target_index = window.workspace_selector.findData("claims2")
+        target_index = window.workspace_selector.findData("docs2")
         assert target_index >= 0
         window.workspace_selector.setCurrentIndex(target_index)
         switch_callback = scheduled_callbacks.pop()
@@ -4271,12 +4271,12 @@ def test_run_log_preview_omits_placeholder_source_separator(qapp, monkeypatch):
     window = _make_window()
     try:
         entry = FlowLogEntry(
-            line="run=abc flow=claims_summary step=Collect Claim Files source=None status=started",
+            line="run=abc flow=docs_summary step=Collect Claim Files source=None status=started",
             kind="runtime",
-            flow_name="claims_summary",
+            flow_name="docs_summary",
             event=RuntimeStepEvent(
                 run_id="abc",
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 step_name="Collect Claim Files",
                 source_label="-",
                 status="started",
@@ -4285,8 +4285,8 @@ def test_run_log_preview_omits_placeholder_source_separator(qapp, monkeypatch):
 
         rendered = window._format_raw_log_message(entry)
 
-        assert "claims_summary &gt; &gt;" not in rendered
-        assert rendered == "claims_summary &gt; <b>Collect Claim Files</b> - <i>started</i>"
+        assert "docs_summary &gt; &gt;" not in rendered
+        assert rendered == "docs_summary &gt; <b>Collect Claim Files</b> - <i>started</i>"
     finally:
         _dispose_window(qapp, window)
 
@@ -4399,7 +4399,7 @@ def test_refresh_log_view_skips_row_rebuild_when_visible_runs_are_unchanged(qapp
                     run_id="run-1",
                     flow_name=flow_name,
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="success",
                     elapsed_seconds=0.3,
                 ),
@@ -4437,27 +4437,27 @@ def test_refresh_log_view_reloads_ledger_runs_when_log_store_is_unchanged(qapp, 
         flow_name = "poller"
         window.selected_flow_name = flow_name
         started_entry = FlowLogEntry(
-            line="run=run-1 flow=poller source=claims.xlsx status=started",
+            line="run=run-1 flow=poller source=docs.xlsx status=started",
             kind="flow",
             flow_name=flow_name,
             event=RuntimeStepEvent(
                 run_id="run-1",
                 flow_name=flow_name,
                 step_name=None,
-                source_label="claims.xlsx",
+                source_label="docs.xlsx",
                 status="started",
                 elapsed_seconds=None,
             ),
         )
         finished_entry = FlowLogEntry(
-            line="run=run-1 flow=poller source=claims.xlsx status=success elapsed=8.0",
+            line="run=run-1 flow=poller source=docs.xlsx status=success elapsed=8.0",
             kind="flow",
             flow_name=flow_name,
             event=RuntimeStepEvent(
                 run_id="run-1",
                 flow_name=flow_name,
                 step_name=None,
-                source_label="claims.xlsx",
+                source_label="docs.xlsx",
                 status="success",
                 elapsed_seconds=8.0,
             ),
@@ -4465,7 +4465,7 @@ def test_refresh_log_view_reloads_ledger_runs_when_log_store_is_unchanged(qapp, 
         started_group = FlowRunState(
             key=(flow_name, "run-1"),
             display_label="2026-04-20 09:00:00 AM",
-            source_label="claims.xlsx",
+            source_label="docs.xlsx",
             status="started",
             elapsed_seconds=None,
             summary_entry=started_entry,
@@ -4475,7 +4475,7 @@ def test_refresh_log_view_reloads_ledger_runs_when_log_store_is_unchanged(qapp, 
         finished_group = FlowRunState(
             key=(flow_name, "run-1"),
             display_label="2026-04-20 09:00:00 AM",
-            source_label="claims.xlsx",
+            source_label="docs.xlsx",
             status="success",
             elapsed_seconds=8.0,
             summary_entry=finished_entry,
@@ -4529,7 +4529,7 @@ def test_refresh_log_view_refreshes_runtime_cache_before_querying_ledger_runs(qa
                 run_id="run-1",
                 flow_name=flow_name,
                 group_name="Imports",
-                source_path="claims.xlsx",
+                source_path="docs.xlsx",
                 started_at_utc=started_at,
             )
             direct_ledger.execution_state.record_run_finished(
@@ -4548,7 +4548,7 @@ def test_refresh_log_view_refreshes_runtime_cache_before_querying_ledger_runs(qa
         assert run_group is not None
         assert run_group.key == (flow_name, "run-1")
         assert run_group.status == "success"
-        assert run_group.source_label == "claims.xlsx"
+        assert run_group.source_label == "docs.xlsx"
     finally:
         _dispose_window(qapp, window)
 
@@ -4559,24 +4559,24 @@ def test_run_log_preview_collapses_step_started_and_finished_rows(qapp, monkeypa
     try:
         entries = (
             FlowLogEntry(
-                line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=started",
+                line="run=abc flow=docs_summary step=Collect Claim Files source=input.xlsx status=started",
                 kind="runtime",
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 event=RuntimeStepEvent(
                     run_id="abc",
-                    flow_name="claims_summary",
+                    flow_name="docs_summary",
                     step_name="Collect Claim Files",
                     source_label="input.xlsx",
                     status="started",
                 ),
             ),
             FlowLogEntry(
-                line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=success elapsed=0.4",
+                line="run=abc flow=docs_summary step=Collect Claim Files source=input.xlsx status=success elapsed=0.4",
                 kind="runtime",
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 event=RuntimeStepEvent(
                     run_id="abc",
-                    flow_name="claims_summary",
+                    flow_name="docs_summary",
                     step_name="Collect Claim Files",
                     source_label="input.xlsx",
                     status="success",
@@ -4615,12 +4615,12 @@ def test_run_log_preview_rows_are_not_created_as_top_level_windows(qapp, monkeyp
     try:
         entries = (
             FlowLogEntry(
-                line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=success elapsed=0.4",
+                line="run=abc flow=docs_summary step=Collect Claim Files source=input.xlsx status=success elapsed=0.4",
                 kind="runtime",
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 event=RuntimeStepEvent(
                     run_id="abc",
-                    flow_name="claims_summary",
+                    flow_name="docs_summary",
                     step_name="Collect Claim Files",
                     source_label="input.xlsx",
                     status="success",
@@ -4653,12 +4653,12 @@ def test_run_log_preview_keeps_unfinished_started_step_rows_visible(qapp, monkey
     try:
         entries = (
             FlowLogEntry(
-                line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=started",
+                line="run=abc flow=docs_summary step=Collect Claim Files source=input.xlsx status=started",
                 kind="runtime",
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 event=RuntimeStepEvent(
                     run_id="abc",
-                    flow_name="claims_summary",
+                    flow_name="docs_summary",
                     step_name="Collect Claim Files",
                     source_label="input.xlsx",
                     status="started",
@@ -4690,24 +4690,24 @@ def test_run_log_preview_omits_redundant_run_terminal_rows_when_step_rows_exist(
     try:
         entries = (
             FlowLogEntry(
-                line="run=abc flow=claims_summary source=input.xlsx status=started",
+                line="run=abc flow=docs_summary source=input.xlsx status=started",
                 kind="flow",
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 event=RuntimeStepEvent(
                     run_id="abc",
-                    flow_name="claims_summary",
+                    flow_name="docs_summary",
                     step_name=None,
                     source_label="input.xlsx",
                     status="started",
                 ),
             ),
             FlowLogEntry(
-                line="run=abc flow=claims_summary step=Collect Claim Files source=input.xlsx status=success elapsed=0.4",
+                line="run=abc flow=docs_summary step=Collect Claim Files source=input.xlsx status=success elapsed=0.4",
                 kind="flow",
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 event=RuntimeStepEvent(
                     run_id="abc",
-                    flow_name="claims_summary",
+                    flow_name="docs_summary",
                     step_name="Collect Claim Files",
                     source_label="input.xlsx",
                     status="success",
@@ -4715,12 +4715,12 @@ def test_run_log_preview_omits_redundant_run_terminal_rows_when_step_rows_exist(
                 ),
             ),
             FlowLogEntry(
-                line="run=abc flow=claims_summary source=input.xlsx status=failed elapsed=0.8",
+                line="run=abc flow=docs_summary source=input.xlsx status=failed elapsed=0.8",
                 kind="flow",
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 event=RuntimeStepEvent(
                     run_id="abc",
-                    flow_name="claims_summary",
+                    flow_name="docs_summary",
                     step_name=None,
                     source_label="input.xlsx",
                     status="failed",
@@ -4756,22 +4756,22 @@ def test_run_log_preview_shows_full_source_path_in_header(qapp, monkeypatch):
     del monkeypatch
     window = _make_window()
     try:
-        source_path = r"C:\input\alternate\claims_flat_1.xlsx"
+        source_path = r"C:\input\alternate\docs_flat_1.xlsx"
         window.runtime_binding.runtime_cache_ledger.execution_state.record_run_started(
             run_id="abc",
-            flow_name="claims_summary",
-            group_name="Claims",
+            flow_name="docs_summary",
+            group_name="Docs",
             source_path=source_path,
             started_at_utc="2026-04-18T21:39:03+00:00",
         )
         entries = (
             FlowLogEntry(
-                line="run=abc flow=claims_summary source=input.xlsx status=started",
+                line="run=abc flow=docs_summary source=input.xlsx status=started",
                 kind="flow",
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 event=RuntimeStepEvent(
                     run_id="abc",
-                    flow_name="claims_summary",
+                    flow_name="docs_summary",
                     step_name=None,
                     source_label="input.xlsx",
                     status="started",
@@ -4796,7 +4796,7 @@ def test_run_log_preview_refreshes_runtime_cache_before_loading_source_path(qapp
     del monkeypatch
     window = _make_window()
     try:
-        source_path = r"C:\input\alternate\claims_flat_1.xlsx"
+        source_path = r"C:\input\alternate\docs_flat_1.xlsx"
         run_id = "abc"
         # Prime the runtime-IO cache with a missing read, then write through a separate ledger handle.
         assert window.runtime_binding.runtime_cache_ledger.runs.get(run_id) is None
@@ -4804,8 +4804,8 @@ def test_run_log_preview_refreshes_runtime_cache_before_loading_source_path(qapp
         try:
             direct_ledger.execution_state.record_run_started(
                 run_id=run_id,
-                flow_name="claims_summary",
-                group_name="Claims",
+                flow_name="docs_summary",
+                group_name="Docs",
                 source_path=source_path,
                 started_at_utc="2026-04-18T21:39:03+00:00",
             )
@@ -4813,12 +4813,12 @@ def test_run_log_preview_refreshes_runtime_cache_before_loading_source_path(qapp
             direct_ledger.close()
         entries = (
             FlowLogEntry(
-                line="run=abc flow=claims_summary source=input.xlsx status=started",
+                line="run=abc flow=docs_summary source=input.xlsx status=started",
                 kind="flow",
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 event=RuntimeStepEvent(
                     run_id=run_id,
-                    flow_name="claims_summary",
+                    flow_name="docs_summary",
                     step_name=None,
                     source_label="input.xlsx",
                     status="started",
@@ -4852,14 +4852,14 @@ def test_show_run_error_details_refreshes_runtime_cache_before_loading_failed_st
         try:
             direct_ledger.execution_state.record_run_started(
                 run_id=run_id,
-                flow_name="claims_summary",
-                group_name="Claims",
-                source_path=r"C:\input\alternate\claims_flat_1.xlsx",
+                flow_name="docs_summary",
+                group_name="Docs",
+                source_path=r"C:\input\alternate\docs_flat_1.xlsx",
                 started_at_utc="2026-04-18T21:39:03+00:00",
             )
             step_run_id = direct_ledger.execution_state.record_step_started(
                 run_id=run_id,
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 step_label=step_name,
                 started_at_utc="2026-04-18T21:39:04+00:00",
             )
@@ -4879,12 +4879,12 @@ def test_show_run_error_details_refreshes_runtime_cache_before_loading_failed_st
         finally:
             direct_ledger.close()
         entry = FlowLogEntry(
-            line="run=abc flow=claims_summary step=Write Parquet source=input.xlsx status=failed elapsed=1.0",
+            line="run=abc flow=docs_summary step=Write Parquet source=input.xlsx status=failed elapsed=1.0",
             kind="flow",
-            flow_name="claims_summary",
+            flow_name="docs_summary",
             event=RuntimeStepEvent(
                 run_id=run_id,
-                flow_name="claims_summary",
+                flow_name="docs_summary",
                 step_name=step_name,
                 source_label="input.xlsx",
                 status="failed",
@@ -4892,7 +4892,7 @@ def test_show_run_error_details_refreshes_runtime_cache_before_loading_failed_st
             ),
         )
         run_group = FlowRunState(
-            key=("claims_summary", run_id),
+            key=("docs_summary", run_id),
             display_label="2026-04-18 09:39:03 PM",
             source_label="input.xlsx",
             status="failed",
@@ -4937,16 +4937,16 @@ def test_runtime_log_emitter_scopes_live_queue_entries_to_workspace() -> None:
     previous_level = logger.level
     logger.setLevel(logging.INFO)
     try:
-        emitter = RuntimeLogEmitter(_QueuedLogSinkProbe(), workspace_id="claims2")
+        emitter = RuntimeLogEmitter(_QueuedLogSinkProbe(), workspace_id="docs2")
         emitter.log_flow_event(
             "run-1",
             "poller",
-            Path("claims.xlsx"),
+            Path("docs.xlsx"),
             status="success",
             elapsed=1.2,
         )
         entry = queue.get(timeout=1.0)
-        assert entry.workspace_id == "claims2"
+        assert entry.workspace_id == "docs2"
         assert entry.flow_name == "poller"
         assert entry.event is not None
         assert entry.event.status == "success"
@@ -4977,7 +4977,7 @@ def test_finish_run_reloads_visible_run_history_from_empty_state(qapp, monkeypat
                         run_id="run-1",
                         flow_name=flow_name,
                         step_name=None,
-                        source_label="claims.xlsx",
+                        source_label="docs.xlsx",
                         status="success",
                         elapsed_seconds=1.2,
                     ),
@@ -4996,7 +4996,7 @@ def test_finish_run_reloads_visible_run_history_from_empty_state(qapp, monkeypat
         item = window.log_view.item(0)
         assert item is not None
         assert window.log_view.duration_text(item) == "1.2s"
-        assert window.log_view.source_label(item) == "claims.xlsx"
+        assert window.log_view.source_label(item) == "docs.xlsx"
     finally:
         _dispose_window(qapp, window)
 
@@ -5016,7 +5016,7 @@ def test_refresh_log_view_updates_duration_when_live_row_finishes_in_place(qapp,
                     run_id="run-1",
                     flow_name=flow_name,
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="started",
                     elapsed_seconds=None,
                 ),
@@ -5038,7 +5038,7 @@ def test_refresh_log_view_updates_duration_when_live_row_finishes_in_place(qapp,
                     run_id="run-1",
                     flow_name=flow_name,
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="success",
                     elapsed_seconds=9.9,
                 ),
@@ -5071,7 +5071,7 @@ def test_refresh_log_view_updates_only_changed_rows_when_one_live_duration_chang
                         run_id=run_id,
                         flow_name=flow_name,
                         step_name=None,
-                        source_label="claims.xlsx",
+                        source_label="docs.xlsx",
                         status=status,
                         elapsed_seconds=elapsed,
                     ),
@@ -5100,7 +5100,7 @@ def test_refresh_log_view_updates_only_changed_rows_when_one_live_duration_chang
                     run_id="run-3",
                     flow_name=flow_name,
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="success",
                     elapsed_seconds=9.9,
                 ),
@@ -5127,7 +5127,7 @@ def test_build_log_run_widget_is_not_created_as_top_level_window(qapp):
                 run_id="run-1",
                 flow_name=flow_name,
                 step_name=None,
-                source_label="claims.xlsx",
+                source_label="docs.xlsx",
                 status="success",
                 elapsed_seconds=1.0,
             ),
@@ -5180,7 +5180,7 @@ def test_refresh_log_view_success_rows_ignore_transparent_log_button(qapp, monke
                     run_id="run-1",
                     flow_name=flow_name,
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="started",
                     elapsed_seconds=None,
                 ),
@@ -5207,7 +5207,7 @@ def test_refresh_log_view_success_rows_ignore_transparent_log_button(qapp, monke
                     run_id="run-1",
                     flow_name=flow_name,
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="success",
                     elapsed_seconds=9.9,
                 ),
@@ -5241,7 +5241,7 @@ def test_refresh_log_view_failed_button_opens_error_details_directly(qapp, monke
                     run_id="run-1",
                     flow_name=flow_name,
                     step_name=None,
-                    source_label="claims.xlsx",
+                    source_label="docs.xlsx",
                     status="failed",
                     elapsed_seconds=1.0,
                 ),
@@ -5387,7 +5387,7 @@ def test_refresh_selection_prefers_daemon_live_step_state(qapp, monkeypatch):
                     run_id="run-1",
                     flow_name="poller",
                     group_name="Imports",
-                    source_path="claims.xlsx",
+                    source_path="docs.xlsx",
                     state="running",
                     current_step_name="Read Excel",
                     current_step_started_at_utc="2026-04-18T12:00:00+00:00",
@@ -5436,7 +5436,7 @@ def test_apply_daemon_update_batch_streams_step_events_without_log_rebuild(qapp,
                     run_id="run-1",
                     flow_name="poller",
                     group_name="Imports",
-                    source_path="claims.xlsx",
+                    source_path="docs.xlsx",
                     state="running",
                     current_step_name="Read Excel",
                     current_step_started_at_utc="2026-04-18T12:00:00+00:00",
@@ -5457,7 +5457,7 @@ def test_apply_daemon_update_batch_streams_step_events_without_log_rebuild(qapp,
                             run_id="run-1",
                             flow_name="poller",
                             step_name="Read Excel",
-                            source_label="claims.xlsx",
+                            source_label="docs.xlsx",
                             status="started",
                             elapsed_seconds=None,
                         ),
@@ -5501,7 +5501,7 @@ def test_apply_daemon_update_batch_normalizes_previous_success_when_next_step_st
                 run_id="run-1",
                 flow_name="poller",
                 step_name="Read Excel",
-                source_label="claims.xlsx",
+                source_label="docs.xlsx",
                 status="success",
                 elapsed_seconds=0.25,
             )
@@ -5511,7 +5511,7 @@ def test_apply_daemon_update_batch_normalizes_previous_success_when_next_step_st
                 run_id="run-1",
                 flow_name="poller",
                 step_name="Write Parquet",
-                source_label="claims.xlsx",
+                source_label="docs.xlsx",
                 status="started",
                 elapsed_seconds=None,
             )
@@ -5564,7 +5564,7 @@ def test_apply_daemon_update_batch_uses_persisted_finished_step_duration_before_
                     run_id="run-1",
                     flow_name="poller",
                     group_name="Imports",
-                    source_path="claims.xlsx",
+                    source_path="docs.xlsx",
                     state="running",
                     current_step_name="Write Parquet",
                     current_step_started_at_utc="2026-04-18T12:00:01+00:00",
@@ -5585,7 +5585,7 @@ def test_apply_daemon_update_batch_uses_persisted_finished_step_duration_before_
                             run_id="run-1",
                             flow_name="poller",
                             step_name="Write Parquet",
-                            source_label="claims.xlsx",
+                            source_label="docs.xlsx",
                             status="started",
                             elapsed_seconds=None,
                         ),
@@ -5639,14 +5639,14 @@ def test_apply_daemon_update_batch_streams_log_events_without_waiting_for_reload
                     completed_run_ids=("run-1",),
                     log_entries=(
                         FlowLogEntry(
-                            line="poller  success  claims.xlsx",
+                            line="poller  success  docs.xlsx",
                             kind="flow",
                             flow_name="poller",
                             event=RuntimeStepEvent(
                                 run_id="run-1",
                                 flow_name="poller",
                                 step_name=None,
-                                source_label="claims.xlsx",
+                                source_label="docs.xlsx",
                                 status="success",
                                 elapsed_seconds=1.25,
                             ),
@@ -5771,7 +5771,7 @@ def test_sync_from_daemon_preserves_daemon_owned_runtime_truth(qapp, monkeypatch
                 run_id="run-1",
                 flow_name="poller",
                 group_name="Imports",
-                source_path="claims.xlsx",
+                source_path="docs.xlsx",
                 state="running",
                 current_step_name="Read Excel",
                 current_step_started_at_utc="2026-04-17T12:00:00+00:00",
@@ -5825,7 +5825,7 @@ def test_refresh_log_view_prefers_daemon_live_runs_for_parallel_flow(qapp, monke
                         run_id=f"run-{index}",
                         flow_name="poller",
                         step_name=None,
-                        source_label=f"claims_{index}.xlsx",
+                        source_label=f"docs_{index}.xlsx",
                         status="started",
                     ),
                 )
@@ -5841,7 +5841,7 @@ def test_refresh_log_view_prefers_daemon_live_runs_for_parallel_flow(qapp, monke
                     run_id=f"run-{index}",
                     flow_name="poller",
                     group_name="Imports",
-                    source_path=f"claims_{index}.xlsx",
+                    source_path=f"docs_{index}.xlsx",
                     state="running",
                     current_step_name="Normalize",
                     current_step_started_at_utc="2026-04-18T12:00:00+00:00",
@@ -5878,7 +5878,7 @@ def test_refresh_selection_shows_parallel_active_step_counts_without_serializing
                     run_id="run-1",
                     flow_name="poller",
                     group_name="Imports",
-                    source_path="claims_1.xlsx",
+                    source_path="docs_1.xlsx",
                     state="running",
                     current_step_name="Read Excel",
                     current_step_started_at_utc=(now - timedelta(seconds=4)).isoformat(),
@@ -5889,7 +5889,7 @@ def test_refresh_selection_shows_parallel_active_step_counts_without_serializing
                     run_id="run-2",
                     flow_name="poller",
                     group_name="Imports",
-                    source_path="claims_2.xlsx",
+                    source_path="docs_2.xlsx",
                     state="running",
                     current_step_name="Write Parquet",
                     current_step_started_at_utc=(now - timedelta(seconds=3)).isoformat(),
@@ -5900,7 +5900,7 @@ def test_refresh_selection_shows_parallel_active_step_counts_without_serializing
                     run_id="run-3",
                     flow_name="poller",
                     group_name="Imports",
-                    source_path="claims_3.xlsx",
+                    source_path="docs_3.xlsx",
                     state="running",
                     current_step_name="Write Parquet",
                     current_step_started_at_utc=(now - timedelta(seconds=2)).isoformat(),
@@ -6056,4 +6056,5 @@ def test_rebuild_runtime_snapshot_drops_stopping_runtime_state_for_completed_flo
         assert window.flow_states["poller_b"] == "schedule ready"
     finally:
         _dispose_window(qapp, window)
+
 

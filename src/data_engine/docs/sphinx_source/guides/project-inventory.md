@@ -796,7 +796,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `line_count`
 - module `data_engine.devtools.smoke_data`
   - attribute `DEFAULT_WORKSPACE_IDS`
-  - attribute `_BASE_CLAIMS_COLUMNS`
+  - attribute `_BASE_DOCS_COLUMNS`
   - attribute `__all__`
   - function `build_temp_smoke_environment`
     - param `*`
@@ -811,7 +811,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `create_app_root: bool=False`
     - param `rows_per_workbook: int=2`
     - param `parallel_rows_per_workbook: int | None=None`
-    - param `column_count: int=len(_BASE_CLAIMS_COLUMNS)`
+    - param `column_count: int=len(_BASE_DOCS_COLUMNS)`
   - function `create_python_flow_modules`
     - param `target_workspace: Path`
     - param `*`
@@ -828,22 +828,22 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `data_root: Path`
     - param `*`
     - param `rows_per_workbook: int=2`
-    - param `column_count: int=len(_BASE_CLAIMS_COLUMNS)`
-  - function `create_parallel_claims_data_root`
+    - param `column_count: int=len(_BASE_DOCS_COLUMNS)`
+  - function `create_parallel_docs_data_root`
     - param `data_root: Path`
     - param `*`
     - param `file_count: int=12`
     - param `rows_per_workbook: int=2`
-    - param `column_count: int=len(_BASE_CLAIMS_COLUMNS)`
-  - function `_claims_headers`
+    - param `column_count: int=len(_BASE_DOCS_COLUMNS)`
+  - function `_docs_headers`
     - param `*`
     - param `column_count: int`
-  - function `_claims_row`
+  - function `_docs_row`
     - param `*`
     - param `workbook_index: int`
     - param `row_number: int`
     - param `column_count: int`
-  - function `_write_claims_workbook`
+  - function `_write_docs_workbook`
     - param `path: Path`
     - param `*`
     - param `workbook_index: int`
@@ -8614,6 +8614,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `error: object`
 - module `data_engine.ui.gui.theme`
   - attribute `__all__`
+  - function `_check_mark_icon_url`
+    - param `theme_name: str`
   - function `stylesheet`
     - param `theme_name: str=DEFAULT_THEME`
 - module `data_engine.ui.gui.widgets`

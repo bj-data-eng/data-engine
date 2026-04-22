@@ -19,10 +19,10 @@ from data_engine.views.models import qt_flow_card_from_entry
 def _sample_card():
     return qt_flow_card_from_entry(
         flow_catalog_entry_from_flow(
-            Flow(name="claims_summary", label="Claims Summary", group="Claims")
+            Flow(name="docs_summary", label="Docs Summary", group="Docs")
             .step(lambda context: context.current, label="Read Excel")
             .step(lambda context: context.current, label="Write Parquet"),
-            description="Review claims",
+            description="Review docs",
         )
     )
 
@@ -46,9 +46,9 @@ def test_selected_flow_detail_state_collects_summary_and_operation_rows():
 
     detail = SelectedFlowDetailState.from_flow(card, tracker, flow_states={card.name: "running"})
 
-    assert detail.title == "Claims Summary"
+    assert detail.title == "Docs Summary"
     assert detail.summary_rows[0].label == "Flow"
-    assert detail.summary_rows[0].value == "claims_summary"
+    assert detail.summary_rows[0].value == "docs_summary"
     assert detail.operation_rows[0].status == "running"
 
 
@@ -56,10 +56,10 @@ def test_run_detail_state_collects_step_rows():
     step_entry = FlowLogEntry(
         line="step",
         kind="flow",
-        flow_name="claims_summary",
+        flow_name="docs_summary",
         event=RuntimeStepEvent(
             run_id="run-1",
-            flow_name="claims_summary",
+            flow_name="docs_summary",
             step_name="Read Excel",
             source_label="input.xlsx",
             status="success",
@@ -67,7 +67,7 @@ def test_run_detail_state_collects_step_rows():
         ),
     )
     run_group = FlowRunState(
-        key=("claims_summary", "run-1"),
+        key=("docs_summary", "run-1"),
         display_label="2026-04-04 09:15:00 AM",
         source_label="input.xlsx",
         status="success",
@@ -92,10 +92,10 @@ def test_run_detail_state_collects_step_rows():
 
 
 def test_flow_summary_rows_expose_core_flow_config_fields_in_display_order():
-    rows = FlowSummaryRow.rows_for_flow(_sample_card(), {"claims_summary": "running"})
+    rows = FlowSummaryRow.rows_for_flow(_sample_card(), {"docs_summary": "running"})
 
     assert [(row.label, row.value) for row in rows][:5] == [
-        ("Flow", "claims_summary"),
+        ("Flow", "docs_summary"),
         ("Mode", "manual"),
         ("Interval", "-"),
         ("Settle", "-"),
@@ -104,8 +104,9 @@ def test_flow_summary_rows_expose_core_flow_config_fields_in_display_order():
 
 
 def test_flow_summary_state_wraps_rows_and_pairs_together():
-    summary = FlowSummaryState.from_flow(_sample_card(), {"claims_summary": "running"})
+    summary = FlowSummaryState.from_flow(_sample_card(), {"docs_summary": "running"})
 
     assert summary.rows[0].label == "Flow"
-    assert summary.rows[0].value == "claims_summary"
-    assert summary.pairs[0] == ("Flow", "claims_summary")
+    assert summary.rows[0].value == "docs_summary"
+    assert summary.pairs[0] == ("Flow", "docs_summary")
+

@@ -25,13 +25,13 @@ Examples:
 
 ```python
 context.database("analytics.duckdb")
-context.database("claims/analytics.duckdb")
+context.database("docs/analytics.duckdb")
 ```
 
 Those resolve to:
 
 - `workspaces/<workspace_id>/databases/analytics.duckdb`
-- `workspaces/<workspace_id>/databases/claims/analytics.duckdb`
+- `workspaces/<workspace_id>/databases/docs/analytics.duckdb`
 
 Rules:
 
@@ -51,7 +51,7 @@ import polars as pl
 from data_engine import Flow
 
 
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path)
 
 
@@ -81,12 +81,12 @@ def build():
             mode="schedule",
             run_as="batch",
             interval="15m",
-            source="../../example_data/Input/claims_flat",
+            source="../../example_data/Input/docs_flat",
         )
         .mirror(root="../../example_data/Output/example_summary")
-        .collect([".xlsx"], save_as="claim_files")
-        .map(read_claims, use="claim_files", save_as="claim_frames")
-        .step(build_source, use="claim_frames", save_as="raw_df")
+        .collect([".xlsx"], save_as="doc_files")
+        .map(read_docs, use="doc_files", save_as="doc_frames")
+        .step(build_source, use="doc_frames", save_as="raw_df")
         .step(summarize, use="raw_df", save_as="summary_df")
     )
 ```
@@ -98,7 +98,7 @@ This keeps the flow API small while still letting flow modules use native SQL an
 - open the connection inside the step that needs it
 - close the connection in `finally:`
 - keep the path stable when you want incremental or append-oriented databases
-- use subfolders such as `claims/analytics.duckdb` when one workspace owns several related databases
+- use subfolders such as `docs/analytics.duckdb` when one workspace owns several related databases
 
 ## A note on mirror vs database paths
 

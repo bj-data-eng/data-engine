@@ -106,7 +106,7 @@ def test_runtime_state_service_returns_unified_workspace_snapshot():
         (),
         {
             "log_store": "log-store",
-            "workspace_paths": type("_Paths", (), {"workspace_id": "claims2"})(),
+            "workspace_paths": type("_Paths", (), {"workspace_id": "docs2"})(),
         },
     )()
     service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
@@ -118,7 +118,7 @@ def test_runtime_state_service_returns_unified_workspace_snapshot():
         now=123.0,
     )
 
-    assert snapshot.workspace_id == "claims2"
+    assert snapshot.workspace_id == "docs2"
     assert snapshot.version == 1
     assert snapshot.control.state == "available"
     assert snapshot.control.blocked_status_text == "Takeover available."
@@ -239,12 +239,12 @@ def test_runtime_state_service_emits_snapshot_events_to_subscribers():
         (),
         {
             "log_store": "log-store",
-            "workspace_paths": type("_Paths", (), {"workspace_id": "claims2"})(),
+            "workspace_paths": type("_Paths", (), {"workspace_id": "docs2"})(),
         },
     )()
     service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
     events = []
-    token = service.subscribe(workspace_id="claims2", callback=events.append)
+    token = service.subscribe(workspace_id="docs2", callback=events.append)
 
     snapshot = service.current_snapshot(
         binding,
@@ -285,7 +285,7 @@ def test_runtime_state_service_incremental_snapshot_from_daemon_updates_live_tru
         category="automated",
     )
     previous = WorkspaceSnapshot(
-        workspace_id="claims2",
+        workspace_id="docs2",
         version=4,
         control=ControlSnapshot(
             state="available",
@@ -316,7 +316,7 @@ def test_runtime_state_service_incremental_snapshot_from_daemon_updates_live_tru
                 run_id="run-1",
                 flow_name="poller",
                 group_name="Imports",
-                source_path="claims.xlsx",
+                source_path="docs.xlsx",
                 state="running",
                 current_step_name="Read Excel",
                 current_step_started_at_utc="2026-04-18T12:00:00+00:00",
@@ -366,7 +366,7 @@ def test_runtime_state_service_incremental_projection_from_daemon_updates_flow_s
         category="manual",
     )
     previous = WorkspaceSnapshot(
-        workspace_id="claims2",
+        workspace_id="docs2",
         version=3,
         control=ControlSnapshot(
             state="available",
@@ -396,7 +396,7 @@ def test_runtime_state_service_incremental_projection_from_daemon_updates_flow_s
                 run_id="run-42",
                 flow_name="manual_flow",
                 group_name="Manual",
-                source_path="claims.xlsx",
+                source_path="docs.xlsx",
                 state="running",
                 current_step_name="Read Excel",
                 current_step_started_at_utc="2026-04-18T12:00:00+00:00",
@@ -495,7 +495,7 @@ def test_runtime_state_service_uses_daemon_projection_version_and_engine_startin
         (),
         {
             "log_store": "log-store",
-            "workspace_paths": type("_Paths", (), {"workspace_id": "claims2"})(),
+            "workspace_paths": type("_Paths", (), {"workspace_id": "docs2"})(),
         },
     )()
     service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
@@ -582,7 +582,7 @@ def test_runtime_state_service_does_not_treat_daemon_process_startup_as_engine_s
         (),
         {
             "log_store": "log-store",
-            "workspace_paths": type("_Paths", (), {"workspace_id": "claims2"})(),
+            "workspace_paths": type("_Paths", (), {"workspace_id": "docs2"})(),
         },
     )()
     service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
@@ -605,7 +605,7 @@ def test_runtime_state_service_prefers_daemon_active_runs_over_log_reconstructio
         run_id="run-1",
         flow_name="poller",
         group_name="Imports",
-        source_path="claims.xlsx",
+        source_path="docs.xlsx",
         state="running",
         current_step_name="Emit Value",
         current_step_started_at_utc="2026-04-17T00:00:05+00:00",
@@ -725,7 +725,7 @@ def test_runtime_state_service_prefers_daemon_active_runs_over_log_reconstructio
         (),
         {
             "log_store": "log-store",
-            "workspace_paths": type("_Paths", (), {"workspace_id": "claims2"})(),
+            "workspace_paths": type("_Paths", (), {"workspace_id": "docs2"})(),
         },
     )()
     service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
@@ -790,7 +790,7 @@ def test_runtime_state_service_preserves_empty_daemon_live_runs_and_engine_flows
     run_group = FlowRunState(
         key=("poller", "run-1"),
         display_label="started",
-        source_label="claims.xlsx",
+        source_label="docs.xlsx",
         status="started",
         elapsed_seconds=None,
         summary_entry=None,
@@ -853,7 +853,7 @@ def test_runtime_state_service_preserves_empty_daemon_live_runs_and_engine_flows
         (),
         {
             "log_store": "log-store",
-            "workspace_paths": type("_Paths", (), {"workspace_id": "claims2"})(),
+            "workspace_paths": type("_Paths", (), {"workspace_id": "docs2"})(),
         },
     )()
     service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
@@ -966,7 +966,7 @@ def test_runtime_state_service_does_not_fallback_to_stale_session_when_daemon_is
         (),
         {
             "log_store": "log-store",
-            "workspace_paths": type("_Paths", (), {"workspace_id": "claims2"})(),
+            "workspace_paths": type("_Paths", (), {"workspace_id": "docs2"})(),
         },
     )()
     service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
@@ -1078,7 +1078,7 @@ def test_runtime_state_service_preserves_subscription_transport_mode():
         (),
         {
             "log_store": "log-store",
-            "workspace_paths": type("_Paths", (), {"workspace_id": "claims2"})(),
+            "workspace_paths": type("_Paths", (), {"workspace_id": "docs2"})(),
         },
     )()
     service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
@@ -1208,7 +1208,7 @@ def test_runtime_state_service_prefers_daemon_flow_activity_over_local_flow_stat
         (),
         {
             "log_store": "log-store",
-            "workspace_paths": type("_Paths", (), {"workspace_id": "claims2"})(),
+            "workspace_paths": type("_Paths", (), {"workspace_id": "docs2"})(),
         },
     )()
     service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
@@ -1222,3 +1222,4 @@ def test_runtime_state_service_prefers_daemon_flow_activity_over_local_flow_stat
 
     assert snapshot.flows["manual_flow"].state == "running"
     assert snapshot.flows["manual_flow"].running_step_counts == {"Transform": 1}
+

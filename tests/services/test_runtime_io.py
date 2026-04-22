@@ -20,14 +20,14 @@ def test_runtime_io_layer_serializes_execution_and_log_writes(tmp_path: Path) ->
 
     store.execution_state.record_run_started(
         run_id="run-1",
-        flow_name="claims_manual",
-        group_name="Claims",
-        source_path="claims.xlsx",
+        flow_name="docs_manual",
+        group_name="Docs",
+        source_path="docs.xlsx",
         started_at_utc=started_at,
     )
     step_run_id = store.execution_state.record_step_started(
         run_id="run-1",
-        flow_name="claims_manual",
+        flow_name="docs_manual",
         step_label="Read Excel",
         started_at_utc=started_at,
     )
@@ -45,13 +45,13 @@ def test_runtime_io_layer_serializes_execution_and_log_writes(tmp_path: Path) ->
     )
     store.logs.append(
         level="info",
-        message="runtime:flow:claims_manual:status=success",
+        message="runtime:flow:docs_manual:status=success",
         created_at_utc=started_at,
         run_id="run-1",
-        flow_name="claims_manual",
+        flow_name="docs_manual",
     )
 
-    assert store.runs.list(flow_name="claims_manual")[0].status == "success"
+    assert store.runs.list(flow_name="docs_manual")[0].status == "success"
     assert store.step_outputs.list_for_run("run-1")[0].elapsed_ms == 123
     assert store.logs.list(run_id="run-1")[0].message.endswith("status=success")
     store.close()
@@ -63,9 +63,9 @@ def test_runtime_io_layer_caches_reads_until_local_write_invalidates(tmp_path: P
     started_at = utcnow_text()
     ledger.runs.record_started(
         run_id="run-1",
-        flow_name="claims_manual",
-        group_name="Claims",
-        source_path="claims.xlsx",
+        flow_name="docs_manual",
+        group_name="Docs",
+        source_path="docs.xlsx",
         started_at_utc=started_at,
     )
     layer = RuntimeIoLayer(cache_ttl_seconds=60.0)
@@ -81,8 +81,8 @@ def test_runtime_io_layer_caches_reads_until_local_write_invalidates(tmp_path: P
 
     monkeypatch.setattr(delegate, "list", _counted_list)
 
-    first = store.runs.list(flow_name="claims_manual")
-    second = store.runs.list(flow_name="claims_manual")
+    first = store.runs.list(flow_name="docs_manual")
+    second = store.runs.list(flow_name="docs_manual")
     assert first == second
     assert calls["count"] == 1
 
@@ -91,7 +91,7 @@ def test_runtime_io_layer_caches_reads_until_local_write_invalidates(tmp_path: P
         status="success",
         finished_at_utc=started_at,
     )
-    refreshed = store.runs.list(flow_name="claims_manual")
+    refreshed = store.runs.list(flow_name="docs_manual")
     assert refreshed[0].status == "success"
     assert calls["count"] == 2
 
@@ -115,12 +115,12 @@ def test_runtime_binding_service_opens_runtime_io_cache_store(tmp_path: Path) ->
     try:
         binding.runtime_cache_ledger.execution_state.record_run_started(
             run_id="run-1",
-            flow_name="claims_manual",
-            group_name="Claims",
-            source_path="claims.xlsx",
+            flow_name="docs_manual",
+            group_name="Docs",
+            source_path="docs.xlsx",
             started_at_utc=utcnow_text(),
         )
-        assert binding.runtime_cache_ledger.runs.list(flow_name="claims_manual")
+        assert binding.runtime_cache_ledger.runs.list(flow_name="docs_manual")
     finally:
         service.close_binding(binding)
 
@@ -129,14 +129,15 @@ def test_runtime_io_logs_proxy_supports_limited_tail_reads(tmp_path: Path) -> No
     db_path = tmp_path / "runtime_state" / "runtime_cache.sqlite"
     ledger = RuntimeCacheLedger(db_path)
     created_at = utcnow_text()
-    ledger.logs.append(level="INFO", message="first", created_at_utc=created_at, run_id="run-1", flow_name="claims_manual")
-    ledger.logs.append(level="INFO", message="second", created_at_utc=created_at, run_id="run-1", flow_name="claims_manual")
-    ledger.logs.append(level="INFO", message="third", created_at_utc=created_at, run_id="run-1", flow_name="claims_manual")
+    ledger.logs.append(level="INFO", message="first", created_at_utc=created_at, run_id="run-1", flow_name="docs_manual")
+    ledger.logs.append(level="INFO", message="second", created_at_utc=created_at, run_id="run-1", flow_name="docs_manual")
+    ledger.logs.append(level="INFO", message="third", created_at_utc=created_at, run_id="run-1", flow_name="docs_manual")
 
     store = RuntimeIoLayer(cache_ttl_seconds=60.0).open_cache_store(db_path)
     try:
-        tail = store.logs.list(flow_name="claims_manual", limit=2)
+        tail = store.logs.list(flow_name="docs_manual", limit=2)
         assert [entry.message for entry in tail] == ["second", "third"]
     finally:
         store.close()
         ledger.close()
+

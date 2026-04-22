@@ -139,7 +139,7 @@ def _executor(calls: list[tuple[str, object]]) -> FlowRunExecutor:
 def test_flow_run_executor_does_not_emit_routine_success_logs() -> None:
     calls: list[tuple[str, object]] = []
     executor = _executor(calls)
-    flow = _Flow(name="claims_summary", group="Claims", steps=(_Step("Emit", lambda context: "ok"),))
+    flow = _Flow(name="docs_summary", group="Docs", steps=(_Step("Emit", lambda context: "ok"),))
 
     executor.run_one(flow, None)
 
@@ -162,7 +162,7 @@ def test_flow_run_executor_logs_failure_before_publishing_run_finished_state() -
         del context
         raise FlowStoppedError("stop requested")
 
-    flow = _Flow(name="claims_summary", group="Claims", steps=(_Step("Emit", _boom),))
+    flow = _Flow(name="docs_summary", group="Docs", steps=(_Step("Emit", _boom),))
 
     try:
         executor.run_one(flow, None)
@@ -202,7 +202,7 @@ def test_flow_run_executor_elapsed_excludes_start_write_delay() -> None:
             stop_controller=_StopController(),
         )
     )
-    flow = _Flow(name="claims_summary", group="Claims", steps=(_Step("Emit", lambda context: "ok"),))
+    flow = _Flow(name="docs_summary", group="Docs", steps=(_Step("Emit", lambda context: "ok"),))
 
     executor.run_one(flow, None)
 
@@ -262,8 +262,8 @@ def test_flow_runtime_discards_completed_contexts_when_results_collection_is_dis
 
 def test_flow_runtime_dispatches_queued_jobs_when_results_collection_is_disabled() -> None:
     flow = _Flow(
-        name="claims_poll",
-        group="Claims",
+        name="docs_poll",
+        group="Docs",
         steps=(_Step("Emit", lambda context: context.current),),
     )
     runtime = FlowRuntime(flows=(flow,), continuous=True)
@@ -330,3 +330,4 @@ def test_continuous_runtime_loop_sleeps_until_next_poll_without_pending_futures(
 
     assert isinstance(recorded["seconds"], float)
     assert 0.0 <= recorded["seconds"] <= 0.2
+

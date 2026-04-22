@@ -8,8 +8,8 @@ def _entries() -> tuple[FlowCatalogEntry, ...]:
         FlowCatalogEntry(
             name="poller",
             group="Imports",
-            title="Claims Poller",
-            description="Polls for claims.",
+            title="Docs Poller",
+            description="Polls for docs.",
             source_root="/tmp/input",
             target_root="/tmp/output",
             mode="poll",
@@ -61,3 +61,4 @@ def test_flow_catalog_state_tracks_flow_states_and_empty_message():
 
     assert updated.flow_states["poller"] == "polling"
     assert updated.empty_message == "No discoverable flows were found yet"
+

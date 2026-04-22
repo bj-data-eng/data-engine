@@ -27,7 +27,7 @@ DESCRIPTION = "Reads workbook inputs and writes mirrored parquet outputs."
 
 
 def build():
-    return Flow(group="Claims")
+    return Flow(group="Docs")
 ```
 
 In flow modules, the module filename owns the flow identity. Use `label=` on the returned `Flow(...)` when you want a custom UI title. When `label=` is omitted, Data Engine derives a readable label from the flow-module filename automatically.
@@ -50,11 +50,11 @@ Use `build().preview(use="name")` from an external notebook, REPL, or script whi
 Every `step(...)` callable receives one `context` argument:
 
 ```python
-def read_claims(context):
+def read_docs(context):
     ...
 
 
-def clean_claims(context):
+def clean_docs(context):
     ...
 ```
 
@@ -116,18 +116,18 @@ Helper modules are regular Python files under `flow_modules/flow_helpers/`. They
 Example:
 
 ```python
-# flow_modules/flow_helpers/claims_sql.py
-LATEST_CLAIMS_SQL = "select * from claims where is_latest = true"
+# flow_modules/flow_helpers/docs_sql.py
+LATEST_DOCS_SQL = "select * from docs where is_latest = true"
 ```
 
 ```python
-# flow_modules/claims_report.py
-from flow_helpers.claims_sql import LATEST_CLAIMS_SQL
+# flow_modules/docs_report.py
+from flow_helpers.docs_sql import LATEST_DOCS_SQL
 from data_engine import Flow
 
 
 def build():
-    return Flow(group="Claims")
+    return Flow(group="Docs")
 ```
 
 Files in `flow_modules/flow_helpers/` support authored flow modules and stay out of runnable flow discovery.
@@ -153,11 +153,11 @@ from data_engine import Flow
 import polars as pl
 
 
-def read_claims(file_ref):
+def read_docs(file_ref):
     return pl.read_excel(file_ref.path)
 
 
-def concat_claims(context):
+def concat_docs(context):
     return pl.concat(context.current, how="vertical_relaxed")
 
 
@@ -173,12 +173,12 @@ def write_target(context):
 
 def build():
     return (
-        Flow(group="Claims")
-        .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/claims_flat")
+        Flow(group="Docs")
+        .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/docs_flat")
         .mirror(root="../../example_data/Output/example_completed")
-        .collect([".xlsx"], save_as="claim_files")
-        .map(read_claims, use="claim_files", save_as="claim_frames")
-        .step(concat_claims, use="claim_frames", save_as="raw_df")
+        .collect([".xlsx"], save_as="doc_files")
+        .map(read_docs, use="doc_files", save_as="doc_frames")
+        .step(concat_docs, use="doc_frames", save_as="raw_df")
         .step(keep_completed, use="raw_df", save_as="clean_df")
         .step(write_target, use="clean_df")
     )

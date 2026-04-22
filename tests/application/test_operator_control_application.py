@@ -291,12 +291,12 @@ def test_operator_control_application_allows_manual_run_while_engine_is_active_f
         paths=paths,
         action_context=_action_context(
             runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poller",)),
-            flow_name="manual_claims",
+            flow_name="manual_docs",
             group_name="Manual",
             engine_state="running",
             live_truth_known=True,
         ),
-        selected_flow_name="manual_claims",
+        selected_flow_name="manual_docs",
         selected_flow_valid=True,
         blocked_status_text="blocked",
     )
@@ -335,7 +335,7 @@ def test_operator_control_application_blocks_automated_run_while_engine_is_start
         action_context=_action_context(
             runtime_session=RuntimeSessionState.empty(),
             flow_name="poller",
-            group_name="Claims",
+            group_name="Docs",
             flow_mode="poll",
             engine_state="starting",
             live_truth_known=True,
@@ -364,7 +364,7 @@ def test_operator_control_application_allows_manual_run_while_other_group_manual
     control_app = OperatorControlApplication(
         runtime_application=_RuntimeApplication(),
         daemon_state_service=_FakeDaemonStateService(
-            _snapshot(live=True, manual_runs=("claims2_parallel_poll",), source="runtime"),
+            _snapshot(live=True, manual_runs=("docs2_parallel_poll",), source="runtime"),
             control_state=object(),
         ),
     )
@@ -372,7 +372,7 @@ def test_operator_control_application_allows_manual_run_while_other_group_manual
     result = control_app.run_selected_flow(
         paths=paths,
         action_context=_action_context(
-            runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Imports": "claims2_parallel_poll"}),
+            runtime_session=RuntimeSessionState.empty().with_manual_runs_map({"Imports": "docs2_parallel_poll"}),
             flow_name="example_manual",
             group_name="Manual",
             live_truth_known=True,
@@ -591,3 +591,4 @@ def test_operator_control_application_refresh_reports_daemon_warning_but_keeps_r
     assert result.sync_after is True
     assert result.status_text == "Reloaded flow definitions."
     assert result.warning_text == "unreachable"
+

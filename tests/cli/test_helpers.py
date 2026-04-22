@@ -80,12 +80,12 @@ def test_workspace_vscode_settings_point_back_to_shared_app_root(tmp_path, monke
     app_root = tmp_path / "data_engine"
     (app_root / "src").mkdir(parents=True)
     (app_root / "tests").mkdir(parents=True)
-    settings = _workspace_vscode_settings(tmp_path / "workspaces" / "claims", app_root=app_root)
+    settings = _workspace_vscode_settings(tmp_path / "workspaces" / "docs", app_root=app_root)
 
     assert settings["python.analysis.extraPaths"] == [str(app_root / "src")]
     assert settings["python.testing.pytestArgs"] == [str(app_root / "tests")]
-    assert settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
-    assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ID"] == "claims"
+    assert settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_ID"] == "docs"
+    assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ID"] == "docs"
     assert settings["terminal.integrated.env.windows"] == settings["terminal.integrated.env.osx"]
 
 
@@ -166,3 +166,4 @@ def test_raise_open_file_limit_uses_minimum_when_hard_limit_is_unlimited(monkeyp
     raise_open_file_limit()
 
     assert calls == [(_FakeResource.RLIMIT_NOFILE, (4096, -1))]
+

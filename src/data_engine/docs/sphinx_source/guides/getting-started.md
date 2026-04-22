@@ -129,7 +129,7 @@ from data_engine import Flow
 import polars as pl
 
 
-def read_claims(context):
+def read_docs(context):
     return pl.read_excel(context.source.path)
 
 
@@ -145,16 +145,16 @@ def write_target(context):
 
 def build():
     return (
-        Flow(group="Claims")
+        Flow(group="Docs")
         .watch(
             mode="poll",
-            source="../../example_data/Input/claims_dated",
+            source="../../example_data/Input/docs_dated",
             interval="5s",
             extensions=[".xlsx", ".xlsm"],
             settle=1,
         )
         .mirror(root="../../example_data/Output/example_poll")
-        .step(read_claims, save_as="raw_df")
+        .step(read_docs, save_as="raw_df")
         .step(keep_open, use="raw_df", save_as="filtered_df")
         .step(write_target, use="filtered_df", label="Write Parquet")
     )
@@ -185,7 +185,7 @@ def summarize_results(context):
 
 def build():
     return (
-        Flow(group="Claims")
+        Flow(group="Docs")
         .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/pdfs")
         .collect(extensions=[".pdf"], save_as="pdf_files")
         .map(fn=validate_pdf, use="pdf_files", save_as="pdf_results")

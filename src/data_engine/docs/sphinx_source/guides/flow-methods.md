@@ -17,7 +17,7 @@ from data_engine import Flow
 Create a new immutable flow definition.
 
 ```python
-flow = Flow(group="Claims")
+flow = Flow(group="Docs")
 ```
 
 Rules:
@@ -35,7 +35,7 @@ Configure a runtime trigger for manual, poll, or schedule execution.
 ```python
 flow = flow.watch(
     mode="poll",
-    source="../../example_data/Input/claims_flat",
+    source="../../example_data/Input/docs_flat",
     interval="5s",
     extensions=[".xlsx", ".xlsm"],
     settle=1,
@@ -52,7 +52,7 @@ flow = flow.watch(
 
 ```python
 flow = flow.watch(mode="schedule", run_as="batch", interval="15m")
-flow = flow.watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/claims_flat")
+flow = flow.watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/docs_flat")
 flow = flow.watch(mode="schedule", run_as="batch", time="10:31", source="../../example_data/Settings/single_watch.xlsx")
 flow = flow.watch(mode="schedule", run_as="batch", time=["08:15", "14:45"])
 flow = flow.watch(mode="manual")
@@ -98,8 +98,8 @@ You can omit `mirror(...)` entirely if the flow has no need for a mirrored outpu
 Add one generic callable step.
 
 ```python
-flow = flow.step(read_claims, save_as="raw_df")
-flow = flow.step(clean_claims, use="raw_df", save_as="clean_df")
+flow = flow.step(read_docs, save_as="raw_df")
+flow = flow.step(clean_docs, use="raw_df", save_as="clean_df")
 flow = flow.step(write_output, use="clean_df", label="Write Parquet")
 ```
 
@@ -155,8 +155,8 @@ Reach for `map(...)` when the same callable should run once per collected item. 
 Use whichever reads better in the flow module:
 
 ```python
-flow = flow.map(fn=read_claims)
-flow = flow.step_each(fn=read_claims)
+flow = flow.map(fn=read_docs)
+flow = flow.step_each(fn=read_docs)
 ```
 
 ## `collect(extensions, root=None, recursive=False, use=None, save_as=None, label=None)`
@@ -196,7 +196,7 @@ Run one flow for notebook inspection and return a real object.
 ```python
 build().preview()
 build().preview(use="raw_df").head(10)
-build().preview(use="claim_frames")
+build().preview(use="doc_frames")
 ```
 
 Behavior:

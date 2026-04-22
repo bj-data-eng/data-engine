@@ -57,7 +57,7 @@ def test_load_flow_module_definition_defaults_flow_label_from_module_name(tmp_pa
     flow_modules_dir = workspace / "flow_modules"
     flow_modules_dir.mkdir(parents=True)
     _write_notebook(
-        flow_modules_dir / "claims_summary.ipynb",
+        flow_modules_dir / "docs_summary.ipynb",
         [
             "from data_engine import Flow\n",
             "def build():\n",
@@ -65,12 +65,12 @@ def test_load_flow_module_definition_defaults_flow_label_from_module_name(tmp_pa
         ],
     )
 
-    definition = load_flow_module_definition("claims_summary", data_root=workspace)
+    definition = load_flow_module_definition("docs_summary", data_root=workspace)
     built = definition.build()
 
     assert isinstance(built, Flow)
-    assert built.name == "claims_summary"
-    assert built.label == "Claims Summary"
+    assert built.name == "docs_summary"
+    assert built.label == "Docs Summary"
 
 
 def test_load_flow_module_definition_rejects_missing_build(tmp_path):
@@ -187,7 +187,7 @@ def test_compiled_flow_module_context_is_scoped():
 def test_load_flow_module_definition_resolves_relative_flow_paths_from_compiled_flow_module_dir(tmp_path):
     workspace = tmp_path / "workspace"
     flow_modules_dir = workspace / "flow_modules"
-    data_dir = tmp_path / "data" / "Input" / "claims_flat"
+    data_dir = tmp_path / "data" / "Input" / "docs_flat"
     flow_modules_dir.mkdir(parents=True)
     data_dir.mkdir(parents=True)
     _write_notebook(
@@ -197,7 +197,7 @@ def test_load_flow_module_definition_resolves_relative_flow_paths_from_compiled_
             "def build():\n",
             "    return (\n",
             '        Flow(name="demo", group="Tests")\n',
-            '        .watch(mode="poll", source="../../data/Input/claims_flat", interval="5s")\n',
+            '        .watch(mode="poll", source="../../data/Input/docs_flat", interval="5s")\n',
             '        .mirror(root="../../data/Output/demo")\n',
             "        .step(lambda context: context.current)\n",
             "    )\n",
@@ -208,7 +208,7 @@ def test_load_flow_module_definition_resolves_relative_flow_paths_from_compiled_
     built = definition.build()
 
     assert built.trigger is not None
-    assert built.trigger.source == (tmp_path / "data" / "Input" / "claims_flat").resolve()
+    assert built.trigger.source == (tmp_path / "data" / "Input" / "docs_flat").resolve()
     assert built.mirror_spec is not None
     assert built.mirror_spec.root == (tmp_path / "data" / "Output" / "demo").resolve()
 
@@ -370,13 +370,14 @@ def test_load_flow_module_definition_overrides_flow_name_with_module_name(tmp_pa
     workspace = tmp_path / "workspace"
     flow_modules_dir = workspace / "flow_modules"
     flow_modules_dir.mkdir(parents=True)
-    (flow_modules_dir / "claims_demo.py").write_text(
+    (flow_modules_dir / "docs_demo.py").write_text(
         "from data_engine import Flow\n\n"
         "def build():\n"
         '    return Flow(name="broken_step", label="broken_step", group="Tests").step(lambda context: context.current)\n',
         encoding="utf-8",
     )
 
-    definition = load_flow_module_definition("claims_demo", data_root=workspace)
+    definition = load_flow_module_definition("docs_demo", data_root=workspace)
     with pytest.raises(FlowValidationError, match="must not override the module-defined flow name"):
         definition.build()
+

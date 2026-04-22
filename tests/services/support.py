@@ -35,7 +35,7 @@ def record_run_with_step(
     ledger.runs.record_started(
         run_id=run_id,
         flow_name=flow_name,
-        group_name="Claims",
+        group_name="Docs",
         source_path=None,
         started_at_utc=started_at,
     )
@@ -107,11 +107,11 @@ def record_flow_state(ledger: RuntimeCacheLedger, *, flow_name: str, source_path
     )
 
 
-def claims_poll_card() -> FlowCatalogEntry:
+def docs_poll_card() -> FlowCatalogEntry:
     return FlowCatalogEntry(
-        name="claims",
-        group="Claims",
-        title="Claims",
+        name="docs",
+        group="Docs",
+        title="Docs",
         description="",
         source_root="(not set)",
         target_root="(not set)",
@@ -124,3 +124,4 @@ def claims_poll_card() -> FlowCatalogEntry:
         valid=True,
         category="manual",
     )
+
