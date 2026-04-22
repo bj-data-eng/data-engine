@@ -137,6 +137,23 @@ class RuntimeExecutionService:
         )
         return release_completed_results(result)
 
+    def run_manual_and_discard(
+        self,
+        flow: "CoreFlow",
+        *,
+        runtime_ledger: RuntimeCacheStore,
+        runtime_stop_event: Event,
+        flow_stop_event: Event | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        """Run one flow manually while discarding completed results immediately."""
+        self._engine(
+            runtime_ledger=runtime_ledger,
+            runtime_stop_event=runtime_stop_event,
+            flow_stop_event=flow_stop_event,
+            workspace_id=workspace_id,
+        ).run_once_and_discard(flow)
+
     def run_continuous(
         self,
         flow: "CoreFlow",

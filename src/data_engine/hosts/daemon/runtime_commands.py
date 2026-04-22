@@ -91,7 +91,16 @@ class DaemonRuntimeCommandHandler:
                             "run_manual_flow",
                             fields={"flow": name, "request_id": request_id},
                         ):
-                            service.runtime_execution_service.run_manual(
+                            runtime_execution_service = service.runtime_execution_service
+                            if "run_manual" in getattr(runtime_execution_service, "__dict__", {}):
+                                run_manual = runtime_execution_service.run_manual
+                            else:
+                                run_manual = getattr(
+                                    runtime_execution_service,
+                                    "run_manual_and_discard",
+                                    runtime_execution_service.run_manual,
+                                )
+                            run_manual(
                                 flow,
                                 runtime_ledger=service.runtime_execution_ledger,
                                 runtime_stop_event=runtime_stop_event,

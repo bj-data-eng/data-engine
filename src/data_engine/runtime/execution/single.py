@@ -109,6 +109,16 @@ class FlowRuntime:
         finally:
             self._close_runtime_resources()
 
+    def run_and_discard(self) -> None:
+        """Run one-shot flows while releasing completed contexts immediately."""
+        try:
+            self._validate()
+            if self.continuous and not all(flow.mode == "manual" for flow in self.flows):
+                raise FlowValidationError("run_and_discard() is only available for one-shot executions.")
+            self._run_once_all(collect_results=False)
+        finally:
+            self._close_runtime_resources()
+
     def preview(self, *, use: str | None = None):
         """Run exactly one flow for notebook-style inspection and return one object."""
         try:
@@ -168,7 +178,7 @@ class FlowRuntime:
             if not flow.steps:
                 raise FlowValidationError(f"Flow {flow.name!r} must define at least one step.")
 
-    def _run_once_all(self) -> list[FlowContext]:
+    def _run_once_all(self, *, collect_results: bool = True) -> list[FlowContext]:
         results: list[FlowContext] = []
         for flow in self.flows:
             if self.runtime_stop_event is not None and self.runtime_stop_event.is_set():
@@ -187,7 +197,9 @@ class FlowRuntime:
                 ):
                     batch_signatures = self.polling.stale_batch_poll_signatures(flow)
                 jobs.append(QueuedRunJob(flow=flow, source_path=source_path, batch_signatures=batch_signatures))
-            results.extend(self._run_jobs(jobs))
+            batch_results = self._run_jobs(jobs, collect_results=collect_results)
+            if collect_results:
+                results.extend(batch_results)
         return results
 
     def max_parallel_for_flow(self, flow: "CoreFlow") -> int:
@@ -199,7 +211,7 @@ class FlowRuntime:
             return 1
         return max(int(trigger.max_parallel), 1)
 
-    def _run_jobs(self, jobs: list[QueuedRunJob]) -> list[FlowContext]:
+    def _run_jobs(self, jobs: list[QueuedRunJob], *, collect_results: bool = True) -> list[FlowContext]:
         if not jobs:
             return []
         max_parallel = self.max_parallel_for_flow(jobs[0].flow)
@@ -208,10 +220,47 @@ class FlowRuntime:
             for job in jobs:
                 if self.runtime_stop_event is not None and self.runtime_stop_event.is_set():
                     break
-                results.append(
-                    self.run_executor.run_one(job.flow, job.source_path, batch_signatures=job.batch_signatures)
+                result = self.run_executor.run_one(
+                    job.flow,
+                    job.source_path,
+                    batch_signatures=job.batch_signatures,
                 )
+                if collect_results:
+                    results.append(result)
+                else:
+                    self._release_completed_context(result)
             return results
+        if not collect_results:
+            with ThreadPoolExecutor(max_workers=min(max_parallel, len(jobs))) as executor:
+                future_to_job: dict[Future[FlowContext], QueuedRunJob] = {}
+                job_iter = iter(jobs)
+
+                def _submit_next_job() -> bool:
+                    if self.runtime_stop_event is not None and self.runtime_stop_event.is_set():
+                        return False
+                    try:
+                        job = next(job_iter)
+                    except StopIteration:
+                        return False
+                    future = executor.submit(self._execute_job_in_thread, job)
+                    future_to_job[future] = job
+                    return True
+
+                for _ in range(min(max_parallel, len(jobs))):
+                    if not _submit_next_job():
+                        break
+                try:
+                    while future_to_job:
+                        future = next(as_completed(tuple(future_to_job)))
+                        future_to_job.pop(future, None)
+                        result = future.result()
+                        self._release_completed_context(result)
+                        _submit_next_job()
+                except Exception:
+                    for future in future_to_job:
+                        future.cancel()
+                    raise
+            return []
         results_by_index: dict[int, FlowContext] = {}
         job_iter = iter(enumerate(jobs))
         with ThreadPoolExecutor(max_workers=min(max_parallel, len(jobs))) as executor:

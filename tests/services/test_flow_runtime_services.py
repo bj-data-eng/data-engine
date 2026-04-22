@@ -169,6 +169,91 @@ def test_runtime_execution_service_run_manual_releases_completed_flow_contexts()
     assert context.debug is None
 
 
+def test_runtime_execution_service_run_manual_and_discard_uses_runtime_discard_hook_when_available() -> None:
+    flow = Flow(name="docs", group="Docs")
+    runtime_stop = Event()
+    flow_stop = Event()
+    ledger = object()
+    calls: list[str] = []
+
+    class _Runtime:
+        def __init__(
+            self,
+            flows,
+            *,
+            continuous,
+            runtime_stop_event=None,
+            flow_stop_event=None,
+            runtime_ledger=None,
+            run_stop_controller=None,
+        ):
+            self.flows = flows
+            self.continuous = continuous
+            self.runtime_stop_event = runtime_stop_event
+            self.flow_stop_event = flow_stop_event
+            self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
+
+        def run(self):
+            calls.append("run")
+            return ["result"]
+
+        def run_and_discard(self):
+            calls.append("run_and_discard")
+
+    service = RuntimeExecutionService(flow_runtime_type=_Runtime)
+
+    service.run_manual_and_discard(
+        flow,
+        runtime_ledger=ledger,
+        runtime_stop_event=runtime_stop,
+        flow_stop_event=flow_stop,
+    )
+
+    assert calls == ["run_and_discard"]
+
+
+def test_runtime_execution_service_run_manual_and_discard_falls_back_for_legacy_runtime() -> None:
+    flow = Flow(name="docs", group="Docs")
+    runtime_stop = Event()
+    flow_stop = Event()
+    ledger = object()
+    calls: list[str] = []
+
+    class _Runtime:
+        def __init__(
+            self,
+            flows,
+            *,
+            continuous,
+            runtime_stop_event=None,
+            flow_stop_event=None,
+            runtime_ledger=None,
+            run_stop_controller=None,
+        ):
+            self.flows = flows
+            self.continuous = continuous
+            self.runtime_stop_event = runtime_stop_event
+            self.flow_stop_event = flow_stop_event
+            self.runtime_ledger = runtime_ledger
+            self.run_stop_controller = run_stop_controller
+
+        def run(self):
+            calls.append("run")
+            return []
+
+    service = RuntimeExecutionService(flow_runtime_type=_Runtime)
+
+    service.run_manual_and_discard(
+        flow,
+        runtime_ledger=ledger,
+        runtime_stop_event=runtime_stop,
+        flow_stop_event=flow_stop,
+    )
+
+    assert calls == ["run"]
+
+
 def test_runtime_execution_service_exposes_explicit_engine_commands(tmp_path):
     flow = Flow(name="docs", group="Docs")
     source = tmp_path / "docs.csv"

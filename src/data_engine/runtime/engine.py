@@ -51,6 +51,15 @@ class RuntimeEngine:
         runtime = self._flow_runtime((flow,), continuous=False)
         return runtime.run()
 
+    def run_once_and_discard(self, flow: "CoreFlow") -> None:
+        """Run one flow once while releasing completed contexts eagerly."""
+        runtime = self._flow_runtime((flow,), continuous=False)
+        run_and_discard = getattr(runtime, "run_and_discard", None)
+        if callable(run_and_discard):
+            run_and_discard()
+            return
+        release_completed_results(runtime.run())
+
     @staticmethod
     def release_completed_results(result: object) -> object:
         return release_completed_results(result)
