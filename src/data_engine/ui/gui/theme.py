@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from importlib import resources
+
 from data_engine.platform.theme import (
     DEFAULT_THEME,
     GITHUB_DARK,
@@ -15,11 +17,19 @@ from data_engine.platform.theme import (
 )
 
 
+def _check_mark_icon_url(theme_name: str) -> str:
+    """Return one stylesheet-safe packaged path for the preview check-mark icon."""
+    icon_file_name = f'check-mark-{"dark" if theme_name == "dark" else "light"}.svg'
+    icon_path = resources.files("data_engine.ui.gui").joinpath("icons", icon_file_name)
+    return str(icon_path).replace("\\", "/")
+
+
 def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     """Return the application stylesheet for the requested theme."""
     palette = THEMES[resolve_theme_name(theme_name)]
     selected_sidebar_text = palette.selection_text if palette.name == "dark" else palette.text
     selected_sidebar_subtext = palette.selection_text if palette.name == "dark" else palette.text
+    preview_check_mark_icon_url = _check_mark_icon_url(palette.name)
     return f"""
     QWidget {{
         background: {palette.app_bg};
@@ -764,7 +774,7 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border: 1px solid {palette.selection_border};
     }}
     QListWidget#outputPreviewPopupList::indicator:checked {{
-        image: url(src/data_engine/ui/gui/icons/check-mark-{"dark" if palette.name == "dark" else "light"}.svg);
+        image: url({preview_check_mark_icon_url});
     }}
     QTabWidget::pane {{
         background: transparent;
