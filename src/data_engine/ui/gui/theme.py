@@ -44,6 +44,47 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         background: {palette.window_bg};
         color: {palette.muted_text};
     }}
+    QScrollBar:vertical {{
+        background: {palette.panel_bg};
+        width: 8px;
+        margin: 0px;
+        border: none;
+        border-radius: 0px;
+    }}
+    QScrollBar:horizontal {{
+        background: {palette.panel_bg};
+        height: 8px;
+        margin: 0px;
+        border: none;
+        border-radius: 0px;
+    }}
+    QScrollBar::handle:vertical,
+    QScrollBar::handle:horizontal {{
+        background: {palette.input_border};
+        border: 1px solid {palette.panel_border};
+        border-radius: 4px;
+        min-height: 20px;
+        min-width: 20px;
+    }}
+    QScrollBar::handle:vertical:hover,
+    QScrollBar::handle:horizontal:hover {{
+        background: {palette.hover_bg};
+        border: 1px solid {palette.input_border};
+    }}
+    QScrollBar::handle:vertical:pressed,
+    QScrollBar::handle:horizontal:pressed {{
+        background: {palette.button_checked_bg};
+        border: 1px solid {palette.button_checked_border};
+    }}
+    QScrollBar::add-line,
+    QScrollBar::sub-line,
+    QScrollBar::add-page,
+    QScrollBar::sub-page {{
+        background: transparent;
+        border: none;
+        width: 0px;
+        height: 0px;
+    }}
     QFrame#workspacePanel, QFrame#sidebarPanel {{
         background: {palette.panel_bg};
         border: 1px solid {palette.panel_border};
@@ -91,10 +132,6 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QScrollArea#sidebarScroll, QWidget#sidebarContent {{
         background: transparent;
         border: none;
-    }}
-    QScrollArea#sidebarScroll QScrollBar:vertical {{
-        width: 0px;
-        background: transparent;
     }}
     QFrame#sidebarCueTop, QFrame#sidebarCueBottom {{
         border: none;
@@ -223,10 +260,6 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QScrollArea#operationScroll {{
         background: transparent;
         border: none;
-    }}
-    QScrollArea#operationScroll QScrollBar:vertical {{
-        width: 0px;
-        background: transparent;
     }}
     QFrame#operationCard {{
         background: {palette.panel_bg};

@@ -219,12 +219,6 @@ class _ParquetPreviewLoader(QThread):
             else:
                 preview = query.head(self._preview_row_limit).collect()
                 preview_label = f"Showing top {self._preview_row_limit} rows"
-            if self._sort_columns:
-                sort_summary = ", ".join(
-                    f"{column_name} {'↓' if descending else '↑'}"
-                    for column_name, descending in self._sort_columns
-                )
-                preview_label = f"{preview_label}  •  Sorted by {sort_summary}"
             summary = f"{row_count} row(s)  •  {len(schema.names())} column(s)  •  {preview_label}"
             self.preview_loaded.emit(schema, preview, summary)
         except Exception as exc:  # pragma: no cover - defensive UI fallback
