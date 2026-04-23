@@ -698,6 +698,9 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QLabel#outputPreviewPath {{
         background: transparent;
         color: {palette.muted_text};
+        font-family: "Segoe UI", Helvetica, Arial;
+        font-size: 12px;
+        font-weight: 500;
     }}
     QFrame#rawLogRow {{
         background: {palette.panel_bg};
@@ -748,7 +751,6 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QTableWidget#outputPreviewTable::item {{
         padding: 4px 8px;
         border: none;
-        font-size: 11px;
     }}
     QTableWidget#outputPreviewTable QHeaderView {{
         background: {palette.panel_bg};

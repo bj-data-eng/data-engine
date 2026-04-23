@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QStyle,
     QStyleOptionHeader,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -145,6 +147,19 @@ class _PreviewHeaderView(QHeaderView):
         painter.setFont(caret_font)
         painter.drawText(indicator_rect, int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter), "▾")
         painter.restore()
+
+
+class _PreviewBodyItemDelegate(QStyledItemDelegate):
+    """Delegate that applies the intended preview table body font during paint."""
+
+    def initStyleOption(self, option: QStyleOptionViewItem, index) -> None:  # noqa: N802
+        super().initStyleOption(option, index)
+        body_font = QFont(option.font)
+        body_font.setFamilies(["Segoe UI", "Helvetica", "Arial"])
+        body_font.setPointSize(9)
+        body_font.setWeight(QFont.Weight.Medium)
+        option.font = body_font
+        option.fontMetrics = QFontMetrics(body_font)
 
 
 class _ParquetPreviewLoader(QThread):
@@ -1272,6 +1287,7 @@ def _build_dataframe_table(frame: pl.DataFrame) -> QTableWidget:
     table = _CopyablePreviewTable()
     table.setObjectName("outputPreviewTable")
     table.setHorizontalHeader(_PreviewHeaderView(Qt.Orientation.Horizontal, table))
+    table.setItemDelegate(_PreviewBodyItemDelegate(table))
     table.setAlternatingRowColors(True)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
@@ -1289,9 +1305,6 @@ def _build_dataframe_table(frame: pl.DataFrame) -> QTableWidget:
     table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     table.horizontalHeader().setMinimumHeight(43)
     table.horizontalHeader().setFixedHeight(43)
-    body_font = QFont(table.font())
-    body_font.setPointSize(max(8, body_font.pointSize() - 1))
-    table.setFont(body_font)
     _prepare_dataframe_table(table, frame, filtered_columns=set())
     _populate_dataframe_table_rows(table, frame, 0, frame.height)
     if frame.height <= 250:
