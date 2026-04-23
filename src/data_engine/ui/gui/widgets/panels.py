@@ -156,6 +156,7 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     left_header.addWidget(left_title, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
     left_header.addStretch(1)
     window.clear_debug_artifacts_button = QPushButton("Clear")
+    window.clear_debug_artifacts_button.setFixedHeight(22)
     window.clear_debug_artifacts_button.clicked.connect(window._clear_debug_artifacts)
     left_header.addWidget(window.clear_debug_artifacts_button, 0, Qt.AlignmentFlag.AlignTop)
     left_layout.addLayout(left_header)
@@ -180,12 +181,12 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     right_header.addStretch(1)
     window.debug_preview_mode_combo = QComboBox()
     window.debug_preview_mode_combo.setObjectName("outputPreviewModeCombo")
-    window.debug_preview_mode_combo.setFixedHeight(36)
+    window.debug_preview_mode_combo.setFixedHeight(22)
     window.debug_preview_mode_combo.setVisible(False)
     right_header.addWidget(window.debug_preview_mode_combo, 0, Qt.AlignmentFlag.AlignTop)
     window.debug_preview_limit_spin = QSpinBox()
     window.debug_preview_limit_spin.setObjectName("outputPreviewLimitSpin")
-    window.debug_preview_limit_spin.setFixedHeight(36)
+    window.debug_preview_limit_spin.setFixedHeight(22)
     window.debug_preview_limit_spin.setVisible(False)
     right_header.addWidget(window.debug_preview_limit_spin, 0, Qt.AlignmentFlag.AlignTop)
     right_layout.addLayout(right_header)
@@ -196,7 +197,7 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     right_layout.addWidget(window.debug_artifact_summary_label)
 
     window.debug_artifact_source_label = QLabel("")
-    window.debug_artifact_source_label.setObjectName("sectionMeta")
+    window.debug_artifact_source_label.setObjectName("outputPreviewPath")
     window.debug_artifact_source_label.setWordWrap(True)
     window.debug_artifact_source_label.setVisible(False)
     right_layout.addWidget(window.debug_artifact_source_label)
@@ -280,6 +281,7 @@ def _build_workspace_settings_panel(window: "DataEngineWindow") -> QWidget:
     workspace_actions.setSpacing(8)
 
     window.browse_workspace_root_button = QPushButton("Browse…")
+    window.browse_workspace_root_button.setFixedHeight(22)
     window.browse_workspace_root_button.clicked.connect(window._browse_workspace_collection_root_override)
     workspace_actions.addWidget(window.browse_workspace_root_button)
     workspace_actions.addStretch(1)
@@ -305,7 +307,7 @@ def _build_workspace_settings_panel(window: "DataEngineWindow") -> QWidget:
     window.workspace_settings_selector = QComboBox()
     window.workspace_settings_selector.setObjectName("workspaceSettingsSelector")
     window.workspace_settings_selector.setMinimumWidth(200)
-    window.workspace_settings_selector.setFixedHeight(36)
+    window.workspace_settings_selector.setFixedHeight(22)
     window.workspace_settings_selector.currentIndexChanged.connect(window._settings_workspace_target_changed)
     workspace_layout.addWidget(window.workspace_settings_selector, 0, Qt.AlignmentFlag.AlignLeft)
 
@@ -315,6 +317,7 @@ def _build_workspace_settings_panel(window: "DataEngineWindow") -> QWidget:
     workspace_layout.addWidget(window.workspace_target_label)
 
     window.provision_workspace_button = QPushButton("Provision Selected Workspace")
+    window.provision_workspace_button.setFixedHeight(22)
     window.provision_workspace_button.clicked.connect(window._provision_selected_workspace)
     workspace_layout.addWidget(window.provision_workspace_button, 0, Qt.AlignmentFlag.AlignLeft)
 
@@ -364,6 +367,7 @@ def _build_bootstrap_settings_panel(window: "DataEngineWindow") -> QWidget:
     details_layout.addWidget(daemon_intro)
 
     window.force_shutdown_daemon_button = QPushButton("Force Stop Daemon")
+    window.force_shutdown_daemon_button.setFixedHeight(22)
     window.force_shutdown_daemon_button.clicked.connect(window._force_shutdown_daemon)
     details_layout.addWidget(window.force_shutdown_daemon_button, 0, Qt.AlignmentFlag.AlignLeft)
 
@@ -373,6 +377,7 @@ def _build_bootstrap_settings_panel(window: "DataEngineWindow") -> QWidget:
     details_layout.addWidget(window.force_shutdown_daemon_status_label)
 
     window.reset_workspace_button = QPushButton("Reset Workspace")
+    window.reset_workspace_button.setFixedHeight(22)
     window.reset_workspace_button.clicked.connect(window._reset_workspace)
     details_layout.addWidget(window.reset_workspace_button, 0, Qt.AlignmentFlag.AlignLeft)
 
@@ -419,14 +424,14 @@ def build_action_bar(window: "DataEngineWindow") -> QWidget:
 
     window.engine_button = QPushButton("Start Engine")
     window.engine_button.setObjectName("engineButton")
-    window.engine_button.setFixedHeight(36)
+    window.engine_button.setFixedHeight(22)
     window.engine_button.clicked.connect(window._toggle_runtime)
 
     window.refresh_button = QPushButton()
     window.refresh_button.setObjectName("refreshButton")
     window.refresh_button.setIcon(window._action_bar_icon("refresh"))
-    window.refresh_button.setIconSize(QPixmap(16, 16).size())
-    window.refresh_button.setFixedSize(36, 36)
+    window.refresh_button.setIconSize(QPixmap(12, 12).size())
+    window.refresh_button.setFixedSize(22, 22)
     window.refresh_button.clicked.connect(window._refresh_flows_requested)
 
     controls_group = QFrame()
@@ -439,14 +444,14 @@ def build_action_bar(window: "DataEngineWindow") -> QWidget:
     controls_row.addWidget(window.engine_button)
     window.request_control_button = QPushButton("Request Control")
     window.request_control_button.setObjectName("requestControlButton")
-    window.request_control_button.setFixedHeight(36)
+    window.request_control_button.setFixedHeight(22)
     window.request_control_button.setVisible(True)
     window.request_control_button.clicked.connect(window._request_control)
     controls_row.addWidget(window.request_control_button)
     window.workspace_selector = QComboBox()
     window.workspace_selector.setObjectName("workspaceSelector")
     window.workspace_selector.setMinimumWidth(200)
-    window.workspace_selector.setFixedHeight(36)
+    window.workspace_selector.setFixedHeight(22)
     window.workspace_selector.currentIndexChanged.connect(window._workspace_selection_changed)
     controls_row.addWidget(window.workspace_selector)
     row.addWidget(controls_group, 0)
@@ -462,8 +467,8 @@ def build_action_bar(window: "DataEngineWindow") -> QWidget:
     window.theme_toggle_button = QPushButton()
     window.theme_toggle_button.setObjectName("themeToggleButton")
     window.theme_toggle_button.setIcon(window._action_bar_icon("theme_toggle"))
-    window.theme_toggle_button.setIconSize(QPixmap(16, 16).size())
-    window.theme_toggle_button.setFixedSize(36, 36)
+    window.theme_toggle_button.setIconSize(QPixmap(12, 12).size())
+    window.theme_toggle_button.setFixedSize(22, 22)
     window.theme_toggle_button.clicked.connect(window._toggle_theme)
     row.addWidget(window.theme_toggle_button)
     return frame
@@ -507,22 +512,17 @@ def build_center_panel(window: "DataEngineWindow") -> QWidget:
 
     header = QFrame()
     header.setObjectName("heroHeader")
-    header_row = QHBoxLayout(header)
+    header_layout = QVBoxLayout(header)
+    header_layout.setContentsMargins(0, 0, 0, 0)
+    header_layout.setSpacing(6)
+
+    header_row = QHBoxLayout()
     header_row.setContentsMargins(0, 0, 0, 0)
     header_row.setSpacing(12)
-
-    title_column = QVBoxLayout()
-    title_column.setContentsMargins(0, 0, 0, 0)
-    title_column.setSpacing(2)
     window.operations_title_label = QLabel("Steps")
     window.operations_title_label.setObjectName("sectionTitle")
-    title_column.addWidget(window.operations_title_label, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-
-    window.flow_error_label = QLabel("")
-    window.flow_error_label.setWordWrap(True)
-    window.flow_error_label.setObjectName("errorText")
-    title_column.addWidget(window.flow_error_label, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-    header_row.addLayout(title_column, 1)
+    header_row.addWidget(window.operations_title_label, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+    header_row.addStretch(1)
 
     title_row = QHBoxLayout()
     title_row.setContentsMargins(0, 0, 0, 0)
@@ -530,12 +530,30 @@ def build_center_panel(window: "DataEngineWindow") -> QWidget:
     window.flow_run_button = QPushButton("Run Once")
     window.flow_run_button.setObjectName("flowRunButton")
     window.flow_run_button.setProperty("flowRunState", "run")
+    window.flow_run_button.setFixedHeight(22)
     window.flow_run_button.clicked.connect(window._run_selected_flow)
     title_row.addWidget(window.flow_run_button, 0, Qt.AlignmentFlag.AlignTop)
     window.flow_config_button = QPushButton("View Config")
+    window.flow_config_button.setObjectName("flowConfigButton")
+    window.flow_config_button.setFixedHeight(22)
     window.flow_config_button.clicked.connect(window._show_config_preview)
     title_row.addWidget(window.flow_config_button, 0, Qt.AlignmentFlag.AlignTop)
     header_row.addLayout(title_row, 0)
+    header_layout.addLayout(header_row)
+
+    error_frame = QFrame(header)
+    error_frame.setObjectName("flowErrorAlert")
+    error_frame.setVisible(False)
+    error_layout = QHBoxLayout(error_frame)
+    error_layout.setContentsMargins(10, 6, 10, 6)
+    error_layout.setSpacing(0)
+
+    window.flow_error_label = QLabel("", error_frame)
+    window.flow_error_label.setWordWrap(True)
+    window.flow_error_label.setObjectName("errorText")
+    error_layout.addWidget(window.flow_error_label, 1, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+    window.flow_error_frame = error_frame
+    header_layout.addWidget(error_frame)
 
     window.operation_scroll = QScrollArea()
     window.operation_scroll.setWidgetResizable(True)
@@ -573,6 +591,8 @@ def build_right_panel(window: "DataEngineWindow") -> QWidget:
     header.addStretch(1)
 
     window.clear_flow_log_button = QPushButton("Reset Flow")
+    window.clear_flow_log_button.setObjectName("resetFlowButton")
+    window.clear_flow_log_button.setFixedHeight(22)
     window.clear_flow_log_button.clicked.connect(window._clear_logs)
     header.addWidget(window.clear_flow_log_button, 0, Qt.AlignmentFlag.AlignTop)
     layout.addLayout(header)

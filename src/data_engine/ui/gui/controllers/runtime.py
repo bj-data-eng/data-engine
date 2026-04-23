@@ -228,6 +228,7 @@ class GuiRuntimeController:
         refresh_selection = False
         refresh_summary = False
         refresh_buttons = False
+        refresh_workspace_counts_footer = False
         for update in batch.updates:
             if update.lane == "control":
                 self.sync_from_daemon(window)
@@ -242,6 +243,7 @@ class GuiRuntimeController:
                     refresh_selection = True
             if update.lane == "run_lifecycle":
                 refresh_buttons = True
+                refresh_workspace_counts_footer = True
                 if selected_flow_affected:
                     refresh_log_view = True
                     refresh_selection = True
@@ -259,6 +261,7 @@ class GuiRuntimeController:
                         and event.step_name is None
                         and event.status in {"success", "failed", "stopped"}
                     ):
+                        refresh_workspace_counts_footer = True
                         for group_name, (flow_name, *_rest) in tuple(window.pending_manual_run_requests.items()):
                             if flow_name == synthesized_entry.flow_name:
                                 window.pending_manual_run_requests.pop(group_name, None)
@@ -276,10 +279,16 @@ class GuiRuntimeController:
         if selected_flow_affected and batch.completed_run_ids:
             projection = self._refresh_runtime_projection_from_logs(window)
             window.step_output_index = projection.step_output_index
+        if batch.completed_run_ids:
+            refresh_workspace_counts_footer = True
         if refresh_selection and selected_flow_name is not None and selected_flow_name in window.flow_cards:
             window.flow_controller.refresh_selection(window, window.flow_cards[selected_flow_name])
+        if refresh_workspace_counts_footer:
+            window._workspace_counts_footer_cache.pop(window.workspace_paths.workspace_id, None)
         if refresh_summary:
             window.flow_controller.refresh_summary(window)
+            window._refresh_workspace_visibility_panel()
+        elif refresh_workspace_counts_footer:
             window._refresh_workspace_visibility_panel()
         if refresh_log_view:
             window._refresh_log_view()

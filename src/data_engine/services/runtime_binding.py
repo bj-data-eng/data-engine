@@ -314,6 +314,9 @@ class WorkspaceRuntimeBindingService:
         cutoff = datetime.now(UTC) - timedelta(days=days)
         count = 0
         try:
+            refresh_external_state = getattr(binding.runtime_cache_ledger, "refresh_external_state", None)
+            if callable(refresh_external_state):
+                refresh_external_state()
             runs = binding.runtime_cache_ledger.runs.list()
         except Exception:
             return 0

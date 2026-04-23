@@ -5797,7 +5797,6 @@ def test_apply_daemon_update_batch_streams_log_events_without_waiting_for_reload
                     "log_events",
                     flow_names=("poller",),
                     run_ids=("run-1",),
-                    completed_run_ids=("run-1",),
                     log_entries=(
                         FlowLogEntry(
                             line="poller  success  docs.xlsx",
@@ -5829,6 +5828,84 @@ def test_apply_daemon_update_batch_streams_log_events_without_waiting_for_reload
         assert len(run_groups) == 1
         assert run_groups[0].status == "success"
         assert run_groups[0].elapsed_seconds == 1.25
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_apply_daemon_update_batch_refreshes_last_7_day_run_count_on_success(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        window._load_flows()
+        recent_started = datetime.now(UTC).isoformat()
+        window.runtime_binding.runtime_cache_ledger.runs.record_started(
+            run_id="run-existing",
+            flow_name="poller",
+            group_name="Imports",
+            source_path="/tmp/input-existing.xlsx",
+            started_at_utc=recent_started,
+        )
+        window._workspace_counts_footer_cache.clear()
+        window._refresh_workspace_visibility_panel()
+        assert window.workspace_counts_footer_label.text().endswith("1 runs last 7 days")
+
+        window.runtime_binding.runtime_cache_ledger.runs.record_started(
+            run_id="run-new",
+            flow_name="poller",
+            group_name="Imports",
+            source_path="/tmp/input-new.xlsx",
+            started_at_utc=recent_started,
+        )
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=8,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+        window.runtime_session = RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=False)
+        window._pending_daemon_update_batch = DaemonUpdateBatch(
+            snapshot=WorkspaceDaemonSnapshot(
+                live=True,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=False,
+                runtime_stopping=False,
+                manual_runs=(),
+                last_checkpoint_at_utc=None,
+                source="daemon",
+                projection_version=9,
+                active_runs=(),
+            ),
+            updates=(
+                DaemonLaneUpdate(
+                    "log_events",
+                    flow_names=("poller",),
+                    run_ids=("run-new",),
+                    completed_run_ids=("run-new",),
+                    log_entries=(
+                        FlowLogEntry(
+                            line="poller  success  docs.xlsx",
+                            kind="flow",
+                            flow_name="poller",
+                            event=RuntimeStepEvent(
+                                run_id="run-new",
+                                flow_name="poller",
+                                step_name=None,
+                                source_label="docs.xlsx",
+                                status="success",
+                                elapsed_seconds=1.25,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            requires_full_sync=False,
+        )
+
+        window._apply_daemon_update_batch()
+
+        assert window.workspace_counts_footer_label.text().endswith("2 runs last 7 days")
     finally:
         _dispose_window(qapp, window)
 

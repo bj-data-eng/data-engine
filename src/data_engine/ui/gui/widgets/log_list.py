@@ -70,22 +70,20 @@ class LogRunItemDelegate(QStyledItemDelegate):
         )
         painter.drawPixmap(status_rect, status_icon)
 
-        button_active = display.status_visual_state == "failed"
         button_bg = QColor(Qt.GlobalColor.transparent)
         button_border = QColor(Qt.GlobalColor.transparent)
-        if button_active and self._button_hovered(option, index.row()):
+        if self._button_hovered(option, index.row()):
             button_bg = hover_bg
             button_border = hover_border
         painter.setPen(QPen(button_border, 1))
         painter.setBrush(button_bg)
         painter.drawRoundedRect(button_rect, 5, 5)
-        if button_active:
-            view_icon = self._host_window._log_icon("view_log").pixmap(16, 16)
-            painter.drawPixmap(
-                button_rect.left() + (button_rect.width() - 16) // 2,
-                button_rect.top() + (button_rect.height() - 16) // 2,
-                view_icon,
-            )
+        view_icon = self._host_window._log_icon("view_log").pixmap(16, 16)
+        painter.drawPixmap(
+            button_rect.left() + (button_rect.width() - 16) // 2,
+            button_rect.top() + (button_rect.height() - 16) // 2,
+            view_icon,
+        )
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
@@ -120,29 +118,16 @@ class LogRunItemDelegate(QStyledItemDelegate):
         button_width = 22
         button_rect = QRect(0, frame_rect.top() + (frame_rect.height() - 22) // 2, button_width, 22)
         status_rect = QRect(0, frame_rect.top() + (frame_rect.height() - 16) // 2, 16, 16)
-        if display.status_visual_state == "failed":
-            button_rect.moveLeft(frame_rect.right() - 32)
-            status_rect.moveLeft(button_rect.left() - 26)
-            duration_right = status_rect.left() - 8
-            duration_rect = QRect(
-                max(text_left, duration_right - duration_width),
-                frame_rect.top(),
-                duration_width,
-                frame_rect.height(),
-            )
-            title_right = duration_rect.left() - 8 if duration_width else status_rect.left() - 8
-        else:
-            status_rect.moveLeft(frame_rect.right() - 32)
-            duration_right = status_rect.left() - 8
-            duration_rect = QRect(
-                max(text_left, duration_right - duration_width),
-                frame_rect.top(),
-                duration_width,
-                frame_rect.height(),
-            )
-            button_left = (duration_rect.left() - 26) if duration_width else (duration_right - 26)
-            button_rect.moveLeft(max(text_left, button_left))
-            title_right = button_rect.left() - 8
+        button_rect.moveLeft(frame_rect.right() - 32)
+        status_rect.moveLeft(button_rect.left() - 26)
+        duration_right = status_rect.left() - 8
+        duration_rect = QRect(
+            max(text_left, duration_right - duration_width),
+            frame_rect.top(),
+            duration_width,
+            frame_rect.height(),
+        )
+        title_right = duration_rect.left() - 8 if duration_width else status_rect.left() - 8
         title_rect = QRect(text_left, frame_rect.top(), max(0, title_right - text_left), frame_rect.height())
         return title_rect, duration_rect, button_rect, status_rect
 
@@ -203,14 +188,13 @@ class LogRunListWidget(QListWidget):
         if item is not None:
             rect = self.visualItemRect(item)
             run_group = self.run_group(item)
-            failed_entry = self._failed_entry_for_run_group(run_group) if run_group is not None else None
             button_rect = (
                 self._delegate.button_rect_for_run_group(rect.adjusted(1, 2, -1, -2), run_group)
                 if run_group is not None
                 else QRect()
             )
-            if failed_entry is not None and button_rect.contains(event.position().toPoint()):
-                self._host_window._show_run_error_details(run_group, failed_entry)
+            if run_group is not None and button_rect.contains(event.position().toPoint()):
+                self._host_window._show_run_log_preview(run_group)
                 event.accept()
                 return
         super().mouseReleaseEvent(event)
@@ -232,27 +216,10 @@ class LogRunListWidget(QListWidget):
         run_group = self.run_group(item)
         if run_group is None:
             return -1
-        if self._failed_entry_for_run_group(run_group) is None:
-            return -1
         button_rect = self._delegate.button_rect_for_run_group(rect.adjusted(1, 2, -1, -2), run_group)
         if button_rect.contains(pos):
             return self.row(item)
         return -1
-
-    @staticmethod
-    def _failed_entry_for_run_group(run_group: "FlowRunState"):
-        if run_group.status != "failed":
-            return None
-        for entry in reversed(run_group.entries):
-            event = entry.event
-            if event is not None and event.status == "failed":
-                return entry
-        summary_entry = run_group.summary_entry
-        if summary_entry is not None:
-            event = summary_entry.event
-            if event is not None and event.status == "failed":
-                return summary_entry
-        return None
 
     def _set_hovered_button_row(self, row: int) -> None:
         if row == self._hovered_button_row:

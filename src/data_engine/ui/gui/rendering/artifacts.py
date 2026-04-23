@@ -664,11 +664,11 @@ class _ParquetExplorerWidget(QWidget):
             controls.addStretch(1)
             self.preview_mode_combo = QComboBox()
             self.preview_mode_combo.setObjectName("outputPreviewModeCombo")
-            self.preview_mode_combo.setFixedHeight(36)
+            self.preview_mode_combo.setFixedHeight(22)
             controls.addWidget(self.preview_mode_combo)
             self.preview_limit_spin = QSpinBox()
             self.preview_limit_spin.setObjectName("outputPreviewLimitSpin")
-            self.preview_limit_spin.setFixedHeight(36)
+            self.preview_limit_spin.setFixedHeight(22)
             controls.addWidget(self.preview_limit_spin)
             layout.addLayout(controls)
         else:

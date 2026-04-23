@@ -273,10 +273,10 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
 
     mode_combo = QComboBox(header)
     mode_combo.setObjectName("outputPreviewModeCombo")
-    mode_combo.setFixedHeight(36)
+    mode_combo.setFixedHeight(22)
     limit_spin = QSpinBox(header)
     limit_spin.setObjectName("outputPreviewLimitSpin")
-    limit_spin.setFixedHeight(36)
+    limit_spin.setFixedHeight(22)
     show_controls = preview_spec.kind == "parquet"
     mode_combo.setVisible(show_controls)
     limit_spin.setVisible(show_controls)

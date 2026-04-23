@@ -24,12 +24,22 @@ def _check_mark_icon_url(theme_name: str) -> str:
     return str(icon_path).replace("\\", "/")
 
 
+def _spin_chevron_icon_url(theme_name: str, direction: str) -> str:
+    """Return one stylesheet-safe packaged path for a themed spinbox chevron icon."""
+    variant = "dark" if theme_name == "dark" else "light"
+    icon_file_name = f"{direction}-chevron-{variant}.svg"
+    icon_path = resources.files("data_engine.ui.gui").joinpath("icons", icon_file_name)
+    return str(icon_path).replace("\\", "/")
+
+
 def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     """Return the application stylesheet for the requested theme."""
     palette = THEMES[resolve_theme_name(theme_name)]
     selected_sidebar_text = palette.selection_text if palette.name == "dark" else palette.text
     selected_sidebar_subtext = palette.selection_text if palette.name == "dark" else palette.text
     preview_check_mark_icon_url = _check_mark_icon_url(palette.name)
+    spin_up_chevron_icon_url = _spin_chevron_icon_url(palette.name, "up")
+    spin_down_chevron_icon_url = _spin_chevron_icon_url(palette.name, "down")
     return f"""
     QWidget {{
         background: {palette.app_bg};
@@ -407,6 +417,11 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         font-weight: 500;
         min-width: 52px;
     }}
+    QFrame#flowErrorAlert {{
+        background: {palette.summary_bg};
+        border: 1px solid {palette.error_text};
+        border-radius: 5px;
+    }}
     QLabel#errorText {{
         background: transparent;
         color: {palette.error_text};
@@ -443,9 +458,10 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QPushButton {{
         background: {palette.button_bg};
         border: 1px solid {palette.panel_border};
-        border-radius: 5px;
-        padding: 8px 14px;
+        border-radius: 4px;
+        padding: 4px 8px;
         color: {palette.text};
+        font-size: 11px;
         font-weight: 600;
     }}
     QToolButton#navButton {{
@@ -507,6 +523,24 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     }}
     QPushButton:hover {{
         background: {palette.button_hover};
+    }}
+    QPushButton#engineButton,
+    QPushButton#requestControlButton,
+    QPushButton#flowRunButton,
+    QPushButton#flowConfigButton,
+    QPushButton#resetFlowButton,
+    QPushButton#refreshButton,
+    QPushButton#themeToggleButton {{
+        padding: 3px 8px;
+        font-size: 11px;
+        border-radius: 4px;
+    }}
+    QComboBox#workspaceSelector {{
+        min-height: 22px;
+        max-height: 22px;
+        padding: 1px 20px 1px 8px;
+        font-size: 11px;
+        border-radius: 4px;
     }}
     QPushButton#requestControlButton {{
         background: {palette.request_control_bg};
@@ -583,12 +617,63 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         background: {palette.button_disabled_bg};
         border-color: {palette.button_disabled_border};
     }}
+    QComboBox,
+    QSpinBox {{
+        background: {palette.input_bg};
+        border: 1px solid {palette.input_border};
+        border-radius: 4px;
+        color: {palette.text};
+        font-size: 11px;
+        min-height: 22px;
+        padding: 1px 20px 1px 8px;
+    }}
+    QSpinBox::up-button,
+    QSpinBox::down-button {{
+        subcontrol-origin: border;
+        background: {palette.panel_bg};
+        border-left: 1px solid {palette.input_border};
+        width: 14px;
+    }}
+    QSpinBox::up-button {{
+        subcontrol-position: top right;
+        border-top-right-radius: 4px;
+        border-bottom: 1px solid {palette.input_border};
+    }}
+    QSpinBox::down-button {{
+        subcontrol-position: bottom right;
+        border-bottom-right-radius: 4px;
+    }}
+    QSpinBox::up-button:hover,
+    QSpinBox::down-button:hover {{
+        background: {palette.hover_bg};
+    }}
+    QSpinBox::up-button:pressed,
+    QSpinBox::down-button:pressed {{
+        background: {palette.button_hover};
+    }}
+    QSpinBox::up-arrow,
+    QSpinBox::down-arrow {{
+        width: 7px;
+        height: 7px;
+    }}
+    QSpinBox::up-arrow {{
+        image: url({spin_up_chevron_icon_url});
+    }}
+    QSpinBox::down-arrow {{
+        image: url({spin_down_chevron_icon_url});
+    }}
     QLineEdit {{
         background: {palette.input_bg};
         border: 1px solid {palette.input_border};
         border-radius: 5px;
         padding: 9px 12px;
         color: {palette.text};
+    }}
+    QLineEdit#pathInput {{
+        border-radius: 4px;
+        min-height: 22px;
+        padding: 3px 8px;
+        font-size: 11px;
     }}
     QLineEdit#outputPreviewFilterInput {{
         border-radius: 0px;

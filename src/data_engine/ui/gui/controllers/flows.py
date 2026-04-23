@@ -460,10 +460,16 @@ class _GuiFlowPresentationController:
         )
         if presentation.detail_state is None:
             window.flow_error_label.clear()
+            flow_error_frame = getattr(window, "flow_error_frame", None)
+            if flow_error_frame is not None:
+                flow_error_frame.setVisible(False)
             window._set_operation_cards(())
             return
 
         window.flow_error_label.setText(presentation.detail_state.error)
+        flow_error_frame = getattr(window, "flow_error_frame", None)
+        if flow_error_frame is not None:
+            flow_error_frame.setVisible(bool(presentation.detail_state.error))
         window._set_operation_cards(tuple(row.name for row in presentation.detail_state.operation_rows))
         for index, row in enumerate(presentation.detail_state.operation_rows):
             if index >= len(window.operation_row_widgets):
