@@ -3281,7 +3281,7 @@ def test_debug_view_column_filter_popup_supports_multi_column_sort(qapp):
             lambda: table.isEnabled()
             and table.item(0, 0) is not None
             and table.item(1, 0) is not None
-            and "1â†‘" in header.model().headerData(0, Qt.Orientation.Horizontal),
+            and explorer._sort_columns == [("workflow", False)],
         )
 
         explorer._open_filter_popup_for_index(1)
@@ -3302,16 +3302,10 @@ def test_debug_view_column_filter_popup_supports_multi_column_sort(qapp):
             and table.item(2, 1) is not None
             and table.item(3, 0) is not None
             and table.item(3, 1) is not None
-            and "1â†‘" in header.model().headerData(0, Qt.Orientation.Horizontal)
-            and "2â†‘" in header.model().headerData(1, Qt.Orientation.Horizontal),
+            and explorer._sort_columns == [("workflow", False), ("claim_id", False)]
+            and [(table.item(row, 0).text(), table.item(row, 1).text()) for row in range(4)]
+            == [("A", "1"), ("A", "2"), ("B", "1"), ("B", "2")],
         )
-
-        assert [(table.item(row, 0).text(), table.item(row, 1).text()) for row in range(4)] == [
-            ("A", "1"),
-            ("A", "2"),
-            ("B", "1"),
-            ("B", "2"),
-        ]
     finally:
         _dispose_window(qapp, window)
 
@@ -3374,8 +3368,7 @@ def test_debug_view_column_filter_popup_clicking_active_sort_clears_and_renumber
 
         _process_ui_until(
             qapp,
-            lambda: "1Ã¢â€ â€˜" in header.model().headerData(0, Qt.Orientation.Horizontal)
-            and "2Ã¢â€ â€˜" in header.model().headerData(1, Qt.Orientation.Horizontal),
+            lambda: explorer._sort_columns == [("workflow", False), ("claim_id", False)],
         )
 
         workflow_header_pos = header.sectionViewportPosition(0)
@@ -3395,8 +3388,7 @@ def test_debug_view_column_filter_popup_clicking_active_sort_clears_and_renumber
 
         _process_ui_until(
             qapp,
-            lambda: "1Ã¢â€ â€˜" not in header.model().headerData(0, Qt.Orientation.Horizontal)
-            and "1Ã¢â€ â€˜" in header.model().headerData(1, Qt.Orientation.Horizontal),
+            lambda: explorer._sort_columns == [("claim_id", False)],
         )
     finally:
         _dispose_window(qapp, window)

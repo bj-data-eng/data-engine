@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 import random
 import polars as pl
-from PySide6.QtCore import QEvent, QPoint, QSize, QThread, QTimer, Qt, Signal
-from PySide6.QtGui import QFont, QIcon, QKeySequence
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, QThread, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QMenu,
     QSpinBox,
+    QStyle,
+    QStyleOptionHeader,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -41,6 +43,108 @@ _PREVIEW_MODE_TOP = "top"
 _PREVIEW_MODE_BOTTOM = "bottom"
 _PREVIEW_MODE_SAMPLE = "sample"
 _NULL_FILTER_VALUE = object()
+
+
+class _PreviewHeaderView(QHeaderView):
+    """Header view that paints title, dtype, sort badge, and dropdown caret separately."""
+
+    def __init__(self, orientation: Qt.Orientation, parent: QWidget | None = None) -> None:
+        super().__init__(orientation, parent)
+        self._header_metadata: list[dict[str, object]] = []
+
+    def set_preview_metadata(self, metadata: list[dict[str, object]]) -> None:
+        self._header_metadata = metadata
+        self.viewport().update()
+
+    def _theme_colors(self) -> tuple[QColor, QColor, QColor, QColor]:
+        widget: QWidget | None = self
+        while widget is not None:
+            theme_service = getattr(widget, "theme_service", None)
+            theme_name = getattr(widget, "theme_name", None)
+            if theme_service is not None and isinstance(theme_name, str):
+                palette = theme_service.palette(theme_name)
+                return (
+                    QColor(palette.text),
+                    QColor(palette.section_text),
+                    QColor(palette.hover_bg),
+                    QColor(palette.text),
+                )
+            parent_widget = widget.parentWidget()
+            if parent_widget is widget:
+                break
+            widget = parent_widget
+        return QColor("#1f2328"), QColor("#57606a"), QColor("#0969da"), QColor("#ffffff")
+
+    def paintSection(self, painter: QPainter, rect: QRect, logical_index: int) -> None:  # noqa: N802
+        if not rect.isValid():
+            return
+        option = QStyleOptionHeader()
+        self.initStyleOption(option)
+        option.rect = rect
+        option.section = logical_index
+        option.text = ""
+        self.style().drawControl(QStyle.ControlElement.CE_HeaderSection, option, painter, self)
+        if logical_index < 0 or logical_index >= len(self._header_metadata):
+            return
+
+        metadata = self._header_metadata[logical_index]
+        title = str(metadata.get("title", ""))
+        dtype_text = str(metadata.get("dtype", ""))
+        sort_marker = metadata.get("sort_marker")
+        if bool(metadata.get("filtered", False)):
+            title = f"* {title}"
+
+        text_color, muted_color, badge_bg, badge_text = self._theme_colors()
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+
+        indicator_rect = QRect(rect.right() - 20, rect.top(), 16, rect.height())
+        content_rect = rect.adjusted(10, 6, -28, -4)
+
+        badge_rect: QRect | None = None
+        if isinstance(sort_marker, tuple):
+            sort_rank, descending = sort_marker
+            badge_label = f"{sort_rank}{'↓' if descending else '↑'}"
+            badge_font = QFont(self.font())
+            badge_font.setPointSize(max(7, badge_font.pointSize() - 3))
+            badge_font.setBold(True)
+            badge_metrics = QFontMetrics(badge_font)
+            badge_width = max(16, badge_metrics.horizontalAdvance(badge_label) + 6)
+            badge_height = max(13, badge_metrics.height() + 1)
+            badge_rect = QRect(rect.left(), rect.bottom() - badge_height, badge_width, badge_height)
+            badge_fill = QColor(badge_bg)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(badge_fill)
+            painter.drawRect(badge_rect)
+            painter.setPen(badge_text)
+            painter.setFont(badge_font)
+            painter.drawText(badge_rect, int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter), badge_label)
+
+        title_rect = QRect(content_rect.left(), content_rect.top(), content_rect.width(), 14)
+        dtype_rect = QRect(content_rect.left(), title_rect.bottom() - 1, content_rect.width(), 10)
+
+        title_font = QFont(self.font())
+        title_font.setBold(True)
+        title_font.setPointSize(max(8, title_font.pointSize() - 1))
+        painter.setPen(text_color)
+        painter.setFont(title_font)
+        painter.drawText(title_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextSingleLine), title)
+
+        dtype_font = QFont(self.font())
+        dtype_font.setBold(False)
+        dtype_font.setItalic(True)
+        dtype_font.setPointSize(max(7, dtype_font.pointSize() - 3))
+        painter.setPen(muted_color)
+        painter.setFont(dtype_font)
+        painter.drawText(dtype_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextSingleLine), dtype_text)
+
+        caret_font = QFont(self.font())
+        caret_font.setBold(True)
+        caret_font.setPointSize(max(8, caret_font.pointSize() - 1))
+        painter.setPen(text_color)
+        painter.setFont(caret_font)
+        painter.drawText(indicator_rect, int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter), "▾")
+        painter.restore()
 
 
 class _ParquetPreviewLoader(QThread):
@@ -1167,6 +1271,7 @@ def _add_tabular_preview(layout: QVBoxLayout, frame: pl.DataFrame, heading: str,
 def _build_dataframe_table(frame: pl.DataFrame) -> QTableWidget:
     table = _CopyablePreviewTable()
     table.setObjectName("outputPreviewTable")
+    table.setHorizontalHeader(_PreviewHeaderView(Qt.Orientation.Horizontal, table))
     table.setAlternatingRowColors(True)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
@@ -1182,8 +1287,8 @@ def _build_dataframe_table(frame: pl.DataFrame) -> QTableWidget:
     if hasattr(table.horizontalHeader(), "setResizeContentsPrecision"):
         table.horizontalHeader().setResizeContentsPrecision(50)
     table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-    table.horizontalHeader().setMinimumHeight(58)
-    table.horizontalHeader().setFixedHeight(58)
+    table.horizontalHeader().setMinimumHeight(43)
+    table.horizontalHeader().setFixedHeight(43)
     body_font = QFont(table.font())
     body_font.setPointSize(max(8, body_font.pointSize() - 1))
     table.setFont(body_font)
@@ -1214,17 +1319,20 @@ def _prepare_dataframe_table(
     }
     table.clearContents()
     table.setColumnCount(len(preview.columns))
-    table.setHorizontalHeaderLabels(
-        [
-            _header_text(
-                column_name,
-                preview.schema[column_name],
-                filtered=column_name in filtered_columns,
-                sort_marker=sort_markers.get(column_name),
-            )
-            for column_name in preview.columns
-        ]
-    )
+    table.setHorizontalHeaderLabels([column_name for column_name in preview.columns])
+    header = table.horizontalHeader()
+    if isinstance(header, _PreviewHeaderView):
+        header.set_preview_metadata(
+            [
+                {
+                    "title": column_name,
+                    "dtype": str(preview.schema[column_name]),
+                    "filtered": column_name in filtered_columns,
+                    "sort_marker": sort_markers.get(column_name),
+                }
+                for column_name in preview.columns
+            ]
+        )
     table.setRowCount(preview.height)
 
 
