@@ -772,6 +772,11 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QTextEdit#outputPreviewText {{
         background: {palette.panel_bg};
     }}
+    QFrame#outputPreviewFilterPopup {{
+        background: {palette.panel_bg};
+        border: 1px solid {palette.input_border};
+        border-radius: 5px;
+    }}
     QFrame#outputPreviewControlBar {{
         background: {palette.panel_bg};
         border: 1px solid {palette.input_border};
