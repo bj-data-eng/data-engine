@@ -3316,6 +3316,92 @@ def test_debug_view_column_filter_popup_supports_multi_column_sort(qapp):
         _dispose_window(qapp, window)
 
 
+def test_debug_view_column_filter_popup_clicking_active_sort_clears_and_renumbers(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "workflow": ["B", "A", "B", "A"],
+                "claim_id": [2, 2, 1, 1],
+                "status": ["open", "open", "closed", "closed"],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 4)
+
+        header = table.horizontalHeader()
+        for column_index in (0, 1):
+            header_pos = header.sectionViewportPosition(column_index)
+            header_center = header.viewport().rect().topLeft() + QPoint(
+                header_pos + max(1, header.sectionSize(column_index) // 2),
+                max(1, header.height() // 2),
+            )
+            QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, header_center)
+            qapp.processEvents()
+            popup = explorer._filter_popup
+            assert popup is not None and popup.isVisible()
+            sort_button = popup.findChild(QPushButton, "outputPreviewSortAscendingButton")
+            assert sort_button is not None
+            QTest.mouseClick(sort_button, Qt.MouseButton.LeftButton)
+            qapp.processEvents()
+
+        _process_ui_until(
+            qapp,
+            lambda: "1Ã¢â€ â€˜" in header.model().headerData(0, Qt.Orientation.Horizontal)
+            and "2Ã¢â€ â€˜" in header.model().headerData(1, Qt.Orientation.Horizontal),
+        )
+
+        workflow_header_pos = header.sectionViewportPosition(0)
+        workflow_header_center = header.viewport().rect().topLeft() + QPoint(
+            workflow_header_pos + max(1, header.sectionSize(0) // 2),
+            max(1, header.height() // 2),
+        )
+        QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, workflow_header_center)
+        qapp.processEvents()
+        popup = explorer._filter_popup
+        assert popup is not None and popup.isVisible()
+        sort_button = popup.findChild(QPushButton, "outputPreviewSortAscendingButton")
+        assert sort_button is not None
+        assert sort_button.property("sortActive") is True
+        assert sort_button.toolTip() == "Clear ascending sort"
+        QTest.mouseClick(sort_button, Qt.MouseButton.LeftButton)
+
+        _process_ui_until(
+            qapp,
+            lambda: "1Ã¢â€ â€˜" not in header.model().headerData(0, Qt.Orientation.Horizontal)
+            and "1Ã¢â€ â€˜" in header.model().headerData(1, Qt.Orientation.Horizontal),
+        )
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_debug_view_search_subset_apply_filters_single_matching_value(qapp):
     window = _make_window()
     try:

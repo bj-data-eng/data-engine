@@ -449,11 +449,23 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QPushButton#outputPreviewSortAscendingButton,
     QPushButton#outputPreviewSortDescendingButton,
     QPushButton#outputPreviewSelectAllButton {{
-        min-width: 36px;
-        max-width: 36px;
-        min-height: 36px;
-        max-height: 36px;
+        min-width: 28px;
+        max-width: 28px;
+        min-height: 28px;
+        max-height: 28px;
         padding: 0px;
+    }}
+    QPushButton#outputPreviewSortAscendingButton[sortActive="true"],
+    QPushButton#outputPreviewSortDescendingButton[sortActive="true"] {{
+        background: {palette.button_checked_bg};
+        border: 1px solid {palette.button_checked_border};
+        color: {palette.text};
+    }}
+    QPushButton#outputPreviewSortAscendingButton[sortActive="true"]:hover,
+    QPushButton#outputPreviewSortDescendingButton[sortActive="true"]:hover {{
+        background: {palette.button_checked_bg};
+        border: 1px solid {palette.button_checked_border};
+        color: {palette.text};
     }}
     QPushButton#inspectOutputButton:disabled {{
         color: transparent;
@@ -759,6 +771,11 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     }}
     QTextEdit#outputPreviewText {{
         background: {palette.panel_bg};
+    }}
+    QFrame#outputPreviewControlBar {{
+        background: {palette.panel_bg};
+        border: 1px solid {palette.input_border};
+        border-radius: 5px;
     }}
     QListWidget::item {{
         padding: 4px 6px;

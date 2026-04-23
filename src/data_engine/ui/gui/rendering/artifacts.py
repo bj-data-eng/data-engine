@@ -221,32 +221,32 @@ class _ParquetFilterPopup(QFrame):
         self.status_label.setVisible(False)
         layout.addWidget(self.status_label)
 
-        sort_actions = QHBoxLayout()
-        sort_actions.setContentsMargins(0, 0, 0, 0)
+        controls_frame = QFrame(self)
+        controls_frame.setObjectName("outputPreviewControlBar")
+        layout.addWidget(controls_frame)
+
+        sort_actions = QHBoxLayout(controls_frame)
+        sort_actions.setContentsMargins(6, 6, 6, 6)
         sort_actions.setSpacing(6)
         self._select_all_button = QPushButton("", self)
         self._select_all_button.setObjectName("outputPreviewSelectAllButton")
-        self._select_all_button.setFixedSize(36, 36)
-        self._select_all_button.setIconSize(QSize(24, 24))
+        self._select_all_button.setFixedSize(28, 28)
+        self._select_all_button.setIconSize(QSize(16, 16))
         self._select_all_button.clicked.connect(self._toggle_select_all)
         sort_actions.addWidget(self._select_all_button)
+        sort_actions.addStretch(1)
         self._sort_ascending_button = QPushButton("", self)
         self._sort_ascending_button.setObjectName("outputPreviewSortAscendingButton")
-        self._sort_ascending_button.setFixedSize(36, 36)
-        self._sort_ascending_button.setIconSize(QSize(24, 24))
+        self._sort_ascending_button.setFixedSize(28, 28)
+        self._sort_ascending_button.setIconSize(QSize(16, 16))
         self._sort_ascending_button.clicked.connect(lambda: self._apply_sort(descending=False))
         sort_actions.addWidget(self._sort_ascending_button)
         self._sort_descending_button = QPushButton("", self)
         self._sort_descending_button.setObjectName("outputPreviewSortDescendingButton")
-        self._sort_descending_button.setFixedSize(36, 36)
-        self._sort_descending_button.setIconSize(QSize(24, 24))
+        self._sort_descending_button.setFixedSize(28, 28)
+        self._sort_descending_button.setIconSize(QSize(16, 16))
         self._sort_descending_button.clicked.connect(lambda: self._apply_sort(descending=True))
         sort_actions.addWidget(self._sort_descending_button)
-        clear_sorts_button = QPushButton("Clear Sorts", self)
-        clear_sorts_button.setObjectName("outputPreviewClearSortsButton")
-        clear_sorts_button.clicked.connect(self._clear_sorts)
-        sort_actions.addWidget(clear_sorts_button)
-        layout.addLayout(sort_actions)
         self._refresh_sort_button_state()
 
         self.values_list = QListWidget(self)
@@ -468,12 +468,16 @@ class _ParquetFilterPopup(QFrame):
         primary_sort_column = self._explorer.primary_sort_column()
         return primary_sort_column is not None and primary_sort_column != self._column_name
 
+    def _sort_direction_for_column(self) -> bool | None:
+        return self._explorer.sort_direction_for_column(self._column_name)
+
     def _refresh_sort_button_state(self) -> None:
         if self._sort_ascending_button is None or self._sort_descending_button is None:
             return
         append_mode = self._sort_should_append()
         action_prefix = "Then sort" if append_mode else "Sort"
         icon_fill = self._icon_fill_color()
+        active_direction = self._sort_direction_for_column()
         for button, icon_name, label in (
             (self._sort_ascending_button, "sort-ascending", "ascending"),
             (self._sort_descending_button, "sort-descending", "descending"),
@@ -489,19 +493,25 @@ class _ParquetFilterPopup(QFrame):
                     )
                 )
             )
-            button.setToolTip(f"{action_prefix} {label}")
-            button.setAccessibleName(f"{action_prefix} {label}")
+            is_active = active_direction is not None and active_direction == (label == "descending")
+            button.setProperty("sortActive", is_active)
+            button.setToolTip(f"Clear {label} sort" if is_active else f"{action_prefix} {label}")
+            button.setAccessibleName(f"Clear {label} sort" if is_active else f"{action_prefix} {label}")
+            style = button.style()
+            style.unpolish(button)
+            style.polish(button)
+            button.update()
 
     def _apply_sort(self, *, descending: bool) -> None:
-        self._explorer.apply_column_sort(
-            self._column_name,
-            descending=descending,
-            append=self._sort_should_append(),
-        )
-        self.close()
-
-    def _clear_sorts(self) -> None:
-        self._explorer.clear_column_sorts()
+        active_direction = self._sort_direction_for_column()
+        if active_direction == descending:
+            self._explorer.remove_column_sort(self._column_name)
+        else:
+            self._explorer.apply_column_sort(
+                self._column_name,
+                descending=descending,
+                append=self._sort_should_append(),
+            )
         self.close()
 
 
@@ -871,12 +881,11 @@ class _ParquetExplorerWidget(QWidget):
         self._refresh_preview()
 
     def apply_column_sort(self, column_name: str, *, descending: bool, append: bool) -> None:
-        updated_sorts = [
-            (active_name, active_descending)
-            for active_name, active_descending in self._sort_columns
-            if active_name != column_name
-        ]
-        if append:
+        existing_rank = self.sort_rank_for_column(column_name)
+        updated_sorts = list(self._sort_columns)
+        if existing_rank is not None:
+            updated_sorts[existing_rank - 1] = (column_name, descending)
+        elif append:
             updated_sorts.append((column_name, descending))
         else:
             updated_sorts = [(column_name, descending)]
@@ -894,6 +903,23 @@ class _ParquetExplorerWidget(QWidget):
             if active_name == column_name:
                 return index
         return None
+
+    def sort_direction_for_column(self, column_name: str) -> bool | None:
+        for active_name, active_descending in self._sort_columns:
+            if active_name == column_name:
+                return active_descending
+        return None
+
+    def remove_column_sort(self, column_name: str) -> None:
+        updated_sorts = [
+            (active_name, active_descending)
+            for active_name, active_descending in self._sort_columns
+            if active_name != column_name
+        ]
+        if len(updated_sorts) == len(self._sort_columns):
+            return
+        self._sort_columns = updated_sorts
+        self._refresh_preview()
 
     def primary_sort_column(self) -> str | None:
         if not self._sort_columns:
