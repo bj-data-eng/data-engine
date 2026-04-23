@@ -627,6 +627,26 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         min-height: 22px;
         padding: 1px 20px 1px 8px;
     }}
+    QComboBox::drop-down {{
+        subcontrol-origin: border;
+        subcontrol-position: top right;
+        background: {palette.panel_bg};
+        border-left: 1px solid {palette.input_border};
+        border-top-right-radius: 4px;
+        border-bottom-right-radius: 4px;
+        width: 18px;
+    }}
+    QComboBox::drop-down:hover {{
+        background: {palette.hover_bg};
+    }}
+    QComboBox::drop-down:pressed {{
+        background: {palette.button_hover};
+    }}
+    QComboBox::down-arrow {{
+        image: url({spin_down_chevron_icon_url});
+        width: 7px;
+        height: 7px;
+    }}
     QSpinBox::up-button,
     QSpinBox::down-button {{
         subcontrol-origin: border;

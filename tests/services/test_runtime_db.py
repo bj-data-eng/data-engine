@@ -270,6 +270,46 @@ def test_runtime_ledger_prunes_history_older_than_30_days(tmp_path):
     assert ledger.step_outputs.list_for_run("old-run") == ()
 
 
+def test_runtime_ledger_pruning_history_keeps_unchanged_poll_file_state_fresh(tmp_path):
+    ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
+    source = tmp_path / "old.xlsx"
+    source.write_text("docs", encoding="utf-8")
+    signature = ledger.source_signatures.signature_for_path(source)
+
+    assert signature is not None
+
+    old_started = (datetime.now(UTC) - timedelta(days=8)).isoformat()
+    old_finished = (datetime.now(UTC) - timedelta(days=8, seconds=-1)).isoformat()
+
+    ledger.runs.record_started(
+        run_id="old-run",
+        flow_name="docs_poll",
+        group_name="Docs",
+        source_path=signature.source_path,
+        started_at_utc=old_started,
+    )
+    ledger.source_signatures.upsert_file_state(
+        flow_name="docs_poll",
+        signature=signature,
+        status="success",
+        run_id="old-run",
+        finished_at_utc=old_finished,
+    )
+
+    assert ledger.source_signatures.is_stale("docs_poll", signature) is False
+
+    ledger.runs.record_finished(run_id="old-run", status="success", finished_at_utc=old_finished)
+
+    states = ledger.source_signatures.list_file_states(flow_name="docs_poll")
+
+    assert len(states) == 1
+    assert states[0].source_path == signature.source_path
+    assert states[0].mtime_ns == signature.mtime_ns
+    assert states[0].size_bytes == signature.size_bytes
+    assert states[0].last_success_run_id is None
+    assert ledger.source_signatures.is_stale("docs_poll", signature) is False
+
+
 def test_runtime_ledger_prunes_missing_file_state_rows(tmp_path):
     ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
     source_a = tmp_path / "a.xlsx"

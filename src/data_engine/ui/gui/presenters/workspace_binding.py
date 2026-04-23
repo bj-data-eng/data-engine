@@ -141,6 +141,7 @@ def rebind_workspace_context(
     window._selected_flow_run_groups_dirty = True
     window._selected_flow_has_logs = False
     window._selected_flow_has_logs_flow_name = None
+    window.log_view.clear()
     window._workspace_counts_footer_cache.clear()
     window._last_gui_action_state = None
     window.workspace_provision_status_label.clear()

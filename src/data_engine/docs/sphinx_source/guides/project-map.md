@@ -22,14 +22,14 @@ These counts are package-level rollups from the current AST snapshot.
 | `data_engine.core` | 5 | 12 | 15 | 0 | 1412 |
 | `data_engine.devtools` | 3 | 44 | 5 | 0 | 1371 |
 | `data_engine.docs` | 2 | 0 | 0 | 0 | 41 |
-| `data_engine.domain` | 17 | 10 | 44 | 0 | 2227 |
+| `data_engine.domain` | 17 | 10 | 44 | 0 | 2232 |
 | `data_engine.flow_modules` | 3 | 22 | 3 | 0 | 518 |
 | `data_engine.helpers` | 9 | 62 | 7 | 0 | 3078 |
 | `data_engine.hosts` | 20 | 63 | 25 | 0 | 3980 |
 | `data_engine.platform` | 10 | 43 | 10 | 0 | 1495 |
 | `data_engine.runtime` | 20 | 44 | 48 | 0 | 4405 |
-| `data_engine.services` | 23 | 38 | 81 | 0 | 5170 |
-| `data_engine.ui` | 73 | 227 | 45 | 0 | 13292 |
+| `data_engine.services` | 23 | 38 | 81 | 0 | 5173 |
+| `data_engine.ui` | 73 | 228 | 47 | 0 | 13725 |
 | `data_engine.views` | 12 | 44 | 11 | 0 | 1414 |
 
 ## Largest Modules
@@ -37,12 +37,12 @@ These counts are package-level rollups from the current AST snapshot.
 | Module | Lines | Functions | Classes |
 | --- | ---: | ---: | ---: |
 | `data_engine.helpers.polars` | 1594 | 28 | 2 |
-| `data_engine.ui.gui.rendering.artifacts` | 1171 | 14 | 5 |
+| `data_engine.ui.gui.rendering.artifacts` | 1420 | 14 | 7 |
 | `data_engine.runtime.runtime_cache_store` | 1095 | 0 | 8 |
+| `data_engine.ui.gui.theme` | 996 | 3 | 0 |
 | `data_engine.services.runtime_state` | 930 | 3 | 12 |
-| `data_engine.ui.gui.controllers.flows` | 830 | 0 | 3 |
-| `data_engine.ui.gui.theme` | 825 | 2 | 0 |
-| `data_engine.ui.gui.controllers.runtime` | 793 | 0 | 1 |
+| `data_engine.ui.gui.controllers.flows` | 836 | 0 | 3 |
+| `data_engine.ui.gui.controllers.runtime` | 802 | 0 | 1 |
 | `data_engine.devtools.smoke_data` | 759 | 24 | 0 |
 | `data_engine.core.primitives` | 631 | 1 | 11 |
 | `data_engine.runtime.shared_state` | 621 | 33 | 6 |

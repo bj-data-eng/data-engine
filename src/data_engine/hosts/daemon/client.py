@@ -155,6 +155,13 @@ def _harden_private_file_permissions(path: Path) -> None:
     if not username.strip():
         return
     try:
+        kwargs: dict[str, Any] = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "check": False,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = windows_subprocess_creationflags(no_window=True)
         subprocess.run(
             [
                 "icacls",
@@ -163,9 +170,7 @@ def _harden_private_file_permissions(path: Path) -> None:
                 "/grant:r",
                 f"{username}:(F)",
             ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
+            **kwargs,
         )
     except OSError:
         return

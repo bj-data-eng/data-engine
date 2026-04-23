@@ -18,6 +18,7 @@ from data_engine.hosts.daemon.client import (
     DaemonClientError,
     _decode_message,
     _encode_message,
+    _harden_private_file_permissions,
     _pid_is_live,
     daemon_authkey,
     force_shutdown_daemon_process,
@@ -789,6 +790,32 @@ def test_daemon_authkey_hardens_created_file(tmp_path, monkeypatch):
 
     assert len(authkey) == 32
     assert hardened == [paths.runtime_state_dir / daemon_client.DAEMON_AUTHKEY_FILE_NAME]
+
+
+def test_harden_private_file_permissions_uses_no_window_creationflags_on_windows(tmp_path, monkeypatch):
+    path = tmp_path / "secret.txt"
+    path.write_text("secret", encoding="utf-8")
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setenv("USERNAME", "codex-user")
+    monkeypatch.setattr(daemon_client.os, "name", "nt")
+    monkeypatch.setattr(
+        daemon_client.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append({"command": command, **kwargs}),
+    )
+
+    _harden_private_file_permissions(path)
+
+    assert len(calls) == 1
+    assert calls[0]["command"] == [
+        "icacls",
+        str(path),
+        "/inheritance:r",
+        "/grant:r",
+        "codex-user:(F)",
+    ]
+    assert calls[0]["creationflags"] == daemon_client.windows_subprocess_creationflags(no_window=True)
 
 
 def test_daemon_message_encoding_requires_json_object():

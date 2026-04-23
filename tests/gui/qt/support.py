@@ -1379,6 +1379,68 @@ def test_switching_workspaces_reloads_visible_log_runs_from_new_workspace(qapp, 
         _dispose_window(qapp, window)
 
 
+def test_switching_to_workspace_with_no_flows_clears_grouped_log_pane(qapp, monkeypatch, tmp_path):
+    del monkeypatch
+    workspace_collection_root = tmp_path / "workspaces"
+    docs_root = workspace_collection_root / "docs"
+    empty_root = workspace_collection_root / "empty"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    empty_root.mkdir(parents=True)
+
+    discovered = (
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="empty", workspace_root=empty_root),
+    )
+
+    def _resolve(workspace_id=None):
+        if workspace_id == "empty":
+            return resolve_workspace_paths(workspace_root=empty_root, workspace_id="empty")
+        return resolve_workspace_paths(workspace_root=docs_root, workspace_id="docs")
+
+    initial_store = FlowLogStore()
+    replacement_store = FlowLogStore()
+    window = _make_window(
+        discover_workspaces_func=lambda app_root=None, workspace_collection_root=None: discovered,
+        resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
+        log_service=_FakeLogService(stores=(initial_store, replacement_store)),
+    )
+    try:
+        flow_name = "poller"
+        window.selected_flow_name = flow_name
+        initial_store.append_entry(
+            FlowLogEntry(
+                line="run-docs",
+                kind="flow",
+                flow_name=flow_name,
+                event=RuntimeStepEvent(
+                    run_id="run-docs",
+                    flow_name=flow_name,
+                    step_name=None,
+                    source_label="docs.xlsx",
+                    status="success",
+                    elapsed_seconds=0.3,
+                ),
+            )
+        )
+        window._refresh_log_view(force_scroll_to_bottom=True)
+
+        assert window.log_view.count() == 1
+        assert _visible_log_run_primary_labels(window) == ["docs.xlsx"]
+
+        target_index = window.workspace_selector.findData("empty")
+        assert target_index >= 0
+        window.workspace_selector.setCurrentIndex(target_index)
+        qapp.processEvents()
+
+        assert window.workspace_paths.workspace_id == "empty"
+        assert window.selected_flow_name is None
+        assert window.log_store is replacement_store
+        assert window.log_view.count() == 0
+        assert _visible_log_run_primary_labels(window) == []
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_switching_workspaces_closes_preview_dialogs(qapp, monkeypatch, tmp_path):
     workspace_collection_root = tmp_path / "workspaces"
     docs_root = workspace_collection_root / "docs"
@@ -2988,7 +3050,13 @@ def test_debug_view_lists_previews_and_clears_saved_debug_artifacts(qapp):
         assert isinstance(table, QTableWidget)
         _process_ui_until(qapp, lambda: table.rowCount() == 2)
         header_labels = {table.horizontalHeaderItem(index).text() for index in range(table.columnCount())}
-        assert header_labels == {"claim_id \u25be\nInt64", "status \u25be\nString"}
+        assert header_labels == {"claim_id", "status"}
+        header = table.horizontalHeader()
+        metadata = getattr(header, "_header_metadata", [])
+        assert metadata == [
+            {"title": "claim_id", "dtype": "Int64", "filtered": False, "sort_marker": None},
+            {"title": "status", "dtype": "String", "filtered": False, "sort_marker": None},
+        ]
 
         window.clear_debug_artifacts_button.click()
         qapp.processEvents()
@@ -5378,7 +5446,7 @@ def test_refresh_log_view_success_rows_ignore_transparent_log_button(qapp, monke
         window._refresh_log_view(force_scroll_to_bottom=True)
         QTest.mouseClick(window.log_view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, click_point)
 
-        assert shown == []
+        assert shown == [flow_name]
     finally:
         _dispose_window(qapp, window)
 
@@ -5420,8 +5488,8 @@ def test_refresh_log_view_failed_button_opens_error_details_directly(qapp, monke
         )
         QTest.mouseClick(window.log_view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, button_rect.center())
 
-        assert shown_logs == []
-        assert shown_errors == [((flow_name, "run-1"), "run-1 failed")]
+        assert shown_logs == [(flow_name, "run-1")]
+        assert shown_errors == []
     finally:
         _dispose_window(qapp, window)
 

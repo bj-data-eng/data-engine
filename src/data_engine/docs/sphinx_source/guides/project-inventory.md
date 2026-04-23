@@ -8094,6 +8094,27 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `heading: str`
     - param `message: str`
     - param `output_path: Path`
+  - class `_PreviewHeaderView`
+    - instance attribute `_header_metadata`
+    - method `__init__`
+      - param `self`
+      - param `orientation: Qt.Orientation`
+      - param `parent: QWidget | None=None`
+    - method `set_preview_metadata`
+      - param `self`
+      - param `metadata: list[dict[str, object]]`
+    - method `_theme_colors`
+      - param `self`
+    - method `paintSection`
+      - param `self`
+      - param `painter: QPainter`
+      - param `rect: QRect`
+      - param `logical_index: int`
+  - class `_PreviewBodyItemDelegate`
+    - method `initStyleOption`
+      - param `self`
+      - param `option: QStyleOptionViewItem`
+      - param `index`
   - class `_ParquetPreviewLoader`
     - attribute `preview_loaded`
     - attribute `load_failed`
@@ -8138,6 +8159,9 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `_values`
     - instance attribute `_search_token`
     - instance attribute `_value_domain_complete`
+    - instance attribute `_sort_ascending_button`
+    - instance attribute `_sort_descending_button`
+    - instance attribute `_select_all_button`
     - instance attribute `search_input`
     - instance attribute `status_label`
     - instance attribute `values_list`
@@ -8150,6 +8174,9 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `dtype: pl.DataType`
       - param `values: list[tuple[str, object]]`
     - method `showEvent`
+      - param `self`
+      - param `event`
+    - method `changeEvent`
       - param `self`
       - param `event`
     - method `hideEvent`
@@ -8171,9 +8198,16 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `message: str`
     - method `_populate_items`
       - param `self`
-    - method `_select_all_visible`
+    - method `_apply_select_all_state`
       - param `self`
-    - method `_clear_all_visible`
+      - param `state: Qt.CheckState | int`
+    - method `_select_all_check_state`
+      - param `self`
+    - method `_sync_select_all_button`
+      - param `self`
+    - method `_icon_fill_color`
+      - param `self`
+    - method `_toggle_select_all`
       - param `self`
     - method `_apply_selection`
       - param `self`
@@ -8181,13 +8215,16 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
     - method `_dispatch_search`
       - param `self`
+    - method `_sort_should_append`
+      - param `self`
+    - method `_sort_direction_for_column`
+      - param `self`
+    - method `_refresh_sort_button_state`
+      - param `self`
     - method `_apply_sort`
       - param `self`
       - param `*`
       - param `descending: bool`
-      - param `append: bool`
-    - method `_clear_sorts`
-      - param `self`
   - class `_ParquetExplorerWidget`
     - attribute `summary_changed`
     - instance attribute `_output_path`
@@ -8279,6 +8316,17 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `append: bool`
     - method `clear_column_sorts`
       - param `self`
+    - method `sort_rank_for_column`
+      - param `self`
+      - param `column_name: str`
+    - method `sort_direction_for_column`
+      - param `self`
+      - param `column_name: str`
+    - method `remove_column_sort`
+      - param `self`
+      - param `column_name: str`
+    - method `primary_sort_column`
+      - param `self`
     - method `eventFilter`
       - param `self`
       - param `watched: object`
@@ -8323,6 +8371,8 @@ This page is generated from the current AST map and is intentionally inventory-s
   - function `theme_svg_paths`
     - param `svg_text: str`
     - param `fill: str`
+    - param `*`
+    - param `colorize_stroke: bool=False`
   - function `render_svg_icon_pixmap`
     - param `*`
     - param `icon_name: str`
@@ -8331,6 +8381,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `fill_color: str | None=None`
     - param `default_fill_color: QColor | str`
     - param `inset: float=0.0`
+    - param `colorize_stroke: bool=False`
 - module `data_engine.ui.gui.runtime`
   - attribute `__all__`
   - class `QueueLogHandler`
@@ -8638,6 +8689,9 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `__all__`
   - function `_check_mark_icon_url`
     - param `theme_name: str`
+  - function `_spin_chevron_icon_url`
+    - param `theme_name: str`
+    - param `direction: str`
   - function `stylesheet`
     - param `theme_name: str=DEFAULT_THEME`
 - module `data_engine.ui.gui.widgets`
@@ -8716,8 +8770,6 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `_hovered_row_for_position`
       - param `self`
       - param `pos`
-    - method `_failed_entry_for_run_group`
-      - param `run_group: 'FlowRunState'`
     - method `_set_hovered_button_row`
       - param `self`
       - param `row: int`

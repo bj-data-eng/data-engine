@@ -51,9 +51,9 @@ def build_operator_view(window: "DataEngineWindow") -> QWidget:
     splitter.addWidget(center)
     splitter.addWidget(right)
     splitter.setStretchFactor(0, 2)
-    splitter.setStretchFactor(1, 4)
-    splitter.setStretchFactor(2, 4)
-    splitter.setSizes([320, 505, 505])
+    splitter.setStretchFactor(1, 6)
+    splitter.setStretchFactor(2, 2)
+    splitter.setSizes([320, 690, 320])
     layout.addWidget(splitter, 1)
     return container
 
