@@ -5,12 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 import random
 import polars as pl
-from PySide6.QtCore import QEvent, QPoint, QThread, QTimer, Qt, Signal
-from PySide6.QtGui import QFont, QKeySequence
+from PySide6.QtCore import QEvent, QPoint, QSize, QThread, QTimer, Qt, Signal
+from PySide6.QtGui import QFont, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
-    QCheckBox,
     QComboBox,
     QFrame,
     QHeaderView,
@@ -30,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from data_engine.platform.instrumentation import append_timing_line, new_request_id
+from data_engine.ui.gui.rendering.icons import render_svg_icon_pixmap
 from data_engine.views import ArtifactPreviewSpec, classify_artifact_preview
 
 _PREVIEW_ROW_LIMIT = 200
@@ -41,15 +41,6 @@ _PREVIEW_MODE_TOP = "top"
 _PREVIEW_MODE_BOTTOM = "bottom"
 _PREVIEW_MODE_SAMPLE = "sample"
 _NULL_FILTER_VALUE = object()
-
-
-class _VisualTristateCheckBox(QCheckBox):
-    """Checkbox that displays a partial state but toggles like a normal checkbox."""
-
-    def nextCheckState(self) -> None:  # noqa: N802
-        self.setCheckState(
-            Qt.CheckState.Unchecked if self.checkState() == Qt.CheckState.Checked else Qt.CheckState.Checked
-        )
 
 
 class _ParquetPreviewLoader(QThread):
@@ -205,6 +196,9 @@ class _ParquetFilterPopup(QFrame):
         self._values = values
         self._search_token = 0
         self._value_domain_complete = False
+        self._sort_ascending_button: QPushButton | None = None
+        self._sort_descending_button: QPushButton | None = None
+        self._select_all_button: QPushButton | None = None
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
 
         layout = QVBoxLayout(self)
@@ -230,44 +224,36 @@ class _ParquetFilterPopup(QFrame):
         sort_actions = QHBoxLayout()
         sort_actions.setContentsMargins(0, 0, 0, 0)
         sort_actions.setSpacing(6)
-        sort_ascending_button = QPushButton("Sort ↑", self)
-        sort_ascending_button.setObjectName("outputPreviewSortAscendingButton")
-        sort_ascending_button.clicked.connect(lambda: self._apply_sort(descending=False, append=False))
-        sort_actions.addWidget(sort_ascending_button)
-        sort_descending_button = QPushButton("Sort ↓", self)
-        sort_descending_button.setObjectName("outputPreviewSortDescendingButton")
-        sort_descending_button.clicked.connect(lambda: self._apply_sort(descending=True, append=False))
-        sort_actions.addWidget(sort_descending_button)
-        add_sort_ascending_button = QPushButton("Then ↑", self)
-        add_sort_ascending_button.setObjectName("outputPreviewAddSortAscendingButton")
-        add_sort_ascending_button.clicked.connect(lambda: self._apply_sort(descending=False, append=True))
-        sort_actions.addWidget(add_sort_ascending_button)
-        add_sort_descending_button = QPushButton("Then ↓", self)
-        add_sort_descending_button.setObjectName("outputPreviewAddSortDescendingButton")
-        add_sort_descending_button.clicked.connect(lambda: self._apply_sort(descending=True, append=True))
-        sort_actions.addWidget(add_sort_descending_button)
+        self._select_all_button = QPushButton("", self)
+        self._select_all_button.setObjectName("outputPreviewSelectAllButton")
+        self._select_all_button.setFixedSize(36, 36)
+        self._select_all_button.setIconSize(QSize(24, 24))
+        self._select_all_button.clicked.connect(self._toggle_select_all)
+        sort_actions.addWidget(self._select_all_button)
+        self._sort_ascending_button = QPushButton("", self)
+        self._sort_ascending_button.setObjectName("outputPreviewSortAscendingButton")
+        self._sort_ascending_button.setFixedSize(36, 36)
+        self._sort_ascending_button.setIconSize(QSize(24, 24))
+        self._sort_ascending_button.clicked.connect(lambda: self._apply_sort(descending=False))
+        sort_actions.addWidget(self._sort_ascending_button)
+        self._sort_descending_button = QPushButton("", self)
+        self._sort_descending_button.setObjectName("outputPreviewSortDescendingButton")
+        self._sort_descending_button.setFixedSize(36, 36)
+        self._sort_descending_button.setIconSize(QSize(24, 24))
+        self._sort_descending_button.clicked.connect(lambda: self._apply_sort(descending=True))
+        sort_actions.addWidget(self._sort_descending_button)
         clear_sorts_button = QPushButton("Clear Sorts", self)
         clear_sorts_button.setObjectName("outputPreviewClearSortsButton")
         clear_sorts_button.clicked.connect(self._clear_sorts)
         sort_actions.addWidget(clear_sorts_button)
         layout.addLayout(sort_actions)
-
-        actions = QHBoxLayout()
-        actions.setContentsMargins(0, 0, 0, 0)
-        actions.setSpacing(6)
-        self.select_all_checkbox = _VisualTristateCheckBox("Select All", self)
-        self.select_all_checkbox.setObjectName("outputPreviewSelectAllCheckbox")
-        self.select_all_checkbox.setTristate(True)
-        self.select_all_checkbox.checkStateChanged.connect(self._apply_select_all_state)
-        actions.addWidget(self.select_all_checkbox)
-        actions.addStretch(1)
-        layout.addLayout(actions)
+        self._refresh_sort_button_state()
 
         self.values_list = QListWidget(self)
         self.values_list.setObjectName("outputPreviewPopupList")
         self.values_list.setMinimumWidth(220)
         self.values_list.setMinimumHeight(240)
-        self.values_list.itemChanged.connect(self._sync_select_all_checkbox)
+        self.values_list.itemChanged.connect(self._sync_select_all_button)
         layout.addWidget(self.values_list, 1)
 
         footer = QHBoxLayout()
@@ -296,6 +282,16 @@ class _ParquetFilterPopup(QFrame):
         if app is not None:
             app.installEventFilter(self)
         super().showEvent(event)
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        if isinstance(event, QEvent) and event.type() in {
+            QEvent.Type.PaletteChange,
+            QEvent.Type.StyleChange,
+            QEvent.Type.ApplicationPaletteChange,
+        }:
+            self._refresh_sort_button_state()
+            self._sync_select_all_button()
+        super().changeEvent(event)
 
     def hideEvent(self, event) -> None:  # noqa: N802
         app = QApplication.instance()
@@ -362,7 +358,7 @@ class _ParquetFilterPopup(QFrame):
                 else Qt.CheckState.Unchecked
             )
             self.values_list.addItem(item)
-        self._sync_select_all_checkbox()
+        self._sync_select_all_button()
 
     def _apply_select_all_state(self, state: Qt.CheckState | int) -> None:
         if state == Qt.CheckState.PartiallyChecked:
@@ -376,9 +372,9 @@ class _ParquetFilterPopup(QFrame):
                     item.setCheckState(target_state)
         finally:
             self.values_list.blockSignals(False)
-        self._sync_select_all_checkbox()
+        self._sync_select_all_button()
 
-    def _sync_select_all_checkbox(self) -> None:
+    def _select_all_check_state(self) -> Qt.CheckState:
         visible_total = 0
         visible_checked = 0
         for index in range(self.values_list.count()):
@@ -388,18 +384,60 @@ class _ParquetFilterPopup(QFrame):
             visible_total += 1
             if item.checkState() == Qt.CheckState.Checked:
                 visible_checked += 1
-        self.select_all_checkbox.blockSignals(True)
-        try:
-            if visible_total == 0:
-                self.select_all_checkbox.setCheckState(Qt.CheckState.Unchecked)
-            elif visible_checked == 0:
-                self.select_all_checkbox.setCheckState(Qt.CheckState.Unchecked)
-            elif visible_checked == visible_total:
-                self.select_all_checkbox.setCheckState(Qt.CheckState.Checked)
-            else:
-                self.select_all_checkbox.setCheckState(Qt.CheckState.PartiallyChecked)
-        finally:
-            self.select_all_checkbox.blockSignals(False)
+        if visible_total == 0:
+            return Qt.CheckState.Unchecked
+        if visible_checked == 0:
+            return Qt.CheckState.Unchecked
+        if visible_checked == visible_total:
+            return Qt.CheckState.Checked
+        return Qt.CheckState.PartiallyChecked
+
+    def _sync_select_all_button(self) -> None:
+        if self._select_all_button is None:
+            return
+        state = self._select_all_check_state()
+        icon_name = {
+            Qt.CheckState.Checked: "select-all-all",
+            Qt.CheckState.PartiallyChecked: "select-all-partial",
+            Qt.CheckState.Unchecked: "select-all-none",
+        }[state]
+        icon_fill = self._icon_fill_color()
+        self._select_all_button.setIcon(
+            QIcon(
+                render_svg_icon_pixmap(
+                    icon_name=icon_name,
+                    size=24,
+                    device_pixel_ratio=max(1.0, self.devicePixelRatioF()),
+                    default_fill_color=icon_fill,
+                )
+            )
+        )
+        self._select_all_button.setToolTip(
+            {
+                Qt.CheckState.Checked: "All visible values selected",
+                Qt.CheckState.PartiallyChecked: "Some visible values selected",
+                Qt.CheckState.Unchecked: "No visible values selected",
+            }[state]
+        )
+        self._select_all_button.setAccessibleName("Select all values")
+        self._select_all_button.setProperty("selectAllState", int(state.value))
+        style = self._select_all_button.style()
+        style.unpolish(self._select_all_button)
+        style.polish(self._select_all_button)
+        self._select_all_button.update()
+
+    def _icon_fill_color(self):
+        window = self.window()
+        theme_service = getattr(window, "theme_service", None)
+        theme_name = getattr(window, "theme_name", None)
+        if theme_service is not None and isinstance(theme_name, str):
+            return theme_service.palette(theme_name).text
+        return self.palette().buttonText().color()
+
+    def _toggle_select_all(self) -> None:
+        current_state = self._select_all_check_state()
+        target_state = Qt.CheckState.Unchecked if current_state == Qt.CheckState.Checked else Qt.CheckState.Checked
+        self._apply_select_all_state(target_state)
 
     def _apply_selection(self) -> None:
         selected_values: list[object] = []
@@ -426,8 +464,40 @@ class _ParquetFilterPopup(QFrame):
         self._search_token += 1
         self._explorer.request_filter_values(self._column_name, search_text, self._search_token)
 
-    def _apply_sort(self, *, descending: bool, append: bool) -> None:
-        self._explorer.apply_column_sort(self._column_name, descending=descending, append=append)
+    def _sort_should_append(self) -> bool:
+        primary_sort_column = self._explorer.primary_sort_column()
+        return primary_sort_column is not None and primary_sort_column != self._column_name
+
+    def _refresh_sort_button_state(self) -> None:
+        if self._sort_ascending_button is None or self._sort_descending_button is None:
+            return
+        append_mode = self._sort_should_append()
+        action_prefix = "Then sort" if append_mode else "Sort"
+        icon_fill = self._icon_fill_color()
+        for button, icon_name, label in (
+            (self._sort_ascending_button, "sort-ascending", "ascending"),
+            (self._sort_descending_button, "sort-descending", "descending"),
+        ):
+            button.setIcon(
+                QIcon(
+                    render_svg_icon_pixmap(
+                        icon_name=icon_name,
+                        size=24,
+                        device_pixel_ratio=max(1.0, self.devicePixelRatioF()),
+                        default_fill_color=icon_fill,
+                        colorize_stroke=True,
+                    )
+                )
+            )
+            button.setToolTip(f"{action_prefix} {label}")
+            button.setAccessibleName(f"{action_prefix} {label}")
+
+    def _apply_sort(self, *, descending: bool) -> None:
+        self._explorer.apply_column_sort(
+            self._column_name,
+            descending=descending,
+            append=self._sort_should_append(),
+        )
         self.close()
 
     def _clear_sorts(self) -> None:
@@ -818,6 +888,17 @@ class _ParquetExplorerWidget(QWidget):
             return
         self._sort_columns = []
         self._refresh_preview()
+
+    def sort_rank_for_column(self, column_name: str) -> int | None:
+        for index, (active_name, _descending) in enumerate(self._sort_columns, start=1):
+            if active_name == column_name:
+                return index
+        return None
+
+    def primary_sort_column(self) -> str | None:
+        if not self._sort_columns:
+            return None
+        return self._sort_columns[0][0]
 
     def eventFilter(self, watched: object, event: object) -> bool:
         header = self.table.horizontalHeader()

@@ -3078,15 +3078,15 @@ def test_debug_view_live_parquet_filters_update_preview_rows(qapp):
         assert popup is not None
         _process_ui_until(qapp, lambda: popup.findChild(QListWidget, "outputPreviewPopupList").count() > 0)
         search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
-        select_all = popup.findChild(QCheckBox, "outputPreviewSelectAllCheckbox")
+        select_all = popup.findChild(QPushButton, "outputPreviewSelectAllButton")
         assert search is not None
         assert select_all is not None
         search.setText("100")
         qapp.processEvents()
-        _process_ui_until(qapp, lambda: select_all.checkState() == Qt.CheckState.Checked)
-        select_all.setCheckState(Qt.CheckState.Unchecked)
+        _process_ui_until(qapp, lambda: select_all.property("selectAllState") == Qt.CheckState.Checked.value)
+        QTest.mouseClick(select_all, Qt.MouseButton.LeftButton)
         qapp.processEvents()
-        select_all.setCheckState(Qt.CheckState.Checked)
+        QTest.mouseClick(select_all, Qt.MouseButton.LeftButton)
         qapp.processEvents()
         buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
         next(button for button in buttons if button.text() == "Apply").click()
@@ -3099,15 +3099,15 @@ def test_debug_view_live_parquet_filters_update_preview_rows(qapp):
         assert popup is not None
         _process_ui_until(qapp, lambda: popup.findChild(QListWidget, "outputPreviewPopupList").count() > 0)
         search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
-        select_all = popup.findChild(QCheckBox, "outputPreviewSelectAllCheckbox")
+        select_all = popup.findChild(QPushButton, "outputPreviewSelectAllButton")
         assert search is not None
         assert select_all is not None
         search.setText("closed")
         qapp.processEvents()
-        _process_ui_until(qapp, lambda: select_all.checkState() == Qt.CheckState.Checked)
-        select_all.setCheckState(Qt.CheckState.Unchecked)
+        _process_ui_until(qapp, lambda: select_all.property("selectAllState") == Qt.CheckState.Checked.value)
+        QTest.mouseClick(select_all, Qt.MouseButton.LeftButton)
         qapp.processEvents()
-        select_all.setCheckState(Qt.CheckState.Checked)
+        QTest.mouseClick(select_all, Qt.MouseButton.LeftButton)
         qapp.processEvents()
         buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
         next(button for button in buttons if button.text() == "Apply").click()
@@ -3288,9 +3288,10 @@ def test_debug_view_column_filter_popup_supports_multi_column_sort(qapp):
         qapp.processEvents()
         popup = explorer._filter_popup
         assert popup is not None and popup.isVisible()
-        add_sort_button = popup.findChild(QPushButton, "outputPreviewAddSortAscendingButton")
-        assert add_sort_button is not None
-        QTest.mouseClick(add_sort_button, Qt.MouseButton.LeftButton)
+        sort_button = popup.findChild(QPushButton, "outputPreviewSortAscendingButton")
+        assert sort_button is not None
+        assert sort_button.toolTip() == "Then sort ascending"
+        QTest.mouseClick(sort_button, Qt.MouseButton.LeftButton)
         _process_ui_until(
             qapp,
             lambda: table.item(0, 0) is not None
@@ -3423,33 +3424,33 @@ def test_debug_view_filter_popup_select_all_checkbox_tracks_visible_values(qapp)
         popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
         assert popup is not None
         values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
-        select_all = popup.findChild(QCheckBox, "outputPreviewSelectAllCheckbox")
+        select_all = popup.findChild(QPushButton, "outputPreviewSelectAllButton")
         search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
         assert values_list is not None
         assert select_all is not None
         assert search is not None
 
         _process_ui_until(qapp, lambda: values_list.count() == 2)
-        assert select_all.checkState() == Qt.CheckState.Checked
+        assert select_all.property("selectAllState") == Qt.CheckState.Checked.value
 
         QTest.mouseClick(select_all, Qt.MouseButton.LeftButton)
         qapp.processEvents()
-        assert select_all.checkState() == Qt.CheckState.Unchecked
+        assert select_all.property("selectAllState") == Qt.CheckState.Unchecked.value
         assert all(values_list.item(i).checkState() == Qt.CheckState.Unchecked for i in range(values_list.count()))
 
         values_list.item(0).setCheckState(Qt.CheckState.Checked)
         qapp.processEvents()
-        assert select_all.checkState() == Qt.CheckState.PartiallyChecked
+        assert select_all.property("selectAllState") == Qt.CheckState.PartiallyChecked.value
 
         search.setText("Enroll")
         qapp.processEvents()
         _process_ui_until(qapp, lambda: values_list.count() == 1 and values_list.item(0).text() == "Enrollment")
 
-        assert select_all.checkState() == Qt.CheckState.Unchecked
+        assert select_all.property("selectAllState") == Qt.CheckState.Unchecked.value
         QTest.mouseClick(select_all, Qt.MouseButton.LeftButton)
         qapp.processEvents()
         assert values_list.item(0).checkState() == Qt.CheckState.Checked
-        assert select_all.checkState() == Qt.CheckState.Checked
+        assert select_all.property("selectAllState") == Qt.CheckState.Checked.value
     finally:
         _dispose_window(qapp, window)
 

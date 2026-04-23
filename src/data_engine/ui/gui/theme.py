@@ -446,6 +446,15 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border-color: {palette.hover_border};
         color: {palette.text};
     }}
+    QPushButton#outputPreviewSortAscendingButton,
+    QPushButton#outputPreviewSortDescendingButton,
+    QPushButton#outputPreviewSelectAllButton {{
+        min-width: 36px;
+        max-width: 36px;
+        min-height: 36px;
+        max-height: 36px;
+        padding: 0px;
+    }}
     QPushButton#inspectOutputButton:disabled {{
         color: transparent;
         background: transparent;
