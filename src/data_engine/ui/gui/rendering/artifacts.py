@@ -100,8 +100,7 @@ class _PreviewHeaderView(QHeaderView):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
 
-        indicator_rect = QRect(rect.right() - 20, rect.top(), 16, rect.height())
-        content_rect = rect.adjusted(10, 6, -28, -4)
+        content_rect = rect.adjusted(10, 4, -28, -3)
 
         badge_rect: QRect | None = None
         if isinstance(sort_marker, tuple):
@@ -113,7 +112,7 @@ class _PreviewHeaderView(QHeaderView):
             badge_metrics = QFontMetrics(badge_font)
             badge_width = max(16, badge_metrics.horizontalAdvance(badge_label) + 6)
             badge_height = max(13, badge_metrics.height() + 1)
-            badge_rect = QRect(rect.left(), rect.bottom() - badge_height, badge_width, badge_height)
+            badge_rect = QRect(rect.right() - badge_width - 6, rect.center().y() - (badge_height // 2), badge_width, badge_height)
             badge_fill = QColor(badge_bg)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(badge_fill)
@@ -123,7 +122,7 @@ class _PreviewHeaderView(QHeaderView):
             painter.drawText(badge_rect, int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter), badge_label)
 
         title_rect = QRect(content_rect.left(), content_rect.top(), content_rect.width(), 14)
-        dtype_rect = QRect(content_rect.left(), title_rect.bottom() - 1, content_rect.width(), 10)
+        dtype_rect = QRect(content_rect.left(), title_rect.bottom(), content_rect.width(), 11)
 
         title_font = QFont(self.font())
         title_font.setBold(True)
@@ -140,12 +139,6 @@ class _PreviewHeaderView(QHeaderView):
         painter.setFont(dtype_font)
         painter.drawText(dtype_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextSingleLine), dtype_text)
 
-        caret_font = QFont(self.font())
-        caret_font.setBold(True)
-        caret_font.setPointSize(max(8, caret_font.pointSize() - 1))
-        painter.setPen(text_color)
-        painter.setFont(caret_font)
-        painter.drawText(indicator_rect, int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter), "▾")
         painter.restore()
 
 
@@ -1303,8 +1296,8 @@ def _build_dataframe_table(frame: pl.DataFrame) -> QTableWidget:
     if hasattr(table.horizontalHeader(), "setResizeContentsPrecision"):
         table.horizontalHeader().setResizeContentsPrecision(50)
     table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-    table.horizontalHeader().setMinimumHeight(43)
-    table.horizontalHeader().setFixedHeight(43)
+    table.horizontalHeader().setMinimumHeight(30)
+    table.horizontalHeader().setFixedHeight(30)
     _prepare_dataframe_table(table, frame, filtered_columns=set())
     _populate_dataframe_table_rows(table, frame, 0, frame.height)
     if frame.height <= 250:
