@@ -35,7 +35,7 @@ from data_engine.platform.workspace_models import DiscoveredWorkspace, machine_i
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.runtime.execution.logging import RuntimeLogEmitter
-from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, FlowLiveSummary, RunLiveSnapshot, WorkspaceSnapshot
+from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, FlowLiveSummary, RunLiveSnapshot, WorkspaceRuntimeProjection, WorkspaceSnapshot
 from data_engine.domain import StepOutputIndex
 from data_engine.services import DaemonService, DaemonStateService
 from data_engine.services.daemon_state import DaemonLaneUpdate, DaemonUpdateBatch
@@ -5539,6 +5539,43 @@ def test_sync_from_daemon_coalesces_nested_refresh_requests(qapp, monkeypatch):
         _dispose_window(qapp, window)
 
 
+def test_finish_daemon_sync_skips_unchanged_projection_redraw(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        window.workspace_snapshot = _workspace_snapshot_for_test(window.workspace_paths.workspace_id)
+        window._selected_flow_run_groups_dirty = False
+        refresh_calls = {"count": 0}
+        original_refresh_selection = window.flow_controller.refresh_selection
+
+        def wrapped_refresh_selection(*args, **kwargs):
+            refresh_calls["count"] += 1
+            return original_refresh_selection(*args, **kwargs)
+
+        monkeypatch.setattr(window.flow_controller, "refresh_selection", wrapped_refresh_selection)
+        payload = {
+            "workspace_token": window._workspace_binding_token(),
+            "sync_state": object(),
+            "projection": WorkspaceRuntimeProjection(
+                runtime_session=window.runtime_session,
+                operation_tracker=window.operation_tracker,
+                flow_states=dict(window.flow_states),
+                active_runtime_flow_names=(),
+                step_output_index=window.step_output_index,
+            ),
+            "workspace_snapshot": window.workspace_snapshot,
+        }
+
+        window.runtime_controller.finish_daemon_sync(window, payload)
+        qapp.processEvents()
+
+        assert refresh_calls["count"] == 0
+        assert window._selected_flow_run_groups_dirty is False
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_poll_log_queue_ignores_entries_for_other_workspaces(qapp, monkeypatch):
     del monkeypatch
     window = _make_window()
@@ -6220,7 +6257,68 @@ def test_refresh_selection_shows_parallel_active_step_counts_without_serializing
 
         assert len(window.operation_row_widgets) == 2
         assert window.operation_row_widgets[0].row_card.property("stepState") == "running"
-        assert window.operation_row_widgets[0].duration_label.text() == "4.0s"
+        assert window.operation_row_widgets[0].duration_label.text() == "1 active"
+        assert window.operation_row_widgets[1].row_card.property("stepState") == "running"
+        assert window.operation_row_widgets[1].duration_label.text() == "2 active"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_parallel_operation_rows_keep_last_duration_when_step_has_no_active_runs(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        now = datetime.now(UTC)
+        window._load_flows()
+        window.flow_cards["poller"] = replace(window.flow_cards["poller"], parallelism="4")
+        window._select_flow("poller")
+        window._apply_runtime_event(
+            RuntimeStepEvent(
+                run_id="run-1",
+                flow_name="poller",
+                step_name="Read Excel",
+                source_label="docs_1.xlsx",
+                status="success",
+                elapsed_seconds=1.0,
+            )
+        )
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=11,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, active_flow_names=("poller",)),
+            flows={},
+            active_runs={
+                "run-2": RunLiveSnapshot(
+                    run_id="run-2",
+                    flow_name="poller",
+                    group_name="Imports",
+                    source_path="docs_2.xlsx",
+                    state="running",
+                    current_step_name="Write Parquet",
+                    current_step_started_at_utc=(now - timedelta(seconds=3)).isoformat(),
+                    started_at_utc=(now - timedelta(seconds=65)).isoformat(),
+                    elapsed_seconds=65.0,
+                ),
+                "run-3": RunLiveSnapshot(
+                    run_id="run-3",
+                    flow_name="poller",
+                    group_name="Imports",
+                    source_path="docs_3.xlsx",
+                    state="running",
+                    current_step_name="Write Parquet",
+                    current_step_started_at_utc=(now - timedelta(seconds=2)).isoformat(),
+                    started_at_utc=(now - timedelta(seconds=70)).isoformat(),
+                    elapsed_seconds=70.0,
+                ),
+            },
+        )
+
+        window._refresh_selection(window.flow_cards["poller"])
+        window._refresh_live_operation_durations()
+
+        assert len(window.operation_row_widgets) == 2
+        assert window.operation_row_widgets[0].duration_label.text() == "1.0s"
         assert window.operation_row_widgets[1].row_card.property("stepState") == "running"
         assert window.operation_row_widgets[1].duration_label.text() == "2 active"
     finally:

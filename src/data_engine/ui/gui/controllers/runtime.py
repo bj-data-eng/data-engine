@@ -392,6 +392,20 @@ class GuiRuntimeController:
             if sync_state is None or projection is None or workspace_snapshot is None:
                 return
             window._last_daemon_sync_error_text = None
+            previous_workspace_snapshot = getattr(window, "workspace_snapshot", None)
+            previous_runtime_session = getattr(window, "runtime_session", None)
+            previous_operation_tracker = getattr(window, "operation_tracker", None)
+            previous_flow_states = getattr(window, "flow_states", None)
+            previous_step_output_index = getattr(window, "step_output_index", None)
+            if (
+                previous_workspace_snapshot == workspace_snapshot
+                and previous_runtime_session == projection.runtime_session
+                and previous_operation_tracker == projection.operation_tracker
+                and previous_flow_states == projection.flow_states
+                and previous_step_output_index == projection.step_output_index
+            ):
+                window.daemon_subscription.mark_sync(window._monotonic())
+                return
             window._selected_flow_run_groups_dirty = True
             window.workspace_snapshot = workspace_snapshot
             if not window.workspace_snapshot.engine.daemon_live and window._auto_daemon_enabled:

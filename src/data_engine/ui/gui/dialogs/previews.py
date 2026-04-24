@@ -307,6 +307,9 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
     )
     if hasattr(preview_widget, "summary_changed"):
         preview_widget.summary_changed.connect(summary_label.setText)
+    shutdown_background_work = getattr(preview_widget, "shutdown_background_work", None)
+    if callable(shutdown_background_work):
+        dialog.finished.connect(lambda _result, shutdown=shutdown_background_work: shutdown())
 
     _present_dialog(dialog)
     return dialog

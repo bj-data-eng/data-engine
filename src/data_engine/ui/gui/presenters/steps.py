@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QFrame
 
 from data_engine.domain import RuntimeStepEvent
-from data_engine.domain.time import parse_utc_text
 from data_engine.services import runtime_session_from_workspace_snapshot
 from data_engine.views.models import default_flow_state
 from data_engine.views.presentation import format_seconds
@@ -83,9 +81,10 @@ def render_operation_durations(window: "DataEngineWindow", flow_name: str) -> No
     state = window.operation_tracker.state_for(flow_name)
     if card is None or state is None:
         for row_widgets in window.operation_row_widgets:
-            row_widgets.duration_label.setText("")
+            _set_duration_text(row_widgets.duration_label, "")
         return
     container = window.operation_scroll.viewport()
+    updated = False
     container.setUpdatesEnabled(False)
     try:
         for index, operation_name in enumerate(card.operation_items):
@@ -95,12 +94,13 @@ def render_operation_durations(window: "DataEngineWindow", flow_name: str) -> No
             row_card = row_widgets.row_card
             duration_label = row_widgets.duration_label
             row_state = window.operation_tracker.row_state(flow_name, operation_name)
-            apply_operation_row_state(row_card, row_state.status if row_state is not None else "idle")
-            duration_label.setText(duration_text(window, flow_name, operation_name))
+            updated = apply_operation_row_state(row_card, row_state.status if row_state is not None else "idle") or updated
+            updated = _set_duration_text(duration_label, duration_text(window, flow_name, operation_name)) or updated
         window._refresh_operation_buttons(flow_name)
     finally:
         container.setUpdatesEnabled(True)
-        container.update()
+        if updated:
+            container.update()
 
 
 def duration_text(window: "DataEngineWindow", flow_name: str, operation_name: str) -> str:
@@ -118,6 +118,7 @@ def refresh_live_operation_durations(window: "DataEngineWindow") -> None:
         _refresh_live_log_durations(window)
         return
     container = window.operation_scroll.viewport()
+    updated = False
     container.setUpdatesEnabled(False)
     try:
         for index, operation_name in enumerate(card.operation_items):
@@ -127,10 +128,14 @@ def refresh_live_operation_durations(window: "DataEngineWindow") -> None:
             if row_state is None or row_state.status != "running":
                 continue
             row_widgets = window.operation_row_widgets[index]
-            row_widgets.duration_label.setText(duration_text(window, window.selected_flow_name, operation_name))
+            updated = _set_duration_text(
+                row_widgets.duration_label,
+                duration_text(window, window.selected_flow_name, operation_name),
+            ) or updated
     finally:
         container.setUpdatesEnabled(True)
-        container.update()
+        if updated:
+            container.update()
     _refresh_live_log_durations(window)
 
 
@@ -173,8 +178,6 @@ def _refresh_parallel_live_operation_rows(window: "DataEngineWindow", card) -> b
     if workspace_snapshot is None or not workspace_snapshot.engine.daemon_live:
         return False
     active_by_step: dict[str, int] = {}
-    duration_by_step: dict[str, float | None] = {}
-    started_at_by_step: dict[str, str | None] = {}
     status_by_step: dict[str, str] = {}
     for run in workspace_snapshot.active_runs.values():
         if run.flow_name != card.name:
@@ -183,17 +186,12 @@ def _refresh_parallel_live_operation_rows(window: "DataEngineWindow", card) -> b
         if not step_name:
             continue
         active_by_step[step_name] = active_by_step.get(step_name, 0) + 1
-        if active_by_step[step_name] == 1:
-            duration_by_step[step_name] = _live_step_elapsed_seconds(run.current_step_started_at_utc, run.elapsed_seconds)
-            started_at_by_step[step_name] = run.current_step_started_at_utc
-        else:
-            duration_by_step[step_name] = None
-            started_at_by_step[step_name] = None
         next_status = "stopping" if run.state == "stopping" else "running"
         previous_status = status_by_step.get(step_name)
         if previous_status != "stopping":
             status_by_step[step_name] = next_status
     container = window.operation_scroll.viewport()
+    updated = False
     container.setUpdatesEnabled(False)
     try:
         for index, operation_name in enumerate(card.operation_items):
@@ -202,37 +200,35 @@ def _refresh_parallel_live_operation_rows(window: "DataEngineWindow", card) -> b
             row_widgets = window.operation_row_widgets[index]
             count = active_by_step.get(operation_name, 0)
             status = status_by_step.get(operation_name, "idle") if count > 0 else "idle"
-            apply_operation_row_state(row_widgets.row_card, status)
-            if count > 1:
-                row_widgets.duration_label.setText(f"{count} active")
-            elif count == 1 and isinstance(duration_by_step.get(operation_name), (int, float)):
-                row_widgets.duration_label.setText(format_seconds(duration_by_step[operation_name]))
+            updated = apply_operation_row_state(row_widgets.row_card, status) or updated
+            if count > 0:
+                next_duration = f"{count} active"
             else:
-                row_widgets.duration_label.setText("")
+                next_duration = duration_text(window, card.name, operation_name)
+            updated = _set_duration_text(row_widgets.duration_label, next_duration) or updated
     finally:
         container.setUpdatesEnabled(True)
-        container.update()
+        if updated:
+            container.update()
     return True
 
 
-def _live_step_elapsed_seconds(
-    started_at_utc: str | None,
-    fallback_elapsed_seconds: float | None,
-) -> float | None:
-    started = parse_utc_text(started_at_utc)
-    if started is not None:
-        return max((datetime.now(UTC) - started.astimezone(UTC)).total_seconds(), 0.0)
-    return fallback_elapsed_seconds
-
-
-def apply_operation_row_state(row_card: QFrame, status: str) -> None:
+def apply_operation_row_state(row_card: QFrame, status: str) -> bool:
     if row_card.property("stepState") == status:
-        return
+        return False
     row_card.setProperty("stepState", status)
     style = row_card.style()
     style.unpolish(row_card)
     style.polish(row_card)
     row_card.update()
+    return True
+
+
+def _set_duration_text(label, text: str) -> bool:
+    if label.text() == text:
+        return False
+    label.setText(text)
+    return True
 
 
 def flash_operation_row(window: "DataEngineWindow", index: int) -> None:

@@ -479,32 +479,30 @@ class _GuiFlowPresentationController:
                 row_widgets.row_card,
                 type("_RowState", (), {"status": row.status})(),
             )
-            if row.active_count > 1:
-                row_widgets.duration_label.setText(f"{row.active_count} active")
+            if row.active_count > 0:
+                _set_label_text(row_widgets.duration_label, f"{row.active_count} active")
             elif row.status == "running":
                 if isinstance(row.live_started_at_utc, str):
                     started = parse_utc_text(row.live_started_at_utc)
                     if started is not None:
-                        row_widgets.duration_label.setText(
+                        _set_label_text(
+                            row_widgets.duration_label,
                             window._format_seconds(
                                 max((datetime.now(UTC) - started.astimezone(UTC)).total_seconds(), 0.0)
-                            )
+                            ),
                         )
                     elif isinstance(row.live_elapsed_seconds, (int, float)):
-                        row_widgets.duration_label.setText(
-                            window._format_seconds(row.live_elapsed_seconds)
-                        )
+                        _set_label_text(row_widgets.duration_label, window._format_seconds(row.live_elapsed_seconds))
                     else:
-                        row_widgets.duration_label.setText(window._duration_text(card.name, row.name))
+                        _set_label_text(row_widgets.duration_label, window._duration_text(card.name, row.name))
                 elif isinstance(row.live_elapsed_seconds, (int, float)):
-                    row_widgets.duration_label.setText(
-                        window._format_seconds(row.live_elapsed_seconds)
-                    )
+                    _set_label_text(row_widgets.duration_label, window._format_seconds(row.live_elapsed_seconds))
                 else:
-                    row_widgets.duration_label.setText(window._duration_text(card.name, row.name))
+                    _set_label_text(row_widgets.duration_label, window._duration_text(card.name, row.name))
             else:
-                row_widgets.duration_label.setText(
-                    window._format_seconds(row.elapsed_seconds) if isinstance(row.elapsed_seconds, (int, float)) else ""
+                _set_label_text(
+                    row_widgets.duration_label,
+                    window._format_seconds(row.elapsed_seconds) if isinstance(row.elapsed_seconds, (int, float)) else "",
                 )
         if card is not None:
             window._refresh_operation_buttons(card.name)
@@ -834,3 +832,8 @@ class GuiFlowController:
 
 
 __all__ = ["GuiFlowController"]
+
+
+def _set_label_text(label, text: str) -> None:
+    if label.text() != text:
+        label.setText(text)

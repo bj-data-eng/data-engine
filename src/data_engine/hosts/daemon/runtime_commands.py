@@ -215,6 +215,16 @@ class DaemonRuntimeCommandHandler:
                     service._debug_log(traceback.format_exc().rstrip())
                     raise
                 finally:
+                    orphaned_run_count, orphaned_step_count = service.runtime_cache_ledger.reconcile_orphaned_activity(
+                        status="stopped",
+                        finished_at_utc=utcnow_text(),
+                        error_text="Engine stopped before completion.",
+                    )
+                    if orphaned_run_count or orphaned_step_count:
+                        service._debug_log(
+                            "reconciled orphaned runtime rows after engine stop"
+                            f" runs={orphaned_run_count} steps={orphaned_step_count}"
+                        )
                     with service._state_lock:
                         service.state.end_runtime(status="idle")
                     service._publish_runtime_event("engine.stopped", correlation_id=request_id)

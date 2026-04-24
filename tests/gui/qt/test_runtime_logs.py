@@ -17,6 +17,7 @@ from .support import (
     test_refresh_log_view_success_rows_ignore_transparent_log_button,
     test_refresh_log_view_failed_button_opens_error_details_directly,
     test_refresh_log_view_prefers_daemon_live_runs_for_parallel_flow,
+    test_parallel_operation_rows_keep_last_duration_when_step_has_no_active_runs,
     test_refresh_selection_shows_parallel_active_step_counts_without_serializing_steps,
     test_refresh_selection_reuses_operation_rows_when_steps_are_unchanged,
     test_refresh_sidebar_state_views_skips_rebuild_when_no_flow_states_changed,

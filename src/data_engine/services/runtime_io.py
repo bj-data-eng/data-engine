@@ -41,9 +41,11 @@ class _RuntimeCacheHandle:
         db_path: Path,
         *,
         cache_ttl_seconds: float = 1.0,
+        max_read_cache_entries: int = 512,
     ) -> None:
         self.db_path = Path(db_path).expanduser().resolve()
         self.cache_ttl_seconds = cache_ttl_seconds
+        self.max_read_cache_entries = max(int(max_read_cache_entries), 1)
         self._ledger = RuntimeCacheLedger(self.db_path)
         self._lock = threading.RLock()
         self._refcount = 0
@@ -159,6 +161,7 @@ class _RuntimeCacheHandle:
         now = monotonic()
         current_signature = None
         with self._lock:
+            self._prune_read_cache_locked(now)
             generation = self._write_generation
             entry = self._read_cache.get(key)
             if entry is not None and entry.generation == generation:
@@ -182,7 +185,26 @@ class _RuntimeCacheHandle:
                 generation=self._write_generation,
                 sqlite_signature=signature,
             )
+            self._prune_read_cache_locked(now)
         return value
+
+    def _prune_read_cache_locked(self, now: float) -> None:
+        expired_keys = tuple(
+            cache_key
+            for cache_key, entry in self._read_cache.items()
+            if now - entry.cached_at_monotonic >= self.cache_ttl_seconds
+        )
+        for cache_key in expired_keys:
+            self._read_cache.pop(cache_key, None)
+        overflow = len(self._read_cache) - self.max_read_cache_entries
+        if overflow <= 0:
+            return
+        oldest_keys = sorted(
+            self._read_cache,
+            key=lambda cache_key: self._read_cache[cache_key].cached_at_monotonic,
+        )[:overflow]
+        for cache_key in oldest_keys:
+            self._read_cache.pop(cache_key, None)
 
 
 class _RuntimeRunsProxy:
@@ -478,8 +500,9 @@ class RuntimeIoCacheStore(RuntimeCacheStore):
 class RuntimeIoLayer:
     """Own shared runtime cache-store proxies, write serialization, and read caching."""
 
-    def __init__(self, *, cache_ttl_seconds: float = 1.0) -> None:
+    def __init__(self, *, cache_ttl_seconds: float = 1.0, max_read_cache_entries: int = 512) -> None:
         self.cache_ttl_seconds = cache_ttl_seconds
+        self.max_read_cache_entries = max(int(max_read_cache_entries), 1)
         self._lock = threading.RLock()
         self._handles: dict[Path, _RuntimeCacheHandle] = {}
 
@@ -488,7 +511,11 @@ class RuntimeIoLayer:
         with self._lock:
             handle = self._handles.get(normalized)
             if handle is None or handle._closed:
-                handle = _RuntimeCacheHandle(normalized, cache_ttl_seconds=self.cache_ttl_seconds)
+                handle = _RuntimeCacheHandle(
+                    normalized,
+                    cache_ttl_seconds=self.cache_ttl_seconds,
+                    max_read_cache_entries=self.max_read_cache_entries,
+                )
                 self._handles[normalized] = handle
             return RuntimeIoCacheStore(handle)
 

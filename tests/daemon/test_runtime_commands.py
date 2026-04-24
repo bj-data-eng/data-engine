@@ -658,6 +658,82 @@ def test_stop_engine_can_request_shutdown_when_idle_for_last_client_disconnect(t
         service._shutdown()  # noqa: SLF001
 
 
+def test_engine_stop_reconciles_orphaned_active_runtime_rows(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        observed_events: list[str] = []
+        service.runtime_event_bus.subscribe(lambda event: observed_events.append(event.event_type))
+        monkeypatch.setattr(
+            service,
+            "_load_flow_cards",
+            lambda *, force=False: (
+                QtFlowCard(
+                    name="demo_poll",
+                    group="Demo",
+                    title="Demo Poll",
+                    description="Automated demo flow.",
+                    source_root="(not set)",
+                    target_root="(not set)",
+                    mode="poll",
+                    interval="5s",
+                    operations="Emit Value",
+                    operation_items=("Emit Value",),
+                    state="poll ready",
+                    valid=True,
+                    category="automated",
+                    parallelism="2",
+                ),
+            ),
+        )
+        monkeypatch.setattr(
+            service.flow_execution_service,
+            "load_flows",
+            lambda flow_names, workspace_root=None: [
+                Flow(name=flow_name, group="Demo").step(lambda context: 1, label="Emit Value") for flow_name in flow_names
+            ],
+        )
+
+        def _orphaning_run(flows, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None):
+            del flows, runtime_stop_event, flow_stop_event, workspace_id
+            started_at = utcnow_text()
+            runtime_ledger.execution_state.record_run_started(
+                run_id="run-1",
+                flow_name="demo_poll",
+                group_name="Demo",
+                source_path="docs.xlsx",
+                started_at_utc=started_at,
+            )
+            runtime_ledger.execution_state.record_step_started(
+                run_id="run-1",
+                flow_name="demo_poll",
+                step_label="Emit Value",
+                started_at_utc=started_at,
+            )
+            return []
+
+        monkeypatch.setattr(service.runtime_execution_service, "run_automated", _orphaning_run)
+
+        response = service._handle_command({"command": "start_engine"})  # noqa: SLF001
+        assert response["ok"] is True
+        _wait_until(lambda: "engine.stopped" in observed_events)
+
+        status = service._handle_command({"command": "daemon_status"})  # noqa: SLF001
+        assert status["status"]["engine_active"] is False
+        assert status["status"]["active_runs"] == []
+        assert status["status"]["flow_activity"] == []
+        assert service.runtime_cache_ledger.runs.list_active() == ()
+        assert service.runtime_cache_ledger.step_outputs.list_active() == ()
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
 def test_run_flow_refreshes_flow_cards_before_lookup(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
