@@ -186,7 +186,6 @@ class _ParquetPreviewLoader(QThread):
                 expression = _build_distinct_value_filter_expression(column_name, selected_values)
                 if expression is not None:
                     query = query.filter(expression)
-            preview = query.head(_PREVIEW_ROW_LIMIT).collect()
             row_count = (
                 query.select(pl.len().alias("__row_count__"))
                 .collect()
@@ -1036,12 +1035,12 @@ class _ParquetExplorerWidget(QWidget):
         header = self.table.horizontalHeader()
         if watched is header.viewport() and isinstance(event, QEvent):
             if event.type() == QEvent.Type.MouseButtonPress:
-                position = getattr(event, "position", None)
-                if callable(position):
-                    section_index = header.logicalIndexAt(position().toPoint())
-                else:
-                    pos = getattr(event, "pos", lambda: None)()
-                    section_index = header.logicalIndexAt(pos) if pos is not None else -1
+                point = _event_position(event)
+                if point is None:
+                    return super().eventFilter(watched, event)
+                if _header_point_is_resize_handle(header, point):
+                    return super().eventFilter(watched, event)
+                section_index = header.logicalIndexAt(point)
                 if section_index >= 0:
                     if self._close_popup_for_column(section_index):
                         return True
@@ -1373,6 +1372,29 @@ def _build_distinct_value_filter_expression(column_name: str, selected_values: t
         null_expression = column.is_null()
         expression = null_expression if expression is None else (expression | null_expression)
     return expression
+
+
+def _event_position(event: object) -> QPoint | None:
+    position = getattr(event, "position", None)
+    if callable(position):
+        return position().toPoint()
+    pos = getattr(event, "pos", lambda: None)()
+    return pos if isinstance(pos, QPoint) else None
+
+
+def _header_point_is_resize_handle(header: QHeaderView, point: QPoint) -> bool:
+    cursor_shape = header.viewport().cursor().shape()
+    if cursor_shape == Qt.CursorShape.SplitHCursor:
+        return True
+    logical_index = header.logicalIndexAt(point)
+    if logical_index < 0:
+        return False
+    resize_margin = max(4, header.style().pixelMetric(QStyle.PixelMetric.PM_HeaderGripMargin, None, header))
+    left = header.sectionViewportPosition(logical_index)
+    right = left + header.sectionSize(logical_index)
+    if point.x() >= right - resize_margin:
+        return True
+    return logical_index > 0 and point.x() <= left + resize_margin
 
 
 def _value_identity(value: object) -> tuple[str, object]:

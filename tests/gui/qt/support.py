@@ -952,6 +952,64 @@ def test_parquet_preview_loader_sample_mode_collects_only_preview_rows(tmp_path)
     assert "Showing sample of 5 rows" in summary
 
 
+def test_parquet_preview_loader_top_mode_avoids_discarded_preview_collect(tmp_path, monkeypatch):
+    output_path = tmp_path / "preview.parquet"
+    pl.DataFrame(
+        {
+            "claim_id": list(range(20)),
+            "status": ["OPEN" if index % 2 == 0 else "CLOSED" for index in range(20)],
+        }
+    ).write_parquet(output_path)
+
+    real_scan_parquet = pl.scan_parquet
+    collect_count = 0
+
+    class _LazyFrameProxy:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def collect(self, *args, **kwargs):
+            nonlocal collect_count
+            collect_count += 1
+            return self._inner.collect(*args, **kwargs)
+
+        def __getattr__(self, name):
+            attr = getattr(self._inner, name)
+            if not callable(attr):
+                return attr
+
+            def _wrapped(*args, **kwargs):
+                result = attr(*args, **kwargs)
+                if isinstance(result, pl.LazyFrame):
+                    return _LazyFrameProxy(result)
+                return result
+
+            return _wrapped
+
+    monkeypatch.setattr(pl, "scan_parquet", lambda *args, **kwargs: _LazyFrameProxy(real_scan_parquet(*args, **kwargs)))
+
+    loader = _ParquetPreviewLoader(
+        output_path,
+        active_value_filters={},
+        sort_columns=(),
+        preview_mode="top",
+        preview_row_limit=5,
+    )
+    loaded: list[tuple[object, object, str]] = []
+    failures: list[str] = []
+    loader.preview_loaded.connect(lambda schema, preview, summary: loaded.append((schema, preview, summary)))
+    loader.load_failed.connect(failures.append)
+
+    loader.run()
+
+    assert failures == []
+    assert len(loaded) == 1
+    _schema, preview, summary = loaded[0]
+    assert preview.height == 5
+    assert "Showing top 5 rows" in summary
+    assert collect_count == 2
+
+
 def test_format_seconds_truncates_and_changes_units(qapp, monkeypatch):
     del monkeypatch
     window = _make_window()
@@ -3282,6 +3340,52 @@ def test_debug_view_column_filter_header_click_toggles_popup(qapp):
 
         QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, header_rect.center())
         qapp.processEvents()
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is None or popup.isVisible() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_header_resize_handle_does_not_open_filter_popup(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame({"claim_id": [1001, 1002], "status": ["OPEN", "CLOSED"]}).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+
+        header = table.horizontalHeader()
+        right_edge = header.sectionViewportPosition(0) + header.sectionSize(0) - 1
+        resize_point = QPoint(right_edge, max(1, header.height() // 2))
+        QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, resize_point)
+        qapp.processEvents()
+
         popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
         assert popup is None or popup.isVisible() is False
     finally:
