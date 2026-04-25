@@ -341,6 +341,8 @@ class FlowContext:
         Runtime metadata attached to the execution.
     config : WorkspaceConfigContext
         Lazy workspace config reader.
+    debug : FlowDebugContext | None
+        Optional debug artifact writer for the active execution.
 
     Examples
     --------

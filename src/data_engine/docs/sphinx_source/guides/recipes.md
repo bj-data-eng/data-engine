@@ -340,6 +340,49 @@ df = df.with_columns(
 Use `count_first_day=True` when the received day itself should count as day 1
 for SLA-style deadlines.
 
+## Recipe: Propagate the last matching row value across a window
+
+```python
+import data_engine.helpers
+import polars as pl
+
+
+df = df.with_columns(
+    archived_at=data_engine.helpers.propagate_last_value(
+        pl.col("archive_date").dt.combine(pl.col("archive_time")),
+        by="claim_id",
+        sort_by="claim_step_index",
+        where=pl.col("status") == "Archive",
+    )
+)
+```
+
+Use this when one row in a grouped window marks an event, but every row in
+that window needs the event's value. The first argument can be a column name or
+any Polars expression, including an adjacent value expression such as
+`pl.col("archive_date").dt.combine(pl.col("archive_time"))`. The output column
+name comes from `with_columns`.
+
+## Recipe: Count repeated visits to the same workflow
+
+```python
+import data_engine.helpers
+
+
+df = df.with_columns(
+    workflow_visit=data_engine.helpers.visit_counter(
+        "workflow",
+        by="document_id",
+        sort_by="step_index",
+    )
+)
+```
+
+Use this when a document can leave and later return to the same workflow. For
+ordered workflow values `w1, w1, w1, w2, w2, w1, w1, w1`, the visit counter is
+`1, 1, 1, 1, 1, 2, 2, 2`: the second `w1` run is visit 2 for `w1`, while the
+first `w2` run remains visit 1 for `w2`.
+
 ## Recipe: Write several outputs for one source
 
 ```python

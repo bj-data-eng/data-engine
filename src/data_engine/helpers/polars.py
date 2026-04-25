@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from datetime import date, datetime, timedelta
 import os
 from pathlib import Path
@@ -26,8 +26,12 @@ ColumnNames = str | list[str] | tuple[str, ...]
 ReturnMode = str | None
 WeekMask = tuple[bool, bool, bool, bool, bool, bool, bool]
 DateLike = date | datetime
+HolidayDates = list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None
 ExprLike = pl.Expr | str | DateLike
 IntExprLike = pl.Expr | str | int
+ColumnExpr = str | pl.Expr
+ColumnExprs = ColumnExpr | Sequence[ColumnExpr]
+DescendingLike = bool | Sequence[bool]
 _DEFAULT_WEEK_MASK: WeekMask = (True, True, True, True, True, False, False)
 
 
@@ -35,7 +39,7 @@ def networkdays(
     start: ExprLike,
     end: ExprLike,
     *,
-    holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+    holidays: HolidayDates = None,
     count_first_day: bool = False,
     mask: Iterable[bool] | None = None,
 ) -> pl.Expr:
@@ -51,11 +55,11 @@ def networkdays(
 
     Parameters
     ----------
-    start : pl.Expr | str | date | datetime
+    start : ExprLike
         Start date expression, column name, or scalar date/datetime.
-    end : pl.Expr | str | date | datetime
+    end : ExprLike
         End date expression, column name, or scalar date/datetime.
-    holidays : list[date | datetime | str] | tuple[...] | set[...] | None
+    holidays : HolidayDates
         Optional holiday dates removed from the business-day count. String
         values must use ISO date text such as ``"2026-04-15"``.
     count_first_day : bool
@@ -161,7 +165,7 @@ def workday(
     start: ExprLike,
     days: IntExprLike,
     *,
-    holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+    holidays: HolidayDates = None,
     count_first_day: bool = False,
     mask: Iterable[bool] | None = None,
 ) -> pl.Expr:
@@ -176,11 +180,11 @@ def workday(
 
     Parameters
     ----------
-    start : pl.Expr | str | date | datetime
+    start : ExprLike
         Start date expression, column name, or scalar date/datetime.
-    days : pl.Expr | str | int
+    days : IntExprLike
         Signed business-day offset expression, column name, or scalar integer.
-    holidays : list[date | datetime | str] | tuple[...] | set[...] | None
+    holidays : HolidayDates
         Optional holiday dates skipped while calculating the result. String
         values must use ISO date text such as ``"2026-04-15"``.
     count_first_day : bool
@@ -265,6 +269,174 @@ def workday(
     )
 
 
+def propagate_last_value(
+    value: ColumnExpr,
+    *,
+    by: ColumnExprs,
+    sort_by: ColumnExprs,
+    where: pl.Expr | None = None,
+    descending: DescendingLike = False,
+    nulls_last: bool = False,
+    ignore_nulls: bool = True,
+) -> pl.Expr:
+    """Return an expression that broadcasts the last ordered value per window.
+
+    The helper sorts rows inside each ``by`` window, optionally filters the
+    ordered rows with ``where``, takes the last ``value`` from that ordered
+    candidate set, and propagates it to every row in the same window. Null
+    values are ignored by default, which matches the common pattern where only
+    one row in a window contains the value to carry across the group.
+
+    Parameters
+    ----------
+    value : ColumnExpr
+        Column name or expression containing the value to propagate.
+    by : ColumnExprs
+        Window column or columns.
+    sort_by : ColumnExprs
+        Ordering column or columns used to define the last row in each window.
+    where : pl.Expr | None
+        Optional row predicate that limits which sorted rows can supply the
+        propagated value.
+    descending : DescendingLike
+        Sort direction passed to ``Expr.sort_by``.
+    nulls_last : bool
+        Whether null sort-key values are ordered last.
+    ignore_nulls : bool
+        Whether null ``value`` rows are skipped before taking the last value.
+
+    Returns
+    -------
+    pl.Expr
+        Window expression suitable for ``with_columns`` or ``select``.
+
+    Examples
+    --------
+    Propagate the latest non-null status to every row for a claim:
+
+    .. code-block:: python
+
+        df = df.with_columns(
+            latest_status=data_engine.helpers.propagate_last_value(
+                "status",
+                by="claim_id",
+                sort_by="claim_step_index",
+            )
+        )
+
+    Propagate the timestamp from the last Archive row to every row for a
+    claim. The output column is named by ``with_columns``:
+
+    .. code-block:: python
+
+        df = df.with_columns(
+            archived_at=data_engine.helpers.propagate_last_value(
+                pl.col("archive_date").dt.combine(pl.col("archive_time")),
+                by="claim_id",
+                sort_by="claim_step_index",
+                where=pl.col("status") == "Archive",
+            )
+        )
+    """
+    sort_exprs = _as_column_exprs(sort_by)
+    value_expr = _as_column_expr(value)
+    ordered = value_expr.sort_by(
+        sort_exprs,
+        descending=descending,
+        nulls_last=nulls_last,
+    )
+    if where is not None:
+        ordered = ordered.filter(
+            where.sort_by(
+                sort_exprs,
+                descending=descending,
+                nulls_last=nulls_last,
+            )
+        )
+    if ignore_nulls:
+        ordered = ordered.drop_nulls()
+    return ordered.last().over(_as_column_exprs(by))
+
+
+def visit_counter(
+    value: ColumnExpr,
+    *,
+    by: ColumnExprs,
+    sort_by: ColumnExprs,
+    descending: DescendingLike = False,
+    nulls_last: bool = False,
+) -> pl.Expr:
+    """Return a per-value contiguous-run visit number inside each window.
+
+    Rows are ordered inside each ``by`` window, then consecutive rows with the
+    same ``value`` are treated as one visit. When a value leaves and later
+    returns in the same window, the returned run gets the next visit number for
+    that value.
+
+    Parameters
+    ----------
+    value : ColumnExpr
+        Column name or expression containing the state to count visits for.
+    by : ColumnExprs
+        Window column or columns.
+    sort_by : ColumnExprs
+        Ordering column or columns used to define row sequence inside each
+        window.
+    descending : DescendingLike
+        Sort direction passed to ``DataFrame.sort`` for the in-window order.
+    nulls_last : bool
+        Whether null sort-key values are ordered last.
+
+    Returns
+    -------
+    pl.Expr
+        Unsigned integer expression containing the one-based visit number for
+        each row's current ``value``.
+
+    Examples
+    --------
+    Count repeated workflow visits for each document:
+
+    .. code-block:: python
+
+        df = df.with_columns(
+            workflow_visit=data_engine.helpers.visit_counter(
+                "workflow",
+                by="document_id",
+                sort_by="step_index",
+            )
+        )
+
+    For a document with workflow runs ``w1, w1, w1, w2, w2, w1``, the result
+    is ``1, 1, 1, 1, 1, 2``.
+    """
+    sort_exprs = _as_column_exprs(sort_by)
+    sort_expr_list = sort_exprs if isinstance(sort_exprs, list) else [sort_exprs]
+    sort_names = [f"__sort_{index}" for index in range(len(sort_expr_list))]
+    batch_descending: bool | tuple[bool, ...]
+    if isinstance(descending, bool):
+        batch_descending = descending
+    else:
+        batch_descending = tuple(descending)
+
+    return (
+        pl.struct(
+            __value=_as_column_expr(value),
+            **dict(zip(sort_names, sort_expr_list, strict=True)),
+        )
+        .map_batches(
+            lambda batch: _visit_counter_batch(
+                batch,
+                sort_names=sort_names,
+                descending=batch_descending,
+                nulls_last=nulls_last,
+            ),
+            return_dtype=pl.UInt32,
+        )
+        .over(_as_column_exprs(by))
+    )
+
+
 def _coerce_week_mask(mask: Iterable[bool] | None) -> WeekMask:
     if mask is None:
         return _DEFAULT_WEEK_MASK
@@ -276,9 +448,7 @@ def _coerce_week_mask(mask: Iterable[bool] | None) -> WeekMask:
     return values  # type: ignore[return-value]
 
 
-def _coerce_holiday_dates(
-    holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None,
-) -> tuple[date, ...]:
+def _coerce_holiday_dates(holidays: HolidayDates) -> tuple[date, ...]:
     if holidays is None:
         return ()
     values: set[date] = set()
@@ -310,6 +480,45 @@ def _as_int_expr(value: IntExprLike) -> pl.Expr:
     if isinstance(value, str):
         return pl.col(value)
     return pl.lit(value)
+
+
+def _as_column_expr(value: ColumnExpr) -> pl.Expr:
+    if isinstance(value, pl.Expr):
+        return value
+    return pl.col(value)
+
+
+def _as_column_exprs(value: ColumnExprs) -> pl.Expr | list[pl.Expr]:
+    if isinstance(value, str) or isinstance(value, pl.Expr):
+        return _as_column_expr(value)
+    return [_as_column_expr(item) for item in value]
+
+
+def _visit_counter_batch(
+    batch: pl.Series,
+    *,
+    sort_names: Sequence[str],
+    descending: bool | tuple[bool, ...],
+    nulls_last: bool,
+) -> pl.Series:
+    if len(batch) == 0:
+        return pl.Series([], dtype=pl.UInt32)
+    frame = batch.struct.unnest().with_row_index("__row_number")
+    ordered = frame.sort(
+        list(sort_names),
+        descending=descending,
+        nulls_last=nulls_last,
+    )
+    visits = [0] * len(frame)
+    visit_by_value: dict[object, int] = {}
+    previous = object()
+    for row in ordered.iter_rows(named=True):
+        current = row["__value"]
+        if current != previous:
+            visit_by_value[current] = visit_by_value.get(current, 0) + 1
+            previous = current
+        visits[row["__row_number"]] = visit_by_value[current]
+    return pl.Series(visits, dtype=pl.UInt32)
 
 
 def _is_business_day_expr(
@@ -908,7 +1117,7 @@ class DataEngineDataFrameNamespace:
         start: ExprLike,
         end: ExprLike,
         *,
-        holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+        holidays: HolidayDates = None,
         count_first_day: bool = False,
         mask: Iterable[bool] | None = None,
     ) -> pl.Expr:
@@ -917,6 +1126,25 @@ class DataEngineDataFrameNamespace:
         This is a convenience wrapper around :func:`data_engine.helpers.networkdays`.
         The returned value is still a normal ``pl.Expr``, so it can be chained
         into cumulative windows and other Polars expressions.
+
+        Parameters
+        ----------
+        start : ExprLike
+            Start date expression, column name, or scalar date/datetime.
+        end : ExprLike
+            End date expression, column name, or scalar date/datetime.
+        holidays : HolidayDates
+            Optional holiday dates removed from the business-day count.
+        count_first_day : bool
+            Whether to force the first day into the count when it would
+            normally be excluded.
+        mask : Iterable[bool] | None
+            Monday-first seven-item business-day mask.
+
+        Returns
+        -------
+        pl.Expr
+            Expression that evaluates to the signed business-day count.
 
         Example
         -------
@@ -952,13 +1180,32 @@ class DataEngineDataFrameNamespace:
         start: ExprLike,
         days: IntExprLike,
         *,
-        holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+        holidays: HolidayDates = None,
         count_first_day: bool = False,
         mask: Iterable[bool] | None = None,
     ) -> pl.Expr:
         """Return an Excel-style workday offset expression for this dataframe.
 
         This is a convenience wrapper around :func:`data_engine.helpers.workday`.
+
+        Parameters
+        ----------
+        start : ExprLike
+            Start date expression, column name, or scalar date/datetime.
+        days : IntExprLike
+            Signed business-day offset expression, column name, or scalar
+            integer.
+        holidays : HolidayDates
+            Optional holiday dates skipped while calculating the result.
+        count_first_day : bool
+            Whether the start date itself can count as day 1.
+        mask : Iterable[bool] | None
+            Monday-first seven-item business-day mask.
+
+        Returns
+        -------
+        pl.Expr
+            Expression that evaluates to a ``Date`` result.
 
         Example
         -------
@@ -978,6 +1225,100 @@ class DataEngineDataFrameNamespace:
             holidays=holidays,
             count_first_day=count_first_day,
             mask=mask,
+        )
+
+    def propagate_last_value(
+        self,
+        value: ColumnExpr,
+        *,
+        by: ColumnExprs,
+        sort_by: ColumnExprs,
+        where: pl.Expr | None = None,
+        descending: DescendingLike = False,
+        nulls_last: bool = False,
+        ignore_nulls: bool = True,
+    ) -> pl.Expr:
+        """Return an expression broadcasting the last ordered value per window.
+
+        This is a convenience wrapper around
+        :func:`data_engine.helpers.propagate_last_value`.
+
+        Parameters
+        ----------
+        value : ColumnExpr
+            Column name or expression containing the value to propagate.
+        by : ColumnExprs
+            Window column or columns.
+        sort_by : ColumnExprs
+            Ordering column or columns used to define the last row in each
+            window.
+        where : pl.Expr | None
+            Optional row predicate that limits which sorted rows can supply the
+            propagated value.
+        descending : DescendingLike
+            Sort direction passed to ``Expr.sort_by``.
+        nulls_last : bool
+            Whether null sort-key values are ordered last.
+        ignore_nulls : bool
+            Whether null ``value`` rows are skipped before taking the last
+            value.
+
+        Returns
+        -------
+        pl.Expr
+            Window expression suitable for ``with_columns`` or ``select``.
+        """
+        return propagate_last_value(
+            value,
+            by=by,
+            sort_by=sort_by,
+            where=where,
+            descending=descending,
+            nulls_last=nulls_last,
+            ignore_nulls=ignore_nulls,
+        )
+
+    def visit_counter(
+        self,
+        value: ColumnExpr,
+        *,
+        by: ColumnExprs,
+        sort_by: ColumnExprs,
+        descending: DescendingLike = False,
+        nulls_last: bool = False,
+    ) -> pl.Expr:
+        """Return a per-value contiguous-run visit number expression.
+
+        This is a convenience wrapper around
+        :func:`data_engine.helpers.visit_counter`.
+
+        Parameters
+        ----------
+        value : ColumnExpr
+            Column name or expression containing the state to count visits for.
+        by : ColumnExprs
+            Window column or columns.
+        sort_by : ColumnExprs
+            Ordering column or columns used to define row sequence inside each
+            window.
+        descending : DescendingLike
+            Sort direction passed to ``DataFrame.sort`` for the in-window
+            order.
+        nulls_last : bool
+            Whether null sort-key values are ordered last.
+
+        Returns
+        -------
+        pl.Expr
+            Unsigned integer expression containing the one-based visit number
+            for each row's current ``value``.
+        """
+        return visit_counter(
+            value,
+            by=by,
+            sort_by=sort_by,
+            descending=descending,
+            nulls_last=nulls_last,
         )
 
     def write_parquet_atomic(self, path: PathLike, **write_options: object) -> Path:
@@ -1293,7 +1634,7 @@ class DataEngineLazyFrameNamespace:
         start: ExprLike,
         end: ExprLike,
         *,
-        holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+        holidays: HolidayDates = None,
         count_first_day: bool = False,
         mask: Iterable[bool] | None = None,
     ) -> pl.Expr:
@@ -1302,6 +1643,25 @@ class DataEngineLazyFrameNamespace:
         This is a convenience wrapper around :func:`data_engine.helpers.networkdays`.
         The returned value stays lazy and can be chained into window
         expressions before ``collect()``.
+
+        Parameters
+        ----------
+        start : ExprLike
+            Start date expression, column name, or scalar date/datetime.
+        end : ExprLike
+            End date expression, column name, or scalar date/datetime.
+        holidays : HolidayDates
+            Optional holiday dates removed from the business-day count.
+        count_first_day : bool
+            Whether to force the first day into the count when it would
+            normally be excluded.
+        mask : Iterable[bool] | None
+            Monday-first seven-item business-day mask.
+
+        Returns
+        -------
+        pl.Expr
+            Expression that evaluates to the signed business-day count.
         """
         return networkdays(
             start,
@@ -1316,13 +1676,32 @@ class DataEngineLazyFrameNamespace:
         start: ExprLike,
         days: IntExprLike,
         *,
-        holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None = None,
+        holidays: HolidayDates = None,
         count_first_day: bool = False,
         mask: Iterable[bool] | None = None,
     ) -> pl.Expr:
         """Return an Excel-style workday offset expression for this lazy frame.
 
         This is a convenience wrapper around :func:`data_engine.helpers.workday`.
+
+        Parameters
+        ----------
+        start : ExprLike
+            Start date expression, column name, or scalar date/datetime.
+        days : IntExprLike
+            Signed business-day offset expression, column name, or scalar
+            integer.
+        holidays : HolidayDates
+            Optional holiday dates skipped while calculating the result.
+        count_first_day : bool
+            Whether the start date itself can count as day 1.
+        mask : Iterable[bool] | None
+            Monday-first seven-item business-day mask.
+
+        Returns
+        -------
+        pl.Expr
+            Expression that evaluates to a ``Date`` result.
         """
         return workday(
             start,
@@ -1330,6 +1709,100 @@ class DataEngineLazyFrameNamespace:
             holidays=holidays,
             count_first_day=count_first_day,
             mask=mask,
+        )
+
+    def propagate_last_value(
+        self,
+        value: ColumnExpr,
+        *,
+        by: ColumnExprs,
+        sort_by: ColumnExprs,
+        where: pl.Expr | None = None,
+        descending: DescendingLike = False,
+        nulls_last: bool = False,
+        ignore_nulls: bool = True,
+    ) -> pl.Expr:
+        """Return an expression broadcasting the last ordered value per window.
+
+        This is a convenience wrapper around
+        :func:`data_engine.helpers.propagate_last_value`.
+
+        Parameters
+        ----------
+        value : ColumnExpr
+            Column name or expression containing the value to propagate.
+        by : ColumnExprs
+            Window column or columns.
+        sort_by : ColumnExprs
+            Ordering column or columns used to define the last row in each
+            window.
+        where : pl.Expr | None
+            Optional row predicate that limits which sorted rows can supply the
+            propagated value.
+        descending : DescendingLike
+            Sort direction passed to ``Expr.sort_by``.
+        nulls_last : bool
+            Whether null sort-key values are ordered last.
+        ignore_nulls : bool
+            Whether null ``value`` rows are skipped before taking the last
+            value.
+
+        Returns
+        -------
+        pl.Expr
+            Window expression suitable for ``with_columns`` or ``select``.
+        """
+        return propagate_last_value(
+            value,
+            by=by,
+            sort_by=sort_by,
+            where=where,
+            descending=descending,
+            nulls_last=nulls_last,
+            ignore_nulls=ignore_nulls,
+        )
+
+    def visit_counter(
+        self,
+        value: ColumnExpr,
+        *,
+        by: ColumnExprs,
+        sort_by: ColumnExprs,
+        descending: DescendingLike = False,
+        nulls_last: bool = False,
+    ) -> pl.Expr:
+        """Return a per-value contiguous-run visit number expression.
+
+        This is a convenience wrapper around
+        :func:`data_engine.helpers.visit_counter`.
+
+        Parameters
+        ----------
+        value : ColumnExpr
+            Column name or expression containing the state to count visits for.
+        by : ColumnExprs
+            Window column or columns.
+        sort_by : ColumnExprs
+            Ordering column or columns used to define row sequence inside each
+            window.
+        descending : DescendingLike
+            Sort direction passed to ``DataFrame.sort`` for the in-window
+            order.
+        nulls_last : bool
+            Whether null sort-key values are ordered last.
+
+        Returns
+        -------
+        pl.Expr
+            Unsigned integer expression containing the one-based visit number
+            for each row's current ``value``.
+        """
+        return visit_counter(
+            value,
+            by=by,
+            sort_by=sort_by,
+            descending=descending,
+            nulls_last=nulls_last,
         )
 
     def sink_parquet_atomic(self, path: PathLike, **sink_options: object) -> Path:

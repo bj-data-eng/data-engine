@@ -8,7 +8,9 @@ from polars.testing import assert_frame_equal
 import pytest
 
 from data_engine.helpers import networkdays
+from data_engine.helpers import propagate_last_value
 from data_engine.helpers import sink_parquet_atomic
+from data_engine.helpers import visit_counter
 from data_engine.helpers import workday
 from data_engine.helpers import write_excel_atomic
 from data_engine.helpers import write_parquet_atomic
@@ -388,6 +390,207 @@ def test_workday_accepts_string_and_datetime_holidays_with_deduping():
     )
 
     assert result["target"].to_list() == [date(2026, 4, 16)]
+
+
+def test_propagate_last_value_broadcasts_latest_non_null_value_per_window():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "a", "b", "b", "c"],
+            "step_index": [1, 2, 3, 1, 2, 1],
+            "status": [None, "ready", None, "open", "closed", None],
+        }
+    )
+
+    result = frame.with_columns(
+        latest_status=propagate_last_value(
+            "status",
+            by="claim_id",
+            sort_by="step_index",
+        )
+    )
+
+    assert result.to_dict(as_series=False)["latest_status"] == [
+        "ready",
+        "ready",
+        "ready",
+        "closed",
+        "closed",
+        None,
+    ]
+
+
+def test_propagate_last_value_accepts_multiple_window_and_sort_columns():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "a", "a", "b"],
+            "line": [1, 1, 1, 2, 1],
+            "step_index": [1, 2, 2, 1, 1],
+            "tie_breaker": [1, 1, 2, 1, 1],
+            "status": [None, "first", "last", "line-two", "only"],
+        }
+    )
+
+    result = frame.with_columns(
+        latest_status=propagate_last_value(
+            "status",
+            by=["claim_id", "line"],
+            sort_by=["step_index", "tie_breaker"],
+        )
+    )
+
+    assert result.to_dict(as_series=False)["latest_status"] == [
+        "last",
+        "last",
+        "last",
+        "line-two",
+        "only",
+    ]
+
+
+def test_propagate_last_value_namespace_helpers_work_for_eager_and_lazy_frames():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "b", "b"],
+            "step_index": [1, 2, 1, 2],
+            "status": ["open", None, "queued", "done"],
+        }
+    )
+
+    eager = frame.with_columns(
+        latest_status=frame.de.propagate_last_value("status", by="claim_id", sort_by="step_index")
+    )
+    lazy_frame = frame.lazy()
+    lazy = lazy_frame.with_columns(
+        latest_status=lazy_frame.de.propagate_last_value("status", by="claim_id", sort_by="step_index")
+    ).collect()
+
+    assert eager.to_dict(as_series=False)["latest_status"] == ["open", "open", "done", "done"]
+    assert lazy.to_dict(as_series=False)["latest_status"] == ["open", "open", "done", "done"]
+
+
+def test_propagate_last_value_can_keep_nulls_when_requested():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "b", "b"],
+            "step_index": [1, 2, 1, 2],
+            "status": ["open", None, None, "done"],
+        }
+    )
+
+    result = frame.with_columns(
+        latest_status=propagate_last_value(
+            "status",
+            by="claim_id",
+            sort_by="step_index",
+            ignore_nulls=False,
+        )
+    )
+
+    assert result.to_dict(as_series=False)["latest_status"] == [None, None, "done", "done"]
+
+
+def test_propagate_last_value_can_filter_source_rows_and_return_adjacent_values():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "a", "b", "b"],
+            "step_index": [1, 2, 3, 1, 2],
+            "event": ["Open", "Archive", "Archive", "Open", "Archive"],
+            "event_date": ["2026-04-01", "2026-04-02", "2026-04-03", "2026-05-01", "2026-05-02"],
+            "event_time": ["08:00", "09:30", "10:15", "11:00", "12:45"],
+        }
+    )
+
+    result = frame.with_columns(
+        archived_at=propagate_last_value(
+            pl.concat_str(["event_date", "event_time"], separator=" "),
+            by="claim_id",
+            sort_by="step_index",
+            where=pl.col("event") == "Archive",
+        )
+    )
+
+    assert result.to_dict(as_series=False)["archived_at"] == [
+        "2026-04-03 10:15",
+        "2026-04-03 10:15",
+        "2026-04-03 10:15",
+        "2026-05-02 12:45",
+        "2026-05-02 12:45",
+    ]
+
+
+def test_visit_counter_counts_repeated_contiguous_value_runs_per_window():
+    frame = pl.DataFrame(
+        {
+            "document_id": ["doc-1"] * 8,
+            "step_index": [1, 2, 3, 4, 5, 6, 7, 8],
+            "workflow": ["w1", "w1", "w1", "w2", "w2", "w1", "w1", "w1"],
+        }
+    )
+
+    result = frame.with_columns(
+        workflow_visit=visit_counter("workflow", by="document_id", sort_by="step_index")
+    )
+
+    assert result.to_dict(as_series=False)["workflow_visit"] == [1, 1, 1, 1, 1, 2, 2, 2]
+
+
+def test_visit_counter_maps_results_back_to_original_row_order():
+    frame = pl.DataFrame(
+        {
+            "document_id": ["doc-1"] * 5,
+            "step_index": [5, 1, 4, 2, 3],
+            "workflow": ["w1", "w1", "w2", "w1", "w2"],
+        }
+    )
+
+    result = frame.with_columns(
+        workflow_visit=visit_counter("workflow", by="document_id", sort_by="step_index")
+    )
+
+    assert result.to_dict(as_series=False)["workflow_visit"] == [2, 1, 1, 1, 1]
+
+
+def test_visit_counter_accepts_multiple_window_and_sort_columns():
+    frame = pl.DataFrame(
+        {
+            "document_id": ["doc-1", "doc-1", "doc-1", "doc-1", "doc-1", "doc-2"],
+            "section": ["a", "a", "a", "a", "b", "a"],
+            "step_index": [1, 2, 2, 3, 1, 1],
+            "tie_breaker": [1, 1, 2, 1, 1, 1],
+            "workflow": ["w1", "w2", "w1", "w1", "w1", "w1"],
+        }
+    )
+
+    result = frame.with_columns(
+        workflow_visit=visit_counter(
+            "workflow",
+            by=["document_id", "section"],
+            sort_by=["step_index", "tie_breaker"],
+        )
+    )
+
+    assert result.to_dict(as_series=False)["workflow_visit"] == [1, 1, 2, 2, 1, 1]
+
+
+def test_visit_counter_namespace_helpers_work_for_eager_and_lazy_frames():
+    frame = pl.DataFrame(
+        {
+            "document_id": ["doc-1", "doc-1", "doc-1"],
+            "step_index": [1, 2, 3],
+            "workflow": ["w1", "w2", "w1"],
+        }
+    )
+
+    eager = frame.with_columns(
+        workflow_visit=frame.de.visit_counter("workflow", by="document_id", sort_by="step_index")
+    )
+    lazy_frame = frame.lazy()
+    lazy = lazy_frame.with_columns(
+        workflow_visit=lazy_frame.de.visit_counter("workflow", by="document_id", sort_by="step_index")
+    ).collect()
+
+    assert eager.to_dict(as_series=False)["workflow_visit"] == [1, 1, 2]
+    assert lazy.to_dict(as_series=False)["workflow_visit"] == [1, 1, 2]
 
 
 def test_atomic_write_cleans_temporary_file_and_preserves_target_on_replace_failure(

@@ -23,7 +23,7 @@ def read_rows_by_values(
     column: str,
     is_in: list[object] | tuple[object, ...],
     select: str | list[str] | tuple[str, ...],
-):
+) -> pl.DataFrame:
     """Return selected columns for rows whose one column matches provided values.
 
     Parameters
@@ -122,7 +122,7 @@ def read_rows_by_values(
         connection.close()
 
 
-def read_sql(db_path: str | Path, *, sql: str):
+def read_sql(db_path: str | Path, *, sql: str) -> pl.DataFrame:
     """Run one SQL query against DuckDB and return the result as a Polars dataframe.
 
     Parameters
@@ -136,6 +136,11 @@ def read_sql(db_path: str | Path, *, sql: str):
     -------
     pl.DataFrame
         Query result as a Polars dataframe.
+
+    Raises
+    ------
+    ValueError
+        If ``sql`` is empty.
     """
 
     statement = str(sql).strip()
@@ -157,7 +162,7 @@ def read_table(
     select: str | list[str] | tuple[str, ...] = "*",
     where: str | None = None,
     limit: int | None = None,
-):
+) -> pl.DataFrame:
     """Read rows from one DuckDB table into a Polars dataframe.
 
     Parameters
@@ -177,6 +182,11 @@ def read_table(
     -------
     pl.DataFrame
         Selected table rows.
+
+    Raises
+    ------
+    ValueError
+        If the table, selected columns, or limit are invalid.
     """
 
     normalized_limit = _normalize_optional_limit(limit)
