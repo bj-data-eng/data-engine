@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
+    QFileDialog,
     QFrame,
     QHeaderView,
     QHBoxLayout,
@@ -18,8 +19,9 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
+    QMessageBox,
     QMenu,
+    QPushButton,
     QSpinBox,
     QStyle,
     QStyleOptionHeader,
@@ -32,13 +34,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from data_engine.helpers import write_excel_atomic
 from data_engine.platform.instrumentation import append_timing_line, new_request_id
 from data_engine.ui.gui.rendering.icons import render_svg_icon_pixmap
 from data_engine.views import ArtifactPreviewSpec, classify_artifact_preview
 
 _PREVIEW_ROW_LIMIT = 200
 _PREVIEW_ROW_LIMIT_MIN = 1
-_PREVIEW_ROW_LIMIT_MAX = 10_000
+_PREVIEW_ROW_LIMIT_MAX = 500_000
 _TABLE_RENDER_BATCH_SIZE = 500
 _PREVIEW_DISTINCT_VALUE_LIMIT = 500
 _PREVIEW_MODE_TOP = "top"
@@ -684,10 +687,22 @@ class _ParquetExplorerWidget(QWidget):
 
         self._configure_preview_controls()
 
+        export_row = QHBoxLayout()
+        export_row.setContentsMargins(0, 0, 0, 0)
+        export_row.setSpacing(8)
         self.status_label = QLabel("Loading preview…")
         self.status_label.setObjectName("sectionMeta")
         self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
+        export_row.addWidget(self.status_label, 1, Qt.AlignmentFlag.AlignVCenter)
+        export_row.addStretch(1)
+        self.export_excel_button = QPushButton("Export Excel")
+        self.export_excel_button.setObjectName("outputPreviewExportExcelButton")
+        self.export_excel_button.setFixedHeight(22)
+        self.export_excel_button.setToolTip("Export the visible preview rows to an Excel workbook.")
+        self.export_excel_button.setEnabled(False)
+        self.export_excel_button.clicked.connect(self._export_current_preview)
+        export_row.addWidget(self.export_excel_button)
+        layout.addLayout(export_row)
 
         self.table = _build_dataframe_table(pl.DataFrame())
         self.table.horizontalHeader().setSectionsClickable(True)
@@ -733,6 +748,10 @@ class _ParquetExplorerWidget(QWidget):
         if not self._owns_preview_controls:
             self.preview_mode_combo.setVisible(False)
             self.preview_limit_spin.setVisible(False)
+        try:
+            self.export_excel_button.clicked.disconnect(self._export_current_preview)
+        except (RuntimeError, TypeError):
+            pass
         preview_loader = self._preview_loader
         self._preview_loader = None
         if preview_loader is not None:
@@ -818,6 +837,7 @@ class _ParquetExplorerWidget(QWidget):
         self.status_label.setText("Loading preview…")
         self.status_label.setVisible(True)
         self.table.setEnabled(False)
+        self.export_excel_button.setEnabled(False)
         loader = _ParquetPreviewLoader(
             self._output_path,
             active_value_filters=self._active_value_filters,
@@ -969,6 +989,7 @@ class _ParquetExplorerWidget(QWidget):
         request_id = self._active_preview_request_id
         self._active_preview_request_id = None
         self.table.setEnabled(False)
+        self.export_excel_button.setEnabled(False)
         self.status_label.setText(f"Unable to load preview: {message}")
         self.status_label.setVisible(True)
         append_timing_line(
@@ -1116,6 +1137,7 @@ class _ParquetExplorerWidget(QWidget):
         if preview.height <= 250:
             self.table.resizeColumnsToContents()
         self.table.setEnabled(True)
+        self.export_excel_button.setEnabled(bool(preview.columns))
         self.status_label.setVisible(False)
 
     def _merge_selected_values(self, column_name: str, values: list[tuple[str, object]]) -> list[tuple[str, object]]:
@@ -1135,6 +1157,9 @@ class _ParquetExplorerWidget(QWidget):
             merged.append((label, value))
             seen.add(identity)
         return merged
+
+    def _export_current_preview(self) -> None:
+        _export_frame_to_excel(self._current_preview, source_path=self._output_path, parent=self)
 
 
 class _CopyablePreviewTable(QTableWidget):
@@ -1213,6 +1238,7 @@ def populate_output_preview(
             pl.read_excel(output_path, sheet_id=1, engine="calamine"),
             preview_spec.label,
             show_summary=show_summary,
+            output_path=output_path,
         )
     if preview_spec.kind == "text":
         return _add_text_preview(layout, output_path, preview_spec.label)
@@ -1268,14 +1294,51 @@ def _add_parquet_preview(
     return explorer
 
 
-def _add_tabular_preview(layout: QVBoxLayout, frame: pl.DataFrame, heading: str, *, show_summary: bool) -> QWidget:
-    if show_summary:
-        meta_label = QLabel(f"{heading}  \u2022  {_frame_summary_text(frame)}")
-        meta_label.setObjectName("sectionMeta")
-        layout.addWidget(meta_label)
-    table = _build_dataframe_table(frame)
-    layout.addWidget(table, 1)
-    return table
+def _add_tabular_preview(
+    layout: QVBoxLayout,
+    frame: pl.DataFrame,
+    heading: str,
+    *,
+    show_summary: bool,
+    output_path: Path | None = None,
+) -> QWidget:
+    preview = _ExportableFramePreviewWidget(frame, heading=heading, show_summary=show_summary, source_path=output_path)
+    layout.addWidget(preview, 1)
+    return preview
+
+
+class _ExportableFramePreviewWidget(QWidget):
+    """Static dataframe preview with spreadsheet export support."""
+
+    def __init__(self, frame: pl.DataFrame, *, heading: str, show_summary: bool, source_path: Path | None = None) -> None:
+        super().__init__()
+        self._frame = frame
+        self._source_path = source_path
+        self.setObjectName("outputPreviewFrame")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        if show_summary:
+            meta_label = QLabel(f"{heading}  \u2022  {_frame_summary_text(frame)}")
+            meta_label.setObjectName("sectionMeta")
+            layout.addWidget(meta_label)
+        export_row = QHBoxLayout()
+        export_row.setContentsMargins(0, 0, 0, 0)
+        export_row.setSpacing(8)
+        export_row.addStretch(1)
+        export_button = QPushButton("Export Excel")
+        export_button.setObjectName("outputPreviewExportExcelButton")
+        export_button.setFixedHeight(22)
+        export_button.setToolTip("Export the visible preview rows to an Excel workbook.")
+        export_button.setEnabled(bool(frame.columns))
+        export_button.clicked.connect(self._export_frame)
+        export_row.addWidget(export_button)
+        layout.addLayout(export_row)
+        table = _build_dataframe_table(frame)
+        layout.addWidget(table, 1)
+
+    def _export_frame(self) -> None:
+        _export_frame_to_excel(self._frame, source_path=self._source_path, parent=self)
 
 
 def _build_dataframe_table(frame: pl.DataFrame) -> QTableWidget:
@@ -1309,6 +1372,38 @@ def _build_dataframe_table(frame: pl.DataFrame) -> QTableWidget:
 
 def _frame_summary_text(frame: pl.DataFrame) -> str:
     return f"{frame.height} row(s)  \u2022  {len(frame.columns)} column(s)  \u2022  Previewing up to {_PREVIEW_ROW_LIMIT} rows"
+
+
+def _export_frame_to_excel(frame: pl.DataFrame, *, source_path: Path | None, parent: QWidget) -> Path | None:
+    default_path = _default_excel_export_path(source_path)
+    selected_path, _selected_filter = QFileDialog.getSaveFileName(
+        parent,
+        "Export Preview to Excel",
+        str(default_path),
+        "Excel Workbook (*.xlsx)",
+    )
+    if not selected_path:
+        return None
+    target_path = _with_excel_suffix(Path(selected_path))
+    try:
+        write_excel_atomic(frame, target_path, worksheet="Preview")
+    except Exception as exc:  # pragma: no cover - defensive UI fallback
+        QMessageBox.critical(parent, "Export Failed", f"Unable to export preview: {exc}")
+        return None
+    QMessageBox.information(parent, "Export Complete", f"Exported {frame.height} row(s) to {target_path}.")
+    return target_path
+
+
+def _default_excel_export_path(source_path: Path | None) -> Path:
+    if source_path is None:
+        return Path("preview.xlsx")
+    return source_path.with_name(f"{source_path.stem}_preview.xlsx")
+
+
+def _with_excel_suffix(path: Path) -> Path:
+    if path.suffix.lower() == ".xlsx":
+        return path
+    return path.with_suffix(".xlsx")
 
 
 def _prepare_dataframe_table(

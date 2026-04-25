@@ -13,7 +13,7 @@ import pytest
 import polars as pl
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QListWidget, QPushButton, QTableWidget, QTextEdit, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QListWidget, QPushButton, QSpinBox, QTableWidget, QTextEdit, QWidget
 from shiboken6 import delete as shiboken_delete
 from shiboken6 import isValid as shiboken_is_valid
 
@@ -46,7 +46,11 @@ from data_engine.views import flow_category
 from data_engine.ui.gui.icons import ICON_ASSETS, load_svg_icon_text
 from data_engine.ui.gui.app import DataEngineWindow
 from data_engine.ui.gui.rendering import classify_artifact_preview, theme_svg_paths
-from data_engine.ui.gui.rendering.artifacts import _build_distinct_value_filter_expression, _ParquetPreviewLoader
+from data_engine.ui.gui.rendering.artifacts import (
+    _build_distinct_value_filter_expression,
+    _export_frame_to_excel,
+    _ParquetPreviewLoader,
+)
 from data_engine.ui.gui.runtime import QueueLogHandler
 from data_engine.domain import FlowLogEntry
 from data_engine.domain import RuntimeStepEvent, parse_runtime_event
@@ -883,16 +887,50 @@ def test_show_output_preview_renders_excel_as_table(qapp, monkeypatch, tmp_path)
             if label.objectName() == "sectionMeta"
         )
         table = window.output_preview_dialog.findChild(QTableWidget, "outputPreviewTable")
+        export_button = window.output_preview_dialog.findChild(QPushButton, "outputPreviewExportExcelButton")
 
         assert "2 row(s)" in meta_label.text()
         assert "2 column(s)" in meta_label.text()
         assert table is not None
         assert table.rowCount() == 2
         assert table.columnCount() == 2
+        assert export_button is not None
+        assert export_button.isEnabled()
     finally:
         if window.output_preview_dialog is not None:
             window.output_preview_dialog.close()
         _dispose_window(qapp, window)
+
+
+def test_output_preview_export_writes_excel_workbook(qapp, monkeypatch, tmp_path):
+    export_path = tmp_path / "preview_export"
+    messages: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "data_engine.ui.gui.rendering.artifacts.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: (str(export_path), "Excel Workbook (*.xlsx)"),
+    )
+    monkeypatch.setattr(
+        "data_engine.ui.gui.rendering.artifacts.QMessageBox.information",
+        lambda _parent, title, message: messages.append((title, message)),
+    )
+    monkeypatch.setattr(
+        "data_engine.ui.gui.rendering.artifacts.QMessageBox.critical",
+        lambda _parent, title, message: messages.append((title, message)),
+    )
+
+    written_path = _export_frame_to_excel(
+        pl.DataFrame({"member_id": ["A1", "A2"], "amount": [10, 20]}),
+        source_path=tmp_path / "source.parquet",
+        parent=QWidget(),
+    )
+
+    assert written_path == export_path.with_suffix(".xlsx")
+    assert written_path.exists()
+    assert pl.read_excel(written_path, sheet_id=1, engine="calamine").to_dict(as_series=False) == {
+        "member_id": ["A1", "A2"],
+        "amount": [10, 20],
+    }
+    assert messages[0][0] == "Export Complete"
 
 
 def test_show_output_preview_pdf_uses_placeholder_message(qapp, monkeypatch, tmp_path):
@@ -3208,7 +3246,10 @@ def test_debug_view_live_parquet_filters_update_preview_rows(qapp):
 
         explorer = window.debug_preview_layout.itemAt(0).widget()
         table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        limit_spin = explorer.findChild(QSpinBox, "outputPreviewLimitSpin")
         assert table is not None
+        assert limit_spin is not None
+        assert limit_spin.maximum() == 500_000
         _process_ui_until(qapp, lambda: table.rowCount() == 3)
         assert table.rowCount() == 3
 
