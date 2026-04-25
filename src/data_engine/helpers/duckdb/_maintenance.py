@@ -22,6 +22,56 @@ def _default_index_name(*, table: str, columns: tuple[str, ...]) -> str:
     return f"idx_de_{digest}"
 
 
+def _index_ref(*, schema: str, name: str) -> str:
+    if schema == "main":
+        return _quote_identifier(name)
+    return f"{_quote_identifier(schema)}.{_quote_identifier(name)}"
+
+
+def _table_index_rows(connection, table: str) -> list[dict[str, str]]:
+    parts = [part.strip() for part in str(table).split(".")]
+    table_name = parts[-1]
+    schema_name = ".".join(parts[:-1]) if len(parts) > 1 else "main"
+    rows = connection.execute(
+        """
+        SELECT schema_name, index_name, sql
+        FROM duckdb_indexes()
+        WHERE table_name = ?
+          AND schema_name = ?
+        ORDER BY index_name
+        """,
+        [table_name, schema_name],
+    ).fetchall()
+    return [
+        {
+            "schema_name": str(schema_name),
+            "index_name": str(index_name),
+            "sql": str(sql),
+        }
+        for schema_name, index_name, sql in rows
+    ]
+
+
+def _drop_indexes(connection, index_rows: list[dict[str, str]]) -> list[str]:
+    dropped: list[str] = []
+    for row in index_rows:
+        connection.execute(
+            f"""
+            DROP INDEX IF EXISTS {_index_ref(schema=row["schema_name"], name=row["index_name"])}
+            """
+        )
+        dropped.append(row["index_name"])
+    return dropped
+
+
+def _restore_indexes(connection, index_rows: list[dict[str, str]]) -> None:
+    for row in index_rows:
+        try:
+            connection.execute(row["sql"])
+        except duckdb.Error:
+            pass
+
+
 def ensure_index(
     db_path: str | Path,
     table: str,
@@ -115,7 +165,13 @@ def compact_database(
     drop_all_null_columns: bool = True,
     vacuum: bool = True,
 ) -> pl.DataFrame:
-    """Compact one DuckDB database by dropping all-null columns and optionally vacuuming."""
+    """Compact one DuckDB database by dropping all-null columns and optionally vacuuming.
+
+    Existing indexes on compacted tables are dropped before column removal and
+    recreated afterward when their original ``CREATE INDEX`` statement still
+    applies to the compacted table. Indexes that reference dropped columns are
+    reported as skipped.
+    """
 
     normalized_tables = _normalize_table_names(tables)
     resolved_db_path = _resolved_db_path(db_path)
@@ -133,54 +189,83 @@ def compact_database(
             target_tables = normalized_tables
 
         summary_rows: list[dict[str, object]] = []
-        connection.execute("BEGIN TRANSACTION")
-        try:
-            for table_name in target_tables:
-                table_columns = list(_table_column_names(connection, table_name))
-                dropped_columns: list[str] = []
+        for table_name in target_tables:
+            table_columns = list(_table_column_names(connection, table_name))
+            dropped_columns: list[str] = []
+            indexes_dropped: list[str] = []
+            indexes_recreated: list[str] = []
+            indexes_skipped: list[str] = []
 
-                if drop_all_null_columns and len(table_columns) > 1:
-                    nullable_candidates: list[str] = []
-                    quoted_table = _quote_table_ref(table_name)
-                    for column_name in table_columns:
-                        quoted_column = _quote_identifier(column_name)
-                        has_non_null = connection.execute(
-                            f"""
-                            SELECT 1
-                            FROM {quoted_table}
-                            WHERE {quoted_column} IS NOT NULL
-                            LIMIT 1
-                            """
-                        ).fetchone()
-                        if has_non_null is None:
-                            nullable_candidates.append(column_name)
+            if drop_all_null_columns and len(table_columns) > 1:
+                nullable_candidates: list[str] = []
+                quoted_table = _quote_table_ref(table_name)
+                for column_name in table_columns:
+                    quoted_column = _quote_identifier(column_name)
+                    has_non_null = connection.execute(
+                        f"""
+                        SELECT 1
+                        FROM {quoted_table}
+                        WHERE {quoted_column} IS NOT NULL
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if has_non_null is None:
+                        nullable_candidates.append(column_name)
 
-                    if len(nullable_candidates) >= len(table_columns):
-                        nullable_candidates = nullable_candidates[1:]
+                if len(nullable_candidates) >= len(table_columns):
+                    nullable_candidates = nullable_candidates[1:]
 
-                    for column_name in nullable_candidates:
-                        connection.execute(
-                            f"ALTER TABLE {quoted_table} DROP COLUMN {_quote_identifier(column_name)}"
-                        )
-                        dropped_columns.append(column_name)
+                if nullable_candidates:
+                    index_rows = _table_index_rows(connection, table_name)
+                    if index_rows:
+                        connection.execute("BEGIN TRANSACTION")
+                        try:
+                            indexes_dropped = _drop_indexes(connection, index_rows)
+                            connection.execute("COMMIT")
+                        except Exception:
+                            try:
+                                connection.execute("ROLLBACK")
+                            except Exception:
+                                pass
+                            raise
 
-                summary_rows.append(
-                    {
-                        "db_path": str(resolved_db_path),
-                        "table": table_name,
-                        "dropped_column_count": len(dropped_columns),
-                        "dropped_columns": dropped_columns,
-                        "vacuum_requested": vacuum,
-                    }
-                )
+                    connection.execute("BEGIN TRANSACTION")
+                    try:
+                        for column_name in nullable_candidates:
+                            connection.execute(
+                                f"ALTER TABLE {quoted_table} DROP COLUMN {_quote_identifier(column_name)}"
+                            )
+                            dropped_columns.append(column_name)
 
-            connection.execute("COMMIT")
-        except Exception:
-            try:
-                connection.execute("ROLLBACK")
-            except Exception:
-                pass
-            raise
+                        for row in index_rows:
+                            try:
+                                connection.execute(row["sql"])
+                            except duckdb.Error:
+                                indexes_skipped.append(row["index_name"])
+                            else:
+                                indexes_recreated.append(row["index_name"])
+
+                        connection.execute("COMMIT")
+                    except Exception:
+                        try:
+                            connection.execute("ROLLBACK")
+                        except Exception:
+                            pass
+                        _restore_indexes(connection, index_rows)
+                        raise
+
+            summary_rows.append(
+                {
+                    "db_path": str(resolved_db_path),
+                    "table": table_name,
+                    "dropped_column_count": len(dropped_columns),
+                    "dropped_columns": dropped_columns,
+                    "indexes_dropped": indexes_dropped,
+                    "indexes_recreated": indexes_recreated,
+                    "indexes_skipped": indexes_skipped,
+                    "vacuum_requested": vacuum,
+                }
+            )
 
         vacuumed = False
         if vacuum:
@@ -196,6 +281,9 @@ def compact_database(
             "table": [row["table"] for row in summary_rows],
             "dropped_column_count": [row["dropped_column_count"] for row in summary_rows],
             "dropped_columns": [row["dropped_columns"] for row in summary_rows],
+            "indexes_dropped": [row["indexes_dropped"] for row in summary_rows],
+            "indexes_recreated": [row["indexes_recreated"] for row in summary_rows],
+            "indexes_skipped": [row["indexes_skipped"] for row in summary_rows],
             "vacuum_requested": [row["vacuum_requested"] for row in summary_rows],
             "vacuumed": [vacuumed for _ in summary_rows],
             "size_before_bytes": [size_before_bytes for _ in summary_rows],

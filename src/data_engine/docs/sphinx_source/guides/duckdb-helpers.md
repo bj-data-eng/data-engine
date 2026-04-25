@@ -382,8 +382,12 @@ Behavior:
 - inspects one or more user tables in the database
 - drops columns whose persisted values are entirely null
 - preserves at least one column per table
+- drops indexes before column removal and recreates indexes that still apply
+- reports indexes that could not be recreated because compaction removed one of
+  their columns
 - optionally runs `VACUUM` after schema cleanup
-- returns a Polars summary dataframe with dropped-column and file-size metadata
+- returns a Polars summary dataframe with dropped-column, index, and file-size
+  metadata
 
 Example:
 

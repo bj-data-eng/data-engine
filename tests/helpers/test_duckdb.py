@@ -1003,6 +1003,9 @@ def test_compact_database_drops_all_null_columns_and_can_target_specific_tables(
         "table": ["fact_claim"],
         "dropped_column_count": [2],
         "dropped_columns": [["empty_text", "empty_number"]],
+        "indexes_dropped": [[]],
+        "indexes_recreated": [[]],
+        "indexes_skipped": [[]],
         "vacuum_requested": [False],
         "vacuumed": [False],
         "size_before_bytes": [size_before],
@@ -1038,6 +1041,9 @@ def test_compact_database_preserves_at_least_one_all_null_column_and_reports_vac
     assert summary.get_column("table").to_list() == ["fact_empty"]
     assert summary.get_column("dropped_column_count").to_list() == [1]
     assert summary.get_column("dropped_columns").to_list() == [["empty_b"]]
+    assert summary.get_column("indexes_dropped").to_list() == [[]]
+    assert summary.get_column("indexes_recreated").to_list() == [[]]
+    assert summary.get_column("indexes_skipped").to_list() == [[]]
     assert summary.get_column("vacuumed").to_list() == [True]
 
     with duckdb.connect(db_path) as connection:
@@ -1054,6 +1060,82 @@ def test_compact_database_rejects_missing_tables(tmp_path):
 
     with pytest.raises(ValueError, match="must exist in database"):
         compact_database(db_path, tables=["fact_claim", "missing_table"], vacuum=False)
+
+
+def test_compact_database_rebuilds_indexes_around_dropped_columns(tmp_path):
+    db_path = tmp_path / "docs.duckdb"
+
+    with duckdb.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE fact_claim AS
+            SELECT *
+            FROM (
+                VALUES
+                    (1, 'open', NULL),
+                    (2, 'ready', NULL)
+            ) AS t(claim_id, status, empty_text)
+            """
+        )
+        connection.execute('CREATE INDEX idx_fact_claim_status ON fact_claim("status")')
+
+    summary = compact_database(db_path, tables="fact_claim", vacuum=False)
+
+    assert summary.get_column("dropped_columns").to_list() == [["empty_text"]]
+    assert summary.get_column("indexes_dropped").to_list() == [["idx_fact_claim_status"]]
+    assert summary.get_column("indexes_recreated").to_list() == [["idx_fact_claim_status"]]
+    assert summary.get_column("indexes_skipped").to_list() == [[]]
+
+    with duckdb.connect(db_path) as connection:
+        columns = connection.execute("PRAGMA table_info('fact_claim')").fetchall()
+        indexes = connection.execute(
+            """
+            SELECT index_name, expressions
+            FROM duckdb_indexes()
+            WHERE table_name = 'fact_claim'
+            """
+        ).fetchall()
+
+    assert [row[1] for row in columns] == ["claim_id", "status"]
+    assert indexes == [("idx_fact_claim_status", "[status]")]
+
+
+def test_compact_database_skips_recreating_indexes_for_dropped_columns(tmp_path):
+    db_path = tmp_path / "docs.duckdb"
+
+    with duckdb.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE fact_claim AS
+            SELECT *
+            FROM (
+                VALUES
+                    (1, NULL),
+                    (2, NULL)
+            ) AS t(claim_id, empty_text)
+            """
+        )
+        connection.execute('CREATE INDEX idx_fact_claim_empty ON fact_claim("empty_text")')
+
+    summary = compact_database(db_path, tables="fact_claim", vacuum=False)
+
+    assert summary.get_column("dropped_columns").to_list() == [["empty_text"]]
+    assert summary.get_column("indexes_dropped").to_list() == [["idx_fact_claim_empty"]]
+    assert summary.get_column("indexes_recreated").to_list() == [[]]
+    assert summary.get_column("indexes_skipped").to_list() == [["idx_fact_claim_empty"]]
+
+    with duckdb.connect(db_path) as connection:
+        columns = connection.execute("PRAGMA table_info('fact_claim')").fetchall()
+        indexes = connection.execute(
+            """
+            SELECT index_name
+            FROM duckdb_indexes()
+            WHERE table_name = 'fact_claim'
+            """
+        ).fetchall()
+
+    assert [row[1] for row in columns] == ["claim_id"]
+    assert indexes == []
 
 
 def test_ensure_index_creates_stable_index_for_columns(tmp_path):
