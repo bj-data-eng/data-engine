@@ -48,29 +48,12 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
         )
     )
     if not run_groups:
-        current_store_version = getattr(window.runtime_binding.log_store, "version", None)
-        if (
-            current_flow_name is not None
-            and current_flow_name == window._cached_selected_flow_run_groups_flow_name
-            and current_store_version == getattr(window, "_cached_selected_flow_run_groups_store_version", None)
-            and not window._selected_flow_run_groups_dirty
-        ):
-            run_groups = window._cached_selected_flow_run_groups
-        else:
-            run_groups = tuple(
-                window.history_query_service.list_flow_runs(
-                    window.runtime_binding.log_store,
-                    flow_name=current_flow_name,
-                )
+        run_groups = tuple(
+            window.history_query_service.list_flow_runs(
+                window.runtime_binding.log_store,
+                flow_name=current_flow_name,
             )
-            window._cached_selected_flow_run_groups = run_groups
-            window._cached_selected_flow_run_groups_flow_name = current_flow_name
-            window._cached_selected_flow_run_groups_store_version = current_store_version
-    else:
-        window._cached_selected_flow_run_groups = run_groups
-        window._cached_selected_flow_run_groups_flow_name = current_flow_name
-        window._cached_selected_flow_run_groups_store_version = None
-    window._selected_flow_run_groups_dirty = False
+        )
     window._selected_flow_has_logs_flow_name = current_flow_name
     window._selected_flow_has_logs = bool(run_groups)
     workspace_snapshot = getattr(window, "workspace_snapshot", None)

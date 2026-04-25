@@ -238,6 +238,35 @@ def test_daemon_state_service_heartbeat_policy_prefers_healthy_subscription():
     )
 
 
+def test_daemon_state_service_heartbeat_policy_throttles_live_heartbeat_transport():
+    service = DaemonStateService()
+
+    assert (
+        service.should_run_heartbeat(
+            daemon_live=True,
+            transport_mode="heartbeat",
+            wait_worker_alive=False,
+            now_monotonic=110.0,
+            last_sync_monotonic=100.0,
+            last_subscription_monotonic=0.0,
+            stale_after_seconds=15.0,
+        )
+        is False
+    )
+    assert (
+        service.should_run_heartbeat(
+            daemon_live=True,
+            transport_mode="heartbeat",
+            wait_worker_alive=False,
+            now_monotonic=116.0,
+            last_sync_monotonic=100.0,
+            last_subscription_monotonic=0.0,
+            stale_after_seconds=15.0,
+        )
+        is True
+    )
+
+
 def test_daemon_state_service_diff_update_batch_tracks_run_and_step_lanes():
     service = DaemonStateService()
     previous = WorkspaceDaemonSnapshot(

@@ -311,10 +311,7 @@ class _FakeDaemonStateService:
     ) -> bool:
         if not daemon_live:
             return True
-        if transport_mode != "subscription":
-            return True
-        if not wait_worker_alive:
-            return True
+        del transport_mode, wait_worker_alive
         freshest = max(float(last_sync_monotonic or 0.0), float(last_subscription_monotonic or 0.0))
         return (float(now_monotonic) - freshest) >= max(float(stale_after_seconds), 0.0)
 
@@ -4039,9 +4036,6 @@ def test_rebind_workspace_context_recreates_daemon_subscription_and_clears_log_c
         window._last_log_view_flow_name = "poller"
         window._last_log_view_run_keys = (("poller", "run-1"),)
         window._last_log_view_signature = ((("poller", "run-1"), "x", "y", "z", None),)
-        window._cached_selected_flow_run_groups = ("cached",)
-        window._cached_selected_flow_run_groups_flow_name = "poller"
-        window._selected_flow_run_groups_dirty = False
         window._selected_flow_has_logs = True
         window._selected_flow_has_logs_flow_name = "poller"
 
@@ -4059,7 +4053,6 @@ def test_rebind_workspace_context_recreates_daemon_subscription_and_clears_log_c
         assert "Workspace reset failed" not in window.reset_workspace_status_label.text()
         assert window._last_log_view_run_keys != (("poller", "run-1"),)
         assert window._last_log_view_signature != ((("poller", "run-1"), "x", "y", "z", None),)
-        assert window._cached_selected_flow_run_groups == ()
         assert window._selected_flow_has_logs is False or window._selected_flow_has_logs_flow_name != "poller"
         assert window._pending_control_actions == set()
         assert window._pending_control_action_tokens == {}
@@ -4730,7 +4723,86 @@ def test_refresh_log_view_reloads_ledger_runs_when_log_store_is_unchanged(qapp, 
         item = window.log_view.item(0)
         first_group = window.log_view.run_group(item)
 
-        window._selected_flow_run_groups_dirty = False
+        window._refresh_log_view(force_scroll_to_bottom=True)
+        second_group = window.log_view.run_group(item)
+
+        assert first_group is not None and first_group.status == "started"
+        assert second_group is not None and second_group.status == "success"
+        assert second_group.elapsed_seconds == 8.0
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_refresh_log_view_reloads_legacy_log_runs_without_cached_groups(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        flow_name = "poller"
+        window.selected_flow_name = flow_name
+        started_entry = FlowLogEntry(
+            line="run=run-1 flow=poller source=docs.xlsx status=started",
+            kind="flow",
+            flow_name=flow_name,
+            event=RuntimeStepEvent(
+                run_id="run-1",
+                flow_name=flow_name,
+                step_name=None,
+                source_label="docs.xlsx",
+                status="started",
+                elapsed_seconds=None,
+            ),
+        )
+        finished_entry = FlowLogEntry(
+            line="run=run-1 flow=poller source=docs.xlsx status=success elapsed=8.0",
+            kind="flow",
+            flow_name=flow_name,
+            event=RuntimeStepEvent(
+                run_id="run-1",
+                flow_name=flow_name,
+                step_name=None,
+                source_label="docs.xlsx",
+                status="success",
+                elapsed_seconds=8.0,
+            ),
+        )
+        started_group = FlowRunState(
+            key=(flow_name, "run-1"),
+            display_label="2026-04-20 09:00:00 AM",
+            source_label="docs.xlsx",
+            status="started",
+            elapsed_seconds=None,
+            summary_entry=started_entry,
+            steps=(),
+            entries=(started_entry,),
+        )
+        finished_group = FlowRunState(
+            key=(flow_name, "run-1"),
+            display_label="2026-04-20 09:00:00 AM",
+            source_label="docs.xlsx",
+            status="success",
+            elapsed_seconds=8.0,
+            summary_entry=finished_entry,
+            steps=(),
+            entries=(finished_entry,),
+        )
+        log_results = [started_group, finished_group]
+        monkeypatch.setattr(
+            window.history_query_service,
+            "list_flow_runs_from_ledger",
+            lambda _ledger, *, flow_name=None, limit=50: (),
+        )
+
+        def list_flow_runs(_store, *, flow_name=None):
+            if flow_name != "poller":
+                return ()
+            result = log_results.pop(0) if log_results else finished_group
+            return (result,)
+
+        monkeypatch.setattr(window.history_query_service, "list_flow_runs", list_flow_runs)
+
+        window._refresh_log_view(force_scroll_to_bottom=True)
+        item = window.log_view.item(0)
+        first_group = window.log_view.run_group(item)
+
         window._refresh_log_view(force_scroll_to_bottom=True)
         second_group = window.log_view.run_group(item)
 
@@ -5545,7 +5617,6 @@ def test_finish_daemon_sync_skips_unchanged_projection_redraw(qapp, monkeypatch)
         window._load_flows()
         window._select_flow("poller")
         window.workspace_snapshot = _workspace_snapshot_for_test(window.workspace_paths.workspace_id)
-        window._selected_flow_run_groups_dirty = False
         refresh_calls = {"count": 0}
         original_refresh_selection = window.flow_controller.refresh_selection
 
@@ -5571,7 +5642,6 @@ def test_finish_daemon_sync_skips_unchanged_projection_redraw(qapp, monkeypatch)
         qapp.processEvents()
 
         assert refresh_calls["count"] == 0
-        assert window._selected_flow_run_groups_dirty is False
     finally:
         _dispose_window(qapp, window)
 

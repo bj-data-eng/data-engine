@@ -509,10 +509,6 @@ class DaemonStateService:
         """Return whether fallback heartbeat sync should run right now."""
         if not daemon_live:
             return True
-        if transport_mode != "subscription":
-            return True
-        if not wait_worker_alive:
-            return True
         freshest = max(float(last_sync_monotonic or 0.0), float(last_subscription_monotonic or 0.0))
         return (float(now_monotonic) - freshest) >= max(float(stale_after_seconds), 0.0)
 

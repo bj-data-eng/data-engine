@@ -206,7 +206,6 @@ class GuiRuntimeController:
         changed_flow_names, requires_log_reload = self._apply_daemon_live_snapshot(window, batch)
         if requires_log_reload:
             window.runtime_binding_service.reload_logs(window.runtime_binding)
-            window._selected_flow_run_groups_dirty = True
         if changed_flow_names:
             window._refresh_sidebar_state_views(changed_flow_names)
         selected_flow_name = window.selected_flow_name
@@ -253,7 +252,6 @@ class GuiRuntimeController:
                             if flow_name == synthesized_entry.flow_name:
                                 window.pending_manual_run_requests.pop(group_name, None)
                 if any(entry.flow_name == selected_flow_name for entry in update.log_entries):
-                    window._selected_flow_run_groups_dirty = True
                     refresh_log_view = True
                 if update.log_entries:
                     refresh_buttons = True
@@ -389,7 +387,6 @@ class GuiRuntimeController:
             ):
                 window.daemon_subscription.mark_sync(window._monotonic())
                 return
-            window._selected_flow_run_groups_dirty = True
             window.workspace_snapshot = workspace_snapshot
             if not window.workspace_snapshot.engine.daemon_live and window._auto_daemon_enabled:
                 self.ensure_daemon_started(window)
@@ -716,7 +713,6 @@ class GuiRuntimeController:
         )
         window.runtime_session = completion.runtime_session
         window.runtime_binding_service.reload_logs(window.runtime_binding)
-        window._selected_flow_run_groups_dirty = True
         window._workspace_counts_footer_cache.pop(window.workspace_paths.workspace_id, None)
         window.flow_controller.set_flow_states(window, completion.state_updates)
         for message in completion.log_messages:
@@ -759,7 +755,6 @@ class GuiRuntimeController:
         )
         window.runtime_session = completion.runtime_session
         window.runtime_binding_service.reload_logs(window.runtime_binding)
-        window._selected_flow_run_groups_dirty = True
         window.engine_runtime_stop_event.clear()
         window.engine_flow_stop_event.clear()
         window._workspace_counts_footer_cache.pop(window.workspace_paths.workspace_id, None)

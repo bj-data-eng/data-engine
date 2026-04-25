@@ -135,10 +135,6 @@ def rebind_workspace_context(
     window._last_log_view_flow_name = None
     window._last_log_view_run_keys = ()
     window._last_log_view_signature = ()
-    window._cached_selected_flow_run_groups = ()
-    window._cached_selected_flow_run_groups_flow_name = None
-    window._cached_selected_flow_entry_count = 0
-    window._selected_flow_run_groups_dirty = True
     window._selected_flow_has_logs = False
     window._selected_flow_has_logs_flow_name = None
     window.log_view.clear()

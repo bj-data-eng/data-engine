@@ -310,10 +310,7 @@ class _GuiWorkspaceCatalogController:
                     window.runtime_binding,
                     flow_name=flow_name,
                 )
-                window._selected_flow_run_groups_dirty = True
-                if window._cached_selected_flow_run_groups_flow_name == flow_name:
-                    window._cached_selected_flow_run_groups = ()
-                    window._cached_selected_flow_entry_count = 0
+                if window._selected_flow_has_logs_flow_name == flow_name:
                     window._selected_flow_has_logs = False
             window._rebuild_runtime_snapshot()
             return
