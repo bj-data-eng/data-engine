@@ -983,38 +983,6 @@ def test_show_output_preview_pdf_uses_placeholder_message(qapp, monkeypatch, tmp
         _dispose_window(qapp, window)
 
 
-def test_parquet_preview_loader_sample_mode_collects_only_preview_rows(tmp_path):
-    output_path = tmp_path / "preview.parquet"
-    pl.DataFrame(
-        {
-            "claim_id": list(range(20)),
-            "status": ["OPEN" if index % 2 == 0 else "CLOSED" for index in range(20)],
-        }
-    ).write_parquet(output_path)
-
-    loader = _ParquetPreviewLoader(
-        output_path,
-        active_value_filters={},
-        sort_columns=(),
-        preview_mode="sample",
-        preview_row_limit=5,
-    )
-    loaded: list[tuple[object, object, str]] = []
-    failures: list[str] = []
-    loader.preview_loaded.connect(lambda schema, preview, summary: loaded.append((schema, preview, summary)))
-    loader.load_failed.connect(failures.append)
-
-    loader.run()
-
-    assert failures == []
-    assert len(loaded) == 1
-    _schema, preview, summary = loaded[0]
-    assert preview.height == 5
-    assert preview.columns == ["claim_id", "status"]
-    assert "20 rows" in summary
-    assert "showing sample of 5 rows" in summary
-
-
 def test_parquet_preview_loader_top_mode_avoids_discarded_preview_collect(tmp_path, monkeypatch):
     output_path = tmp_path / "preview.parquet"
     pl.DataFrame(
@@ -1055,7 +1023,6 @@ def test_parquet_preview_loader_top_mode_avoids_discarded_preview_collect(tmp_pa
         output_path,
         active_value_filters={},
         sort_columns=(),
-        preview_mode="top",
         preview_row_limit=5,
     )
     loaded: list[tuple[object, object, str]] = []
@@ -3294,7 +3261,7 @@ def test_dataframes_view_connects_single_parquet_file(qapp, tmp_path):
         assert status_label is not None
         assert (
             window.dataframe_preview_controls_layout.indexOf(export_button)
-            < window.dataframe_preview_controls_layout.indexOf(window.dataframe_preview_mode_combo)
+            < window.dataframe_preview_controls_layout.indexOf(window.dataframe_preview_limit_spin)
         )
         _process_ui_until(qapp, lambda: table.rowCount() == 2)
         assert window.dataframe_preview_title_label.text() == "claims.parquet"
@@ -3354,7 +3321,6 @@ def test_dataframes_view_clear_button_disconnects_loaded_preview(qapp, tmp_path)
         assert window.dataframe_source_input.text() == ""
         assert window.dataframe_preview_title_label.text() == "Preview"
         assert window.dataframe_preview_summary_label.isVisible() is False
-        assert window.dataframe_preview_mode_combo.isVisible() is False
         assert window.dataframe_preview_limit_spin.isVisible() is False
         assert window.dataframe_clear_button.isEnabled() is False
         assert "Choose a parquet source" in placeholder.text()

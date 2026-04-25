@@ -64,7 +64,6 @@ def show_dataframe_source(window: "DataEngineWindow", path: Path, *, label: str)
         window.dataframe_clear_button.setEnabled(True)
     window.dataframe_preview_summary_label.setText("")
     window.dataframe_preview_summary_label.setVisible(True)
-    window.dataframe_preview_mode_combo.setVisible(True)
     window.dataframe_preview_limit_spin.setVisible(True)
     _clear_layout_widgets(window.dataframe_preview_layout)
     preview_spec = classify_artifact_preview(path)
@@ -75,7 +74,6 @@ def show_dataframe_source(window: "DataEngineWindow", path: Path, *, label: str)
         show_summary=False,
         timing_log_path=getattr(window, "_ui_timing_log_path", None),
         external_preview_controls=(
-            window.dataframe_preview_mode_combo,
             window.dataframe_preview_limit_spin,
             window.dataframe_preview_controls_layout,
             window.dataframe_preview_summary_label,
@@ -102,7 +100,6 @@ def clear_dataframe_preview(window: "DataEngineWindow", message: str) -> None:
     window.dataframe_preview_title_label.setText("Preview")
     window.dataframe_preview_summary_label.setText("")
     window.dataframe_preview_summary_label.setVisible(False)
-    window.dataframe_preview_mode_combo.setVisible(False)
     window.dataframe_preview_limit_spin.setVisible(False)
     _clear_layout_widgets(window.dataframe_preview_layout)
     placeholder = QLabel(message)

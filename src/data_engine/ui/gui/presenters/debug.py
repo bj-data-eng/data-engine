@@ -85,11 +85,9 @@ def show_selected_debug_artifact(window: "DataEngineWindow") -> None:
         title_label.setText("Dataframe")
     summary_label = getattr(window, "debug_artifact_summary_label", None)
     preview_spec = classify_artifact_preview(record.artifact_path)
-    mode_combo = getattr(window, "debug_preview_mode_combo", None)
     limit_spin = getattr(window, "debug_preview_limit_spin", None)
-    if mode_combo is not None and limit_spin is not None:
+    if limit_spin is not None:
         show_controls = preview_spec.kind == "parquet"
-        mode_combo.setVisible(show_controls)
         limit_spin.setVisible(show_controls)
     if summary_label is not None:
         if preview_spec.kind == "parquet":
@@ -113,12 +111,11 @@ def show_selected_debug_artifact(window: "DataEngineWindow") -> None:
         show_summary=False,
         timing_log_path=getattr(window, "_ui_timing_log_path", None),
         external_preview_controls=(
-            mode_combo,
             limit_spin,
             getattr(window, "debug_preview_controls_layout", None),
             summary_label,
         )
-        if mode_combo is not None and limit_spin is not None and getattr(window, "debug_preview_controls_layout", None) is not None and summary_label is not None
+        if limit_spin is not None and getattr(window, "debug_preview_controls_layout", None) is not None and summary_label is not None
         else None,
     )
     append_timing_line(
@@ -148,10 +145,8 @@ def _clear_debug_preview(window: "DataEngineWindow", *, message: str) -> None:
     if source_label is not None:
         source_label.setText("")
         source_label.setVisible(False)
-    mode_combo = getattr(window, "debug_preview_mode_combo", None)
     limit_spin = getattr(window, "debug_preview_limit_spin", None)
-    if mode_combo is not None and limit_spin is not None:
-        mode_combo.setVisible(False)
+    if limit_spin is not None:
         limit_spin.setVisible(False)
     layout = getattr(window, "debug_preview_layout", None)
     if layout is None:

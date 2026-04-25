@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import glob as glob_module
 from pathlib import Path
-import random
 import pyarrow.parquet as pq
 import polars as pl
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, QThread, QTimer, Qt, Signal
@@ -12,7 +11,6 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPai
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
-    QComboBox,
     QFileDialog,
     QFrame,
     QHeaderView,
@@ -56,8 +54,6 @@ _PREVIEW_ROW_LIMIT_MAX = 500_000
 _TABLE_RENDER_BATCH_SIZE = 500
 _PREVIEW_DISTINCT_VALUE_LIMIT = 500
 _PREVIEW_MODE_TOP = "top"
-_PREVIEW_MODE_BOTTOM = "bottom"
-_PREVIEW_MODE_SAMPLE = "sample"
 
 
 class _PreviewHeaderView(QHeaderView):
@@ -180,14 +176,12 @@ class _ParquetPreviewLoader(QThread):
         *,
         active_value_filters: dict[str, tuple[object, ...]],
         sort_columns: tuple[tuple[str, bool], ...],
-        preview_mode: str,
         preview_row_limit: int,
     ) -> None:
         super().__init__()
         self._output_path = Path(output_path)
         self._active_value_filters = dict(active_value_filters)
         self._sort_columns = tuple((str(column_name), bool(descending)) for column_name, descending in sort_columns)
-        self._preview_mode = preview_mode
         self._preview_row_limit = max(_PREVIEW_ROW_LIMIT_MIN, min(preview_row_limit, _PREVIEW_ROW_LIMIT_MAX))
 
     def run(self) -> None:
@@ -213,41 +207,18 @@ class _ParquetPreviewLoader(QThread):
                     .get_column("__row_count__")
                     .item()
                 )
-            if self._preview_mode == _PREVIEW_MODE_BOTTOM:
-                if self._sort_columns:
-                    query = _sort_parquet_preview_query(query, self._sort_columns)
-                preview = query.tail(self._preview_row_limit).collect()
-                preview_label = f"showing bottom {self._preview_row_limit} rows"
-            elif self._preview_mode == _PREVIEW_MODE_SAMPLE:
-                if self._sort_columns:
-                    query = _sort_parquet_preview_query(query, self._sort_columns)
-                sample_size = min(self._preview_row_limit, row_count)
-                if sample_size <= 0:
-                    preview = query.head(0).collect()
-                elif sample_size >= row_count:
-                    preview = query.collect()
-                else:
-                    sample_indices = sorted(random.Random(0).sample(range(int(row_count)), int(sample_size)))
-                    preview = (
-                        query.with_row_index("__preview_row_index")
-                        .filter(pl.col("__preview_row_index").is_in(sample_indices))
-                        .drop("__preview_row_index")
-                        .collect()
+            if filter_expressions or self._sort_columns:
+                preview = _top_parquet_preview_by_row_index(
+                    lazy_frame,
+                    self._output_path,
+                    filter_expressions=tuple(filter_expressions),
+                    sort_columns=self._sort_columns,
+                    row_limit=self._preview_row_limit,
+                    schema_names=tuple(schema.names()),
                 )
-                preview_label = f"showing sample of {self._preview_row_limit} rows"
             else:
-                if filter_expressions or self._sort_columns:
-                    preview = _top_parquet_preview_by_row_index(
-                        lazy_frame,
-                        self._output_path,
-                        filter_expressions=tuple(filter_expressions),
-                        sort_columns=self._sort_columns,
-                        row_limit=self._preview_row_limit,
-                        schema_names=tuple(schema.names()),
-                    )
-                else:
-                    preview = query.head(self._preview_row_limit).collect()
-                preview_label = f"showing top {self._preview_row_limit} rows"
+                preview = query.head(self._preview_row_limit).collect()
+            preview_label = f"showing top {self._preview_row_limit} rows"
             summary = f"{row_count} rows - {len(schema.names())} columns - {preview_label}"
             self.preview_loaded.emit(schema, preview, summary)
         except Exception as exc:  # pragma: no cover - defensive UI fallback
@@ -666,9 +637,9 @@ class _ParquetExplorerWidget(QWidget):
         *,
         timing_log_path: Path | None = None,
         external_preview_controls: (
-            tuple[QComboBox, QSpinBox]
-            | tuple[QComboBox, QSpinBox, QHBoxLayout]
-            | tuple[QComboBox, QSpinBox, QHBoxLayout, QLabel]
+            tuple[QSpinBox]
+            | tuple[QSpinBox, QHBoxLayout]
+            | tuple[QSpinBox, QHBoxLayout, QLabel]
             | None
         ) = None,
     ) -> None:
@@ -684,17 +655,16 @@ class _ParquetExplorerWidget(QWidget):
         self._distinct_loaders: list[_DistinctValueLoader] = []
         self._preview_loader: _ParquetPreviewLoader | None = None
         self._pending_preview_refresh = False
-        self._preview_mode = _PREVIEW_MODE_TOP
         self._active_preview_request_id: str | None = None
         self._active_distinct_requests: dict[tuple[str, int], str] = {}
         self._open_filter_column_index: int | None = None
         self._owns_preview_controls = external_preview_controls is None
         self._external_preview_controls_layout = (
-            external_preview_controls[2]
-            if external_preview_controls is not None and len(external_preview_controls) >= 3
+            external_preview_controls[1]
+            if external_preview_controls is not None and len(external_preview_controls) >= 2
             else None
         )
-        self._owns_status_label = not (external_preview_controls is not None and len(external_preview_controls) >= 4)
+        self._owns_status_label = not (external_preview_controls is not None and len(external_preview_controls) >= 3)
         self._table_render_generation = 0
         self._sort_state = PreviewSortState()
         self._preview_summary_text = ""
@@ -708,18 +678,13 @@ class _ParquetExplorerWidget(QWidget):
             controls.setContentsMargins(0, 0, 0, 0)
             controls.setSpacing(8)
             controls.addStretch(1)
-            self.preview_mode_combo = QComboBox()
-            self.preview_mode_combo.setObjectName("outputPreviewModeCombo")
-            self.preview_mode_combo.setFixedHeight(22)
-            controls.addWidget(self.preview_mode_combo)
             self.preview_limit_spin = QSpinBox()
             self.preview_limit_spin.setObjectName("outputPreviewLimitSpin")
             self.preview_limit_spin.setFixedHeight(22)
             controls.addWidget(self.preview_limit_spin)
             layout.addLayout(controls)
         else:
-            self.preview_mode_combo = external_preview_controls[0]
-            self.preview_limit_spin = external_preview_controls[1]
+            self.preview_limit_spin = external_preview_controls[0]
 
         self._configure_preview_controls()
 
@@ -730,7 +695,7 @@ class _ParquetExplorerWidget(QWidget):
             self.status_label.setMinimumWidth(0)
             self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         else:
-            self.status_label = external_preview_controls[3]
+            self.status_label = external_preview_controls[2]
         self.export_excel_button = QPushButton("Export Excel")
         self.export_excel_button.setObjectName("outputPreviewExportExcelButton")
         self.export_excel_button.setFixedHeight(22)
@@ -740,12 +705,12 @@ class _ParquetExplorerWidget(QWidget):
         if external_preview_controls is None:
             stretch_index = _first_layout_stretch_index(controls)
             controls.insertWidget(max(0, stretch_index), self.status_label, 1, Qt.AlignmentFlag.AlignVCenter)
-            combo_index = controls.indexOf(self.preview_mode_combo)
-            controls.insertWidget(max(0, combo_index), self.export_excel_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        elif len(external_preview_controls) >= 3:
-            controls_layout = external_preview_controls[2]
-            combo_index = controls_layout.indexOf(self.preview_mode_combo)
-            controls_layout.insertWidget(max(0, combo_index), self.export_excel_button, 0, Qt.AlignmentFlag.AlignVCenter)
+            spin_index = controls.indexOf(self.preview_limit_spin)
+            controls.insertWidget(max(0, spin_index), self.export_excel_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        elif len(external_preview_controls) >= 2:
+            controls_layout = external_preview_controls[1]
+            spin_index = controls_layout.indexOf(self.preview_limit_spin)
+            controls_layout.insertWidget(max(0, spin_index), self.export_excel_button, 0, Qt.AlignmentFlag.AlignVCenter)
             if self._owns_status_label:
                 stretch_index = _first_layout_stretch_index(controls_layout)
                 controls_layout.insertWidget(max(0, stretch_index), self.status_label, 1, Qt.AlignmentFlag.AlignVCenter)
@@ -766,17 +731,6 @@ class _ParquetExplorerWidget(QWidget):
         self._refresh_preview()
 
     def _configure_preview_controls(self) -> None:
-        self.preview_mode_combo.blockSignals(True)
-        self.preview_mode_combo.clear()
-        self.preview_mode_combo.addItem("Top N", _PREVIEW_MODE_TOP)
-        self.preview_mode_combo.addItem("Bottom N", _PREVIEW_MODE_BOTTOM)
-        self.preview_mode_combo.addItem("Sample", _PREVIEW_MODE_SAMPLE)
-        self.preview_mode_combo.setCurrentIndex(0)
-        self.preview_mode_combo.blockSignals(False)
-        self.preview_mode_combo.currentIndexChanged.connect(self._handle_preview_controls_changed)
-        self.preview_mode_combo.setVisible(True)
-        self.preview_mode_combo.setEnabled(True)
-
         self.preview_limit_spin.blockSignals(True)
         self.preview_limit_spin.setRange(_PREVIEW_ROW_LIMIT_MIN, _PREVIEW_ROW_LIMIT_MAX)
         self.preview_limit_spin.setSingleStep(25)
@@ -793,15 +747,10 @@ class _ParquetExplorerWidget(QWidget):
             self._filter_popup = None
             self._open_filter_column_index = None
         try:
-            self.preview_mode_combo.currentIndexChanged.disconnect(self._handle_preview_controls_changed)
-        except (RuntimeError, TypeError):
-            pass
-        try:
             self.preview_limit_spin.valueChanged.disconnect(self._handle_preview_controls_changed)
         except (RuntimeError, TypeError):
             pass
         if not self._owns_preview_controls:
-            self.preview_mode_combo.setVisible(False)
             self.preview_limit_spin.setVisible(False)
         try:
             self.export_excel_button.clicked.disconnect(self._export_current_preview)
@@ -914,7 +863,7 @@ class _ParquetExplorerWidget(QWidget):
             fields={
                 "request_id": request_id,
                 "artifact_path": self._output_path,
-                "preview_mode": self._preview_mode,
+                "preview_mode": _PREVIEW_MODE_TOP,
                 "row_limit": self.preview_limit_spin.value(),
                 "active_filter_count": len(self._active_value_filters),
                 "sort_column_count": len(self._sort_state.columns),
@@ -927,7 +876,6 @@ class _ParquetExplorerWidget(QWidget):
             self._output_path,
             active_value_filters=self._active_value_filters,
             sort_columns=self._sort_state.columns,
-            preview_mode=self._preview_mode,
             preview_row_limit=self.preview_limit_spin.value(),
         )
         loader.preview_loaded.connect(self._handle_preview_loaded)
@@ -1100,7 +1048,6 @@ class _ParquetExplorerWidget(QWidget):
             self._refresh_preview()
 
     def _handle_preview_controls_changed(self) -> None:
-        self._preview_mode = str(self.preview_mode_combo.currentData())
         self._refresh_preview()
 
     def apply_column_sort(self, column_name: str, *, descending: bool, append: bool) -> None:
@@ -1282,7 +1229,7 @@ def populate_output_preview(
     *,
     show_summary: bool = True,
     timing_log_path: Path | None = None,
-    external_preview_controls: tuple[QComboBox, QSpinBox] | None = None,
+    external_preview_controls: tuple[QSpinBox, ...] | None = None,
 ) -> QWidget:
     """Populate one dialog layout with the appropriate artifact preview widgets."""
     preview_spec = preview_spec or classify_artifact_preview(output_path)
@@ -1341,7 +1288,7 @@ def _add_parquet_preview(
     *,
     show_summary: bool,
     timing_log_path: Path | None = None,
-    external_preview_controls: tuple[QComboBox, QSpinBox] | None = None,
+    external_preview_controls: tuple[QSpinBox, ...] | None = None,
 ) -> QWidget:
     if show_summary:
         meta_label = QLabel(f"{heading}  •  Loading preview…")

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -271,16 +270,11 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
     top_row.addWidget(title_label, 0, Qt.AlignmentFlag.AlignVCenter)
     top_row.addStretch(1)
 
-    mode_combo = QComboBox(header)
-    mode_combo.setObjectName("outputPreviewModeCombo")
-    mode_combo.setFixedHeight(22)
     limit_spin = QSpinBox(header)
     limit_spin.setObjectName("outputPreviewLimitSpin")
     limit_spin.setFixedHeight(22)
     show_controls = preview_spec.kind == "parquet"
-    mode_combo.setVisible(show_controls)
     limit_spin.setVisible(show_controls)
-    top_row.addWidget(mode_combo, 0, Qt.AlignmentFlag.AlignVCenter)
     top_row.addWidget(limit_spin, 0, Qt.AlignmentFlag.AlignVCenter)
     header_layout.addLayout(top_row)
 
@@ -309,11 +303,10 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
         preview_spec=preview_spec,
         show_summary=False,
         external_preview_controls=(
-            mode_combo,
             limit_spin,
             top_row,
             summary_label,
-        ) if summary_label is not None and preview_spec.kind == "parquet" else (mode_combo, limit_spin, top_row),
+        ) if summary_label is not None and preview_spec.kind == "parquet" else (limit_spin, top_row),
     )
     if summary_label is not None and preview_spec.kind != "parquet" and hasattr(preview_widget, "summary_changed"):
         preview_widget.summary_changed.connect(summary_label.setText)
