@@ -31,6 +31,7 @@ from data_engine.helpers.duckdb import build_dimension
 from data_engine.helpers.duckdb import attach_dimension
 from data_engine.helpers.duckdb import compact_database
 from data_engine.helpers.duckdb import denormalize_columns
+from data_engine.helpers.duckdb import ensure_index
 from data_engine.helpers.duckdb import normalize_columns
 from data_engine.helpers.duckdb import read_rows_by_values
 from data_engine.helpers.duckdb import read_sql
@@ -275,6 +276,52 @@ updated = replace_rows_by_file(
 ```
 
 This is the usual pattern for canon-style "replace one file slice" loading.
+
+## `ensure_index(...)`
+
+Use this helper when repeated slice replacements or lookups need to find a
+small set of rows inside a large table.
+
+Signature:
+
+```python
+ensure_index(
+    db_path,
+    table,
+    *,
+    columns,
+    name=None,
+)
+```
+
+Behavior:
+
+- validates that the table and columns exist
+- creates a DuckDB index only when it does not already exist
+- generates a stable index name when `name` is omitted
+- returns the index name
+
+Examples:
+
+```python
+ensure_index(
+    context.database("warehouse.duckdb"),
+    "canon.claim_rows",
+    columns="file_key",
+)
+
+ensure_index(
+    context.database("warehouse.duckdb"),
+    "mart.fact_claim",
+    columns="claim_id",
+    name="idx_fact_claim_claim_id",
+)
+```
+
+Indexes are most useful when the indexed column is used repeatedly by helpers
+such as `replace_rows_by_file(...)`, `replace_rows_by_values(...)`, or
+`read_rows_by_values(...)` against a large table. They use extra disk and make
+writes maintain the index, so create them intentionally for hot lookup paths.
 
 ## `replace_rows_by_values(...)`
 

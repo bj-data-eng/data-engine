@@ -9,6 +9,7 @@ from data_engine.helpers.duckdb._dimensions import build_dimension
 from data_engine.helpers.duckdb._dimensions import denormalize_columns
 from data_engine.helpers.duckdb._dimensions import normalize_columns
 from data_engine.helpers.duckdb._maintenance import compact_database
+from data_engine.helpers.duckdb._maintenance import ensure_index
 from data_engine.helpers.duckdb._read import read_rows_by_values
 from data_engine.helpers.duckdb._read import read_sql
 from data_engine.helpers.duckdb._read import read_table
@@ -21,6 +22,7 @@ __all__ = [
     "build_dimension",
     "compact_database",
     "denormalize_columns",
+    "ensure_index",
     "normalize_columns",
     "read_rows_by_values",
     "read_sql",

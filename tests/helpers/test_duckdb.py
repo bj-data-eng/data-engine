@@ -10,6 +10,7 @@ from data_engine.helpers.duckdb import attach_dimension
 from data_engine.helpers.duckdb import build_dimension
 from data_engine.helpers.duckdb import compact_database
 from data_engine.helpers.duckdb import denormalize_columns
+from data_engine.helpers.duckdb import ensure_index
 from data_engine.helpers.duckdb import normalize_columns
 from data_engine.helpers.duckdb import read_rows_by_values
 from data_engine.helpers.duckdb import read_sql
@@ -369,6 +370,37 @@ def test_replace_rows_by_file_is_not_dependent_on_df_column_order(tmp_path):
     }
 
 
+def test_replace_rows_by_file_does_not_copy_incoming_to_temp_table(monkeypatch, tmp_path):
+    real_connect = duckdb.connect
+
+    class _ConnectionProxy:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def execute(self, sql: str, *args, **kwargs):
+            statement = str(sql).strip().upper()
+            assert "__DATA_ENGINE_INCREMENTAL_INCOMING_TABLE" not in statement
+            return self.inner.execute(sql, *args, **kwargs)
+
+        def register(self, *args, **kwargs):
+            return self.inner.register(*args, **kwargs)
+
+        def close(self):
+            return self.inner.close()
+
+    def _connect(path):
+        return _ConnectionProxy(real_connect(path))
+
+    monkeypatch.setattr(duckdb_helpers.duckdb, "connect", _connect)
+
+    replace_rows_by_file(
+        tmp_path / "docs.duckdb",
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [1], "amount": [10]}),
+        file_hash="file-a",
+    )
+
+
 def test_replace_rows_by_file_rolls_back_and_closes_connection_on_failure(monkeypatch, tmp_path):
     real_connect = duckdb.connect
     events: list[str] = []
@@ -574,6 +606,37 @@ def test_replace_rows_by_values_replaces_null_value_slice(tmp_path):
         "status": ["open", "ready", None],
         "amount": [10, 30, 40],
     }
+
+
+def test_replace_rows_by_values_does_not_copy_incoming_to_temp_table(monkeypatch, tmp_path):
+    real_connect = duckdb.connect
+
+    class _ConnectionProxy:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def execute(self, sql: str, *args, **kwargs):
+            statement = str(sql).strip().upper()
+            assert "__DATA_ENGINE_REPLACE_VALUES_DF_TABLE" not in statement
+            return self.inner.execute(sql, *args, **kwargs)
+
+        def register(self, *args, **kwargs):
+            return self.inner.register(*args, **kwargs)
+
+        def close(self):
+            return self.inner.close()
+
+    def _connect(path):
+        return _ConnectionProxy(real_connect(path))
+
+    monkeypatch.setattr(duckdb_helpers.duckdb, "connect", _connect)
+
+    replace_rows_by_values(
+        tmp_path / "docs.duckdb",
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [1], "status": ["open"]}),
+        column="status",
+    )
 
 
 def test_replace_rows_by_values_rolls_back_and_closes_connection_on_failure(monkeypatch, tmp_path):
@@ -991,6 +1054,103 @@ def test_compact_database_rejects_missing_tables(tmp_path):
 
     with pytest.raises(ValueError, match="must exist in database"):
         compact_database(db_path, tables=["fact_claim", "missing_table"], vacuum=False)
+
+
+def test_ensure_index_creates_stable_index_for_columns(tmp_path):
+    db_path = tmp_path / "docs.duckdb"
+    replace_rows_by_file(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [1], "amount": [10]}),
+        file_hash="file-a",
+    )
+
+    index_name = ensure_index(db_path, "fact_claim", columns="file_key")
+    second_index_name = ensure_index(db_path, "fact_claim", columns="file_key")
+
+    assert second_index_name == index_name
+    with duckdb.connect(db_path) as connection:
+        indexes = connection.execute(
+            """
+            SELECT index_name, table_name, expressions
+            FROM duckdb_indexes()
+            WHERE table_name = 'fact_claim'
+            """
+        ).fetchall()
+
+    assert indexes == [(index_name, "fact_claim", "[file_key]")]
+
+
+def test_ensure_index_accepts_custom_name_and_composite_columns(tmp_path):
+    db_path = tmp_path / "docs.duckdb"
+    replace_rows_by_file(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [1], "status": ["open"], "amount": [10]}),
+        file_hash="file-a",
+    )
+
+    index_name = ensure_index(
+        db_path,
+        "fact_claim",
+        columns=["status", "claim_id"],
+        name="idx_fact_claim_status_claim",
+    )
+
+    assert index_name == "idx_fact_claim_status_claim"
+    with duckdb.connect(db_path) as connection:
+        indexes = connection.execute(
+            """
+            SELECT index_name, expressions
+            FROM duckdb_indexes()
+            WHERE index_name = 'idx_fact_claim_status_claim'
+            """
+        ).fetchall()
+
+    assert indexes == [("idx_fact_claim_status_claim", "[status, claim_id]")]
+
+
+def test_ensure_index_supports_schema_qualified_tables(tmp_path):
+    db_path = tmp_path / "docs.duckdb"
+    replace_rows_by_file(
+        db_path,
+        "mart.fact_claim",
+        df=pl.DataFrame({"claim_id": [1], "amount": [10]}),
+        file_hash="file-a",
+    )
+
+    index_name = ensure_index(db_path, "mart.fact_claim", columns="file_key")
+
+    with duckdb.connect(db_path) as connection:
+        indexes = connection.execute(
+            """
+            SELECT schema_name, index_name, table_name
+            FROM duckdb_indexes()
+            WHERE table_name = 'fact_claim'
+            """
+        ).fetchall()
+
+    assert indexes == [("mart", index_name, "fact_claim")]
+
+
+def test_ensure_index_rejects_missing_tables_columns_and_empty_names(tmp_path):
+    db_path = tmp_path / "docs.duckdb"
+
+    with pytest.raises(ValueError, match="does not exist"):
+        ensure_index(db_path, "fact_claim", columns="file_key")
+
+    replace_rows_by_file(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [1], "amount": [10]}),
+        file_hash="file-a",
+    )
+
+    with pytest.raises(ValueError, match="columns must exist"):
+        ensure_index(db_path, "fact_claim", columns="missing")
+
+    with pytest.raises(ValueError, match="name must be non-empty"):
+        ensure_index(db_path, "fact_claim", columns="file_key", name=" ")
 
 
 def test_replace_table_replaces_existing_rows_and_can_return_df(tmp_path):

@@ -17,6 +17,30 @@ from data_engine.helpers.duckdb._common import _resolved_db_path
 from data_engine.helpers.duckdb._common import _schema_ref
 
 
+def _relation_columns(connection, relation: str) -> list[tuple[str, str]]:
+    return [
+        (str(name), str(dtype))
+        for name, dtype, *_ in connection.execute(f"DESCRIBE SELECT * FROM {relation}").fetchall()
+    ]
+
+
+def _create_or_extend_table_from_relation(
+    connection,
+    *,
+    table: str,
+    quoted_table: str,
+    relation: str,
+) -> dict[str, str]:
+    connection.execute(f"CREATE TABLE IF NOT EXISTS {quoted_table} AS SELECT * FROM {relation} WHERE 1 = 0")
+    existing_columns = {name: dtype for _, name, dtype, *_ in _existing_table_columns(connection, table)}
+    for name, dtype in _relation_columns(connection, relation):
+        if name in existing_columns:
+            continue
+        connection.execute(f"ALTER TABLE {quoted_table} ADD COLUMN {_quote_identifier(name)} {dtype}")
+        existing_columns[name] = dtype
+    return existing_columns
+
+
 def replace_rows_by_file(
     db_path: str | Path,
     table: str,
@@ -51,7 +75,6 @@ def replace_rows_by_file(
     quoted_incoming_columns = _ordered_columns(incoming_columns)
 
     temp_view = "__data_engine_incremental_incoming"
-    temp_table = "__data_engine_incremental_incoming_table"
 
     resolved_db_path = _resolved_db_path(db_path)
 
@@ -62,15 +85,12 @@ def replace_rows_by_file(
             connection.execute(f"CREATE SCHEMA IF NOT EXISTS {quoted_schema}")
 
         connection.register(temp_view, incoming_with_hash)
-        connection.execute(f"CREATE OR REPLACE TEMP TABLE {temp_table} AS SELECT * FROM {temp_view}")
-        connection.execute(f"CREATE TABLE IF NOT EXISTS {quoted_table} AS SELECT * FROM {temp_table} WHERE 1 = 0")
-
-        existing_columns = {name: dtype for _, name, dtype, *_ in _existing_table_columns(connection, table)}
-        incoming_info = connection.execute(f"PRAGMA table_info({temp_table})").fetchall()
-        for _, name, dtype, *_ in incoming_info:
-            if name in existing_columns:
-                continue
-            connection.execute(f"ALTER TABLE {quoted_table} ADD COLUMN {_quote_identifier(name)} {dtype}")
+        _create_or_extend_table_from_relation(
+            connection,
+            table=table,
+            quoted_table=quoted_table,
+            relation=temp_view,
+        )
 
         connection.execute(
             f"""
@@ -83,7 +103,7 @@ def replace_rows_by_file(
             f"""
             INSERT INTO {quoted_table} ({quoted_incoming_columns})
             SELECT {quoted_incoming_columns}
-            FROM {temp_table}
+            FROM {temp_view}
             """
         )
 
@@ -123,21 +143,12 @@ def replace_rows_by_values(
     if normalized_column not in df.columns:
         raise ValueError(f'column {normalized_column!r} must exist in df columns.')
 
-    lookup = df.select(pl.col(normalized_column)).unique(maintain_order=True)
-    if lookup.is_empty():
-        raise ValueError("df must include at least one replacement value.")
-    lookup_values = tuple(lookup.get_column(normalized_column).to_list())
-    non_null_lookup_values = [value for value in lookup_values if value is not None]
-    has_null_lookup = len(non_null_lookup_values) != len(lookup_values)
-
     quoted_table = _quote_table_ref(table)
     quoted_schema = _schema_ref(table)
     quoted_column = _quote_identifier(normalized_column)
     quoted_df_columns = _ordered_columns(tuple(df.columns))
 
     temp_view = "__data_engine_replace_values_df"
-    temp_table = "__data_engine_replace_values_df_table"
-    temp_lookup_view = "__data_engine_replace_values_lookup"
     temp_lookup_table = "__data_engine_replace_values_lookup_table"
 
     resolved_db_path = _resolved_db_path(db_path)
@@ -149,52 +160,34 @@ def replace_rows_by_values(
             connection.execute(f"CREATE SCHEMA IF NOT EXISTS {quoted_schema}")
 
         connection.register(temp_view, df)
-        connection.execute(f"CREATE OR REPLACE TEMP TABLE {temp_table} AS SELECT * FROM {temp_view}")
-        connection.execute(f"CREATE TABLE IF NOT EXISTS {quoted_table} AS SELECT * FROM {temp_table} WHERE 1 = 0")
-
-        existing_columns = {name: dtype for _, name, dtype, *_ in _existing_table_columns(connection, table)}
-        incoming_info = connection.execute(f"PRAGMA table_info({temp_table})").fetchall()
-        for _, name, dtype, *_ in incoming_info:
-            if name in existing_columns:
-                continue
-            connection.execute(f"ALTER TABLE {quoted_table} ADD COLUMN {_quote_identifier(name)} {dtype}")
-            existing_columns[name] = dtype
+        existing_columns = _create_or_extend_table_from_relation(
+            connection,
+            table=table,
+            quoted_table=quoted_table,
+            relation=temp_view,
+        )
 
         target_column_type = existing_columns[normalized_column]
 
-        if non_null_lookup_values:
-            connection.register(
-                temp_lookup_view,
-                pl.DataFrame({"lookup_value": non_null_lookup_values}),
-            )
-            connection.execute(
-                f"""
-                CREATE OR REPLACE TEMP TABLE {temp_lookup_table} AS
-                SELECT CAST(lookup_value AS {target_column_type}) AS lookup_value
-                FROM {temp_lookup_view}
-                """
-            )
-            connection.execute(
-                f"""
-                DELETE FROM {quoted_table}
-                WHERE {quoted_column} IN (
-                    SELECT lookup_value
-                    FROM {temp_lookup_table}
-                )
-                """
-            )
-        if has_null_lookup:
-            connection.execute(
-                f"""
-                DELETE FROM {quoted_table}
-                WHERE {quoted_column} IS NULL
-                """
-            )
+        connection.execute(
+            f"""
+            CREATE OR REPLACE TEMP TABLE {temp_lookup_table} AS
+            SELECT DISTINCT CAST({quoted_column} AS {target_column_type}) AS lookup_value
+            FROM {temp_view}
+            """
+        )
+        connection.execute(
+            f"""
+            DELETE FROM {quoted_table} AS target
+            USING {temp_lookup_table} AS lookup
+            WHERE target.{quoted_column} IS NOT DISTINCT FROM lookup.lookup_value
+            """
+        )
         connection.execute(
             f"""
             INSERT INTO {quoted_table} ({quoted_df_columns})
             SELECT {quoted_df_columns}
-            FROM {temp_table}
+            FROM {temp_view}
             """
         )
 

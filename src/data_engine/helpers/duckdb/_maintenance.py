@@ -2,17 +2,110 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import polars as pl
 
 from data_engine.helpers.duckdb import duckdb
 from data_engine.helpers.duckdb._common import _list_base_tables
+from data_engine.helpers.duckdb._common import _normalize_key_columns
 from data_engine.helpers.duckdb._common import _normalize_table_names
 from data_engine.helpers.duckdb._common import _quote_identifier
 from data_engine.helpers.duckdb._common import _quote_table_ref
 from data_engine.helpers.duckdb._common import _resolved_db_path
 from data_engine.helpers.duckdb._common import _table_column_names
+
+
+def _default_index_name(*, table: str, columns: tuple[str, ...]) -> str:
+    digest = hashlib.sha1(f"{table}|{'|'.join(columns)}".encode("utf-8")).hexdigest()[:12]
+    return f"idx_de_{digest}"
+
+
+def ensure_index(
+    db_path: str | Path,
+    table: str,
+    *,
+    columns: str | list[str] | tuple[str, ...],
+    name: str | None = None,
+) -> str:
+    """Create one DuckDB index if it does not already exist.
+
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Target table name, optionally schema-qualified.
+    columns : str | list[str] | tuple[str, ...]
+        Column or columns to index.
+    name : str | None
+        Optional index name. When omitted, Data Engine generates a stable name
+        from the table and columns.
+
+    Returns
+    -------
+    str
+        Index name that exists after the call.
+
+    Raises
+    ------
+    ValueError
+        If the table does not exist, selected columns do not exist, or the
+        provided index name is empty.
+
+    Examples
+    --------
+    Index a file-slice column before repeated ``replace_rows_by_file`` calls:
+
+    .. code-block:: python
+
+        data_engine.helpers.duckdb.ensure_index(
+            context.database("warehouse.duckdb"),
+            "fact_claim",
+            columns="file_key",
+        )
+
+    Index a lookup column before repeated ``read_rows_by_values`` calls:
+
+    .. code-block:: python
+
+        data_engine.helpers.duckdb.ensure_index(
+            context.database("warehouse.duckdb"),
+            "fact_claim",
+            columns="claim_id",
+            name="idx_fact_claim_claim_id",
+        )
+    """
+    normalized_columns = _normalize_key_columns(columns)
+    if name is None:
+        index_name = _default_index_name(table=table, columns=normalized_columns)
+    else:
+        index_name = str(name).strip()
+        if not index_name:
+            raise ValueError("name must be non-empty.")
+
+    resolved_db_path = _resolved_db_path(db_path)
+    connection = duckdb.connect(resolved_db_path)
+    try:
+        try:
+            table_columns = _table_column_names(connection, table)
+        except duckdb.CatalogException as exc:
+            raise ValueError(f"Table {table!r} does not exist or has no columns.") from exc
+        if not table_columns:
+            raise ValueError(f"Table {table!r} does not exist or has no columns.")
+        missing_columns = [column for column in normalized_columns if column not in table_columns]
+        if missing_columns:
+            raise ValueError(f"columns must exist in table {table!r}: {missing_columns!r}")
+        connection.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS {_quote_identifier(index_name)}
+            ON {_quote_table_ref(table)} ({", ".join(_quote_identifier(column) for column in normalized_columns)})
+            """
+        )
+    finally:
+        connection.close()
+    return index_name
 
 
 def compact_database(
