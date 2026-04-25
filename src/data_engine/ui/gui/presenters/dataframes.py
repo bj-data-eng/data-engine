@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ctypes
+import gc
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -56,6 +59,9 @@ def show_dataframe_source(window: "DataEngineWindow", path: Path, *, label: str)
     """Render one parquet file or parquet glob in the dataframe preview pane."""
     window._dataframe_preview_path = path
     window.dataframe_preview_title_label.setText(label)
+    window.dataframe_source_input.setToolTip(str(path))
+    if hasattr(window, "dataframe_clear_button"):
+        window.dataframe_clear_button.setEnabled(True)
     window.dataframe_preview_summary_label.setText("")
     window.dataframe_preview_summary_label.setVisible(True)
     window.dataframe_preview_mode_combo.setVisible(True)
@@ -89,6 +95,10 @@ def show_selected_dataframe_file(window: "DataEngineWindow") -> None:
 def clear_dataframe_preview(window: "DataEngineWindow", message: str) -> None:
     """Clear the dataframe preview pane and show a placeholder message."""
     window._dataframe_preview_path = None
+    window.dataframe_source_input.clear()
+    window.dataframe_source_input.setToolTip("")
+    if hasattr(window, "dataframe_clear_button"):
+        window.dataframe_clear_button.setEnabled(False)
     window.dataframe_preview_title_label.setText("Preview")
     window.dataframe_preview_summary_label.setText("")
     window.dataframe_preview_summary_label.setVisible(False)
@@ -100,10 +110,32 @@ def clear_dataframe_preview(window: "DataEngineWindow", message: str) -> None:
     placeholder.setWordWrap(True)
     window.dataframe_preview_layout.addWidget(placeholder)
     window.dataframe_preview_layout.addStretch(1)
+    _release_unused_preview_memory()
 
 
 def _recursive_parquet_glob(path: Path) -> Path:
     return Path(path) / "**" / "*.parquet"
+
+
+def _release_unused_preview_memory() -> None:
+    """Ask Python and native allocators to release unused preview memory."""
+    gc.collect()
+    try:
+        import pyarrow as pa
+
+        pa.default_memory_pool().release_unused()
+    except Exception:
+        pass
+    if os.name == "nt":
+        try:
+            ctypes.CDLL("msvcrt")._heapmin()
+        except Exception:
+            pass
+        return
+    try:
+        ctypes.CDLL(None).malloc_trim(0)
+    except Exception:
+        pass
 
 
 def _clear_layout_widgets(layout) -> None:

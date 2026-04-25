@@ -50,6 +50,9 @@ from data_engine.ui.gui.rendering.artifacts import (
     _build_distinct_value_filter_expression,
     _export_frame_to_excel,
     _ParquetPreviewLoader,
+    _parquet_row_count_from_metadata,
+    _sorted_top_parquet_preview,
+    _top_parquet_preview_by_row_index,
 )
 from data_engine.ui.gui.runtime import QueueLogHandler
 from data_engine.domain import FlowLogEntry
@@ -1067,7 +1070,134 @@ def test_parquet_preview_loader_top_mode_avoids_discarded_preview_collect(tmp_pa
     _schema, preview, summary = loaded[0]
     assert preview.height == 5
     assert "showing top 5 rows" in summary
-    assert collect_count == 2
+    assert collect_count == 1
+
+
+def test_parquet_preview_metadata_count_supports_recursive_glob(tmp_path):
+    first_path = tmp_path / "a.parquet"
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
+    second_path = nested_dir / "b.parquet"
+    pl.DataFrame({"claim_id": [1, 2]}).write_parquet(first_path)
+    pl.DataFrame({"claim_id": [3, 4, 5]}).write_parquet(second_path)
+
+    assert _parquet_row_count_from_metadata(tmp_path / "**" / "*.parquet") == 5
+
+
+def test_sorted_top_parquet_preview_matches_sorted_head_without_full_sort_collect(tmp_path):
+    output_path = tmp_path / "preview.parquet"
+    frame = pl.DataFrame(
+        {
+            "workflow": ["B", "A", "B", "A", "C"],
+            "claim_id": [2, 2, 1, 1, 1],
+        }
+    )
+    frame.write_parquet(output_path)
+
+    result = _sorted_top_parquet_preview(
+        pl.scan_parquet(output_path),
+        (("workflow", False), ("claim_id", True)),
+        3,
+    ).collect()
+
+    assert result.to_dict(as_series=False) == frame.sort(
+        ["workflow", "claim_id"],
+        descending=[False, True],
+    ).head(3).to_dict(as_series=False)
+
+
+def test_sorted_top_parquet_preview_matches_sorted_head_with_nulls(tmp_path):
+    output_path = tmp_path / "preview.parquet"
+    frame = pl.DataFrame(
+        {
+            "workflow": [None, "A", None, "B", "A"],
+            "claim_id": [2, None, 1, 1, 2],
+        }
+    )
+    frame.write_parquet(output_path)
+
+    result = _sorted_top_parquet_preview(
+        pl.scan_parquet(output_path),
+        (("workflow", False), ("claim_id", True)),
+        4,
+    ).collect()
+
+    assert result.to_dict(as_series=False) == frame.sort(
+        ["workflow", "claim_id"],
+        descending=[False, True],
+    ).head(4).to_dict(as_series=False)
+
+
+def test_top_parquet_preview_by_row_index_matches_filtered_head(tmp_path):
+    output_path = tmp_path / "preview.parquet"
+    frame = pl.DataFrame(
+        {
+            "workflow": ["Appeals", "Billing", "Appeals", "Enrollment", "Appeals"],
+            "claim_id": [1, 2, 3, 4, 5],
+            "note": ["a", "b", "c", "d", "e"],
+        }
+    )
+    frame.write_parquet(output_path)
+
+    result = _top_parquet_preview_by_row_index(
+        pl.scan_parquet(output_path),
+        output_path,
+        filter_expressions=(pl.col("workflow").is_in(["Appeals"]),),
+        sort_columns=(),
+        row_limit=2,
+        schema_names=tuple(frame.columns),
+    )
+
+    assert result.to_dict(as_series=False) == frame.filter(pl.col("workflow").is_in(["Appeals"])).head(2).to_dict(
+        as_series=False
+    )
+
+
+def test_top_parquet_preview_by_row_index_matches_filtered_sorted_head(tmp_path):
+    output_path = tmp_path / "preview.parquet"
+    frame = pl.DataFrame(
+        {
+            "workflow": ["Appeals", "Billing", "Appeals", "Appeals", "Enrollment"],
+            "claim_id": [3, 2, 1, 2, 1],
+            "note": ["c", "b", "a", "d", "e"],
+        }
+    )
+    frame.write_parquet(output_path)
+
+    result = _top_parquet_preview_by_row_index(
+        pl.scan_parquet(output_path),
+        output_path,
+        filter_expressions=(pl.col("workflow").is_in(["Appeals"]),),
+        sort_columns=(("claim_id", False),),
+        row_limit=2,
+        schema_names=tuple(frame.columns),
+    )
+
+    assert result.to_dict(as_series=False) == frame.filter(pl.col("workflow").is_in(["Appeals"])).sort(
+        "claim_id"
+    ).head(2).to_dict(as_series=False)
+
+
+def test_top_parquet_preview_by_row_index_fetches_scattered_rows_across_files(tmp_path):
+    first_path = tmp_path / "a.parquet"
+    second_path = tmp_path / "b.parquet"
+    first = pl.DataFrame({"employee_id": ["E-0003", "E-0004", "E-0005"], "claim_id": [1, 2, 3]})
+    second = pl.DataFrame({"employee_id": ["E-0003", "E-0004", "E-0005"], "claim_id": [4, 5, 6]})
+    first.write_parquet(first_path)
+    second.write_parquet(second_path)
+    glob_path = tmp_path / "*.parquet"
+    expected = pl.concat([first, second], how="vertical").sort("employee_id").head(4)
+
+    result = _top_parquet_preview_by_row_index(
+        pl.scan_parquet(glob_path),
+        glob_path,
+        filter_expressions=(),
+        sort_columns=(("employee_id", False),),
+        row_limit=4,
+        schema_names=tuple(first.columns),
+    )
+
+    assert result.to_dict(as_series=False) == expected.to_dict(as_series=False)
 
 
 def test_distinct_value_filter_preserves_datetime_time_unit_precision():
@@ -3196,6 +3326,38 @@ def test_dataframes_view_connects_parquet_folder(qapp, tmp_path):
         assert window._dataframe_preview_path.as_posix().endswith("/**/*.parquet")
         _process_ui_until(qapp, lambda: table.rowCount() == 2)
         assert window.dataframe_preview_title_label.text() == "2 parquet files"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_dataframes_view_clear_button_disconnects_loaded_preview(qapp, tmp_path):
+    output_path = tmp_path / "claims.parquet"
+    pl.DataFrame({"claim_id": [1, 2], "status": ["OPEN", "CLOSED"]}).write_parquet(output_path)
+
+    window = _make_window()
+    try:
+        window.dataframes_button.click()
+        qapp.processEvents()
+        window._connect_dataframe_path(output_path)
+
+        explorer = window.dataframe_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+
+        window.dataframe_clear_button.click()
+        qapp.processEvents()
+
+        placeholder = window.dataframe_preview_layout.itemAt(0).widget()
+        assert isinstance(placeholder, QLabel)
+        assert window._dataframe_preview_path is None
+        assert window.dataframe_source_input.text() == ""
+        assert window.dataframe_preview_title_label.text() == "Preview"
+        assert window.dataframe_preview_summary_label.isVisible() is False
+        assert window.dataframe_preview_mode_combo.isVisible() is False
+        assert window.dataframe_preview_limit_spin.isVisible() is False
+        assert window.dataframe_clear_button.isEnabled() is False
+        assert "Choose a parquet source" in placeholder.text()
     finally:
         _dispose_window(qapp, window)
 

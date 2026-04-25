@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import glob as glob_module
 from pathlib import Path
 import random
+import pyarrow.parquet as pq
 import polars as pl
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPainter
@@ -38,6 +40,14 @@ from PySide6.QtWidgets import (
 from data_engine.helpers import write_excel_atomic
 from data_engine.platform.instrumentation import append_timing_line, new_request_id
 from data_engine.ui.gui.rendering.icons import render_svg_icon_pixmap
+from data_engine.ui.gui.rendering.preview_filters import (
+    NULL_FILTER_VALUE as _NULL_FILTER_VALUE,
+    PreviewSortState,
+    build_distinct_value_filter_expression,
+    merge_selected_values,
+    should_clear_distinct_filter,
+    value_identity,
+)
 from data_engine.views import ArtifactPreviewSpec, classify_artifact_preview
 
 _PREVIEW_ROW_LIMIT = 200
@@ -48,7 +58,6 @@ _PREVIEW_DISTINCT_VALUE_LIMIT = 500
 _PREVIEW_MODE_TOP = "top"
 _PREVIEW_MODE_BOTTOM = "bottom"
 _PREVIEW_MODE_SAMPLE = "sample"
-_NULL_FILTER_VALUE = object()
 
 
 class _PreviewHeaderView(QHeaderView):
@@ -186,29 +195,32 @@ class _ParquetPreviewLoader(QThread):
             lazy_frame = pl.scan_parquet(self._output_path)
             schema = lazy_frame.collect_schema()
             query = lazy_frame
+            filter_expressions = []
             for column_name, selected_values in self._active_value_filters.items():
-                expression = _build_distinct_value_filter_expression(
+                expression = build_distinct_value_filter_expression(
                     column_name,
                     selected_values,
                     dtype=schema[column_name],
                 )
                 if expression is not None:
+                    filter_expressions.append(expression)
                     query = query.filter(expression)
-            row_count = (
-                query.select(pl.len().alias("__row_count__"))
-                .collect()
-                .get_column("__row_count__")
-                .item()
-            )
-            if self._sort_columns:
-                query = query.sort(
-                    [column_name for column_name, _descending in self._sort_columns],
-                    descending=[descending for _column_name, descending in self._sort_columns],
+            row_count = None if self._active_value_filters else _parquet_row_count_from_metadata(self._output_path)
+            if row_count is None:
+                row_count = (
+                    query.select(pl.len().alias("__row_count__"))
+                    .collect()
+                    .get_column("__row_count__")
+                    .item()
                 )
             if self._preview_mode == _PREVIEW_MODE_BOTTOM:
+                if self._sort_columns:
+                    query = _sort_parquet_preview_query(query, self._sort_columns)
                 preview = query.tail(self._preview_row_limit).collect()
                 preview_label = f"showing bottom {self._preview_row_limit} rows"
             elif self._preview_mode == _PREVIEW_MODE_SAMPLE:
+                if self._sort_columns:
+                    query = _sort_parquet_preview_query(query, self._sort_columns)
                 sample_size = min(self._preview_row_limit, row_count)
                 if sample_size <= 0:
                     preview = query.head(0).collect()
@@ -221,10 +233,20 @@ class _ParquetPreviewLoader(QThread):
                         .filter(pl.col("__preview_row_index").is_in(sample_indices))
                         .drop("__preview_row_index")
                         .collect()
-                    )
+                )
                 preview_label = f"showing sample of {self._preview_row_limit} rows"
             else:
-                preview = query.head(self._preview_row_limit).collect()
+                if filter_expressions or self._sort_columns:
+                    preview = _top_parquet_preview_by_row_index(
+                        lazy_frame,
+                        self._output_path,
+                        filter_expressions=tuple(filter_expressions),
+                        sort_columns=self._sort_columns,
+                        row_limit=self._preview_row_limit,
+                        schema_names=tuple(schema.names()),
+                    )
+                else:
+                    preview = query.head(self._preview_row_limit).collect()
                 preview_label = f"showing top {self._preview_row_limit} rows"
             summary = f"{row_count} rows - {len(schema.names())} columns - {preview_label}"
             self.preview_loaded.emit(schema, preview, summary)
@@ -263,7 +285,7 @@ class _DistinctValueLoader(QThread):
             for active_name, selected_values in self._active_value_filters.items():
                 if active_name == self._column_name:
                     continue
-                expression = _build_distinct_value_filter_expression(
+                expression = build_distinct_value_filter_expression(
                     active_name,
                     selected_values,
                     dtype=schema[active_name],
@@ -674,7 +696,7 @@ class _ParquetExplorerWidget(QWidget):
         )
         self._owns_status_label = not (external_preview_controls is not None and len(external_preview_controls) >= 4)
         self._table_render_generation = 0
-        self._sort_columns: list[tuple[str, bool]] = []
+        self._sort_state = PreviewSortState()
         self._preview_summary_text = ""
 
         layout = QVBoxLayout(self)
@@ -789,10 +811,24 @@ class _ParquetExplorerWidget(QWidget):
         self._preview_loader = None
         if preview_loader is not None:
             preview_loader.wait(5000)
+            preview_loader.deleteLater()
         distinct_loaders = list(self._distinct_loaders)
         self._distinct_loaders.clear()
         for loader in distinct_loaders:
             loader.wait(5000)
+            loader.deleteLater()
+        self._active_distinct_requests.clear()
+        self._active_preview_request_id = None
+        self._active_value_filters.clear()
+        self._sort_state = PreviewSortState()
+        self._schema = None
+        self._current_preview = pl.DataFrame()
+        self.table.clear()
+        self.table.setRowCount(0)
+        self.table.setColumnCount(0)
+        self.export_excel_button.setEnabled(False)
+        self._preview_summary_text = ""
+        self._set_preview_status(None)
         if self._external_preview_controls_layout is not None:
             self._external_preview_controls_layout.removeWidget(self.export_excel_button)
             if self._owns_status_label:
@@ -804,6 +840,16 @@ class _ParquetExplorerWidget(QWidget):
     def selected_filter_values(self, column_name: str) -> tuple[object, ...] | None:
         return self._active_value_filters.get(column_name)
 
+    @property
+    def _sort_columns(self) -> list[tuple[str, bool]]:
+        return list(self._sort_state.columns)
+
+    @_sort_columns.setter
+    def _sort_columns(self, columns: list[tuple[str, bool]] | tuple[tuple[str, bool], ...]) -> None:
+        self._sort_state = PreviewSortState(
+            tuple((str(column_name), bool(descending)) for column_name, descending in columns)
+        )
+
     def apply_distinct_filter(
         self,
         column_name: str,
@@ -812,7 +858,7 @@ class _ParquetExplorerWidget(QWidget):
         *,
         complete_domain: bool,
     ) -> None:
-        if not selected_values or (complete_domain and len(selected_values) == len(all_values)):
+        if should_clear_distinct_filter(selected_values, all_values, complete_domain=complete_domain):
             self._active_value_filters.pop(column_name, None)
         else:
             self._active_value_filters[column_name] = selected_values
@@ -871,7 +917,7 @@ class _ParquetExplorerWidget(QWidget):
                 "preview_mode": self._preview_mode,
                 "row_limit": self.preview_limit_spin.value(),
                 "active_filter_count": len(self._active_value_filters),
-                "sort_column_count": len(self._sort_columns),
+                "sort_column_count": len(self._sort_state.columns),
             },
         )
         self._set_preview_status("Loading preview…")
@@ -880,7 +926,7 @@ class _ParquetExplorerWidget(QWidget):
         loader = _ParquetPreviewLoader(
             self._output_path,
             active_value_filters=self._active_value_filters,
-            sort_columns=tuple(self._sort_columns),
+            sort_columns=self._sort_state.columns,
             preview_mode=self._preview_mode,
             preview_row_limit=self.preview_limit_spin.value(),
         )
@@ -1001,6 +1047,7 @@ class _ParquetExplorerWidget(QWidget):
     def _drop_distinct_loader(self, loader: _DistinctValueLoader) -> None:
         if loader in self._distinct_loaders:
             self._distinct_loaders.remove(loader)
+        loader.deleteLater()
 
     def _handle_preview_loaded(self, schema: object, preview: object, summary: str) -> None:
         request_id = self._active_preview_request_id
@@ -1044,7 +1091,10 @@ class _ParquetExplorerWidget(QWidget):
         )
 
     def _handle_preview_finished(self) -> None:
+        loader = self._preview_loader
         self._preview_loader = None
+        if loader is not None:
+            loader.deleteLater()
         if self._pending_preview_refresh:
             self._pending_preview_refresh = False
             self._refresh_preview()
@@ -1054,50 +1104,30 @@ class _ParquetExplorerWidget(QWidget):
         self._refresh_preview()
 
     def apply_column_sort(self, column_name: str, *, descending: bool, append: bool) -> None:
-        existing_rank = self.sort_rank_for_column(column_name)
-        updated_sorts = list(self._sort_columns)
-        if existing_rank is not None:
-            updated_sorts[existing_rank - 1] = (column_name, descending)
-        elif append:
-            updated_sorts.append((column_name, descending))
-        else:
-            updated_sorts = [(column_name, descending)]
-        self._sort_columns = updated_sorts
+        self._sort_state = self._sort_state.apply(column_name, descending=descending, append=append)
         self._refresh_preview()
 
     def clear_column_sorts(self) -> None:
-        if not self._sort_columns:
+        if not self._sort_state.columns:
             return
-        self._sort_columns = []
+        self._sort_state = self._sort_state.clear()
         self._refresh_preview()
 
     def sort_rank_for_column(self, column_name: str) -> int | None:
-        for index, (active_name, _descending) in enumerate(self._sort_columns, start=1):
-            if active_name == column_name:
-                return index
-        return None
+        return self._sort_state.rank_for(column_name)
 
     def sort_direction_for_column(self, column_name: str) -> bool | None:
-        for active_name, active_descending in self._sort_columns:
-            if active_name == column_name:
-                return active_descending
-        return None
+        return self._sort_state.direction_for(column_name)
 
     def remove_column_sort(self, column_name: str) -> None:
-        updated_sorts = [
-            (active_name, active_descending)
-            for active_name, active_descending in self._sort_columns
-            if active_name != column_name
-        ]
-        if len(updated_sorts) == len(self._sort_columns):
+        updated_state = self._sort_state.remove(column_name)
+        if updated_state == self._sort_state:
             return
-        self._sort_columns = updated_sorts
+        self._sort_state = updated_state
         self._refresh_preview()
 
     def primary_sort_column(self) -> str | None:
-        if not self._sort_columns:
-            return None
-        return self._sort_columns[0][0]
+        return self._sort_state.primary_column()
 
     def eventFilter(self, watched: object, event: object) -> bool:
         header = self.table.horizontalHeader()
@@ -1147,7 +1177,7 @@ class _ParquetExplorerWidget(QWidget):
             self.table,
             preview,
             filtered_columns=filtered_columns,
-            sort_columns=self._sort_columns,
+            sort_columns=self._sort_state.columns,
         )
         self.table.setEnabled(False)
         self._preview_summary_text = summary
@@ -1179,21 +1209,7 @@ class _ParquetExplorerWidget(QWidget):
 
     def _merge_selected_values(self, column_name: str, values: list[tuple[str, object]]) -> list[tuple[str, object]]:
         selected_values = self.selected_filter_values(column_name) or ()
-        if not selected_values:
-            return values
-        seen = set()
-        merged: list[tuple[str, object]] = []
-        for value in selected_values:
-            label = "(blank)" if value is _NULL_FILTER_VALUE else str(value)
-            merged.append((label, value))
-            seen.add(_value_identity(value))
-        for label, value in values:
-            identity = _value_identity(value)
-            if identity in seen:
-                continue
-            merged.append((label, value))
-            seen.add(identity)
-        return merged
+        return merge_selected_values(selected_values, values)
 
     def _export_current_preview(self) -> None:
         _export_frame_to_excel(self._current_preview, source_path=self._output_path, parent=self)
@@ -1539,19 +1555,184 @@ def _build_distinct_value_filter_expression(
     *,
     dtype: pl.DataType | None = None,
 ):
-    if not selected_values:
+    return build_distinct_value_filter_expression(column_name, selected_values, dtype=dtype)
+
+
+def _parquet_row_count_from_metadata(path: Path) -> int | None:
+    files = _parquet_metadata_paths(path)
+    if not files:
         return None
-    column = pl.col(column_name)
-    include_null = any(value is _NULL_FILTER_VALUE for value in selected_values)
-    concrete_values = [value for value in selected_values if value is not _NULL_FILTER_VALUE]
-    expression = None
-    if concrete_values:
-        values = concrete_values if dtype is None else pl.Series(concrete_values, dtype=dtype).implode()
-        expression = column.is_in(values)
-    if include_null:
-        null_expression = column.is_null()
-        expression = null_expression if expression is None else (expression | null_expression)
-    return expression
+    try:
+        return sum(pq.read_metadata(file_path).num_rows for file_path in files)
+    except Exception:
+        return None
+
+
+def _parquet_metadata_paths(path: Path) -> tuple[Path, ...]:
+    path_text = str(path)
+    if glob_module.has_magic(path_text):
+        return tuple(
+            sorted(
+                (Path(match) for match in glob_module.glob(path_text, recursive=True) if Path(match).is_file()),
+                key=lambda item: str(item).lower(),
+            )
+        )
+    return (path,) if path.is_file() else ()
+
+
+def _sort_parquet_preview_query(query: pl.LazyFrame, sort_columns: tuple[tuple[str, bool], ...]) -> pl.LazyFrame:
+    return query.sort(
+        [column_name for column_name, _descending in sort_columns],
+        descending=[descending for _column_name, descending in sort_columns],
+    )
+
+
+def _sorted_top_parquet_preview(
+    query: pl.LazyFrame,
+    sort_columns: tuple[tuple[str, bool], ...],
+    row_limit: int,
+) -> pl.LazyFrame:
+    sort_column_names = [column_name for column_name, _descending in sort_columns]
+    descending = [descending for _column_name, descending in sort_columns]
+    top_k_by: list[pl.Expr] = []
+    top_k_reverse: list[bool] = []
+    for column_name, is_descending in sort_columns:
+        top_k_by.extend([pl.col(column_name).is_not_null(), pl.col(column_name)])
+        top_k_reverse.extend([True, not is_descending])
+    return query.top_k(row_limit, by=top_k_by, reverse=top_k_reverse).sort(
+        sort_column_names,
+        descending=descending,
+    )
+
+
+def _top_parquet_preview_by_row_index(
+    query: pl.LazyFrame,
+    path: Path,
+    *,
+    filter_expressions: tuple[pl.Expr, ...],
+    sort_columns: tuple[tuple[str, bool], ...],
+    row_limit: int,
+    schema_names: tuple[str, ...],
+) -> pl.DataFrame:
+    row_index_column = _preview_row_index_column(schema_names)
+    order_column = _preview_order_column(schema_names, row_index_column)
+    indexed_query = query.with_row_index(row_index_column)
+    key_query = indexed_query
+    for expression in filter_expressions:
+        key_query = key_query.filter(expression)
+    if sort_columns:
+        key_query = key_query.select([row_index_column, *_sort_column_names(sort_columns)])
+        key_frame = _sorted_top_parquet_preview(key_query, sort_columns, row_limit).collect()
+    else:
+        key_frame = key_query.select(row_index_column).head(row_limit).collect()
+    row_ids = key_frame.get_column(row_index_column).to_list()
+    if not row_ids:
+        return query.head(0).collect()
+    file_scoped_preview = _collect_preview_rows_by_file_row_ids(
+        path,
+        row_ids=row_ids,
+        row_index_column=row_index_column,
+        order_column=order_column,
+    )
+    if file_scoped_preview is not None:
+        return file_scoped_preview
+    row_order = pl.DataFrame(
+        {
+            row_index_column: row_ids,
+            order_column: list(range(len(row_ids))),
+        }
+    ).lazy()
+    row_start = min(row_ids)
+    row_count = max(row_ids) - row_start + 1
+    return (
+        indexed_query.slice(row_start, row_count)
+        .join(row_order, on=row_index_column, how="inner")
+        .sort(order_column)
+        .drop([row_index_column, order_column])
+        .collect()
+    )
+
+
+def _collect_preview_rows_by_file_row_ids(
+    path: Path,
+    *,
+    row_ids: list[int],
+    row_index_column: str,
+    order_column: str,
+) -> pl.DataFrame | None:
+    file_offsets = _parquet_file_row_offsets(path)
+    if not file_offsets:
+        return None
+    remaining_rows = list(enumerate(row_ids))
+    frames: list[pl.DataFrame] = []
+    for file_path, row_start, row_count in file_offsets:
+        file_rows = [
+            (preview_order, row_id - row_start)
+            for preview_order, row_id in remaining_rows
+            if row_start <= row_id < row_start + row_count
+        ]
+        if not file_rows:
+            continue
+        local_ids = [local_id for _preview_order, local_id in file_rows]
+        row_order = pl.DataFrame(
+            {
+                row_index_column: local_ids,
+                order_column: [preview_order for preview_order, _local_id in file_rows],
+            }
+        ).lazy()
+        local_start = min(local_ids)
+        local_count = max(local_ids) - local_start + 1
+        frames.append(
+            pl.scan_parquet(file_path)
+            .with_row_index(row_index_column)
+            .slice(local_start, local_count)
+            .join(row_order, on=row_index_column, how="inner")
+            .collect()
+        )
+    if not frames:
+        return None
+    return (
+        pl.concat(frames, how="vertical")
+        .sort(order_column)
+        .drop([row_index_column, order_column])
+    )
+
+
+def _parquet_file_row_offsets(path: Path) -> tuple[tuple[Path, int, int], ...]:
+    files = _parquet_metadata_paths(path)
+    if not files:
+        return ()
+    offsets: list[tuple[Path, int, int]] = []
+    row_start = 0
+    try:
+        for file_path in files:
+            row_count = pq.read_metadata(file_path).num_rows
+            offsets.append((file_path, row_start, row_count))
+            row_start += row_count
+    except Exception:
+        return ()
+    return tuple(offsets)
+
+
+def _sort_column_names(sort_columns: tuple[tuple[str, bool], ...]) -> list[str]:
+    return [column_name for column_name, _descending in sort_columns]
+
+
+def _preview_row_index_column(schema_names: tuple[str, ...]) -> str:
+    return _unique_preview_column_name("__preview_row_index", schema_names)
+
+
+def _preview_order_column(schema_names: tuple[str, ...], row_index_column: str) -> str:
+    return _unique_preview_column_name("__preview_order", (*schema_names, row_index_column))
+
+
+def _unique_preview_column_name(base_name: str, existing_names: tuple[str, ...]) -> str:
+    if base_name not in existing_names:
+        return base_name
+    index = 1
+    while f"{base_name}_{index}" in existing_names:
+        index += 1
+    return f"{base_name}_{index}"
 
 
 def _event_position(event: object) -> QPoint | None:
@@ -1578,9 +1759,7 @@ def _header_point_is_resize_handle(header: QHeaderView, point: QPoint) -> bool:
 
 
 def _value_identity(value: object) -> tuple[str, object]:
-    if value is _NULL_FILTER_VALUE:
-        return ("null", "__blank__")
-    return (type(value).__name__, value)
+    return value_identity(value)
 
 
 def _cell_text(value: object) -> str:

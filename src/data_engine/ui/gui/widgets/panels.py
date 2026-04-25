@@ -253,6 +253,13 @@ def build_dataframes_view(window: "DataEngineWindow") -> QWidget:
     window.dataframe_source_input.setPlaceholderText("Choose a parquet file or folder")
     window.dataframe_source_input.setMinimumWidth(340)
     header.addWidget(window.dataframe_source_input, 1, Qt.AlignmentFlag.AlignVCenter)
+    window.dataframe_clear_button = QPushButton("Clear")
+    window.dataframe_clear_button.setObjectName("dataframeClearButton")
+    window.dataframe_clear_button.setFixedHeight(22)
+    window.dataframe_clear_button.clicked.connect(
+        lambda: window._clear_dataframe_preview("Choose a parquet source to preview it here.")
+    )
+    header.addWidget(window.dataframe_clear_button, 0, Qt.AlignmentFlag.AlignVCenter)
     container_layout.addLayout(header)
 
     panel = QFrame()
