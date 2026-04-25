@@ -3887,7 +3887,7 @@ def test_debug_view_search_subset_apply_filters_single_matching_value(qapp):
 
         popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
         assert popup is not None
-        search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
+        search = popup.findChild(QLineEdit, "outputPreviewTextFilterInput")
         values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
         assert search is not None
         assert values_list is not None
@@ -3953,9 +3953,11 @@ def test_debug_view_string_column_filter_popup_applies_text_filter(qapp):
         operation = popup.findChild(QComboBox, "outputPreviewTextFilterCombo")
         text_filter = popup.findChild(QLineEdit, "outputPreviewTextFilterInput")
         values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
         assert operation is not None
         assert text_filter is not None
         assert values_list is not None
+        assert search is None
         assert operation.currentData() == "contains"
 
         text_filter.setText("EN")
@@ -3975,6 +3977,88 @@ def test_debug_view_string_column_filter_popup_applies_text_filter(qapp):
         )
         assert [table.item(row, 1).text() for row in range(table.rowCount())] == ["OPEN", "PENDING"]
         assert popup.isVisible() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_string_column_filter_popup_supports_multiple_text_conditions(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 1003, 1004],
+                "status": ["OPEN", "REOPENED", "PENDING", "CLOSED"],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 4)
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        add_button = popup.findChild(QPushButton, "outputPreviewTextFilterAddButton")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert add_button is not None
+        assert values_list is not None
+
+        text_inputs = popup.findChildren(QLineEdit, "outputPreviewTextFilterInput")
+        assert len(text_inputs) == 1
+        text_inputs[0].setText("OPEN")
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 2
+            and [values_list.item(index).text() for index in range(values_list.count())] == ["OPEN", "REOPENED"],
+        )
+
+        QTest.mouseClick(add_button, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        operations = popup.findChildren(QComboBox, "outputPreviewTextFilterCombo")
+        text_inputs = popup.findChildren(QLineEdit, "outputPreviewTextFilterInput")
+        assert len(operations) == 2
+        assert len(text_inputs) == 2
+        not_equals_index = operations[1].findData("not_equals")
+        assert not_equals_index >= 0
+        operations[1].setCurrentIndex(not_equals_index)
+        text_inputs[1].setText("OPEN")
+
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 1 and values_list.item(0).text() == "REOPENED",
+        )
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+
+        _process_ui_until(qapp, lambda: table.rowCount() == 1 and table.item(0, 1) is not None)
+        assert table.item(0, 1).text() == "REOPENED"
     finally:
         _dispose_window(qapp, window)
 
@@ -4135,7 +4219,7 @@ def test_debug_view_filter_popup_select_all_checkbox_tracks_visible_values(qapp)
         assert table is not None
         _process_ui_until(qapp, lambda: table.rowCount() == 3)
 
-        explorer._open_filter_popup_for_index(0)
+        explorer._open_filter_popup_for_index(1)
         qapp.processEvents()
 
         popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
@@ -4147,27 +4231,30 @@ def test_debug_view_filter_popup_select_all_checkbox_tracks_visible_values(qapp)
         assert select_all is not None
         assert search is not None
 
-        _process_ui_until(qapp, lambda: values_list.count() == 2)
+        _process_ui_until(qapp, lambda: values_list.count() == 3 and not explorer._active_distinct_requests)
         assert select_all.property("selectAllState") == Qt.CheckState.Checked.value
 
         QTest.mouseClick(select_all, Qt.MouseButton.LeftButton)
         qapp.processEvents()
-        assert select_all.property("selectAllState") == Qt.CheckState.Unchecked.value
-        assert all(values_list.item(i).checkState() == Qt.CheckState.Unchecked for i in range(values_list.count()))
+        _process_ui_until(
+            qapp,
+            lambda: select_all.property("selectAllState") == Qt.CheckState.Unchecked.value
+            and all(values_list.item(i).checkState() == Qt.CheckState.Unchecked for i in range(values_list.count())),
+        )
 
         values_list.item(0).setCheckState(Qt.CheckState.Checked)
         qapp.processEvents()
         assert select_all.property("selectAllState") == Qt.CheckState.PartiallyChecked.value
 
-        search.setText("Enroll")
+        search.setText("1002")
         qapp.processEvents()
-        _process_ui_until(qapp, lambda: values_list.count() == 1 and values_list.item(0).text() == "Enrollment")
+        _process_ui_until(qapp, lambda: values_list.count() == 1 and values_list.item(0).text() == "1002")
 
-        assert select_all.property("selectAllState") == Qt.CheckState.Unchecked.value
+        assert select_all.property("selectAllState") == Qt.CheckState.Checked.value
         QTest.mouseClick(select_all, Qt.MouseButton.LeftButton)
         qapp.processEvents()
-        assert values_list.item(0).checkState() == Qt.CheckState.Checked
-        assert select_all.property("selectAllState") == Qt.CheckState.Checked.value
+        assert values_list.item(0).checkState() == Qt.CheckState.Unchecked
+        assert select_all.property("selectAllState") == Qt.CheckState.Unchecked.value
     finally:
         _dispose_window(qapp, window)
 

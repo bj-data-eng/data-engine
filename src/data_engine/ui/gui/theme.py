@@ -505,6 +505,16 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         max-height: 28px;
         padding: 0px;
     }}
+    QPushButton#outputPreviewTextFilterAddButton,
+    QPushButton#outputPreviewTextFilterRemoveButton {{
+        min-width: 16px;
+        max-width: 16px;
+        padding: 0px;
+    }}
+    QLineEdit#outputPreviewTextFilterInput {{
+        font-size: 10px;
+        padding: 2px 6px;
+    }}
     QPushButton#outputPreviewSortAscendingButton[sortActive="true"],
     QPushButton#outputPreviewSortDescendingButton[sortActive="true"] {{
         background: {palette.button_checked_bg};

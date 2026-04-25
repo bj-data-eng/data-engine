@@ -56,6 +56,24 @@ def test_column_filter_expression_compiles_text_operations() -> None:
     assert ends_with["status"].to_list() == ["pending"]
 
 
+def test_column_filter_expression_compiles_multiple_text_conditions() -> None:
+    frame = pl.DataFrame({"status": ["open", "closed", "pending", "opened"]})
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.text_conditions(
+                "status",
+                (
+                    ("contains", "open"),
+                    ("not_equals", "open"),
+                ),
+            )
+        )
+    )
+
+    assert result["status"].to_list() == ["opened"]
+
+
 def test_distinct_value_filter_expression_preserves_datetime_time_unit_precision() -> None:
     timestamp = datetime(2026, 4, 24, 12, 30, 45, 123000)
     frame = pl.DataFrame({"created_at": [timestamp]}).with_columns(pl.col("created_at").cast(pl.Datetime("ms")))

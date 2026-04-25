@@ -43,6 +43,8 @@ from data_engine.ui.gui.rendering.preview_filters import (
     ColumnFilter,
     NULL_FILTER_VALUE as _NULL_FILTER_VALUE,
     PreviewSortState,
+    TextFilterCondition,
+    TextFilterOperation,
     build_column_filter_expression,
     build_distinct_value_filter_expression,
     merge_selected_values,
@@ -316,8 +318,10 @@ class _ParquetFilterPopup(QFrame):
         self._sort_ascending_button: QPushButton | None = None
         self._sort_descending_button: QPushButton | None = None
         self._select_all_button: QPushButton | None = None
-        self._text_filter_combo: QComboBox | None = None
-        self._text_filter_input: QLineEdit | None = None
+        self._is_text_filter_column = _dtype_supports_text_filter(dtype)
+        self._text_filter_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
+        self._text_filter_layout: QVBoxLayout | None = None
+        self.search_input: QLineEdit | None = None
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
 
         layout = QVBoxLayout(self)
@@ -338,14 +342,14 @@ class _ParquetFilterPopup(QFrame):
         title_row.addWidget(self.status_label)
         layout.addLayout(title_row)
 
-        self.search_input = QLineEdit(self)
-        self.search_input.setObjectName("outputPreviewPopupSearch")
-        self.search_input.setPlaceholderText("Search values")
-        self.search_input.setClearButtonEnabled(True)
-        layout.addWidget(self.search_input)
-
-        if _dtype_supports_text_filter(dtype):
+        if self._is_text_filter_column:
             layout.addWidget(self._build_text_filter_controls())
+        else:
+            self.search_input = QLineEdit(self)
+            self.search_input.setObjectName("outputPreviewPopupSearch")
+            self.search_input.setPlaceholderText("Search values")
+            self.search_input.setClearButtonEnabled(True)
+            layout.addWidget(self.search_input)
 
         value_panel = QFrame(self)
         value_panel_layout = QVBoxLayout(value_panel)
@@ -410,41 +414,99 @@ class _ParquetFilterPopup(QFrame):
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(180)
         self._search_timer.timeout.connect(self._dispatch_search)
-        self.search_input.textChanged.connect(self._queue_search)
+        if self.search_input is not None:
+            self.search_input.textChanged.connect(self._queue_search)
         self.set_values(values)
 
     def _build_text_filter_controls(self) -> QFrame:
-        text_frame = QFrame(self)
-        text_frame.setObjectName("outputPreviewControlBar")
-        text_layout = QHBoxLayout(text_frame)
-        text_layout.setContentsMargins(6, 6, 6, 6)
-        text_layout.setSpacing(6)
+        text_section = QFrame(self)
+        text_section.setObjectName("outputPreviewTextFilterSection")
+        self._text_filter_layout = QVBoxLayout(text_section)
+        self._text_filter_layout.setContentsMargins(0, 0, 0, 0)
+        self._text_filter_layout.setSpacing(6)
 
-        self._text_filter_combo = QComboBox(text_frame)
-        self._text_filter_combo.setObjectName("outputPreviewTextFilterCombo")
-        self._text_filter_combo.addItem("Contains", "contains")
-        self._text_filter_combo.addItem("Does Not Contain", "not_contains")
-        self._text_filter_combo.addItem("Equals", "equals")
-        self._text_filter_combo.addItem("Does Not Equal", "not_equals")
-        self._text_filter_combo.addItem("Begins With", "begins_with")
-        self._text_filter_combo.addItem("Ends With", "ends_with")
-        text_layout.addWidget(self._text_filter_combo)
+        active_conditions = self._active_text_filter_conditions()
+        if not active_conditions:
+            active_conditions = (("contains", ""),)
+        for operation, value in active_conditions:
+            self._add_text_filter_row(operation=operation, value=value)
+        return text_section
 
-        self._text_filter_input = QLineEdit(text_frame)
-        self._text_filter_input.setObjectName("outputPreviewTextFilterInput")
-        self._text_filter_input.setPlaceholderText("Text filter")
-        self._text_filter_input.setClearButtonEnabled(True)
-        text_layout.addWidget(self._text_filter_input, 1)
+    def _add_text_filter_row(self, *, operation: TextFilterOperation = "contains", value: str = "") -> None:
+        if self._text_filter_layout is None:
+            return
+        row_frame = QFrame(self)
+        row_frame.setObjectName("outputPreviewControlBar")
+        row_layout = QHBoxLayout(row_frame)
+        row_layout.setContentsMargins(6, 6, 6, 6)
+        row_layout.setSpacing(6)
 
+        combo = QComboBox(row_frame)
+        combo.setObjectName("outputPreviewTextFilterCombo")
+        combo.addItem("Contains", "contains")
+        combo.addItem("Does Not Contain", "not_contains")
+        combo.addItem("Equals", "equals")
+        combo.addItem("Does Not Equal", "not_equals")
+        combo.addItem("Begins With", "begins_with")
+        combo.addItem("Ends With", "ends_with")
+        operation_index = combo.findData(operation)
+        if operation_index >= 0:
+            combo.setCurrentIndex(operation_index)
+        row_layout.addWidget(combo)
+
+        line_edit = QLineEdit(row_frame)
+        line_edit.setObjectName("outputPreviewTextFilterInput")
+        line_edit.setPlaceholderText("Text filter")
+        line_edit.setClearButtonEnabled(True)
+        line_edit.setFixedHeight(combo.sizeHint().height())
+        line_edit.setText(value)
+        row_layout.addWidget(line_edit, 1)
+
+        add_button = QPushButton("+", row_frame)
+        add_button.setObjectName("outputPreviewTextFilterAddButton")
+        add_button.setFixedSize(16, combo.sizeHint().height())
+        add_button.setToolTip("Add text condition")
+        add_button.clicked.connect(self._add_empty_text_filter_row)
+        row_layout.addWidget(add_button)
+
+        if self._text_filter_rows:
+            remove_button = QPushButton("-", row_frame)
+            remove_button.setObjectName("outputPreviewTextFilterRemoveButton")
+            remove_button.setFixedSize(16, combo.sizeHint().height())
+            remove_button.setToolTip("Remove text condition")
+            remove_button.clicked.connect(lambda: self._remove_text_filter_row(row_frame))
+            row_layout.addWidget(remove_button)
+
+        combo.currentIndexChanged.connect(lambda _index: self._queue_search())
+        line_edit.textChanged.connect(lambda _text: self._queue_search())
+        self._text_filter_rows.append((row_frame, combo, line_edit))
+        self._text_filter_layout.addWidget(row_frame)
+
+    def _add_empty_text_filter_row(self) -> None:
+        self._add_text_filter_row()
+        self._queue_search()
+
+    def _remove_text_filter_row(self, row_frame: QFrame) -> None:
+        if len(self._text_filter_rows) <= 1:
+            return
+        remaining_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
+        for frame, combo, line_edit in self._text_filter_rows:
+            if frame is row_frame:
+                if self._text_filter_layout is not None:
+                    self._text_filter_layout.removeWidget(frame)
+                frame.deleteLater()
+            else:
+                remaining_rows.append((frame, combo, line_edit))
+        self._text_filter_rows = remaining_rows
+        self._queue_search()
+
+    def _active_text_filter_conditions(self) -> tuple[TextFilterCondition, ...]:
         active_filter = self._explorer.active_column_filter(self._column_name)
-        if active_filter is not None and active_filter.kind == "text" and active_filter.values:
-            index = self._text_filter_combo.findData(active_filter.operation)
-            if index >= 0:
-                self._text_filter_combo.setCurrentIndex(index)
-            self._text_filter_input.setText(str(active_filter.values[0]))
-        self._text_filter_combo.currentIndexChanged.connect(lambda _index: self._queue_search())
-        self._text_filter_input.textChanged.connect(lambda _text: self._queue_search())
-        return text_frame
+        if active_filter is None or active_filter.kind != "text" or not active_filter.values:
+            return ()
+        if active_filter.operation == "all":
+            return tuple((str(operation), str(value)) for operation, value in active_filter.values)
+        return ((str(active_filter.operation), str(active_filter.values[0])),)
 
     def showEvent(self, event) -> None:  # noqa: N802
         app = QApplication.instance()
@@ -482,7 +544,7 @@ class _ParquetFilterPopup(QFrame):
                     global_point = global_pos
                 if global_point is not None and not self.frameGeometry().contains(global_point):
                     self.close()
-                    return True
+                    return False
             elif event.type() == QEvent.Type.KeyPress and getattr(event, "key", lambda: None)() == Qt.Key.Key_Escape:
                 self.close()
                 return True
@@ -499,7 +561,8 @@ class _ParquetFilterPopup(QFrame):
         self._values = values
         self._value_domain_complete = complete_domain
         self.values_list.setEnabled(bool(values) or not loading)
-        self.search_input.setEnabled(True)
+        if self.search_input is not None:
+            self.search_input.setEnabled(True)
         self.status_label.setVisible(loading or bool(note))
         if loading:
             self.status_label.setText("Loading values...")
@@ -510,7 +573,8 @@ class _ParquetFilterPopup(QFrame):
     def set_error(self, message: str) -> None:
         self.values_list.clear()
         self.values_list.setEnabled(False)
-        self.search_input.setEnabled(True)
+        if self.search_input is not None:
+            self.search_input.setEnabled(True)
         self.status_label.setVisible(True)
         self.status_label.setText(message)
 
@@ -611,7 +675,7 @@ class _ParquetFilterPopup(QFrame):
     def _apply_selection(self) -> None:
         text_filter = self.distinct_list_text_filter()
         if text_filter is not None:
-            self._explorer.apply_text_filter(self._column_name, text_filter.operation, str(text_filter.values[0]))
+            self._explorer.apply_column_filter(text_filter)
             self.close()
             return
         selected_values: list[object] = []
@@ -631,8 +695,8 @@ class _ParquetFilterPopup(QFrame):
         self.close()
 
     def _clear_column_state(self) -> None:
-        if self._text_filter_input is not None:
-            self._text_filter_input.clear()
+        for _, _, line_edit in self._text_filter_rows:
+            line_edit.clear()
         self._explorer.clear_column_filter_and_sort(self._column_name)
         self._refresh_sort_button_state()
         self._queue_search()
@@ -642,17 +706,23 @@ class _ParquetFilterPopup(QFrame):
         self._search_timer.start()
 
     def _dispatch_search(self) -> None:
-        search_text = self.search_input.text().strip()
+        search_text = self.search_input.text().strip() if self.search_input is not None else ""
         self._search_token += 1
         self._explorer.request_filter_values(self._column_name, search_text, self._search_token)
 
     def distinct_list_text_filter(self) -> ColumnFilter | None:
-        if self._text_filter_combo is None or self._text_filter_input is None:
+        conditions: list[TextFilterCondition] = []
+        for _, combo, line_edit in self._text_filter_rows:
+            filter_value = line_edit.text().strip()
+            if not filter_value:
+                continue
+            conditions.append((str(combo.currentData()), filter_value))
+        if not conditions:
             return None
-        filter_value = self._text_filter_input.text().strip()
-        if not filter_value:
-            return None
-        return ColumnFilter.text(self._column_name, str(self._text_filter_combo.currentData()), filter_value)
+        if len(conditions) == 1:
+            operation, value = conditions[0]
+            return ColumnFilter.text(self._column_name, operation, value)
+        return ColumnFilter.text_conditions(self._column_name, tuple(conditions))
 
     def _sort_should_append(self) -> bool:
         primary_sort_column = self._explorer.primary_sort_column()
@@ -907,6 +977,10 @@ class _ParquetExplorerWidget(QWidget):
             self._active_filters[column_name] = ColumnFilter.text(column_name, operation, filter_value)
         self._refresh_preview()
 
+    def apply_column_filter(self, column_filter: ColumnFilter) -> None:
+        self._active_filters[column_filter.column_name] = column_filter
+        self._refresh_preview()
+
     def clear_column_filter(self, column_name: str) -> None:
         if column_name not in self._active_filters:
             return
@@ -1059,7 +1133,11 @@ class _ParquetExplorerWidget(QWidget):
             and self._filter_popup._column_name == column_name
             and self._filter_popup._search_token == token
         ):
-            popup_search_text = self._filter_popup.search_input.text().strip()
+            popup_search_text = (
+                self._filter_popup.search_input.text().strip()
+                if self._filter_popup.search_input is not None
+                else ""
+            )
         complete_domain = not truncated and not popup_search_text
         note = "Showing first 500 matching values." if truncated else ""
         request_id = self._active_distinct_requests.pop((column_name, token), None)
@@ -1128,7 +1206,10 @@ class _ParquetExplorerWidget(QWidget):
                 "summary": summary,
             },
         )
-        if self._filter_popup is not None and self._filter_popup.search_input.text().strip() == "":
+        if (
+            self._filter_popup is not None
+            and (self._filter_popup.search_input is None or self._filter_popup.search_input.text().strip() == "")
+        ):
             self.request_filter_values(self._filter_popup._column_name, "", self._filter_popup._search_token)
 
     def _handle_preview_failed(self, message: str) -> None:

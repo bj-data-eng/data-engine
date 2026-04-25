@@ -10,6 +10,7 @@ import polars as pl
 NULL_FILTER_VALUE = object()
 ColumnFilterKind = Literal["distinct", "text"]
 TextFilterOperation = Literal["equals", "not_equals", "begins_with", "ends_with", "contains", "not_contains"]
+TextFilterCondition = tuple[TextFilterOperation, str]
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,20 @@ class ColumnFilter:
 
         return cls(column_name=str(column_name), kind="text", operation=operation, values=(value,))
 
+    @classmethod
+    def text_conditions(cls, column_name: str, conditions: tuple[TextFilterCondition, ...]) -> ColumnFilter:
+        """Build a multi-condition text filter state.
+
+        Args:
+            column_name: Column being filtered.
+            conditions: Ordered ``(operation, value)`` text conditions. Conditions are combined with AND.
+
+        Returns:
+            Text filter state containing all non-empty conditions.
+        """
+
+        return cls(column_name=str(column_name), kind="text", operation="all", values=conditions)
+
 
 def build_column_filter_expression(column_filter: ColumnFilter, *, dtype: pl.DataType | None = None):
     """Build a Polars expression for one preview column filter.
@@ -209,23 +224,40 @@ def build_distinct_value_filter_expression(
 def _build_text_filter_expression(column_filter: ColumnFilter):
     if not column_filter.values:
         return None
+    if column_filter.operation == "all":
+        expressions = [
+            _build_single_text_filter_expression(column_filter.column_name, str(operation), str(value))
+            for operation, value in column_filter.values
+            if str(value) != ""
+        ]
+        expressions = [expression for expression in expressions if expression is not None]
+        if not expressions:
+            return None
+        expression = expressions[0]
+        for next_expression in expressions[1:]:
+            expression = expression & next_expression
+        return expression
     value = str(column_filter.values[0])
+    return _build_single_text_filter_expression(column_filter.column_name, column_filter.operation, value)
+
+
+def _build_single_text_filter_expression(column_name: str, operation: str, value: str):
     if value == "":
         return None
-    column = pl.col(column_filter.column_name).cast(pl.Utf8, strict=False).fill_null("")
-    if column_filter.operation == "equals":
+    column = pl.col(column_name).cast(pl.Utf8, strict=False).fill_null("")
+    if operation == "equals":
         return column == value
-    if column_filter.operation == "not_equals":
+    if operation == "not_equals":
         return column != value
-    if column_filter.operation == "begins_with":
+    if operation == "begins_with":
         return column.str.starts_with(value)
-    if column_filter.operation == "ends_with":
+    if operation == "ends_with":
         return column.str.ends_with(value)
-    if column_filter.operation == "contains":
+    if operation == "contains":
         return column.str.contains(value, literal=True)
-    if column_filter.operation == "not_contains":
+    if operation == "not_contains":
         return ~column.str.contains(value, literal=True)
-    raise ValueError(f"Unsupported text filter operation: {column_filter.operation}")
+    raise ValueError(f"Unsupported text filter operation: {operation}")
 
 
 def should_clear_distinct_filter(
