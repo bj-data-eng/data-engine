@@ -46,7 +46,7 @@ from data_engine.views import flow_category
 from data_engine.ui.gui.icons import ICON_ASSETS, load_svg_icon_text
 from data_engine.ui.gui.app import DataEngineWindow
 from data_engine.ui.gui.rendering import classify_artifact_preview, theme_svg_paths
-from data_engine.ui.gui.rendering.artifacts import _ParquetPreviewLoader
+from data_engine.ui.gui.rendering.artifacts import _build_distinct_value_filter_expression, _ParquetPreviewLoader
 from data_engine.ui.gui.runtime import QueueLogHandler
 from data_engine.domain import FlowLogEntry
 from data_engine.domain import RuntimeStepEvent, parse_runtime_event
@@ -1008,6 +1008,24 @@ def test_parquet_preview_loader_top_mode_avoids_discarded_preview_collect(tmp_pa
     assert preview.height == 5
     assert "Showing top 5 rows" in summary
     assert collect_count == 2
+
+
+def test_distinct_value_filter_preserves_datetime_time_unit_precision():
+    timestamp = datetime(2026, 4, 24, 12, 30, 45, 123000)
+    frame = pl.DataFrame({"created_at": [timestamp]}).with_columns(
+        pl.col("created_at").cast(pl.Datetime("ms"))
+    )
+    selected_value = frame.get_column("created_at").to_list()[0]
+
+    result = frame.lazy().filter(
+        _build_distinct_value_filter_expression(
+            "created_at",
+            (selected_value,),
+            dtype=frame.schema["created_at"],
+        )
+    ).collect()
+
+    assert result.height == 1
 
 
 def test_format_seconds_truncates_and_changes_units(qapp, monkeypatch):

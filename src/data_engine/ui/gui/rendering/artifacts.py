@@ -183,7 +183,11 @@ class _ParquetPreviewLoader(QThread):
             schema = lazy_frame.collect_schema()
             query = lazy_frame
             for column_name, selected_values in self._active_value_filters.items():
-                expression = _build_distinct_value_filter_expression(column_name, selected_values)
+                expression = _build_distinct_value_filter_expression(
+                    column_name,
+                    selected_values,
+                    dtype=schema[column_name],
+                )
                 if expression is not None:
                     query = query.filter(expression)
             row_count = (
@@ -251,10 +255,15 @@ class _DistinctValueLoader(QThread):
     def run(self) -> None:
         try:
             query = pl.scan_parquet(self._output_path)
+            schema = query.collect_schema()
             for active_name, selected_values in self._active_value_filters.items():
                 if active_name == self._column_name:
                     continue
-                expression = _build_distinct_value_filter_expression(active_name, selected_values)
+                expression = _build_distinct_value_filter_expression(
+                    active_name,
+                    selected_values,
+                    dtype=schema[active_name],
+                )
                 if expression is not None:
                     query = query.filter(expression)
             column = pl.col(self._column_name)
@@ -1359,7 +1368,12 @@ def _header_text(
     return f"{marker}{column_name}{sort_text} \u25be\n{dtype}"
 
 
-def _build_distinct_value_filter_expression(column_name: str, selected_values: tuple[object, ...]):
+def _build_distinct_value_filter_expression(
+    column_name: str,
+    selected_values: tuple[object, ...],
+    *,
+    dtype: pl.DataType | None = None,
+):
     if not selected_values:
         return None
     column = pl.col(column_name)
@@ -1367,7 +1381,8 @@ def _build_distinct_value_filter_expression(column_name: str, selected_values: t
     concrete_values = [value for value in selected_values if value is not _NULL_FILTER_VALUE]
     expression = None
     if concrete_values:
-        expression = column.is_in(concrete_values)
+        values = concrete_values if dtype is None else pl.Series(concrete_values, dtype=dtype).implode()
+        expression = column.is_in(values)
     if include_null:
         null_expression = column.is_null()
         expression = null_expression if expression is None else (expression | null_expression)
