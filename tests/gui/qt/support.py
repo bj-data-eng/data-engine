@@ -5556,7 +5556,7 @@ def test_finish_daemon_sync_skips_unchanged_projection_redraw(qapp, monkeypatch)
         monkeypatch.setattr(window.flow_controller, "refresh_selection", wrapped_refresh_selection)
         payload = {
             "workspace_token": window._workspace_binding_token(),
-            "sync_state": object(),
+            "sync_state": type("_SyncState", (), {"daemon_status": DaemonStatusState.empty()})(),
             "projection": WorkspaceRuntimeProjection(
                 runtime_session=window.runtime_session,
                 operation_tracker=window.operation_tracker,
@@ -5572,6 +5572,54 @@ def test_finish_daemon_sync_skips_unchanged_projection_redraw(qapp, monkeypatch)
 
         assert refresh_calls["count"] == 0
         assert window._selected_flow_run_groups_dirty is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_finish_daemon_sync_replaces_stale_observed_operation_tracker(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        window._apply_runtime_event(
+            RuntimeStepEvent(
+                run_id="run-1",
+                flow_name="poller",
+                step_name="Read Excel",
+                source_label="docs.xlsx",
+                status="started",
+                elapsed_seconds=None,
+            )
+        )
+        assert window.operation_tracker.row_state("poller", "Read Excel").status == "running"
+        workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=20,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="idle", daemon_live=True, transport="heartbeat"),
+            flows={},
+            active_runs={},
+        )
+        payload = {
+            "workspace_token": window._workspace_binding_token(),
+            "sync_state": type("_SyncState", (), {"daemon_status": DaemonStatusState.empty()})(),
+            "projection": WorkspaceRuntimeProjection(
+                runtime_session=RuntimeSessionState.empty(),
+                operation_tracker=OperationSessionState.empty(),
+                flow_states={},
+                active_runtime_flow_names=(),
+                step_output_index=window.step_output_index,
+            ),
+            "workspace_snapshot": workspace_snapshot,
+        }
+
+        window.runtime_controller.finish_daemon_sync(window, payload)
+        qapp.processEvents()
+
+        assert window.operation_tracker.row_state("poller", "Read Excel") is None
+        assert window.operation_row_widgets[0].row_card.property("stepState") == "idle"
+        assert window.operation_row_widgets[0].duration_label.text() == ""
     finally:
         _dispose_window(qapp, window)
 

@@ -92,27 +92,14 @@ class GuiRuntimeController:
             return window.runtime_session
         return runtime_session_from_workspace_snapshot(snapshot)
 
-    @staticmethod
-    def _effective_operation_tracker(window: "DataEngineWindow", rebuilt_tracker):
-        """Prefer the live transient tracker once the UI has observed step activity."""
-        current_tracker = window.operation_tracker
-        for flow_state in getattr(current_tracker, "flow_states", {}).values():
-            if flow_state.has_observed_activity:
-                return current_tracker
-        return rebuilt_tracker
-
     def _refresh_runtime_projection_from_logs(self, window: "DataEngineWindow"):
         """Rebuild the local runtime projection from persisted runtime history."""
-        projection = self.runtime_state_service.rebuild_projection(
+        return self.runtime_state_service.rebuild_projection(
             window.runtime_binding,
             runtime_application=self.runtime_application,
             flow_cards=window.flow_cards.values(),
             runtime_session=self._current_runtime_session(window),
             now=window._monotonic(),
-        )
-        return replace(
-            projection,
-            operation_tracker=self._effective_operation_tracker(window, projection.operation_tracker),
         )
 
     def daemon_wait_worker(self, window: "DataEngineWindow") -> None:
@@ -340,10 +327,6 @@ class GuiRuntimeController:
                     runtime_session=sync_state.runtime_session,
                     now=window._monotonic(),
                 )
-                projection = replace(
-                    projection,
-                    operation_tracker=self._effective_operation_tracker(window, projection.operation_tracker),
-                )
                 workspace_snapshot = self.runtime_state_service.snapshot_from_projection(
                     binding=window.runtime_binding,
                     flow_cards=flow_cards,
@@ -495,10 +478,6 @@ class GuiRuntimeController:
                 flow_cards=window.flow_cards.values(),
                 runtime_session=self._current_runtime_session(window),
                 now=window._monotonic(),
-            )
-            projection = replace(
-                projection,
-                operation_tracker=self._effective_operation_tracker(window, projection.operation_tracker),
             )
         self._apply_runtime_projection(
             window,

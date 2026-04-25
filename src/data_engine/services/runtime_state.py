@@ -11,7 +11,6 @@ from data_engine.application.runtime import RuntimeApplication
 from data_engine.domain import (
     ActiveRunState,
     FlowActivityState,
-    FlowRunState,
     OperationSessionState,
     RuntimeSessionState,
     StepOutputIndex,
@@ -313,46 +312,6 @@ class RuntimeStateService:
         return "idle"
 
     @staticmethod
-    def _run_state_name(run_group: FlowRunState, *, flow_state: FlowStateName) -> RunStateName:
-        status = str(run_group.status or "").strip().lower()
-        if status in {"success", "failed", "stopped"}:
-            return status  # type: ignore[return-value]
-        if flow_state == "stopping":
-            return "stopping"
-        if status == "started":
-            return "running"
-        return "starting"
-
-    @staticmethod
-    def _current_step_name(run_group: FlowRunState) -> str | None:
-        for step in reversed(run_group.steps):
-            if step.status == "started":
-                return step.step_name
-        return None
-
-    @staticmethod
-    def _run_started_at(run_group: FlowRunState) -> str | None:
-        if not run_group.entries:
-            return None
-        return run_group.entries[0].created_at_utc.isoformat()
-
-    @staticmethod
-    def _run_finished_at(run_group: FlowRunState) -> str | None:
-        if run_group.status not in {"success", "failed", "stopped"}:
-            return None
-        if run_group.summary_entry is None:
-            return None
-        return run_group.summary_entry.created_at_utc.isoformat()
-
-    @staticmethod
-    def _run_error_text(run_group: FlowRunState) -> str | None:
-        if run_group.status != "failed":
-            return None
-        if run_group.summary_entry is None:
-            return None
-        return run_group.summary_entry.line
-
-    @staticmethod
     def _live_flow_state_name(
         card: FlowCatalogLike,
         *,
@@ -376,18 +335,6 @@ class RuntimeStateService:
         if daemon_activity.queued_run_count > 0:
             return "starting"
         return "idle"
-
-    @staticmethod
-    def _latest_run_times(run_groups: tuple[FlowRunState, ...]) -> tuple[str | None, str | None, str | None]:
-        last_started_at = None
-        last_finished_at = None
-        last_error_text = None
-        if run_groups:
-            newest = run_groups[-1]
-            last_started_at = RuntimeStateService._run_started_at(newest)
-            last_finished_at = RuntimeStateService._run_finished_at(newest)
-            last_error_text = RuntimeStateService._run_error_text(newest)
-        return last_started_at, last_finished_at, last_error_text
 
     @staticmethod
     def _snapshot_signature(snapshot: WorkspaceSnapshot) -> tuple[object, ...]:
@@ -600,22 +547,14 @@ class RuntimeStateService:
         binding: WorkspaceRuntimeBinding,
         flow_name: str,
     ) -> tuple[str | None, str | None, str | None]:
-        """Return recent run timing/error summary for one flow.
-
-        Prefer persisted run rows from the runtime ledger so the workspace
-        snapshot does not depend on replaying retained log entries. Fall back to
-        the in-memory grouped log store only for narrow test scaffolds or
-        transitional bindings that do not expose a runtime ledger.
-        """
+        """Return recent run timing/error summary from the runtime ledger."""
         runs_repo = getattr(getattr(binding, "runtime_cache_ledger", None), "runs", None)
         if runs_repo is not None and hasattr(runs_repo, "list"):
             persisted_runs = tuple(runs_repo.list(flow_name=flow_name))
             if persisted_runs:
                 newest = persisted_runs[-1]
                 return newest.started_at_utc, newest.finished_at_utc, newest.error_text
-            return None, None, None
-        run_groups = self.log_service.runs_for_flow(binding.log_store, flow_name)
-        return self._latest_run_times(run_groups)
+        return None, None, None
 
     def incremental_snapshot_from_daemon(
         self,
