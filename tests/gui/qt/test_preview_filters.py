@@ -188,6 +188,33 @@ def test_column_filter_expression_compiles_float_number_filter() -> None:
     assert result["amount"].to_list() == [12.25, 15.75]
 
 
+def test_column_filter_expression_compiles_boolean_filter() -> None:
+    frame = pl.DataFrame({"is_ready": [True, False, None]})
+
+    true_result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.boolean("is_ready", "true"),
+            dtype=frame.schema["is_ready"],
+        )
+    )
+    false_result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.boolean("is_ready", "false"),
+            dtype=frame.schema["is_ready"],
+        )
+    )
+    blank_result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.boolean("is_ready", "blank"),
+            dtype=frame.schema["is_ready"],
+        )
+    )
+
+    assert true_result["is_ready"].to_list() == [True]
+    assert false_result["is_ready"].to_list() == [False]
+    assert blank_result["is_ready"].to_list() == [None]
+
+
 def test_distinct_value_filter_expression_preserves_datetime_time_unit_precision() -> None:
     timestamp = datetime(2026, 4, 24, 12, 30, 45, 123000)
     frame = pl.DataFrame({"created_at": [timestamp]}).with_columns(pl.col("created_at").cast(pl.Datetime("ms")))

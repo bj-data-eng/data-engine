@@ -4515,13 +4515,103 @@ def test_debug_view_number_column_filter_popup_applies_numeric_conditions(qapp):
         _dispose_window(qapp, window)
 
 
+def test_debug_view_boolean_column_filter_popup_applies_boolean_filter(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "is_ready": [True, False, None],
+                "status": ["OPEN", "CLOSED", "PENDING"],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 3)
+
+        explorer._open_filter_popup_for_index(0)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        combo = popup.findChild(QComboBox, "outputPreviewBooleanFilterCombo")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert combo is not None
+        assert values_list is not None
+        assert popup.findChild(QLineEdit, "outputPreviewPopupSearch") is None
+
+        false_index = combo.findData("false")
+        assert false_index >= 0
+        combo.setCurrentIndex(false_index)
+        _process_ui_until(qapp, lambda: values_list.count() == 1 and values_list.item(0).text() == "False")
+
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+
+        _process_ui_until(qapp, lambda: table.rowCount() == 1 and table.item(0, 0) is not None)
+        assert table.item(0, 0).text() == "False"
+
+        explorer._open_filter_popup_for_index(0)
+        qapp.processEvents()
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        combo = popup.findChild(QComboBox, "outputPreviewBooleanFilterCombo")
+        assert combo is not None
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert values_list is not None
+        blank_index = combo.findData("blank")
+        assert blank_index >= 0
+        combo.setCurrentIndex(blank_index)
+        _process_ui_until(qapp, lambda: values_list.count() == 1 and values_list.item(0).text() == "(blank)")
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+
+        _process_ui_until(
+            qapp,
+            lambda: table.rowCount() == 1 and table.item(0, 0) is not None and table.item(0, 0).text() == "",
+        )
+        assert table.item(0, 0).text() == ""
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_debug_view_non_condition_column_filter_popup_hides_dtype_filters(qapp):
     window = _make_window()
     try:
         debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
         debug_dir.mkdir(parents=True, exist_ok=True)
         artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
-        pl.DataFrame({"is_ready": [True, False], "status": ["OPEN", "CLOSED"]}).write_parquet(artifact_path)
+        pl.DataFrame(
+            {
+                "payload": pl.Series("payload", [b"open", b"closed"], dtype=pl.Binary),
+                "status": ["OPEN", "CLOSED"],
+            }
+        ).write_parquet(artifact_path)
         artifact_path.with_suffix(".json").write_text(
             json.dumps(
                 {
@@ -4558,6 +4648,7 @@ def test_debug_view_non_condition_column_filter_popup_hides_dtype_filters(qapp):
         assert popup.findChild(QLineEdit, "outputPreviewTextFilterInput") is None
         assert popup.findChild(QComboBox, "outputPreviewNumberFilterCombo") is None
         assert popup.findChild(QLineEdit, "outputPreviewNumberFilterInput") is None
+        assert popup.findChild(QComboBox, "outputPreviewBooleanFilterCombo") is None
         assert popup.findChild(QDateEdit, "outputPreviewDateFilterFromInput") is None
         assert popup.findChild(QLineEdit, "outputPreviewPopupSearch") is not None
     finally:

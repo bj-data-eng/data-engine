@@ -9,10 +9,11 @@ from typing import Literal
 import polars as pl
 
 NULL_FILTER_VALUE = object()
-ColumnFilterKind = Literal["distinct", "text", "date", "number", "all"]
+ColumnFilterKind = Literal["distinct", "text", "date", "number", "boolean", "all"]
 TextFilterOperation = Literal["equals", "not_equals", "begins_with", "ends_with", "contains", "not_contains"]
 TextFilterCondition = tuple[TextFilterOperation, str]
 DateFilterRange = tuple[str, str]
+BooleanFilterValue = Literal["true", "false", "blank"]
 NumberFilterOperation = Literal[
     "equals",
     "not_equals",
@@ -240,6 +241,20 @@ class ColumnFilter:
         return cls(column_name=str(column_name), kind="number", operation="all", values=conditions)
 
     @classmethod
+    def boolean(cls, column_name: str, value: BooleanFilterValue) -> ColumnFilter:
+        """Build a boolean filter state.
+
+        Args:
+            column_name: Column being filtered.
+            value: Boolean value selector. ``"blank"`` matches nulls.
+
+        Returns:
+            Boolean filter state.
+        """
+
+        return cls(column_name=str(column_name), kind="boolean", operation="is", values=(value,))
+
+    @classmethod
     def all(cls, column_name: str, filters: tuple[ColumnFilter, ...]) -> ColumnFilter:
         """Build a composite filter state.
 
@@ -297,6 +312,8 @@ def build_column_filter_expression(column_filter: ColumnFilter, *, dtype: pl.Dat
         return _build_date_filter_expression(column_filter, dtype=dtype)
     if column_filter.kind == "number":
         return _build_number_filter_expression(column_filter, dtype=dtype)
+    if column_filter.kind == "boolean":
+        return _build_boolean_filter_expression(column_filter)
     if column_filter.kind == "all":
         return _build_all_filter_expression(column_filter, dtype=dtype)
     raise ValueError(f"Unsupported column filter kind: {column_filter.kind}")
@@ -480,6 +497,20 @@ def _build_single_number_filter_expression(
     if operation == "less_than_or_equal":
         return column <= literal
     raise ValueError(f"Unsupported number filter operation: {operation}")
+
+
+def _build_boolean_filter_expression(column_filter: ColumnFilter):
+    if not column_filter.values:
+        return None
+    value = str(column_filter.values[0])
+    column = pl.col(column_filter.column_name)
+    if value == "true":
+        return column.is_not_null() & column
+    if value == "false":
+        return column.is_not_null() & ~column
+    if value == "blank":
+        return column.is_null()
+    raise ValueError(f"Unsupported boolean filter value: {value}")
 
 
 def should_clear_distinct_filter(

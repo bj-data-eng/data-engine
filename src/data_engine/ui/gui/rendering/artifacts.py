@@ -42,6 +42,7 @@ from data_engine.helpers import write_excel_atomic
 from data_engine.platform.instrumentation import append_timing_line, new_request_id
 from data_engine.ui.gui.rendering.icons import render_svg_icon_pixmap
 from data_engine.ui.gui.rendering.preview_filters import (
+    BooleanFilterValue,
     ColumnFilter,
     NULL_FILTER_VALUE as _NULL_FILTER_VALUE,
     PreviewSortState,
@@ -93,6 +94,10 @@ def _dtype_supports_number_filter(dtype: pl.DataType) -> bool:
         pl.Float64,
         pl.Decimal,
     }
+
+
+def _dtype_supports_boolean_filter(dtype: pl.DataType) -> bool:
+    return dtype.base_type() == pl.Boolean
 
 
 def _qdate_from_iso(value: str) -> QDate:
@@ -359,12 +364,14 @@ class _ParquetFilterPopup(QFrame):
         self._is_text_filter_column = _dtype_supports_text_filter(dtype)
         self._is_date_filter_column = _dtype_supports_date_filter(dtype)
         self._is_number_filter_column = _dtype_supports_number_filter(dtype)
+        self._is_boolean_filter_column = _dtype_supports_boolean_filter(dtype)
         self._text_filter_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
         self._text_filter_layout: QVBoxLayout | None = None
         self._date_filter_rows: list[tuple[QFrame, QDateEdit, QDateEdit]] = []
         self._date_filter_layout: QVBoxLayout | None = None
         self._number_filter_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
         self._number_filter_layout: QVBoxLayout | None = None
+        self._boolean_filter_combo: QComboBox | None = None
         self.search_input: QLineEdit | None = None
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
 
@@ -390,6 +397,8 @@ class _ParquetFilterPopup(QFrame):
             layout.addWidget(self._build_text_filter_controls())
         elif self._is_date_filter_column:
             layout.addWidget(self._build_date_filter_controls())
+        elif self._is_boolean_filter_column:
+            layout.addWidget(self._build_boolean_filter_controls())
         elif self._is_number_filter_column:
             layout.addWidget(self._build_number_filter_controls())
         else:
@@ -751,6 +760,34 @@ class _ParquetFilterPopup(QFrame):
             return tuple((str(operation), str(value)) for operation, value in active_filter.values)
         return ((str(active_filter.operation), str(active_filter.values[0])),)
 
+    def _build_boolean_filter_controls(self) -> QFrame:
+        boolean_section = QFrame(self)
+        boolean_section.setObjectName("outputPreviewBooleanFilterSection")
+        row_layout = QHBoxLayout(boolean_section)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+
+        combo = QComboBox(boolean_section)
+        combo.setObjectName("outputPreviewBooleanFilterCombo")
+        combo.addItem("Any", "")
+        combo.addItem("True", "true")
+        combo.addItem("False", "false")
+        combo.addItem("(blank)", "blank")
+        active_value = self._active_boolean_filter_value()
+        active_index = combo.findData(active_value)
+        if active_index >= 0:
+            combo.setCurrentIndex(active_index)
+        combo.currentIndexChanged.connect(lambda _index: self._queue_condition_search())
+        row_layout.addWidget(combo, 1)
+        self._boolean_filter_combo = combo
+        return boolean_section
+
+    def _active_boolean_filter_value(self) -> str:
+        active_filter = column_filter_component(self._explorer.active_column_filter(self._column_name), "boolean")
+        if active_filter is None or not active_filter.values:
+            return ""
+        return str(active_filter.values[0])
+
     def showEvent(self, event) -> None:  # noqa: N802
         app = QApplication.instance()
         if app is not None:
@@ -1001,6 +1038,8 @@ class _ParquetFilterPopup(QFrame):
             line_edit.clear()
         for _, _, line_edit in self._number_filter_rows:
             line_edit.clear()
+        if self._boolean_filter_combo is not None:
+            self._boolean_filter_combo.setCurrentIndex(0)
         for _, from_edit, to_edit in self._date_filter_rows:
             today = QDate.currentDate()
             row_frame = from_edit.parentWidget()
@@ -1036,6 +1075,8 @@ class _ParquetFilterPopup(QFrame):
     def distinct_list_column_filter(self) -> ColumnFilter | None:
         if self._date_filter_rows:
             return self._date_filter()
+        if self._boolean_filter_combo is not None:
+            return self._boolean_filter()
         if self._number_filter_rows:
             return self._number_filter()
         return self._text_filter()
@@ -1094,6 +1135,17 @@ class _ParquetFilterPopup(QFrame):
             operation, value = conditions[0]
             return ColumnFilter.number(self._column_name, operation, value)
         return ColumnFilter.number_conditions(self._column_name, tuple(conditions))
+
+    def _boolean_filter(self) -> ColumnFilter | None:
+        if self._boolean_filter_combo is None:
+            return None
+        value = str(self._boolean_filter_combo.currentData())
+        if value == "":
+            return None
+        if value not in {"true", "false", "blank"}:
+            return None
+        filter_value: BooleanFilterValue = value
+        return ColumnFilter.boolean(self._column_name, filter_value)
 
     def _sort_should_append(self) -> bool:
         primary_sort_column = self._explorer.primary_sort_column()
