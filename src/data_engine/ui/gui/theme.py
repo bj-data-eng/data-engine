@@ -508,12 +508,15 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QPushButton#outputPreviewTextFilterAddButton,
     QPushButton#outputPreviewTextFilterRemoveButton,
     QPushButton#outputPreviewDateFilterAddButton,
-    QPushButton#outputPreviewDateFilterRemoveButton {{
+    QPushButton#outputPreviewDateFilterRemoveButton,
+    QPushButton#outputPreviewNumberFilterAddButton,
+    QPushButton#outputPreviewNumberFilterRemoveButton {{
         min-width: 16px;
         max-width: 16px;
         padding: 0px;
     }}
-    QLineEdit#outputPreviewTextFilterInput {{
+    QLineEdit#outputPreviewTextFilterInput,
+    QLineEdit#outputPreviewNumberFilterInput {{
         font-size: 10px;
         padding: 2px 6px;
     }}

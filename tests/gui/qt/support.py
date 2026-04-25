@@ -4424,13 +4424,104 @@ def test_debug_view_date_column_filter_popup_does_not_keep_removed_range_values(
         _dispose_window(qapp, window)
 
 
-def test_debug_view_non_string_column_filter_popup_hides_text_filter(qapp):
+def test_debug_view_number_column_filter_popup_applies_numeric_conditions(qapp):
     window = _make_window()
     try:
         debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
         debug_dir.mkdir(parents=True, exist_ok=True)
         artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
-        pl.DataFrame({"claim_id": [1001, 1002], "status": ["OPEN", "CLOSED"]}).write_parquet(artifact_path)
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 1003, 1004],
+                "status": ["OPEN", "REOPENED", "PENDING", "CLOSED"],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 4)
+
+        explorer._open_filter_popup_for_index(0)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        operation = popup.findChild(QComboBox, "outputPreviewNumberFilterCombo")
+        number_filter = popup.findChild(QLineEdit, "outputPreviewNumberFilterInput")
+        add_button = popup.findChild(QPushButton, "outputPreviewNumberFilterAddButton")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert operation is not None
+        assert number_filter is not None
+        assert add_button is not None
+        assert values_list is not None
+        assert popup.findChild(QLineEdit, "outputPreviewPopupSearch") is None
+
+        greater_equal_index = operation.findData("greater_than_or_equal")
+        assert greater_equal_index >= 0
+        operation.setCurrentIndex(greater_equal_index)
+        number_filter.setText("1002")
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 3
+            and [values_list.item(index).text() for index in range(values_list.count())]
+            == ["1002", "1003", "1004"],
+        )
+
+        QTest.mouseClick(add_button, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        operations = popup.findChildren(QComboBox, "outputPreviewNumberFilterCombo")
+        number_inputs = popup.findChildren(QLineEdit, "outputPreviewNumberFilterInput")
+        assert len(operations) == 2
+        assert len(number_inputs) == 2
+        less_than_index = operations[1].findData("less_than")
+        assert less_than_index >= 0
+        operations[1].setCurrentIndex(less_than_index)
+        number_inputs[1].setText("1004")
+
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 2
+            and [values_list.item(index).text() for index in range(values_list.count())] == ["1002", "1003"],
+        )
+        values_list.item(1).setCheckState(Qt.CheckState.Unchecked)
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+
+        _process_ui_until(qapp, lambda: table.rowCount() == 1 and table.item(0, 0) is not None)
+        assert table.item(0, 0).text() == "1002"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_non_condition_column_filter_popup_hides_dtype_filters(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame({"is_ready": [True, False], "status": ["OPEN", "CLOSED"]}).write_parquet(artifact_path)
         artifact_path.with_suffix(".json").write_text(
             json.dumps(
                 {
@@ -4465,6 +4556,10 @@ def test_debug_view_non_string_column_filter_popup_hides_text_filter(qapp):
         assert popup is not None
         assert popup.findChild(QComboBox, "outputPreviewTextFilterCombo") is None
         assert popup.findChild(QLineEdit, "outputPreviewTextFilterInput") is None
+        assert popup.findChild(QComboBox, "outputPreviewNumberFilterCombo") is None
+        assert popup.findChild(QLineEdit, "outputPreviewNumberFilterInput") is None
+        assert popup.findChild(QDateEdit, "outputPreviewDateFilterFromInput") is None
+        assert popup.findChild(QLineEdit, "outputPreviewPopupSearch") is not None
     finally:
         _dispose_window(qapp, window)
 
@@ -4587,10 +4682,12 @@ def test_debug_view_filter_popup_select_all_checkbox_tracks_visible_values(qapp)
         assert popup is not None
         values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
         select_all = popup.findChild(QPushButton, "outputPreviewSelectAllButton")
-        search = popup.findChild(QLineEdit, "outputPreviewPopupSearch")
+        number_operation = popup.findChild(QComboBox, "outputPreviewNumberFilterCombo")
+        number_filter = popup.findChild(QLineEdit, "outputPreviewNumberFilterInput")
         assert values_list is not None
         assert select_all is not None
-        assert search is not None
+        assert number_operation is not None
+        assert number_filter is not None
 
         _process_ui_until(qapp, lambda: values_list.count() == 3 and not explorer._active_distinct_requests)
         assert select_all.property("selectAllState") == Qt.CheckState.Checked.value
@@ -4607,7 +4704,10 @@ def test_debug_view_filter_popup_select_all_checkbox_tracks_visible_values(qapp)
         qapp.processEvents()
         assert select_all.property("selectAllState") == Qt.CheckState.PartiallyChecked.value
 
-        search.setText("1002")
+        equals_index = number_operation.findData("equals")
+        assert equals_index >= 0
+        number_operation.setCurrentIndex(equals_index)
+        number_filter.setText("1002")
         qapp.processEvents()
         _process_ui_until(qapp, lambda: values_list.count() == 1 and values_list.item(0).text() == "1002")
 

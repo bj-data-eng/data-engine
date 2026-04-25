@@ -156,6 +156,38 @@ def test_column_filter_expression_compiles_microsecond_datetime_as_date() -> Non
     assert result.height == 2
 
 
+def test_column_filter_expression_compiles_number_operations() -> None:
+    frame = pl.DataFrame({"claim_id": [1001, 1002, 1003, 1004]})
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.number_conditions(
+                "claim_id",
+                (
+                    ("greater_than_or_equal", "1002"),
+                    ("less_than", "1004"),
+                ),
+            ),
+            dtype=frame.schema["claim_id"],
+        )
+    )
+
+    assert result["claim_id"].to_list() == [1002, 1003]
+
+
+def test_column_filter_expression_compiles_float_number_filter() -> None:
+    frame = pl.DataFrame({"amount": [10.5, 12.25, 15.75]})
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.number("amount", "greater_than", "12"),
+            dtype=frame.schema["amount"],
+        )
+    )
+
+    assert result["amount"].to_list() == [12.25, 15.75]
+
+
 def test_distinct_value_filter_expression_preserves_datetime_time_unit_precision() -> None:
     timestamp = datetime(2026, 4, 24, 12, 30, 45, 123000)
     frame = pl.DataFrame({"created_at": [timestamp]}).with_columns(pl.col("created_at").cast(pl.Datetime("ms")))

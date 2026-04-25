@@ -9,10 +9,19 @@ from typing import Literal
 import polars as pl
 
 NULL_FILTER_VALUE = object()
-ColumnFilterKind = Literal["distinct", "text", "date", "all"]
+ColumnFilterKind = Literal["distinct", "text", "date", "number", "all"]
 TextFilterOperation = Literal["equals", "not_equals", "begins_with", "ends_with", "contains", "not_contains"]
 TextFilterCondition = tuple[TextFilterOperation, str]
 DateFilterRange = tuple[str, str]
+NumberFilterOperation = Literal[
+    "equals",
+    "not_equals",
+    "greater_than",
+    "greater_than_or_equal",
+    "less_than",
+    "less_than_or_equal",
+]
+NumberFilterCondition = tuple[NumberFilterOperation, str]
 
 
 @dataclass(frozen=True)
@@ -202,6 +211,35 @@ class ColumnFilter:
         return cls(column_name=str(column_name), kind="date", operation="ranges", values=ranges)
 
     @classmethod
+    def number(cls, column_name: str, operation: NumberFilterOperation, value: str) -> ColumnFilter:
+        """Build a numeric comparison filter state.
+
+        Args:
+            column_name: Column being filtered.
+            operation: Numeric operation to apply.
+            value: Numeric text value to compare.
+
+        Returns:
+            Numeric filter state.
+        """
+
+        return cls(column_name=str(column_name), kind="number", operation=operation, values=(value,))
+
+    @classmethod
+    def number_conditions(cls, column_name: str, conditions: tuple[NumberFilterCondition, ...]) -> ColumnFilter:
+        """Build a multi-condition numeric filter state.
+
+        Args:
+            column_name: Column being filtered.
+            conditions: Ordered ``(operation, value)`` numeric conditions. Conditions are combined with AND.
+
+        Returns:
+            Numeric filter state containing all non-empty conditions.
+        """
+
+        return cls(column_name=str(column_name), kind="number", operation="all", values=conditions)
+
+    @classmethod
     def all(cls, column_name: str, filters: tuple[ColumnFilter, ...]) -> ColumnFilter:
         """Build a composite filter state.
 
@@ -257,6 +295,8 @@ def build_column_filter_expression(column_filter: ColumnFilter, *, dtype: pl.Dat
         return _build_text_filter_expression(column_filter)
     if column_filter.kind == "date":
         return _build_date_filter_expression(column_filter, dtype=dtype)
+    if column_filter.kind == "number":
+        return _build_number_filter_expression(column_filter, dtype=dtype)
     if column_filter.kind == "all":
         return _build_all_filter_expression(column_filter, dtype=dtype)
     raise ValueError(f"Unsupported column filter kind: {column_filter.kind}")
@@ -388,6 +428,58 @@ def _build_single_date_range_filter_expression(
     if dtype is not None and dtype.base_type() == pl.Datetime:
         column = column.dt.date()
     return (column >= start_date) & (column <= end_date)
+
+
+def _build_number_filter_expression(column_filter: ColumnFilter, *, dtype: pl.DataType | None = None):
+    if not column_filter.values:
+        return None
+    if column_filter.operation == "all":
+        expressions = [
+            _build_single_number_filter_expression(column_filter.column_name, str(operation), str(value), dtype=dtype)
+            for operation, value in column_filter.values
+            if str(value).strip() != ""
+        ]
+        expressions = [expression for expression in expressions if expression is not None]
+        if not expressions:
+            return None
+        expression = expressions[0]
+        for next_expression in expressions[1:]:
+            expression = expression & next_expression
+        return expression
+    value = str(column_filter.values[0])
+    return _build_single_number_filter_expression(column_filter.column_name, column_filter.operation, value, dtype=dtype)
+
+
+def _build_single_number_filter_expression(
+    column_name: str,
+    operation: str,
+    value: str,
+    *,
+    dtype: pl.DataType | None = None,
+):
+    value = value.strip()
+    if value == "":
+        return None
+    column = pl.col(column_name)
+    literal = pl.lit(value)
+    if dtype is not None:
+        literal = literal.cast(dtype, strict=False)
+    else:
+        literal = literal.cast(pl.Float64, strict=False)
+        column = column.cast(pl.Float64, strict=False)
+    if operation == "equals":
+        return column == literal
+    if operation == "not_equals":
+        return column != literal
+    if operation == "greater_than":
+        return column > literal
+    if operation == "greater_than_or_equal":
+        return column >= literal
+    if operation == "less_than":
+        return column < literal
+    if operation == "less_than_or_equal":
+        return column <= literal
+    raise ValueError(f"Unsupported number filter operation: {operation}")
 
 
 def should_clear_distinct_filter(

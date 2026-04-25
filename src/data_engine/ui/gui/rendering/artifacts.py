@@ -46,6 +46,8 @@ from data_engine.ui.gui.rendering.preview_filters import (
     NULL_FILTER_VALUE as _NULL_FILTER_VALUE,
     PreviewSortState,
     DateFilterRange,
+    NumberFilterCondition,
+    NumberFilterOperation,
     TextFilterCondition,
     TextFilterOperation,
     build_column_filter_expression,
@@ -73,6 +75,24 @@ def _dtype_supports_text_filter(dtype: pl.DataType) -> bool:
 def _dtype_supports_date_filter(dtype: pl.DataType) -> bool:
     base_type = dtype.base_type()
     return base_type in {pl.Date, pl.Datetime}
+
+
+def _dtype_supports_number_filter(dtype: pl.DataType) -> bool:
+    base_type = dtype.base_type()
+    return base_type in {
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.Int128,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
+        pl.Float32,
+        pl.Float64,
+        pl.Decimal,
+    }
 
 
 def _qdate_from_iso(value: str) -> QDate:
@@ -338,10 +358,13 @@ class _ParquetFilterPopup(QFrame):
         self._populating_values = False
         self._is_text_filter_column = _dtype_supports_text_filter(dtype)
         self._is_date_filter_column = _dtype_supports_date_filter(dtype)
+        self._is_number_filter_column = _dtype_supports_number_filter(dtype)
         self._text_filter_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
         self._text_filter_layout: QVBoxLayout | None = None
         self._date_filter_rows: list[tuple[QFrame, QDateEdit, QDateEdit]] = []
         self._date_filter_layout: QVBoxLayout | None = None
+        self._number_filter_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
+        self._number_filter_layout: QVBoxLayout | None = None
         self.search_input: QLineEdit | None = None
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
 
@@ -367,6 +390,8 @@ class _ParquetFilterPopup(QFrame):
             layout.addWidget(self._build_text_filter_controls())
         elif self._is_date_filter_column:
             layout.addWidget(self._build_date_filter_controls())
+        elif self._is_number_filter_column:
+            layout.addWidget(self._build_number_filter_controls())
         else:
             self.search_input = QLineEdit(self)
             self.search_input.setObjectName("outputPreviewPopupSearch")
@@ -636,6 +661,96 @@ class _ParquetFilterPopup(QFrame):
             return ()
         return tuple((str(start_value), str(end_value)) for start_value, end_value in active_filter.values)
 
+    def _build_number_filter_controls(self) -> QFrame:
+        number_section = QFrame(self)
+        number_section.setObjectName("outputPreviewNumberFilterSection")
+        self._number_filter_layout = QVBoxLayout(number_section)
+        self._number_filter_layout.setContentsMargins(0, 0, 0, 0)
+        self._number_filter_layout.setSpacing(6)
+
+        active_conditions = self._active_number_filter_conditions()
+        if not active_conditions:
+            active_conditions = (("equals", ""),)
+        for operation, value in active_conditions:
+            self._add_number_filter_row(operation=operation, value=value)
+        return number_section
+
+    def _add_number_filter_row(self, *, operation: NumberFilterOperation = "equals", value: str = "") -> None:
+        if self._number_filter_layout is None:
+            return
+        row_frame = QFrame(self)
+        row_frame.setObjectName("outputPreviewControlBar")
+        row_layout = QHBoxLayout(row_frame)
+        row_layout.setContentsMargins(6, 6, 6, 6)
+        row_layout.setSpacing(6)
+
+        combo = QComboBox(row_frame)
+        combo.setObjectName("outputPreviewNumberFilterCombo")
+        combo.addItem("Equals", "equals")
+        combo.addItem("Does Not Equal", "not_equals")
+        combo.addItem("Greater Than", "greater_than")
+        combo.addItem("Greater Than Or Equal", "greater_than_or_equal")
+        combo.addItem("Less Than", "less_than")
+        combo.addItem("Less Than Or Equal", "less_than_or_equal")
+        operation_index = combo.findData(operation)
+        if operation_index >= 0:
+            combo.setCurrentIndex(operation_index)
+        row_layout.addWidget(combo)
+
+        line_edit = QLineEdit(row_frame)
+        line_edit.setObjectName("outputPreviewNumberFilterInput")
+        line_edit.setPlaceholderText("Number filter")
+        line_edit.setClearButtonEnabled(True)
+        line_edit.setFixedHeight(combo.sizeHint().height())
+        line_edit.setText(value)
+        row_layout.addWidget(line_edit, 1)
+
+        add_button = QPushButton("+", row_frame)
+        add_button.setObjectName("outputPreviewNumberFilterAddButton")
+        add_button.setFixedSize(16, combo.sizeHint().height())
+        add_button.setToolTip("Add numeric condition")
+        add_button.clicked.connect(self._add_empty_number_filter_row)
+        row_layout.addWidget(add_button)
+
+        if self._number_filter_rows:
+            remove_button = QPushButton("-", row_frame)
+            remove_button.setObjectName("outputPreviewNumberFilterRemoveButton")
+            remove_button.setFixedSize(16, combo.sizeHint().height())
+            remove_button.setToolTip("Remove numeric condition")
+            remove_button.clicked.connect(lambda: self._remove_number_filter_row(row_frame))
+            row_layout.addWidget(remove_button)
+
+        combo.currentIndexChanged.connect(lambda _index: self._queue_condition_search())
+        line_edit.textChanged.connect(lambda _text: self._queue_condition_search())
+        self._number_filter_rows.append((row_frame, combo, line_edit))
+        self._number_filter_layout.addWidget(row_frame)
+
+    def _add_empty_number_filter_row(self) -> None:
+        self._add_number_filter_row()
+        self._queue_condition_search()
+
+    def _remove_number_filter_row(self, row_frame: QFrame) -> None:
+        if len(self._number_filter_rows) <= 1:
+            return
+        remaining_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
+        for frame, combo, line_edit in self._number_filter_rows:
+            if frame is row_frame:
+                if self._number_filter_layout is not None:
+                    self._number_filter_layout.removeWidget(frame)
+                frame.deleteLater()
+            else:
+                remaining_rows.append((frame, combo, line_edit))
+        self._number_filter_rows = remaining_rows
+        self._queue_condition_search()
+
+    def _active_number_filter_conditions(self) -> tuple[NumberFilterCondition, ...]:
+        active_filter = column_filter_component(self._explorer.active_column_filter(self._column_name), "number")
+        if active_filter is None or not active_filter.values:
+            return ()
+        if active_filter.operation == "all":
+            return tuple((str(operation), str(value)) for operation, value in active_filter.values)
+        return ((str(active_filter.operation), str(active_filter.values[0])),)
+
     def showEvent(self, event) -> None:  # noqa: N802
         app = QApplication.instance()
         if app is not None:
@@ -884,6 +999,8 @@ class _ParquetFilterPopup(QFrame):
     def _clear_column_state(self) -> None:
         for _, _, line_edit in self._text_filter_rows:
             line_edit.clear()
+        for _, _, line_edit in self._number_filter_rows:
+            line_edit.clear()
         for _, from_edit, to_edit in self._date_filter_rows:
             today = QDate.currentDate()
             row_frame = from_edit.parentWidget()
@@ -919,6 +1036,8 @@ class _ParquetFilterPopup(QFrame):
     def distinct_list_column_filter(self) -> ColumnFilter | None:
         if self._date_filter_rows:
             return self._date_filter()
+        if self._number_filter_rows:
+            return self._number_filter()
         return self._text_filter()
 
     def combined_column_filter(self) -> ColumnFilter | None:
@@ -961,6 +1080,20 @@ class _ParquetFilterPopup(QFrame):
             start_value, end_value = ranges[0]
             return ColumnFilter.date_range(self._column_name, start_value, end_value)
         return ColumnFilter.date_ranges(self._column_name, tuple(ranges))
+
+    def _number_filter(self) -> ColumnFilter | None:
+        conditions: list[NumberFilterCondition] = []
+        for _, combo, line_edit in self._number_filter_rows:
+            filter_value = line_edit.text().strip()
+            if not filter_value:
+                continue
+            conditions.append((str(combo.currentData()), filter_value))
+        if not conditions:
+            return None
+        if len(conditions) == 1:
+            operation, value = conditions[0]
+            return ColumnFilter.number(self._column_name, operation, value)
+        return ColumnFilter.number_conditions(self._column_name, tuple(conditions))
 
     def _sort_should_append(self) -> bool:
         primary_sort_column = self._explorer.primary_sort_column()
