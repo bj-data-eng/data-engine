@@ -5,8 +5,10 @@ from datetime import datetime
 import polars as pl
 
 from data_engine.ui.gui.rendering.preview_filters import (
+    ColumnFilter,
     NULL_FILTER_VALUE,
     PreviewSortState,
+    build_column_filter_expression,
     build_distinct_value_filter_expression,
     merge_selected_values,
     should_clear_distinct_filter,
@@ -25,6 +27,33 @@ def test_distinct_value_filter_expression_matches_selected_values_and_nulls() ->
     )
 
     assert result["status"].to_list() == ["open", None]
+
+
+def test_column_filter_expression_compiles_distinct_filter() -> None:
+    frame = pl.DataFrame({"status": ["open", "closed", None]})
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.distinct("status", ("closed", NULL_FILTER_VALUE)),
+            dtype=frame.schema["status"],
+        )
+    )
+
+    assert result["status"].to_list() == ["closed", None]
+
+
+def test_column_filter_expression_compiles_text_operations() -> None:
+    frame = pl.DataFrame({"status": ["open", "closed", "pending", None]})
+
+    contains = frame.filter(build_column_filter_expression(ColumnFilter.text("status", "contains", "en")))
+    not_contains = frame.filter(build_column_filter_expression(ColumnFilter.text("status", "not_contains", "en")))
+    begins_with = frame.filter(build_column_filter_expression(ColumnFilter.text("status", "begins_with", "cl")))
+    ends_with = frame.filter(build_column_filter_expression(ColumnFilter.text("status", "ends_with", "ing")))
+
+    assert contains["status"].to_list() == ["open", "pending"]
+    assert not_contains["status"].to_list() == ["closed", None]
+    assert begins_with["status"].to_list() == ["closed"]
+    assert ends_with["status"].to_list() == ["pending"]
 
 
 def test_distinct_value_filter_expression_preserves_datetime_time_unit_precision() -> None:

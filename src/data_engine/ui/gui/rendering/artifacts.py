@@ -39,8 +39,10 @@ from data_engine.helpers import write_excel_atomic
 from data_engine.platform.instrumentation import append_timing_line, new_request_id
 from data_engine.ui.gui.rendering.icons import render_svg_icon_pixmap
 from data_engine.ui.gui.rendering.preview_filters import (
+    ColumnFilter,
     NULL_FILTER_VALUE as _NULL_FILTER_VALUE,
     PreviewSortState,
+    build_column_filter_expression,
     build_distinct_value_filter_expression,
     merge_selected_values,
     should_clear_distinct_filter,
@@ -174,13 +176,13 @@ class _ParquetPreviewLoader(QThread):
         self,
         output_path: Path,
         *,
-        active_value_filters: dict[str, tuple[object, ...]],
+        active_filters: dict[str, ColumnFilter],
         sort_columns: tuple[tuple[str, bool], ...],
         preview_row_limit: int,
     ) -> None:
         super().__init__()
         self._output_path = Path(output_path)
-        self._active_value_filters = dict(active_value_filters)
+        self._active_filters = dict(active_filters)
         self._sort_columns = tuple((str(column_name), bool(descending)) for column_name, descending in sort_columns)
         self._preview_row_limit = max(_PREVIEW_ROW_LIMIT_MIN, min(preview_row_limit, _PREVIEW_ROW_LIMIT_MAX))
 
@@ -190,16 +192,12 @@ class _ParquetPreviewLoader(QThread):
             schema = lazy_frame.collect_schema()
             query = lazy_frame
             filter_expressions = []
-            for column_name, selected_values in self._active_value_filters.items():
-                expression = build_distinct_value_filter_expression(
-                    column_name,
-                    selected_values,
-                    dtype=schema[column_name],
-                )
+            for column_name, column_filter in self._active_filters.items():
+                expression = build_column_filter_expression(column_filter, dtype=schema[column_name])
                 if expression is not None:
                     filter_expressions.append(expression)
                     query = query.filter(expression)
-            row_count = None if self._active_value_filters else _parquet_row_count_from_metadata(self._output_path)
+            row_count = None if self._active_filters else _parquet_row_count_from_metadata(self._output_path)
             if row_count is None:
                 row_count = (
                     query.select(pl.len().alias("__row_count__"))
@@ -237,7 +235,7 @@ class _DistinctValueLoader(QThread):
         column_name: str,
         *,
         token: int,
-        active_value_filters: dict[str, tuple[object, ...]],
+        active_filters: dict[str, ColumnFilter],
         search_text: str,
         value_limit: int = 500,
     ) -> None:
@@ -245,7 +243,7 @@ class _DistinctValueLoader(QThread):
         self._output_path = Path(output_path)
         self._column_name = column_name
         self._token = token
-        self._active_value_filters = dict(active_value_filters)
+        self._active_filters = dict(active_filters)
         self._search_text = search_text.strip().lower()
         self._value_limit = max(1, value_limit)
 
@@ -253,14 +251,10 @@ class _DistinctValueLoader(QThread):
         try:
             query = pl.scan_parquet(self._output_path)
             schema = query.collect_schema()
-            for active_name, selected_values in self._active_value_filters.items():
+            for active_name, column_filter in self._active_filters.items():
                 if active_name == self._column_name:
                     continue
-                expression = build_distinct_value_filter_expression(
-                    active_name,
-                    selected_values,
-                    dtype=schema[active_name],
-                )
+                expression = build_column_filter_expression(column_filter, dtype=schema[active_name])
                 if expression is not None:
                     query = query.filter(expression)
             column = pl.col(self._column_name)
@@ -650,7 +644,7 @@ class _ParquetExplorerWidget(QWidget):
         self._lazy_frame = pl.scan_parquet(self._output_path)
         self._schema = None
         self._current_preview = pl.DataFrame()
-        self._active_value_filters: dict[str, tuple[object, ...]] = {}
+        self._active_filters: dict[str, ColumnFilter] = {}
         self._filter_popup: _ParquetFilterPopup | None = None
         self._distinct_loaders: list[_DistinctValueLoader] = []
         self._preview_loader: _ParquetPreviewLoader | None = None
@@ -768,7 +762,7 @@ class _ParquetExplorerWidget(QWidget):
             loader.deleteLater()
         self._active_distinct_requests.clear()
         self._active_preview_request_id = None
-        self._active_value_filters.clear()
+        self._active_filters.clear()
         self._sort_state = PreviewSortState()
         self._schema = None
         self._current_preview = pl.DataFrame()
@@ -787,7 +781,10 @@ class _ParquetExplorerWidget(QWidget):
                 self.status_label.deleteLater()
 
     def selected_filter_values(self, column_name: str) -> tuple[object, ...] | None:
-        return self._active_value_filters.get(column_name)
+        column_filter = self._active_filters.get(column_name)
+        if column_filter is None or column_filter.kind != "distinct":
+            return None
+        return column_filter.values
 
     @property
     def _sort_columns(self) -> list[tuple[str, bool]]:
@@ -808,9 +805,9 @@ class _ParquetExplorerWidget(QWidget):
         complete_domain: bool,
     ) -> None:
         if should_clear_distinct_filter(selected_values, all_values, complete_domain=complete_domain):
-            self._active_value_filters.pop(column_name, None)
+            self._active_filters.pop(column_name, None)
         else:
-            self._active_value_filters[column_name] = selected_values
+            self._active_filters[column_name] = ColumnFilter.distinct(column_name, selected_values)
         self._refresh_preview()
 
     def request_filter_values(self, column_name: str, search_text: str, token: int) -> None:
@@ -833,14 +830,14 @@ class _ParquetExplorerWidget(QWidget):
                 "artifact_path": self._output_path,
                 "column_name": column_name,
                 "search_text": search_text,
-                "active_filter_count": len(self._active_value_filters),
+                "active_filter_count": len(self._active_filters),
             },
         )
         loader = _DistinctValueLoader(
             self._output_path,
             column_name,
             token=token,
-            active_value_filters=self._active_value_filters,
+            active_filters=self._active_filters,
             search_text=search_text,
         )
         loader.values_loaded.connect(self._handle_distinct_values_loaded)
@@ -865,7 +862,7 @@ class _ParquetExplorerWidget(QWidget):
                 "artifact_path": self._output_path,
                 "preview_mode": _PREVIEW_MODE_TOP,
                 "row_limit": self.preview_limit_spin.value(),
-                "active_filter_count": len(self._active_value_filters),
+                "active_filter_count": len(self._active_filters),
                 "sort_column_count": len(self._sort_state.columns),
             },
         )
@@ -874,7 +871,7 @@ class _ParquetExplorerWidget(QWidget):
         self.export_excel_button.setEnabled(False)
         loader = _ParquetPreviewLoader(
             self._output_path,
-            active_value_filters=self._active_value_filters,
+            active_filters=self._active_filters,
             sort_columns=self._sort_state.columns,
             preview_row_limit=self.preview_limit_spin.value(),
         )
@@ -902,7 +899,7 @@ class _ParquetExplorerWidget(QWidget):
                 "artifact_path": self._output_path,
                 "column_name": column_name,
                 "preview_row_count": self._current_preview.height,
-                "active_filter_count": len(self._active_value_filters),
+                "active_filter_count": len(self._active_filters),
             },
         )
         if self._filter_popup is not None:
@@ -1002,7 +999,7 @@ class _ParquetExplorerWidget(QWidget):
         self._active_preview_request_id = None
         self._schema = schema
         self._current_preview = preview
-        self._start_table_render(preview, filtered_columns=set(self._active_value_filters), summary=summary)
+        self._start_table_render(preview, filtered_columns=set(self._active_filters), summary=summary)
         append_timing_line(
             self._timing_log_path,
             scope="gui.debug",

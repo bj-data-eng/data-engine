@@ -1021,7 +1021,7 @@ def test_parquet_preview_loader_top_mode_avoids_discarded_preview_collect(tmp_pa
 
     loader = _ParquetPreviewLoader(
         output_path,
-        active_value_filters={},
+        active_filters={},
         sort_columns=(),
         preview_row_limit=5,
     )

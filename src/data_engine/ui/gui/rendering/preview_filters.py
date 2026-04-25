@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import polars as pl
 
 NULL_FILTER_VALUE = object()
+ColumnFilterKind = Literal["distinct", "text"]
+TextFilterOperation = Literal["equals", "not_equals", "begins_with", "ends_with", "contains", "not_contains"]
 
 
 @dataclass(frozen=True)
@@ -107,6 +110,70 @@ class PreviewSortState:
         return self.columns[0][0]
 
 
+@dataclass(frozen=True)
+class ColumnFilter:
+    """Pure filter state for one dataframe preview column.
+
+    Args:
+        column_name: Column being filtered.
+        kind: Filter family.
+        operation: Operation within the filter family.
+        values: Operation values.
+    """
+
+    column_name: str
+    kind: ColumnFilterKind
+    operation: str
+    values: tuple[object, ...]
+
+    @classmethod
+    def distinct(cls, column_name: str, selected_values: tuple[object, ...]) -> ColumnFilter:
+        """Build a distinct-value filter state.
+
+        Args:
+            column_name: Column being filtered.
+            selected_values: Values selected by the distinct checklist.
+
+        Returns:
+            Distinct-value filter state.
+        """
+
+        return cls(column_name=str(column_name), kind="distinct", operation="is_in", values=selected_values)
+
+    @classmethod
+    def text(cls, column_name: str, operation: TextFilterOperation, value: str) -> ColumnFilter:
+        """Build a text filter state.
+
+        Args:
+            column_name: Column being filtered.
+            operation: Text operation to apply.
+            value: Text value to compare.
+
+        Returns:
+            Text filter state.
+        """
+
+        return cls(column_name=str(column_name), kind="text", operation=operation, values=(value,))
+
+
+def build_column_filter_expression(column_filter: ColumnFilter, *, dtype: pl.DataType | None = None):
+    """Build a Polars expression for one preview column filter.
+
+    Args:
+        column_filter: Filter state to compile.
+        dtype: Optional source dtype used by dtype-sensitive operations.
+
+    Returns:
+        Polars expression for the filter, or ``None`` when the filter is inactive.
+    """
+
+    if column_filter.kind == "distinct":
+        return build_distinct_value_filter_expression(column_filter.column_name, column_filter.values, dtype=dtype)
+    if column_filter.kind == "text":
+        return _build_text_filter_expression(column_filter)
+    raise ValueError(f"Unsupported column filter kind: {column_filter.kind}")
+
+
 def build_distinct_value_filter_expression(
     column_name: str,
     selected_values: tuple[object, ...],
@@ -137,6 +204,28 @@ def build_distinct_value_filter_expression(
         null_expression = column.is_null()
         expression = null_expression if expression is None else (expression | null_expression)
     return expression
+
+
+def _build_text_filter_expression(column_filter: ColumnFilter):
+    if not column_filter.values:
+        return None
+    value = str(column_filter.values[0])
+    if value == "":
+        return None
+    column = pl.col(column_filter.column_name).cast(pl.Utf8, strict=False).fill_null("")
+    if column_filter.operation == "equals":
+        return column == value
+    if column_filter.operation == "not_equals":
+        return column != value
+    if column_filter.operation == "begins_with":
+        return column.str.starts_with(value)
+    if column_filter.operation == "ends_with":
+        return column.str.ends_with(value)
+    if column_filter.operation == "contains":
+        return column.str.contains(value, literal=True)
+    if column_filter.operation == "not_contains":
+        return ~column.str.contains(value, literal=True)
+    raise ValueError(f"Unsupported text filter operation: {column_filter.operation}")
 
 
 def should_clear_distinct_filter(
