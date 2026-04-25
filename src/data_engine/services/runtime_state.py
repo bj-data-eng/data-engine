@@ -11,12 +11,15 @@ from data_engine.application.runtime import RuntimeApplication
 from data_engine.domain import (
     ActiveRunState,
     FlowActivityState,
+    OperationFlowState,
+    OperationRowState,
     OperationSessionState,
     RuntimeSessionState,
     StepOutputIndex,
     WorkspaceControlState,
 )
 from data_engine.domain.catalog import FlowCatalogLike
+from data_engine.domain.time import parse_utc_text
 from data_engine.services.logs import LogService
 from data_engine.services.runtime_binding import WorkspaceRuntimeBinding, WorkspaceRuntimeBindingService
 
@@ -165,6 +168,15 @@ def runtime_session_from_workspace_snapshot(snapshot: WorkspaceSnapshot) -> Runt
     ).with_manual_runs_map(manual_runs)
 
 
+def _safe_parse_utc_text(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return parse_utc_text(value)
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True)
 class RuntimeEvent:
     """One incremental live-state event for a workspace snapshot subscriber."""
@@ -237,6 +249,86 @@ class RuntimeStateService:
         if runtime_session.runtime_active or runtime_session.runtime_stopping:
             return runtime_session.with_active_runtime_flow_names(active_runtime_flow_names)
         return runtime_session
+
+    @staticmethod
+    def _step_elapsed_seconds(step_run: object) -> float | None:
+        elapsed_ms = getattr(step_run, "elapsed_ms", None)
+        if isinstance(elapsed_ms, (int, float)):
+            return max(float(elapsed_ms) / 1000.0, 0.0)
+        started = _safe_parse_utc_text(getattr(step_run, "started_at_utc", None))
+        finished = _safe_parse_utc_text(getattr(step_run, "finished_at_utc", None))
+        if started is None or finished is None:
+            return None
+        return max((finished - started).total_seconds(), 0.0)
+
+    @staticmethod
+    def _step_started_at_monotonic(step_run: object, *, now: float) -> float | None:
+        started = _safe_parse_utc_text(getattr(step_run, "started_at_utc", None))
+        if started is None:
+            return None
+        age_seconds = max((datetime.now(UTC) - started).total_seconds(), 0.0)
+        return now - age_seconds
+
+    @classmethod
+    def _operation_tracker_from_step_runs(
+        cls,
+        binding: WorkspaceRuntimeBinding,
+        *,
+        flow_cards: tuple[FlowCatalogLike, ...],
+        fallback: OperationSessionState,
+        now: float,
+    ) -> OperationSessionState:
+        ledger = getattr(binding, "runtime_cache_ledger", None)
+        step_outputs = getattr(ledger, "step_outputs", None)
+        if step_outputs is None:
+            return fallback
+        flow_states = dict(fallback.flow_states)
+        for card in flow_cards:
+            try:
+                step_runs = step_outputs.list(flow_name=card.name)
+            except TypeError:
+                step_runs = ()
+            if not step_runs:
+                continue
+            operation_names = tuple(card.operation_items)
+            operation_index = {name: index for index, name in enumerate(operation_names)}
+            rows = {
+                operation_name: OperationRowState()
+                for operation_name in operation_names
+            }
+            current_index: int | None = None
+            observed = False
+            for step_run in step_runs:
+                step_label = getattr(step_run, "step_label", None)
+                if step_label not in operation_index:
+                    continue
+                observed = True
+                status = str(getattr(step_run, "status", "") or "").strip().lower()
+                if status == "started":
+                    started_at = cls._step_started_at_monotonic(step_run, now=now)
+                    rows[step_label] = OperationRowState(
+                        status="running",
+                        started_at=started_at,
+                        elapsed_seconds=None,
+                    )
+                    current_index = operation_index[step_label]
+                elif status == "success":
+                    rows[step_label] = OperationRowState(
+                        status="idle",
+                        started_at=None,
+                        elapsed_seconds=cls._step_elapsed_seconds(step_run),
+                    )
+                    current_index = operation_index[step_label]
+                elif status in {"failed", "stopped"}:
+                    rows[step_label] = OperationRowState(
+                        status=status,
+                        started_at=None,
+                        elapsed_seconds=cls._step_elapsed_seconds(step_run),
+                    )
+                    current_index = operation_index[step_label]
+            if observed:
+                flow_states[card.name] = OperationFlowState(current_index=current_index, rows=rows)
+        return OperationSessionState(flow_states=flow_states)
 
     @staticmethod
     def _control_snapshot(control_state: WorkspaceControlState, runtime_session: RuntimeSessionState) -> ControlSnapshot:
@@ -429,13 +521,19 @@ class RuntimeStateService:
             runtime_session=runtime_session,
             now=now,
         )
+        operation_tracker = self._operation_tracker_from_step_runs(
+            binding,
+            flow_cards=flow_cards_tuple,
+            fallback=presentation.operation_tracker,
+            now=now,
+        )
         effective_runtime_session = self._effective_runtime_session(
             runtime_session,
             active_runtime_flow_names=presentation.active_runtime_flow_names,
         )
         return WorkspaceRuntimeProjection(
             runtime_session=effective_runtime_session,
-            operation_tracker=presentation.operation_tracker,
+            operation_tracker=operation_tracker,
             flow_states=presentation.flow_states,
             active_runtime_flow_names=presentation.active_runtime_flow_names,
             step_output_index=step_output_index,

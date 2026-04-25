@@ -5938,6 +5938,62 @@ def test_finish_daemon_sync_replaces_stale_observed_operation_tracker(qapp, monk
         _dispose_window(qapp, window)
 
 
+def test_finish_daemon_sync_preserves_persisted_step_duration_on_flow_switch(qapp, monkeypatch):
+    del monkeypatch
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        started_at = "2026-04-18T12:00:00+00:00"
+        window.runtime_binding.runtime_cache_ledger.execution_state.record_run_started(
+            run_id="run-1",
+            flow_name="poller",
+            group_name="Imports",
+            source_path="docs.xlsx",
+            started_at_utc=started_at,
+        )
+        step_run_id = window.runtime_binding.runtime_cache_ledger.execution_state.record_step_started(
+            run_id="run-1",
+            flow_name="poller",
+            step_label="Read Excel",
+            started_at_utc=started_at,
+        )
+        window.runtime_binding.runtime_cache_ledger.execution_state.record_step_finished(
+            step_run_id=step_run_id,
+            status="success",
+            finished_at_utc="2026-04-18T12:00:01+00:00",
+            elapsed_ms=1000,
+        )
+        projection = window.runtime_controller._refresh_runtime_projection_from_logs(window)
+        workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=21,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="idle", daemon_live=True, transport="heartbeat"),
+            flows={},
+            active_runs={},
+        )
+        payload = {
+            "workspace_token": window._workspace_binding_token(),
+            "sync_state": type("_SyncState", (), {"daemon_status": DaemonStatusState.empty()})(),
+            "projection": projection,
+            "workspace_snapshot": workspace_snapshot,
+        }
+
+        window.runtime_controller.finish_daemon_sync(window, payload)
+        qapp.processEvents()
+
+        assert window.operation_row_widgets[0].duration_label.text() == "1.0s"
+
+        window._select_flow("manual_review")
+        window._select_flow("poller")
+        qapp.processEvents()
+
+        assert window.operation_row_widgets[0].duration_label.text() == "1.0s"
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_poll_log_queue_ignores_entries_for_other_workspaces(qapp, monkeypatch):
     del monkeypatch
     window = _make_window()

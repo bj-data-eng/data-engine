@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from data_engine.domain import (
     ActiveRunState,
     DaemonStatusState,
     FlowCatalogEntry,
     FlowActivityState,
+    OperationRowState,
     FlowRunState,
+    StepOutputIndex,
     OperationSessionState,
     RuntimeSessionState,
     WorkspaceControlState,
 )
+from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, FlowLiveSummary, RuntimeStateService, WorkspaceSnapshot
 
 
@@ -154,6 +159,116 @@ def test_runtime_state_service_returns_unified_workspace_snapshot():
     assert projection.flow_states == {"poller": "polling"}
     assert projection.active_runtime_flow_names == ("poller",)
     assert projection.step_output_index == "step-index"
+
+
+def test_rebuild_projection_rebuilds_operation_tracker_from_persisted_step_runs(tmp_path):
+    ledger = RuntimeCacheLedger.open_default(data_root=tmp_path / "workspace")
+    wall_now = datetime.now(UTC)
+    started_read = (wall_now - timedelta(seconds=10)).isoformat()
+    finished_read = (wall_now - timedelta(seconds=8.75)).isoformat()
+    started_write = (wall_now - timedelta(seconds=3)).isoformat()
+
+    class _BindingService:
+        def reload_logs(self, binding) -> None:
+            del binding
+
+        def rebuild_step_outputs(self, binding, flow_cards):
+            del binding, flow_cards
+            return StepOutputIndex.empty()
+
+    class _LogService:
+        def transient_entries(self, log_store):
+            del log_store
+            return ()
+
+        def all_entries(self, log_store):
+            del log_store
+            return ()
+
+    class _RuntimeApp:
+        def build_runtime_snapshot(self, *, flow_cards, log_entries, runtime_session, now):
+            del flow_cards, log_entries, runtime_session, now
+            return type(
+                "_Presentation",
+                (),
+                {
+                    "operation_tracker": OperationSessionState.empty(),
+                    "flow_states": {"poller": "manual"},
+                    "active_runtime_flow_names": (),
+                },
+            )()
+
+    card = FlowCatalogEntry(
+        name="poller",
+        group="Imports",
+        title="Poller",
+        description="",
+        source_root="inbox",
+        target_root="outbox",
+        mode="manual",
+        interval="-",
+        settle="-",
+        operations="Read -> Write",
+        operation_items=("Read", "Write"),
+        state="manual",
+        valid=True,
+        category="manual",
+    )
+    binding = type(
+        "_Binding",
+        (),
+        {
+            "runtime_cache_ledger": ledger,
+            "log_store": "log-store",
+            "workspace_paths": type("_Paths", (), {"workspace_id": "docs2"})(),
+        },
+    )()
+    try:
+        ledger.runs.record_started(
+            run_id="run-1",
+            flow_name="poller",
+            group_name="Imports",
+            source_path="docs.xlsx",
+            started_at_utc=started_read,
+        )
+        read_step_id = ledger.step_outputs.record_started(
+            run_id="run-1",
+            flow_name="poller",
+            step_label="Read",
+            started_at_utc=started_read,
+        )
+        ledger.step_outputs.record_finished(
+            step_run_id=read_step_id,
+            status="success",
+            finished_at_utc=finished_read,
+            elapsed_ms=1250,
+        )
+        ledger.step_outputs.record_started(
+            run_id="run-1",
+            flow_name="poller",
+            step_label="Write",
+            started_at_utc=started_write,
+        )
+        service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
+
+        projection = service.rebuild_projection(
+            binding,
+            runtime_application=_RuntimeApp(),
+            flow_cards=(card,),
+            runtime_session=RuntimeSessionState.empty(),
+            now=100.0,
+        )
+
+        read_state = projection.operation_tracker.row_state("poller", "Read")
+        write_state = projection.operation_tracker.row_state("poller", "Write")
+        assert read_state == OperationRowState(status="idle", elapsed_seconds=1.25)
+        assert write_state is not None
+        assert write_state.status == "running"
+        assert write_state.started_at is not None
+        assert 96.5 <= write_state.started_at <= 97.5
+        assert write_state.elapsed_seconds is None
+    finally:
+        ledger.close()
 
 
 def test_runtime_state_service_emits_snapshot_events_to_subscribers():
