@@ -284,12 +284,11 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
     top_row.addWidget(limit_spin, 0, Qt.AlignmentFlag.AlignVCenter)
     header_layout.addLayout(top_row)
 
-    summary_label = QLabel(
-        "Loading preview…" if preview_spec.kind == "parquet" else build_preview_summary_text(request.output_path, preview_spec),
-        header,
-    )
-    summary_label.setObjectName("sectionMeta")
-    header_layout.addWidget(summary_label)
+    summary_label: QLabel | None = None
+    if preview_spec.kind != "parquet":
+        summary_label = QLabel(build_preview_summary_text(request.output_path, preview_spec), header)
+        summary_label.setObjectName("sectionMeta")
+        header_layout.addWidget(summary_label)
 
     path_label = QLabel(f"Source: {request.output_path}", header)
     path_label.setObjectName("outputPreviewPath")
@@ -298,15 +297,28 @@ def show_output_preview(window: "DataEngineWindow", request: OutputPreviewReques
     header_layout.addWidget(path_label)
     layout.addWidget(header)
 
+    if preview_spec.kind == "parquet":
+        summary_label = QLabel("", dialog)
+        summary_label.setObjectName("workspaceCountsFooter")
+        summary_label.setWordWrap(False)
+        summary_label.setVisible(False)
+
     preview_widget = populate_output_preview(
         layout,
         request.output_path,
         preview_spec=preview_spec,
         show_summary=False,
-        external_preview_controls=(mode_combo, limit_spin),
+        external_preview_controls=(
+            mode_combo,
+            limit_spin,
+            top_row,
+            summary_label,
+        ) if summary_label is not None and preview_spec.kind == "parquet" else (mode_combo, limit_spin, top_row),
     )
-    if hasattr(preview_widget, "summary_changed"):
+    if summary_label is not None and preview_spec.kind != "parquet" and hasattr(preview_widget, "summary_changed"):
         preview_widget.summary_changed.connect(summary_label.setText)
+    if summary_label is not None and preview_spec.kind == "parquet":
+        layout.addWidget(summary_label, 0, Qt.AlignmentFlag.AlignLeft)
     shutdown_background_work = getattr(preview_widget, "shutdown_background_work", None)
     if callable(shutdown_background_work):
         dialog.finished.connect(lambda _result, shutdown=shutdown_background_work: shutdown())

@@ -70,11 +70,14 @@ def build_nav_rail(window: "DataEngineWindow") -> QWidget:
     window.view_button_group.setExclusive(True)
 
     window.home_button = _nav_button(window, "home", "Home")
+    window.dataframes_button = _nav_button(window, "dataframes", "Dataframes")
     window.debug_button = _nav_button(window, "debug", "Debug")
     window.docs_button = _nav_button(window, "docs", "Docs")
     window.settings_button = _nav_button(window, "settings", "Settings")
 
-    for index, button in enumerate((window.home_button, window.debug_button, window.docs_button, window.settings_button)):
+    for index, button in enumerate(
+        (window.home_button, window.dataframes_button, window.debug_button, window.docs_button, window.settings_button)
+    ):
         window.view_button_group.addButton(button, index)
         layout.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -189,12 +192,13 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     window.debug_preview_limit_spin.setFixedHeight(22)
     window.debug_preview_limit_spin.setVisible(False)
     right_header.addWidget(window.debug_preview_limit_spin, 0, Qt.AlignmentFlag.AlignTop)
+    window.debug_preview_controls_layout = right_header
     right_layout.addLayout(right_header)
 
     window.debug_artifact_summary_label = QLabel("")
-    window.debug_artifact_summary_label.setObjectName("sectionMeta")
-    window.debug_artifact_summary_label.setWordWrap(True)
-    right_layout.addWidget(window.debug_artifact_summary_label)
+    window.debug_artifact_summary_label.setObjectName("workspaceCountsFooter")
+    window.debug_artifact_summary_label.setWordWrap(False)
+    window.debug_artifact_summary_label.setVisible(False)
 
     window.debug_artifact_source_label = QLabel("")
     window.debug_artifact_source_label.setObjectName("outputPreviewPath")
@@ -208,6 +212,7 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     window.debug_preview_layout.setContentsMargins(0, 0, 0, 0)
     window.debug_preview_layout.setSpacing(8)
     right_layout.addWidget(preview_panel, 1)
+    right_layout.addWidget(window.debug_artifact_summary_label, 0, Qt.AlignmentFlag.AlignLeft)
 
     splitter.addWidget(left_panel)
     splitter.addWidget(right_panel)
@@ -215,6 +220,82 @@ def build_debug_view(window: "DataEngineWindow") -> QWidget:
     splitter.setStretchFactor(1, 5)
     splitter.setSizes([320, 760])
     container_layout.addWidget(splitter, 1)
+    return container
+
+
+def build_dataframes_view(window: "DataEngineWindow") -> QWidget:
+    container = QWidget()
+    container_layout = QVBoxLayout(container)
+    container_layout.setContentsMargins(0, 0, 0, 0)
+    container_layout.setSpacing(10)
+
+    header = QHBoxLayout()
+    header.setContentsMargins(0, 0, 0, 0)
+    header.setSpacing(8)
+    title = QLabel("Dataframes")
+    title.setObjectName("heroTitle")
+    header.addWidget(title, 0, Qt.AlignmentFlag.AlignVCenter)
+    header.addStretch(1)
+
+    window.dataframe_browse_file_button = QPushButton("File")
+    window.dataframe_browse_file_button.setObjectName("dataframeBrowseFileButton")
+    window.dataframe_browse_file_button.setFixedHeight(22)
+    window.dataframe_browse_file_button.clicked.connect(window._browse_dataframe_file)
+    header.addWidget(window.dataframe_browse_file_button, 0, Qt.AlignmentFlag.AlignVCenter)
+    window.dataframe_browse_folder_button = QPushButton("Folder")
+    window.dataframe_browse_folder_button.setObjectName("dataframeBrowseFolderButton")
+    window.dataframe_browse_folder_button.setFixedHeight(22)
+    window.dataframe_browse_folder_button.clicked.connect(window._browse_dataframe_folder)
+    header.addWidget(window.dataframe_browse_folder_button, 0, Qt.AlignmentFlag.AlignVCenter)
+    window.dataframe_source_input = QLineEdit()
+    window.dataframe_source_input.setObjectName("pathInput")
+    window.dataframe_source_input.setReadOnly(True)
+    window.dataframe_source_input.setPlaceholderText("Choose a parquet file or folder")
+    window.dataframe_source_input.setMinimumWidth(340)
+    header.addWidget(window.dataframe_source_input, 1, Qt.AlignmentFlag.AlignVCenter)
+    container_layout.addLayout(header)
+
+    panel = QFrame()
+    panel.setObjectName("workspacePanel")
+    panel_layout = QVBoxLayout(panel)
+    panel_layout.setContentsMargins(12, 12, 12, 12)
+    panel_layout.setSpacing(10)
+    panel_header = QHBoxLayout()
+    panel_header.setContentsMargins(0, 0, 0, 0)
+    panel_header.setSpacing(8)
+    window.dataframe_preview_title_label = QLabel("Preview")
+    window.dataframe_preview_title_label.setObjectName("sectionTitle")
+    window.dataframe_preview_title_label.setWordWrap(False)
+    panel_header.addWidget(window.dataframe_preview_title_label, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+    panel_header.addStretch(1)
+    window.dataframe_preview_mode_combo = QComboBox()
+    window.dataframe_preview_mode_combo.setObjectName("outputPreviewModeCombo")
+    window.dataframe_preview_mode_combo.setFixedHeight(22)
+    window.dataframe_preview_mode_combo.setVisible(False)
+    panel_header.addWidget(window.dataframe_preview_mode_combo, 0, Qt.AlignmentFlag.AlignTop)
+    window.dataframe_preview_limit_spin = QSpinBox()
+    window.dataframe_preview_limit_spin.setObjectName("outputPreviewLimitSpin")
+    window.dataframe_preview_limit_spin.setFixedHeight(22)
+    window.dataframe_preview_limit_spin.setVisible(False)
+    panel_header.addWidget(window.dataframe_preview_limit_spin, 0, Qt.AlignmentFlag.AlignTop)
+    window.dataframe_preview_controls_layout = panel_header
+    panel_layout.addLayout(panel_header)
+
+    window.dataframe_preview_summary_label = QLabel("")
+    window.dataframe_preview_summary_label.setObjectName("workspaceCountsFooter")
+    window.dataframe_preview_summary_label.setWordWrap(False)
+    window.dataframe_preview_summary_label.setVisible(False)
+
+    preview_panel = QFrame()
+    preview_panel.setObjectName("outputPreviewBody")
+    window.dataframe_preview_layout = QVBoxLayout(preview_panel)
+    window.dataframe_preview_layout.setContentsMargins(0, 0, 0, 0)
+    window.dataframe_preview_layout.setSpacing(8)
+    panel_layout.addWidget(preview_panel, 1)
+    panel_layout.addWidget(window.dataframe_preview_summary_label, 0, Qt.AlignmentFlag.AlignLeft)
+
+    container_layout.addWidget(panel, 1)
+    window._clear_dataframe_preview("Choose a parquet source to preview it here.")
     return container
 
 
@@ -609,6 +690,7 @@ def build_right_panel(window: "DataEngineWindow") -> QWidget:
 __all__ = [
     "build_action_bar",
     "build_center_panel",
+    "build_dataframes_view",
     "build_debug_view",
     "build_docs_view",
     "build_nav_rail",

@@ -3,6 +3,8 @@
 from .support import (
     test_data_engine_window_instantiates_and_loads_flow_cards,
     test_data_engine_window_nav_buttons_switch_views,
+    test_dataframes_view_connects_parquet_folder,
+    test_dataframes_view_connects_single_parquet_file,
     test_debug_view_lists_previews_and_clears_saved_debug_artifacts,
     test_debug_nav_button_is_icon_only_and_switches_to_debug_view,
     test_load_flows_clears_visible_log_runs_when_reload_fails,

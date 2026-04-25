@@ -364,7 +364,8 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         letter-spacing: 0.12em;
         text-transform: uppercase;
     }}
-    QLabel#sectionMeta {{
+    QLabel#sectionMeta,
+    QLabel#outputPreviewStatusLabel {{
         background: transparent;
         color: {palette.muted_text};
         font-size: 11px;
@@ -620,18 +621,22 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QComboBox,
     QSpinBox {{
         background: {palette.input_bg};
-        border: 1px solid {palette.input_border};
+        border: 1px solid {palette.hover_border};
         border-radius: 4px;
         color: {palette.text};
         font-size: 11px;
         min-height: 22px;
         padding: 1px 20px 1px 8px;
     }}
+    QComboBox:hover,
+    QSpinBox:hover {{
+        border-color: {palette.selection_border};
+    }}
     QComboBox::drop-down {{
         subcontrol-origin: border;
         subcontrol-position: top right;
-        background: {palette.panel_bg};
-        border-left: 1px solid {palette.input_border};
+        background: {palette.button_bg};
+        border-left: 1px solid {palette.hover_border};
         border-top-right-radius: 4px;
         border-bottom-right-radius: 4px;
         width: 18px;
@@ -650,14 +655,14 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QSpinBox::up-button,
     QSpinBox::down-button {{
         subcontrol-origin: border;
-        background: {palette.panel_bg};
-        border-left: 1px solid {palette.input_border};
+        background: {palette.button_bg};
+        border-left: 1px solid {palette.hover_border};
         width: 14px;
     }}
     QSpinBox::up-button {{
         subcontrol-position: top right;
         border-top-right-radius: 4px;
-        border-bottom: 1px solid {palette.input_border};
+        border-bottom: 1px solid {palette.hover_border};
     }}
     QSpinBox::down-button {{
         subcontrol-position: bottom right;
@@ -825,7 +830,7 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border-radius: 5px;
     }}
     QFrame#outputPreviewBody {{
-        background: transparent;
+        background: {palette.panel_bg};
         border: none;
     }}
     QFrame#configPreviewBody {{
@@ -878,8 +883,8 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border: none;
     }}
     QTableWidget#outputPreviewTable {{
-        background: transparent;
-        alternate-background-color: transparent;
+        background: {palette.panel_bg};
+        alternate-background-color: {palette.panel_bg};
         border: 1px solid {palette.input_border};
         border-radius: 0px;
         gridline-color: {palette.input_border};

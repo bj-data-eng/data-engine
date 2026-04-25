@@ -16,8 +16,12 @@ from data_engine.ui.gui.helpers import (
     is_last_process_ui_window as helper_is_last_process_ui_window,
 )
 from data_engine.ui.gui.presenters import (
+    browse_dataframe_file as present_browse_dataframe_file,
+    browse_dataframe_folder as present_browse_dataframe_folder,
     browse_workspace_collection_root_override as present_browse_workspace_collection_root_override,
+    clear_dataframe_preview as present_clear_dataframe_preview,
     clear_workspace_debug_artifacts as present_clear_workspace_debug_artifacts,
+    connect_dataframe_path as present_connect_dataframe_path,
     create_docs_browser as present_create_docs_browser,
     force_shutdown_daemon as present_force_shutdown_daemon,
     initialize_docs_view as present_initialize_docs_view,
@@ -30,6 +34,7 @@ from data_engine.ui.gui.presenters import (
     refresh_workspace_root_controls as present_refresh_workspace_root_controls,
     reset_workspace_collection_root_override as present_reset_workspace_collection_root_override,
     save_workspace_collection_root_override as present_save_workspace_collection_root_override,
+    show_selected_dataframe_file as present_show_selected_dataframe_file,
     show_selected_debug_artifact as present_show_selected_debug_artifact,
 )
 from data_engine.ui.gui.surface import show_message_box_later as surface_show_message_box_later
@@ -246,7 +251,7 @@ class GuiWindowSupportMixin:
 
     def _switch_view(self: "DataEngineWindow", index: int) -> None:
         self.view_stack.setCurrentIndex(index)
-        if index == 1:
+        if index == 2:
             self._refresh_debug_artifacts()
         if hasattr(self, "workspace_counts_footer_label"):
             self.workspace_counts_footer_label.setVisible(index == 0)
@@ -288,6 +293,26 @@ class GuiWindowSupportMixin:
     def _browse_workspace_collection_root_override(self: "DataEngineWindow") -> None:
         """Open a folder picker for the local workspace collection root override."""
         present_browse_workspace_collection_root_override(self)
+
+    def _browse_dataframe_file(self: "DataEngineWindow") -> None:
+        """Open a parquet-file picker for the Dataframes view."""
+        present_browse_dataframe_file(self)
+
+    def _browse_dataframe_folder(self: "DataEngineWindow") -> None:
+        """Open a parquet-folder picker for the Dataframes view."""
+        present_browse_dataframe_folder(self)
+
+    def _connect_dataframe_path(self: "DataEngineWindow", path: Path) -> None:
+        """Connect one parquet file or folder to the Dataframes view."""
+        present_connect_dataframe_path(self, path)
+
+    def _show_selected_dataframe_file(self: "DataEngineWindow") -> None:
+        """Render the selected Dataframes view parquet file."""
+        present_show_selected_dataframe_file(self)
+
+    def _clear_dataframe_preview(self: "DataEngineWindow", message: str) -> None:
+        """Clear the Dataframes view preview pane."""
+        present_clear_dataframe_preview(self, message)
 
     def _provision_selected_workspace(self: "DataEngineWindow") -> None:
         """Provision the selected authored workspace without overwriting existing files."""

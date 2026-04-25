@@ -747,8 +747,9 @@ def test_provision_workspace_button_creates_missing_workspace_assets(qapp, tmp_p
 
 def test_icon_registry_loads_current_file_backed_svg():
     assert ICON_ASSETS["dark_light"].file_name == "dark_light.svg"
+    assert ICON_ASSETS["dataframe"].file_name == "dataframe.svg"
 
-    svg_text = load_svg_icon_text("dark_light")
+    svg_text = load_svg_icon_text("dataframe")
 
     assert "<svg" in svg_text
     assert "viewBox=" in svg_text
@@ -889,13 +890,34 @@ def test_show_output_preview_renders_excel_as_table(qapp, monkeypatch, tmp_path)
         table = window.output_preview_dialog.findChild(QTableWidget, "outputPreviewTable")
         export_button = window.output_preview_dialog.findChild(QPushButton, "outputPreviewExportExcelButton")
 
-        assert "2 row(s)" in meta_label.text()
-        assert "2 column(s)" in meta_label.text()
+        assert "2 rows" in meta_label.text()
+        assert "2 columns" in meta_label.text()
         assert table is not None
         assert table.rowCount() == 2
         assert table.columnCount() == 2
         assert export_button is not None
         assert export_button.isEnabled()
+    finally:
+        if window.output_preview_dialog is not None:
+            window.output_preview_dialog.close()
+        _dispose_window(qapp, window)
+
+
+def test_show_output_preview_parquet_summary_uses_footer(qapp, tmp_path):
+    output_path = tmp_path / "preview.parquet"
+    pl.DataFrame({"claim_id": [1001, 1002], "status": ["OPEN", "CLOSED"]}).write_parquet(output_path)
+
+    window = _make_window()
+    try:
+        window._show_output_preview("Write Parquet", output_path)
+
+        assert window.output_preview_dialog is not None
+        table = window.output_preview_dialog.findChild(QTableWidget, "outputPreviewTable")
+        summary_label = window.output_preview_dialog.findChild(QLabel, "workspaceCountsFooter")
+        assert table is not None
+        assert summary_label is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+        assert summary_label.text() == "2 rows - 2 columns - showing top 200 rows"
     finally:
         if window.output_preview_dialog is not None:
             window.output_preview_dialog.close()
@@ -986,8 +1008,8 @@ def test_parquet_preview_loader_sample_mode_collects_only_preview_rows(tmp_path)
     _schema, preview, summary = loaded[0]
     assert preview.height == 5
     assert preview.columns == ["claim_id", "status"]
-    assert "20 row(s)" in summary
-    assert "Showing sample of 5 rows" in summary
+    assert "20 rows" in summary
+    assert "showing sample of 5 rows" in summary
 
 
 def test_parquet_preview_loader_top_mode_avoids_discarded_preview_collect(tmp_path, monkeypatch):
@@ -1044,7 +1066,7 @@ def test_parquet_preview_loader_top_mode_avoids_discarded_preview_collect(tmp_pa
     assert len(loaded) == 1
     _schema, preview, summary = loaded[0]
     assert preview.height == 5
-    assert "Showing top 5 rows" in summary
+    assert "showing top 5 rows" in summary
     assert collect_count == 2
 
 
@@ -1111,7 +1133,7 @@ def test_data_engine_window_instantiates_and_loads_flow_cards(qapp, monkeypatch)
     del monkeypatch
     window = _make_window()
     try:
-        assert window.view_stack.count() == 4
+        assert window.view_stack.count() == 5
         assert window.selected_flow_name == "poller"
         assert set(window.sidebar_flow_widgets) == {"poller", "manual_review"}
         poller_widget = window.sidebar_flow_widgets["poller"]
@@ -1131,13 +1153,16 @@ def test_data_engine_window_nav_buttons_switch_views(qapp, monkeypatch):
         assert window.view_stack.currentIndex() == 0
 
         window.debug_button.click()
-        assert window.view_stack.currentIndex() == 1
-
-        window.docs_button.click()
         assert window.view_stack.currentIndex() == 2
 
-        window.settings_button.click()
+        window.docs_button.click()
         assert window.view_stack.currentIndex() == 3
+
+        window.settings_button.click()
+        assert window.view_stack.currentIndex() == 4
+
+        window.dataframes_button.click()
+        assert window.view_stack.currentIndex() == 1
 
         window.home_button.click()
         assert window.view_stack.currentIndex() == 0
@@ -3107,14 +3132,70 @@ def test_debug_nav_button_is_icon_only_and_switches_to_debug_view(qapp, monkeypa
     try:
         assert window.debug_button.text() == ""
         assert window.debug_button.toolTip() == ""
-        assert window.view_stack.tabText(1) == "Debug"
+        assert window.view_stack.tabText(2) == "Debug"
         assert window.view_stack.currentIndex() == 0
 
         window.debug_button.click()
         qapp.processEvents()
 
-        assert window.view_stack.currentIndex() == 1
+        assert window.view_stack.currentIndex() == 2
         assert window.debug_button.isChecked() is True
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_dataframes_view_connects_single_parquet_file(qapp, tmp_path):
+    output_path = tmp_path / "claims.parquet"
+    pl.DataFrame({"claim_id": [1001, 1002], "status": ["OPEN", "CLOSED"]}).write_parquet(output_path)
+
+    window = _make_window()
+    try:
+        window.dataframes_button.click()
+        qapp.processEvents()
+        window._connect_dataframe_path(output_path)
+
+        table = window.dataframe_preview_layout.itemAt(0).widget().findChild(QTableWidget, "outputPreviewTable")
+        export_button = window.findChild(QPushButton, "outputPreviewExportExcelButton")
+        assert window.view_stack.currentIndex() == 1
+        assert window.dataframe_source_input.text() == str(output_path)
+        assert table is not None
+        assert export_button is not None
+        status_label = window.dataframe_preview_summary_label
+        assert status_label is not None
+        assert (
+            window.dataframe_preview_controls_layout.indexOf(export_button)
+            < window.dataframe_preview_controls_layout.indexOf(window.dataframe_preview_mode_combo)
+        )
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+        assert window.dataframe_preview_title_label.text() == "claims.parquet"
+        assert window.dataframe_preview_summary_label.objectName() == "workspaceCountsFooter"
+        assert "2 rows - 2 columns - showing top 200 rows" in window.dataframe_preview_summary_label.text()
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_dataframes_view_connects_parquet_folder(qapp, tmp_path):
+    first_path = tmp_path / "a.parquet"
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
+    second_path = nested_dir / "b.parquet"
+    ignored_path = tmp_path / "notes.txt"
+    pl.DataFrame({"claim_id": [1]}).write_parquet(first_path)
+    pl.DataFrame({"claim_id": [2]}).write_parquet(second_path)
+    ignored_path.write_text("skip", encoding="utf-8")
+
+    window = _make_window()
+    try:
+        window.dataframes_button.click()
+        qapp.processEvents()
+        window._connect_dataframe_path(tmp_path)
+
+        table = window.dataframe_preview_layout.itemAt(0).widget().findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        assert window.dataframe_source_input.text() == str(tmp_path)
+        assert window._dataframe_preview_path.as_posix().endswith("/**/*.parquet")
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+        assert window.dataframe_preview_title_label.text() == "2 parquet files"
     finally:
         _dispose_window(qapp, window)
 
@@ -3153,8 +3234,8 @@ def test_debug_view_lists_previews_and_clears_saved_debug_artifacts(qapp):
 
         assert window.debug_artifact_list.count() == 1
         assert window.debug_artifact_title_label.text() == "Dataframe"
-        _process_ui_until(qapp, lambda: "2 column(s)" in window.debug_artifact_summary_label.text())
-        assert "2 column(s)" in window.debug_artifact_summary_label.text()
+        _process_ui_until(qapp, lambda: "2 columns" in window.debug_artifact_summary_label.text())
+        assert "2 columns" in window.debug_artifact_summary_label.text()
         assert window.debug_artifact_source_label.text() == "Source: C:/input/docs_flat_1.xlsx"
         explorer = window.debug_preview_layout.itemAt(0).widget()
         table = explorer.findChild(QTableWidget, "outputPreviewTable")

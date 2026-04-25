@@ -93,9 +93,11 @@ def show_selected_debug_artifact(window: "DataEngineWindow") -> None:
         limit_spin.setVisible(show_controls)
     if summary_label is not None:
         if preview_spec.kind == "parquet":
-            summary_label.setText("Loading preview…")
+            summary_label.setText("")
+            summary_label.setVisible(True)
         else:
             summary_label.setText(build_preview_summary_text(record.artifact_path, preview_spec))
+            summary_label.setVisible(True)
     source_label = getattr(window, "debug_artifact_source_label", None)
     if source_label is not None:
         source_label.setText(f"Source: {record.source_path}" if record.source_path else "")
@@ -110,7 +112,14 @@ def show_selected_debug_artifact(window: "DataEngineWindow") -> None:
         preview_spec=preview_spec,
         show_summary=False,
         timing_log_path=getattr(window, "_ui_timing_log_path", None),
-        external_preview_controls=(mode_combo, limit_spin) if mode_combo is not None and limit_spin is not None else None,
+        external_preview_controls=(
+            mode_combo,
+            limit_spin,
+            getattr(window, "debug_preview_controls_layout", None),
+            summary_label,
+        )
+        if mode_combo is not None and limit_spin is not None and getattr(window, "debug_preview_controls_layout", None) is not None and summary_label is not None
+        else None,
     )
     append_timing_line(
         getattr(window, "_ui_timing_log_path", None),
@@ -123,7 +132,7 @@ def show_selected_debug_artifact(window: "DataEngineWindow") -> None:
             "preview_kind": preview_spec.kind,
         },
     )
-    if summary_label is not None and hasattr(preview_widget, "summary_changed"):
+    if summary_label is not None and preview_spec.kind != "parquet" and hasattr(preview_widget, "summary_changed"):
         preview_widget.summary_changed.connect(summary_label.setText)
 
 
@@ -134,6 +143,7 @@ def _clear_debug_preview(window: "DataEngineWindow", *, message: str) -> None:
     summary_label = getattr(window, "debug_artifact_summary_label", None)
     if summary_label is not None:
         summary_label.setText("")
+        summary_label.setVisible(False)
     source_label = getattr(window, "debug_artifact_source_label", None)
     if source_label is not None:
         source_label.setText("")

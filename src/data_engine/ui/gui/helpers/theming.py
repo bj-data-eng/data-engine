@@ -85,7 +85,7 @@ def apply_theme(window: "DataEngineWindow") -> None:
         app.setStyleSheet(stylesheet(window.theme_name))
     window.theme_toggle_button.setIcon(window._action_bar_icon("theme_toggle"))
     window.refresh_button.setIcon(window._action_bar_icon("refresh"))
-    for button in (window.home_button, window.debug_button, window.docs_button, window.settings_button):
+    for button in (window.home_button, window.dataframes_button, window.debug_button, window.docs_button, window.settings_button):
         icon_name = button.property("viewIconName")
         if isinstance(icon_name, str):
             button.setIcon(window._view_rail_icon(icon_name))

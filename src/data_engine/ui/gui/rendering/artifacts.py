@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QMenu,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QStyle,
     QStyleOptionHeader,
@@ -206,7 +207,7 @@ class _ParquetPreviewLoader(QThread):
                 )
             if self._preview_mode == _PREVIEW_MODE_BOTTOM:
                 preview = query.tail(self._preview_row_limit).collect()
-                preview_label = f"Showing bottom {self._preview_row_limit} rows"
+                preview_label = f"showing bottom {self._preview_row_limit} rows"
             elif self._preview_mode == _PREVIEW_MODE_SAMPLE:
                 sample_size = min(self._preview_row_limit, row_count)
                 if sample_size <= 0:
@@ -221,11 +222,11 @@ class _ParquetPreviewLoader(QThread):
                         .drop("__preview_row_index")
                         .collect()
                     )
-                preview_label = f"Showing sample of {self._preview_row_limit} rows"
+                preview_label = f"showing sample of {self._preview_row_limit} rows"
             else:
                 preview = query.head(self._preview_row_limit).collect()
-                preview_label = f"Showing top {self._preview_row_limit} rows"
-            summary = f"{row_count} row(s)  •  {len(schema.names())} column(s)  •  {preview_label}"
+                preview_label = f"showing top {self._preview_row_limit} rows"
+            summary = f"{row_count} rows - {len(schema.names())} columns - {preview_label}"
             self.preview_loaded.emit(schema, preview, summary)
         except Exception as exc:  # pragma: no cover - defensive UI fallback
             self.load_failed.emit(str(exc))
@@ -642,7 +643,12 @@ class _ParquetExplorerWidget(QWidget):
         output_path: Path,
         *,
         timing_log_path: Path | None = None,
-        external_preview_controls: tuple[QComboBox, QSpinBox] | None = None,
+        external_preview_controls: (
+            tuple[QComboBox, QSpinBox]
+            | tuple[QComboBox, QSpinBox, QHBoxLayout]
+            | tuple[QComboBox, QSpinBox, QHBoxLayout, QLabel]
+            | None
+        ) = None,
     ) -> None:
         super().__init__()
         self.setObjectName("outputPreviewExplorer")
@@ -661,8 +667,15 @@ class _ParquetExplorerWidget(QWidget):
         self._active_distinct_requests: dict[tuple[str, int], str] = {}
         self._open_filter_column_index: int | None = None
         self._owns_preview_controls = external_preview_controls is None
+        self._external_preview_controls_layout = (
+            external_preview_controls[2]
+            if external_preview_controls is not None and len(external_preview_controls) >= 3
+            else None
+        )
+        self._owns_status_label = not (external_preview_controls is not None and len(external_preview_controls) >= 4)
         self._table_render_generation = 0
         self._sort_columns: list[tuple[str, bool]] = []
+        self._preview_summary_text = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -683,26 +696,46 @@ class _ParquetExplorerWidget(QWidget):
             controls.addWidget(self.preview_limit_spin)
             layout.addLayout(controls)
         else:
-            self.preview_mode_combo, self.preview_limit_spin = external_preview_controls
+            self.preview_mode_combo = external_preview_controls[0]
+            self.preview_limit_spin = external_preview_controls[1]
 
         self._configure_preview_controls()
 
-        export_row = QHBoxLayout()
-        export_row.setContentsMargins(0, 0, 0, 0)
-        export_row.setSpacing(8)
-        self.status_label = QLabel("Loading preview…")
-        self.status_label.setObjectName("sectionMeta")
-        self.status_label.setWordWrap(True)
-        export_row.addWidget(self.status_label, 1, Qt.AlignmentFlag.AlignVCenter)
-        export_row.addStretch(1)
+        if self._owns_status_label:
+            self.status_label = QLabel("Loading preview…")
+            self.status_label.setObjectName("outputPreviewStatusLabel")
+            self.status_label.setWordWrap(False)
+            self.status_label.setMinimumWidth(0)
+            self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        else:
+            self.status_label = external_preview_controls[3]
         self.export_excel_button = QPushButton("Export Excel")
         self.export_excel_button.setObjectName("outputPreviewExportExcelButton")
         self.export_excel_button.setFixedHeight(22)
         self.export_excel_button.setToolTip("Export the visible preview rows to an Excel workbook.")
         self.export_excel_button.setEnabled(False)
         self.export_excel_button.clicked.connect(self._export_current_preview)
-        export_row.addWidget(self.export_excel_button)
-        layout.addLayout(export_row)
+        if external_preview_controls is None:
+            stretch_index = _first_layout_stretch_index(controls)
+            controls.insertWidget(max(0, stretch_index), self.status_label, 1, Qt.AlignmentFlag.AlignVCenter)
+            combo_index = controls.indexOf(self.preview_mode_combo)
+            controls.insertWidget(max(0, combo_index), self.export_excel_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        elif len(external_preview_controls) >= 3:
+            controls_layout = external_preview_controls[2]
+            combo_index = controls_layout.indexOf(self.preview_mode_combo)
+            controls_layout.insertWidget(max(0, combo_index), self.export_excel_button, 0, Qt.AlignmentFlag.AlignVCenter)
+            if self._owns_status_label:
+                stretch_index = _first_layout_stretch_index(controls_layout)
+                controls_layout.insertWidget(max(0, stretch_index), self.status_label, 1, Qt.AlignmentFlag.AlignVCenter)
+        else:
+            export_row = QHBoxLayout()
+            export_row.setContentsMargins(0, 0, 0, 0)
+            export_row.setSpacing(8)
+            export_row.addStretch(1)
+            if self._owns_status_label:
+                export_row.addWidget(self.status_label, 1, Qt.AlignmentFlag.AlignVCenter)
+            export_row.addWidget(self.export_excel_button, 0, Qt.AlignmentFlag.AlignVCenter)
+            layout.addLayout(export_row)
 
         self.table = _build_dataframe_table(pl.DataFrame())
         self.table.horizontalHeader().setSectionsClickable(True)
@@ -760,6 +793,13 @@ class _ParquetExplorerWidget(QWidget):
         self._distinct_loaders.clear()
         for loader in distinct_loaders:
             loader.wait(5000)
+        if self._external_preview_controls_layout is not None:
+            self._external_preview_controls_layout.removeWidget(self.export_excel_button)
+            if self._owns_status_label:
+                self._external_preview_controls_layout.removeWidget(self.status_label)
+            self.export_excel_button.deleteLater()
+            if self._owns_status_label:
+                self.status_label.deleteLater()
 
     def selected_filter_values(self, column_name: str) -> tuple[object, ...] | None:
         return self._active_value_filters.get(column_name)
@@ -834,8 +874,7 @@ class _ParquetExplorerWidget(QWidget):
                 "sort_column_count": len(self._sort_columns),
             },
         )
-        self.status_label.setText("Loading preview…")
-        self.status_label.setVisible(True)
+        self._set_preview_status("Loading preview…")
         self.table.setEnabled(False)
         self.export_excel_button.setEnabled(False)
         loader = _ParquetPreviewLoader(
@@ -990,8 +1029,8 @@ class _ParquetExplorerWidget(QWidget):
         self._active_preview_request_id = None
         self.table.setEnabled(False)
         self.export_excel_button.setEnabled(False)
-        self.status_label.setText(f"Unable to load preview: {message}")
-        self.status_label.setVisible(True)
+        self._preview_summary_text = "Unable to load preview"
+        self._set_preview_status(message)
         append_timing_line(
             self._timing_log_path,
             scope="gui.debug",
@@ -1003,7 +1042,6 @@ class _ParquetExplorerWidget(QWidget):
                 "error": message,
             },
         )
-        self.summary_changed.emit("Unable to load preview")
 
     def _handle_preview_finished(self) -> None:
         self._preview_loader = None
@@ -1112,9 +1150,8 @@ class _ParquetExplorerWidget(QWidget):
             sort_columns=self._sort_columns,
         )
         self.table.setEnabled(False)
-        self.status_label.setText("Rendering preview...")
-        self.status_label.setVisible(True)
-        self.summary_changed.emit(summary)
+        self._preview_summary_text = summary
+        self._set_preview_status("Rendering preview...")
         if preview.height <= _TABLE_RENDER_BATCH_SIZE:
             _populate_dataframe_table_rows(self.table, preview, 0, preview.height)
             self._finish_table_render(generation, preview)
@@ -1138,7 +1175,7 @@ class _ParquetExplorerWidget(QWidget):
             self.table.resizeColumnsToContents()
         self.table.setEnabled(True)
         self.export_excel_button.setEnabled(bool(preview.columns))
-        self.status_label.setVisible(False)
+        self._set_preview_status(None)
 
     def _merge_selected_values(self, column_name: str, values: list[tuple[str, object]]) -> list[tuple[str, object]]:
         selected_values = self.selected_filter_values(column_name) or ()
@@ -1160,6 +1197,16 @@ class _ParquetExplorerWidget(QWidget):
 
     def _export_current_preview(self) -> None:
         _export_frame_to_excel(self._current_preview, source_path=self._output_path, parent=self)
+
+    def _set_preview_status(self, status: str | None) -> None:
+        summary_text = self._preview_summary_text
+        if summary_text and status:
+            text = f"{summary_text} - {status}"
+        else:
+            text = summary_text or status or ""
+        self.status_label.setText(text)
+        self.status_label.setVisible(bool(text))
+        self.summary_changed.emit(text)
 
 
 class _CopyablePreviewTable(QTableWidget):
@@ -1371,7 +1418,15 @@ def _build_dataframe_table(frame: pl.DataFrame) -> QTableWidget:
 
 
 def _frame_summary_text(frame: pl.DataFrame) -> str:
-    return f"{frame.height} row(s)  \u2022  {len(frame.columns)} column(s)  \u2022  Previewing up to {_PREVIEW_ROW_LIMIT} rows"
+    return f"{frame.height} rows - {len(frame.columns)} columns - previewing up to {_PREVIEW_ROW_LIMIT} rows"
+
+
+def _first_layout_stretch_index(layout: QHBoxLayout) -> int:
+    for index in range(layout.count()):
+        item = layout.itemAt(index)
+        if item is not None and item.spacerItem() is not None:
+            return index
+    return layout.count() - 1
 
 
 def _export_frame_to_excel(frame: pl.DataFrame, *, source_path: Path | None, parent: QWidget) -> Path | None:
@@ -1397,7 +1452,22 @@ def _export_frame_to_excel(frame: pl.DataFrame, *, source_path: Path | None, par
 def _default_excel_export_path(source_path: Path | None) -> Path:
     if source_path is None:
         return Path("preview.xlsx")
+    if _path_contains_glob(source_path):
+        return _glob_base_path(source_path) / "parquet_preview.xlsx"
     return source_path.with_name(f"{source_path.stem}_preview.xlsx")
+
+
+def _path_contains_glob(path: Path) -> bool:
+    return any(any(marker in part for marker in ("*", "?", "[")) for part in path.parts)
+
+
+def _glob_base_path(path: Path) -> Path:
+    base_parts: list[str] = []
+    for part in path.parts:
+        if any(marker in part for marker in ("*", "?", "[")):
+            break
+        base_parts.append(part)
+    return Path(*base_parts) if base_parts else Path.cwd()
 
 
 def _with_excel_suffix(path: Path) -> Path:

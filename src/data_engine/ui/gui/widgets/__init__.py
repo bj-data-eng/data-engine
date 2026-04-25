@@ -5,6 +5,7 @@ from data_engine.ui.gui.widgets.log_list import LogRunListWidget
 from data_engine.ui.gui.widgets.panels import (
     build_action_bar,
     build_center_panel,
+    build_dataframes_view,
     build_debug_view,
     build_docs_view,
     build_nav_rail,
@@ -20,6 +21,7 @@ from data_engine.ui.gui.widgets.steps import format_operation_title, set_operati
 __all__ = [
     "build_action_bar",
     "build_center_panel",
+    "build_dataframes_view",
     "build_debug_view",
     "build_config_value",
     "build_docs_view",

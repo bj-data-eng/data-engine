@@ -2,6 +2,13 @@
 
 from data_engine.ui.gui.presenters.logs import add_log_run_item, format_raw_log_message, refresh_log_view
 from data_engine.ui.gui.presenters.debug import clear_workspace_debug_artifacts, refresh_debug_artifacts, show_selected_debug_artifact
+from data_engine.ui.gui.presenters.dataframes import (
+    browse_dataframe_file,
+    browse_dataframe_folder,
+    clear_dataframe_preview,
+    connect_dataframe_path,
+    show_selected_dataframe_file,
+)
 from data_engine.ui.gui.presenters.docs import (
     create_docs_browser,
     initialize_docs_view,
@@ -37,7 +44,11 @@ __all__ = [
     "add_log_run_item",
     "apply_runtime_event",
     "browse_workspace_collection_root_override",
+    "browse_dataframe_file",
+    "browse_dataframe_folder",
     "clear_workspace_debug_artifacts",
+    "clear_dataframe_preview",
+    "connect_dataframe_path",
     "create_docs_browser",
     "duration_text",
     "finish_daemon_startup",
@@ -64,5 +75,6 @@ __all__ = [
     "reset_operation_state",
     "save_workspace_collection_root_override",
     "show_selected_debug_artifact",
+    "show_selected_dataframe_file",
     "set_hovered",
 ]

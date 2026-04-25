@@ -12,6 +12,7 @@ from .support import (
     test_rehydrate_step_outputs_from_ledger_enables_inspect_button,
     test_settings_visibility_panel_reports_workspace_stats,
     test_show_output_preview_pdf_uses_placeholder_message,
+    test_show_output_preview_parquet_summary_uses_footer,
     test_show_output_preview_renders_excel_as_table,
     test_structured_error_content_parses_build_failure,
     test_structured_error_content_parses_missing_flow_module_error,
