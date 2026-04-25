@@ -361,7 +361,9 @@ Use this when one row in a grouped window marks an event, but every row in
 that window needs the event's value. The first argument can be a column name or
 any Polars expression, including an adjacent value expression such as
 `pl.col("archive_date").dt.combine(pl.col("archive_time"))`. The output column
-name comes from `with_columns`.
+name comes from `with_columns`. Use normal Polars boolean expressions such as
+`pl.col("status") != "Archive"` or composed `&` and `|` predicates when the
+candidate row needs more specific matching.
 
 ## Recipe: Count repeated visits to the same workflow
 

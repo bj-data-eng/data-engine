@@ -337,6 +337,19 @@ def propagate_last_value(
                 where=pl.col("status") == "Archive",
             )
         )
+
+    Compose the predicate to use the last row that is not Archive:
+
+    .. code-block:: python
+
+        df = df.with_columns(
+            last_active_at=data_engine.helpers.propagate_last_value(
+                pl.col("event_date").dt.combine(pl.col("event_time")),
+                by="claim_id",
+                sort_by="claim_step_index",
+                where=pl.col("status") != "Archive",
+            )
+        )
     """
     sort_exprs = _as_column_exprs(sort_by)
     value_expr = _as_column_expr(value)

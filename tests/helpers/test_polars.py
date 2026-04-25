@@ -518,6 +518,34 @@ def test_propagate_last_value_can_filter_source_rows_and_return_adjacent_values(
     ]
 
 
+def test_propagate_last_value_accepts_composed_source_row_filters():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "a", "b", "b"],
+            "step_index": [1, 2, 3, 1, 2],
+            "event": ["Open", "Archive", "Review", "Archive", "Archive"],
+            "event_date": ["2026-04-01", "2026-04-02", "2026-04-03", "2026-05-01", "2026-05-02"],
+        }
+    )
+
+    result = frame.with_columns(
+        last_non_archive_date=propagate_last_value(
+            "event_date",
+            by="claim_id",
+            sort_by="step_index",
+            where=pl.col("event") != "Archive",
+        )
+    )
+
+    assert result.to_dict(as_series=False)["last_non_archive_date"] == [
+        "2026-04-03",
+        "2026-04-03",
+        "2026-04-03",
+        None,
+        None,
+    ]
+
+
 def test_visit_counter_counts_repeated_contiguous_value_runs_per_window():
     frame = pl.DataFrame(
         {
