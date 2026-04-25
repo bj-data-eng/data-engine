@@ -13,7 +13,7 @@ import pytest
 import polars as pl
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QListWidget, QPushButton, QSpinBox, QTableWidget, QTextEdit, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QListWidget, QPushButton, QSpinBox, QTableWidget, QTextEdit, QWidget
 from shiboken6 import delete as shiboken_delete
 from shiboken6 import isValid as shiboken_is_valid
 
@@ -3600,13 +3600,16 @@ def test_debug_view_column_filter_header_click_toggles_popup(qapp):
         _process_ui_until(qapp, lambda: table.rowCount() == 2)
 
         header = table.horizontalHeader()
-        header_rect = header.sectionRect(0)
-        QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, header_rect.center())
+        header_center = header.viewport().rect().topLeft() + QPoint(
+            header.sectionViewportPosition(0) + max(1, header.sectionSize(0) // 2),
+            max(1, header.height() // 2),
+        )
+        QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, header_center)
         qapp.processEvents()
         popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
         assert popup is not None and popup.isVisible()
 
-        QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, header_rect.center())
+        QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, header_center)
         qapp.processEvents()
         popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
         assert popup is None or popup.isVisible() is False
@@ -3711,14 +3714,23 @@ def test_debug_view_column_filter_popup_supports_multi_column_sort(qapp):
         popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
         assert popup is not None and popup.isVisible()
         sort_button = popup.findChild(QPushButton, "outputPreviewSortAscendingButton")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
         assert sort_button is not None
+        assert values_list is not None
         QTest.mouseClick(sort_button, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        assert popup.isVisible()
         _process_ui_until(
             qapp,
             lambda: table.isEnabled()
             and table.item(0, 0) is not None
             and table.item(1, 0) is not None
             and explorer._sort_columns == [("workflow", False)],
+        )
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 2
+            and [values_list.item(index).text() for index in range(values_list.count())] == ["A", "B"],
         )
 
         explorer._open_filter_popup_for_index(1)
@@ -3890,6 +3902,196 @@ def test_debug_view_search_subset_apply_filters_single_matching_value(qapp):
 
         assert table.rowCount() == 1
         assert table.item(0, 0).text() == "Enrollment"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_string_column_filter_popup_applies_text_filter(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 1003],
+                "status": ["OPEN", "CLOSED", "PENDING"],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 3)
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        operation = popup.findChild(QComboBox, "outputPreviewTextFilterCombo")
+        text_filter = popup.findChild(QLineEdit, "outputPreviewTextFilterInput")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert operation is not None
+        assert text_filter is not None
+        assert values_list is not None
+        assert operation.currentData() == "contains"
+
+        text_filter.setText("EN")
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 2
+            and [values_list.item(index).text() for index in range(values_list.count())] == ["OPEN", "PENDING"],
+        )
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+
+        _process_ui_until(
+            qapp,
+            lambda: table.rowCount() == 2
+            and table.item(0, 1) is not None
+            and table.item(1, 1) is not None,
+        )
+        assert [table.item(row, 1).text() for row in range(table.rowCount())] == ["OPEN", "PENDING"]
+        assert popup.isVisible() is False
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_non_string_column_filter_popup_hides_text_filter(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame({"claim_id": [1001, 1002], "status": ["OPEN", "CLOSED"]}).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+
+        explorer._open_filter_popup_for_index(0)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        assert popup.findChild(QComboBox, "outputPreviewTextFilterCombo") is None
+        assert popup.findChild(QLineEdit, "outputPreviewTextFilterInput") is None
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_filter_popup_clear_resets_column_filter_and_sort(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 1003],
+                "status": ["OPEN", "CLOSED", "PENDING"],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 3)
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        sort_button = popup.findChild(QPushButton, "outputPreviewSortAscendingButton")
+        text_filter = popup.findChild(QLineEdit, "outputPreviewTextFilterInput")
+        assert sort_button is not None
+        assert text_filter is not None
+
+        QTest.mouseClick(sort_button, Qt.MouseButton.LeftButton)
+        text_filter.setText("EN")
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+        _process_ui_until(qapp, lambda: table.rowCount() == 2 and explorer._sort_columns == [("status", False)])
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        text_filter = popup.findChild(QLineEdit, "outputPreviewTextFilterInput")
+        assert text_filter is not None
+        assert text_filter.text() == "EN"
+
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Clear").click()
+        _process_ui_until(qapp, lambda: table.rowCount() == 3 and explorer._sort_columns == [])
+        assert explorer.active_column_filter("status") is None
+        assert text_filter.text() == ""
+        assert popup.isVisible() is False
     finally:
         _dispose_window(qapp, window)
 

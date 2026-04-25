@@ -927,6 +927,20 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border: 1px solid {palette.input_border};
         border-radius: 5px;
     }}
+    QFrame#outputPreviewSortControlBar {{
+        background: {palette.panel_bg};
+        border: 1px solid {palette.input_border};
+        border-bottom: none;
+        border-radius: 5px;
+        border-bottom-left-radius: 0px;
+        border-bottom-right-radius: 0px;
+    }}
+    QListWidget#outputPreviewPopupList {{
+        background: {palette.panel_bg};
+        border-top: none;
+        border-top-left-radius: 0px;
+        border-top-right-radius: 0px;
+    }}
     QListWidget::item {{
         padding: 4px 6px;
         border-radius: 5px;

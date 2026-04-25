@@ -11,6 +11,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPai
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QFileDialog,
     QFrame,
     QHeaderView,
@@ -56,6 +57,10 @@ _PREVIEW_ROW_LIMIT_MAX = 500_000
 _TABLE_RENDER_BATCH_SIZE = 500
 _PREVIEW_DISTINCT_VALUE_LIMIT = 500
 _PREVIEW_MODE_TOP = "top"
+
+
+def _dtype_supports_text_filter(dtype: pl.DataType) -> bool:
+    return str(dtype) in {"String", "Categorical", "Enum"}
 
 
 class _PreviewHeaderView(QHeaderView):
@@ -236,6 +241,8 @@ class _DistinctValueLoader(QThread):
         *,
         token: int,
         active_filters: dict[str, ColumnFilter],
+        value_filter: ColumnFilter | None,
+        sort_descending: bool | None,
         search_text: str,
         value_limit: int = 500,
     ) -> None:
@@ -244,6 +251,8 @@ class _DistinctValueLoader(QThread):
         self._column_name = column_name
         self._token = token
         self._active_filters = dict(active_filters)
+        self._value_filter = value_filter
+        self._sort_descending = sort_descending
         self._search_text = search_text.strip().lower()
         self._value_limit = max(1, value_limit)
 
@@ -257,6 +266,10 @@ class _DistinctValueLoader(QThread):
                 expression = build_column_filter_expression(column_filter, dtype=schema[active_name])
                 if expression is not None:
                     query = query.filter(expression)
+            if self._value_filter is not None:
+                expression = build_column_filter_expression(self._value_filter, dtype=schema[self._column_name])
+                if expression is not None:
+                    query = query.filter(expression)
             column = pl.col(self._column_name)
             if self._search_text:
                 query = query.filter(
@@ -265,11 +278,10 @@ class _DistinctValueLoader(QThread):
                         literal=True,
                     )
                 )
-            series = (
-                query.select(column.unique(maintain_order=True).head(self._value_limit + 1).alias(self._column_name))
-                .collect()
-                .get_column(self._column_name)
-            )
+            value_expression = column.unique(maintain_order=True)
+            if self._sort_descending is not None:
+                value_expression = value_expression.sort(descending=self._sort_descending)
+            series = query.select(value_expression.head(self._value_limit + 1).alias(self._column_name)).collect().get_column(self._column_name)
             raw_values = series.to_list()
             truncated = len(raw_values) > self._value_limit
             values: list[tuple[str, object]] = []
@@ -304,15 +316,27 @@ class _ParquetFilterPopup(QFrame):
         self._sort_ascending_button: QPushButton | None = None
         self._sort_descending_button: QPushButton | None = None
         self._select_all_button: QPushButton | None = None
+        self._text_filter_combo: QComboBox | None = None
+        self._text_filter_input: QLineEdit | None = None
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
 
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(8)
         title = QLabel(f"{column_name} ({dtype})", self)
         title.setObjectName("sectionTitle")
-        layout.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        self.status_label = QLabel("", self)
+        self.status_label.setObjectName("sectionMeta")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.status_label.setVisible(False)
+        title_row.addWidget(self.status_label)
+        layout.addLayout(title_row)
 
         self.search_input = QLineEdit(self)
         self.search_input.setObjectName("outputPreviewPopupSearch")
@@ -320,15 +344,18 @@ class _ParquetFilterPopup(QFrame):
         self.search_input.setClearButtonEnabled(True)
         layout.addWidget(self.search_input)
 
-        self.status_label = QLabel("", self)
-        self.status_label.setObjectName("sectionMeta")
-        self.status_label.setWordWrap(True)
-        self.status_label.setVisible(False)
-        layout.addWidget(self.status_label)
+        if _dtype_supports_text_filter(dtype):
+            layout.addWidget(self._build_text_filter_controls())
 
-        controls_frame = QFrame(self)
-        controls_frame.setObjectName("outputPreviewControlBar")
-        layout.addWidget(controls_frame)
+        value_panel = QFrame(self)
+        value_panel_layout = QVBoxLayout(value_panel)
+        value_panel_layout.setContentsMargins(0, 0, 0, 0)
+        value_panel_layout.setSpacing(0)
+        layout.addWidget(value_panel, 1)
+
+        controls_frame = QFrame(value_panel)
+        controls_frame.setObjectName("outputPreviewSortControlBar")
+        value_panel_layout.addWidget(controls_frame)
 
         sort_actions = QHBoxLayout(controls_frame)
         sort_actions.setContentsMargins(6, 6, 6, 6)
@@ -354,16 +381,20 @@ class _ParquetFilterPopup(QFrame):
         sort_actions.addWidget(self._sort_descending_button)
         self._refresh_sort_button_state()
 
-        self.values_list = QListWidget(self)
+        self.values_list = QListWidget(value_panel)
         self.values_list.setObjectName("outputPreviewPopupList")
         self.values_list.setMinimumWidth(220)
         self.values_list.setMinimumHeight(240)
         self.values_list.itemChanged.connect(self._sync_select_all_button)
-        layout.addWidget(self.values_list, 1)
+        value_panel_layout.addWidget(self.values_list, 1)
 
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 0, 0, 0)
         footer.setSpacing(6)
+        clear_button = QPushButton("Clear", self)
+        clear_button.setObjectName("filterPopupActionButton")
+        clear_button.clicked.connect(self._clear_column_state)
+        footer.addWidget(clear_button)
         footer.addStretch(1)
         cancel_button = QPushButton("Cancel", self)
         cancel_button.setObjectName("filterPopupActionButton")
@@ -381,6 +412,39 @@ class _ParquetFilterPopup(QFrame):
         self._search_timer.timeout.connect(self._dispatch_search)
         self.search_input.textChanged.connect(self._queue_search)
         self.set_values(values)
+
+    def _build_text_filter_controls(self) -> QFrame:
+        text_frame = QFrame(self)
+        text_frame.setObjectName("outputPreviewControlBar")
+        text_layout = QHBoxLayout(text_frame)
+        text_layout.setContentsMargins(6, 6, 6, 6)
+        text_layout.setSpacing(6)
+
+        self._text_filter_combo = QComboBox(text_frame)
+        self._text_filter_combo.setObjectName("outputPreviewTextFilterCombo")
+        self._text_filter_combo.addItem("Contains", "contains")
+        self._text_filter_combo.addItem("Does Not Contain", "not_contains")
+        self._text_filter_combo.addItem("Equals", "equals")
+        self._text_filter_combo.addItem("Does Not Equal", "not_equals")
+        self._text_filter_combo.addItem("Begins With", "begins_with")
+        self._text_filter_combo.addItem("Ends With", "ends_with")
+        text_layout.addWidget(self._text_filter_combo)
+
+        self._text_filter_input = QLineEdit(text_frame)
+        self._text_filter_input.setObjectName("outputPreviewTextFilterInput")
+        self._text_filter_input.setPlaceholderText("Text filter")
+        self._text_filter_input.setClearButtonEnabled(True)
+        text_layout.addWidget(self._text_filter_input, 1)
+
+        active_filter = self._explorer.active_column_filter(self._column_name)
+        if active_filter is not None and active_filter.kind == "text" and active_filter.values:
+            index = self._text_filter_combo.findData(active_filter.operation)
+            if index >= 0:
+                self._text_filter_combo.setCurrentIndex(index)
+            self._text_filter_input.setText(str(active_filter.values[0]))
+        self._text_filter_combo.currentIndexChanged.connect(lambda _index: self._queue_search())
+        self._text_filter_input.textChanged.connect(lambda _text: self._queue_search())
+        return text_frame
 
     def showEvent(self, event) -> None:  # noqa: N802
         app = QApplication.instance()
@@ -545,6 +609,11 @@ class _ParquetFilterPopup(QFrame):
         self._apply_select_all_state(target_state)
 
     def _apply_selection(self) -> None:
+        text_filter = self.distinct_list_text_filter()
+        if text_filter is not None:
+            self._explorer.apply_text_filter(self._column_name, text_filter.operation, str(text_filter.values[0]))
+            self.close()
+            return
         selected_values: list[object] = []
         total_values: list[object] = []
         for index in range(self.values_list.count()):
@@ -561,6 +630,14 @@ class _ParquetFilterPopup(QFrame):
         )
         self.close()
 
+    def _clear_column_state(self) -> None:
+        if self._text_filter_input is not None:
+            self._text_filter_input.clear()
+        self._explorer.clear_column_filter_and_sort(self._column_name)
+        self._refresh_sort_button_state()
+        self._queue_search()
+        self.close()
+
     def _queue_search(self) -> None:
         self._search_timer.start()
 
@@ -568,6 +645,14 @@ class _ParquetFilterPopup(QFrame):
         search_text = self.search_input.text().strip()
         self._search_token += 1
         self._explorer.request_filter_values(self._column_name, search_text, self._search_token)
+
+    def distinct_list_text_filter(self) -> ColumnFilter | None:
+        if self._text_filter_combo is None or self._text_filter_input is None:
+            return None
+        filter_value = self._text_filter_input.text().strip()
+        if not filter_value:
+            return None
+        return ColumnFilter.text(self._column_name, str(self._text_filter_combo.currentData()), filter_value)
 
     def _sort_should_append(self) -> bool:
         primary_sort_column = self._explorer.primary_sort_column()
@@ -617,7 +702,8 @@ class _ParquetFilterPopup(QFrame):
                 descending=descending,
                 append=self._sort_should_append(),
             )
-        self.close()
+        self._refresh_sort_button_state()
+        self._queue_search()
 
 
 class _ParquetExplorerWidget(QWidget):
@@ -786,6 +872,9 @@ class _ParquetExplorerWidget(QWidget):
             return None
         return column_filter.values
 
+    def active_column_filter(self, column_name: str) -> ColumnFilter | None:
+        return self._active_filters.get(column_name)
+
     @property
     def _sort_columns(self) -> list[tuple[str, bool]]:
         return list(self._sort_state.columns)
@@ -810,9 +899,33 @@ class _ParquetExplorerWidget(QWidget):
             self._active_filters[column_name] = ColumnFilter.distinct(column_name, selected_values)
         self._refresh_preview()
 
+    def apply_text_filter(self, column_name: str, operation: str, value: str) -> None:
+        filter_value = value.strip()
+        if not filter_value:
+            self._active_filters.pop(column_name, None)
+        else:
+            self._active_filters[column_name] = ColumnFilter.text(column_name, operation, filter_value)
+        self._refresh_preview()
+
+    def clear_column_filter(self, column_name: str) -> None:
+        if column_name not in self._active_filters:
+            return
+        self._active_filters.pop(column_name, None)
+        self._refresh_preview()
+
+    def clear_column_filter_and_sort(self, column_name: str) -> None:
+        had_filter = column_name in self._active_filters
+        updated_sort_state = self._sort_state.remove(column_name)
+        if not had_filter and updated_sort_state == self._sort_state:
+            return
+        self._active_filters.pop(column_name, None)
+        self._sort_state = updated_sort_state
+        self._refresh_preview()
+
     def request_filter_values(self, column_name: str, search_text: str, token: int) -> None:
         if self._filter_popup is None or self._filter_popup._column_name != column_name:
             return
+        value_filter = self._filter_popup.distinct_list_text_filter()
         self._filter_popup.set_values(
             self._merge_selected_values(column_name, self._preview_distinct_values(column_name)),
             loading=True,
@@ -838,6 +951,8 @@ class _ParquetExplorerWidget(QWidget):
             column_name,
             token=token,
             active_filters=self._active_filters,
+            value_filter=value_filter,
+            sort_descending=self.sort_direction_for_column(column_name),
             search_text=search_text,
         )
         loader.values_loaded.connect(self._handle_distinct_values_loaded)
