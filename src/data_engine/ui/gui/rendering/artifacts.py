@@ -66,12 +66,13 @@ _PREVIEW_MODE_TOP = "top"
 
 
 def _dtype_supports_text_filter(dtype: pl.DataType) -> bool:
-    return str(dtype) in {"String", "Categorical", "Enum"}
+    base_type = dtype.base_type()
+    return base_type in {pl.String, pl.Categorical, pl.Enum}
 
 
 def _dtype_supports_date_filter(dtype: pl.DataType) -> bool:
-    dtype_text = str(dtype)
-    return dtype_text == "Date" or dtype_text.startswith("Datetime")
+    base_type = dtype.base_type()
+    return base_type in {pl.Date, pl.Datetime}
 
 
 def _qdate_from_iso(value: str) -> QDate:
@@ -565,6 +566,7 @@ class _ParquetFilterPopup(QFrame):
         from_edit = QDateEdit(row_frame)
         from_edit.setObjectName("outputPreviewDateFilterFromInput")
         from_edit.setCalendarPopup(True)
+        self._style_date_filter_calendar(from_edit)
         from_edit.setDisplayFormat("yyyy-MM-dd")
         from_edit.setDate(_qdate_from_iso(start_value or date.today().isoformat()))
         row_layout.addWidget(from_edit, 1)
@@ -572,6 +574,7 @@ class _ParquetFilterPopup(QFrame):
         to_edit = QDateEdit(row_frame)
         to_edit.setObjectName("outputPreviewDateFilterToInput")
         to_edit.setCalendarPopup(True)
+        self._style_date_filter_calendar(to_edit)
         to_edit.setDisplayFormat("yyyy-MM-dd")
         to_edit.setDate(_qdate_from_iso(end_value or start_value or date.today().isoformat()))
         to_edit.setFixedHeight(from_edit.sizeHint().height())
@@ -597,6 +600,13 @@ class _ParquetFilterPopup(QFrame):
         to_edit.dateChanged.connect(lambda _date: self._activate_date_filter_row(row_frame))
         self._date_filter_rows.append((row_frame, from_edit, to_edit))
         self._date_filter_layout.addWidget(row_frame)
+
+    def _style_date_filter_calendar(self, date_edit: QDateEdit) -> None:
+        calendar = date_edit.calendarWidget()
+        if calendar is None:
+            return
+        calendar.setObjectName("outputPreviewDateFilterCalendar")
+        calendar.setGridVisible(False)
 
     def _add_empty_date_filter_row(self) -> None:
         self._add_date_filter_row()

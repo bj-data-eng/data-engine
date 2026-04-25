@@ -670,6 +670,92 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         width: 7px;
         height: 7px;
     }}
+    QCalendarWidget#outputPreviewDateFilterCalendar {{
+        background: {palette.panel_bg};
+        border: 1px solid {palette.selection_border};
+        border-radius: 6px;
+        color: {palette.text};
+        min-width: 270px;
+        min-height: 225px;
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QWidget {{
+        background: {palette.panel_bg};
+        color: {palette.text};
+        alternate-background-color: {palette.panel_bg};
+        selection-background-color: {palette.selection_bg};
+        selection-color: {palette.selection_text};
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QWidget#qt_calendar_navigationbar {{
+        background: {palette.summary_bg};
+        border-bottom: 1px solid {palette.panel_border};
+        border-top-left-radius: 6px;
+        border-top-right-radius: 6px;
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QToolButton {{
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        color: {palette.text};
+        font-size: 11px;
+        min-height: 20px;
+        padding: 1px 6px;
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QToolButton:hover {{
+        background: {palette.hover_bg};
+        border-color: {palette.hover_border};
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QToolButton:pressed {{
+        background: {palette.button_hover};
+        border-color: {palette.selection_border};
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QMenu {{
+        background: {palette.panel_bg};
+        border: 1px solid {palette.panel_border};
+        color: {palette.text};
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QMenu::item {{
+        padding: 4px 18px 4px 10px;
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QMenu::item:selected {{
+        background: {palette.selection_bg};
+        color: {palette.selection_text};
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QSpinBox {{
+        min-width: 58px;
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QAbstractItemView {{
+        background: {palette.panel_bg};
+        border: 1px solid {palette.panel_border};
+        border-radius: 0px 0px 6px 6px;
+        color: {palette.text};
+        font-size: 10px;
+        min-width: 252px;
+        min-height: 158px;
+        outline: none;
+        selection-background-color: {palette.selection_bg};
+        selection-color: {palette.selection_text};
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QAbstractItemView:disabled {{
+        color: {palette.muted_text};
+        font-size: 9px;
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QAbstractItemView:enabled {{
+        gridline-color: {palette.panel_border};
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QAbstractItemView:item {{
+        border: 1px solid transparent;
+        padding: 2px;
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QAbstractItemView:item:hover {{
+        background: {palette.hover_bg};
+        border-color: {palette.hover_border};
+        color: {palette.text};
+    }}
+    QCalendarWidget#outputPreviewDateFilterCalendar QAbstractItemView:item:selected {{
+        background: {palette.selection_bg};
+        border-color: {palette.selection_border};
+        color: {palette.selection_text};
+    }}
     QSpinBox::up-button,
     QSpinBox::down-button {{
         subcontrol-origin: border;

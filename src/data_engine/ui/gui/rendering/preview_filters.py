@@ -385,7 +385,7 @@ def _build_single_date_range_filter_expression(
     if start_date > end_date:
         start_date, end_date = end_date, start_date
     column = pl.col(column_name)
-    if dtype is not None and str(dtype).startswith("Datetime"):
+    if dtype is not None and dtype.base_type() == pl.Datetime:
         column = column.dt.date()
     return (column >= start_date) & (column <= end_date)
 

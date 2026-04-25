@@ -135,6 +135,27 @@ def test_column_filter_expression_compiles_datetime_as_date() -> None:
     assert result.height == 2
 
 
+def test_column_filter_expression_compiles_microsecond_datetime_as_date() -> None:
+    frame = pl.DataFrame(
+        {
+            "archived_at": [
+                datetime(2026, 5, 9, 8, 24),
+                datetime(2026, 5, 9, 16, 42),
+                datetime(2026, 5, 10, 8, 24),
+            ]
+        }
+    ).with_columns(pl.col("archived_at").cast(pl.Datetime("us")))
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.date_range("archived_at", "2026-05-09", "2026-05-09"),
+            dtype=frame.schema["archived_at"],
+        )
+    )
+
+    assert result.height == 2
+
+
 def test_distinct_value_filter_expression_preserves_datetime_time_unit_precision() -> None:
     timestamp = datetime(2026, 4, 24, 12, 30, 45, 123000)
     frame = pl.DataFrame({"created_at": [timestamp]}).with_columns(pl.col("created_at").cast(pl.Datetime("ms")))
