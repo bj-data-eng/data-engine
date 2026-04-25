@@ -506,7 +506,9 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         padding: 0px;
     }}
     QPushButton#outputPreviewTextFilterAddButton,
-    QPushButton#outputPreviewTextFilterRemoveButton {{
+    QPushButton#outputPreviewTextFilterRemoveButton,
+    QPushButton#outputPreviewDateFilterAddButton,
+    QPushButton#outputPreviewDateFilterRemoveButton {{
         min-width: 16px;
         max-width: 16px;
         padding: 0px;
@@ -629,6 +631,7 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border-color: {palette.button_disabled_border};
     }}
     QComboBox,
+    QDateEdit,
     QSpinBox {{
         background: {palette.input_bg};
         border: 1px solid {palette.hover_border};
@@ -639,10 +642,12 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         padding: 1px 20px 1px 8px;
     }}
     QComboBox:hover,
+    QDateEdit:hover,
     QSpinBox:hover {{
         border-color: {palette.selection_border};
     }}
-    QComboBox::drop-down {{
+    QComboBox::drop-down,
+    QDateEdit::drop-down {{
         subcontrol-origin: border;
         subcontrol-position: top right;
         background: {palette.button_bg};
@@ -651,13 +656,16 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border-bottom-right-radius: 4px;
         width: 18px;
     }}
-    QComboBox::drop-down:hover {{
+    QComboBox::drop-down:hover,
+    QDateEdit::drop-down:hover {{
         background: {palette.hover_bg};
     }}
-    QComboBox::drop-down:pressed {{
+    QComboBox::drop-down:pressed,
+    QDateEdit::drop-down:pressed {{
         background: {palette.button_hover};
     }}
-    QComboBox::down-arrow {{
+    QComboBox::down-arrow,
+    QDateEdit::down-arrow {{
         image: url({spin_down_chevron_icon_url});
         width: 7px;
         height: 7px;

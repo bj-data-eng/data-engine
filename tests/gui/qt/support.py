@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 import json
 import logging
 import os
@@ -11,9 +11,9 @@ import threading
 
 import pytest
 import polars as pl
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QDate, QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QListWidget, QPushButton, QSpinBox, QTableWidget, QTextEdit, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QDateEdit, QLabel, QLineEdit, QListWidget, QPushButton, QSpinBox, QTableWidget, QTextEdit, QWidget
 from shiboken6 import delete as shiboken_delete
 from shiboken6 import isValid as shiboken_is_valid
 
@@ -3981,6 +3981,86 @@ def test_debug_view_string_column_filter_popup_applies_text_filter(qapp):
         _dispose_window(qapp, window)
 
 
+def test_debug_view_string_column_filter_popup_combines_text_filter_and_value_selection(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 1003, 1004],
+                "status": ["OPEN", "REOPENED", "PENDING", "CLOSED"],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 4)
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        text_filter = popup.findChild(QLineEdit, "outputPreviewTextFilterInput")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert text_filter is not None
+        assert values_list is not None
+
+        text_filter.setText("OPEN")
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 2
+            and [values_list.item(index).text() for index in range(values_list.count())] == ["OPEN", "REOPENED"],
+        )
+        values_list.item(0).setCheckState(Qt.CheckState.Unchecked)
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+
+        _process_ui_until(qapp, lambda: table.rowCount() == 1 and table.item(0, 1) is not None)
+        assert table.item(0, 1).text() == "REOPENED"
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert values_list is not None
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 2
+            and values_list.item(0).text() == "REOPENED"
+            and values_list.item(0).checkState() == Qt.CheckState.Checked
+            and values_list.item(1).text() == "OPEN"
+            and values_list.item(1).checkState() == Qt.CheckState.Unchecked,
+        )
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_debug_view_string_column_filter_popup_supports_multiple_text_conditions(qapp):
     window = _make_window()
     try:
@@ -4059,6 +4139,287 @@ def test_debug_view_string_column_filter_popup_supports_multiple_text_conditions
 
         _process_ui_until(qapp, lambda: table.rowCount() == 1 and table.item(0, 1) is not None)
         assert table.item(0, 1).text() == "REOPENED"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_date_column_filter_popup_applies_date_filter(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 1003],
+                "created_on": [date(2026, 4, 23), date(2026, 4, 24), date(2026, 4, 25)],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 3)
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        from_input = popup.findChild(QDateEdit, "outputPreviewDateFilterFromInput")
+        to_input = popup.findChild(QDateEdit, "outputPreviewDateFilterToInput")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert from_input is not None
+        assert to_input is not None
+        assert values_list is not None
+        assert popup.findChild(QLineEdit, "outputPreviewPopupSearch") is None
+        _process_ui_until(qapp, lambda: values_list.count() == 3)
+        assert [values_list.item(index).text() for index in range(values_list.count())] == [
+            "2026-04-23",
+            "2026-04-24",
+            "2026-04-25",
+        ]
+
+        from_input.setDate(QDate(2026, 4, 24))
+        to_input.setDate(QDate(2026, 4, 25))
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 2
+            and [values_list.item(index).text() for index in range(values_list.count())]
+            == ["2026-04-24", "2026-04-25"],
+        )
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+
+        _process_ui_until(qapp, lambda: table.rowCount() == 2 and table.item(0, 1) is not None)
+        assert [table.item(row, 1).text() for row in range(table.rowCount())] == [
+            "2026-04-24",
+            "2026-04-25",
+        ]
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_date_column_filter_popup_supports_multiple_ranges(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 1003, 1004],
+                "created_on": [
+                    date(2026, 4, 23),
+                    date(2026, 4, 24),
+                    date(2026, 4, 25),
+                    date(2026, 4, 26),
+                ],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 4)
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        add_button = popup.findChild(QPushButton, "outputPreviewDateFilterAddButton")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert add_button is not None
+        assert values_list is not None
+
+        from_inputs = popup.findChildren(QDateEdit, "outputPreviewDateFilterFromInput")
+        to_inputs = popup.findChildren(QDateEdit, "outputPreviewDateFilterToInput")
+        assert len(from_inputs) == 1
+        assert len(to_inputs) == 1
+        from_inputs[0].setDate(QDate(2026, 4, 23))
+        to_inputs[0].setDate(QDate(2026, 4, 23))
+
+        QTest.mouseClick(add_button, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        from_inputs = popup.findChildren(QDateEdit, "outputPreviewDateFilterFromInput")
+        to_inputs = popup.findChildren(QDateEdit, "outputPreviewDateFilterToInput")
+        assert len(from_inputs) == 2
+        assert len(to_inputs) == 2
+        from_inputs[1].setDate(QDate(2026, 4, 25))
+        to_inputs[1].setDate(QDate(2026, 4, 26))
+
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 3
+            and [values_list.item(index).text() for index in range(values_list.count())]
+            == ["2026-04-23", "2026-04-25", "2026-04-26"],
+        )
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+
+        _process_ui_until(qapp, lambda: table.rowCount() == 3 and table.item(0, 1) is not None)
+        assert [table.item(row, 1).text() for row in range(table.rowCount())] == [
+            "2026-04-23",
+            "2026-04-25",
+            "2026-04-26",
+        ]
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_date_column_filter_popup_does_not_keep_removed_range_values(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 1003, 1004],
+                "created_on": [
+                    date(2026, 4, 23),
+                    date(2026, 4, 24),
+                    date(2026, 4, 25),
+                    date(2026, 4, 26),
+                ],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 4)
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        add_button = popup.findChild(QPushButton, "outputPreviewDateFilterAddButton")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert add_button is not None
+        assert values_list is not None
+
+        from_inputs = popup.findChildren(QDateEdit, "outputPreviewDateFilterFromInput")
+        to_inputs = popup.findChildren(QDateEdit, "outputPreviewDateFilterToInput")
+        from_inputs[0].setDate(QDate(2026, 4, 23))
+        to_inputs[0].setDate(QDate(2026, 4, 23))
+        QTest.mouseClick(add_button, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        from_inputs = popup.findChildren(QDateEdit, "outputPreviewDateFilterFromInput")
+        to_inputs = popup.findChildren(QDateEdit, "outputPreviewDateFilterToInput")
+        from_inputs[1].setDate(QDate(2026, 4, 25))
+        to_inputs[1].setDate(QDate(2026, 4, 26))
+        _process_ui_until(qapp, lambda: values_list.count() == 3)
+        for index in range(values_list.count()):
+            if values_list.item(index).text() == "2026-04-26":
+                values_list.item(index).setCheckState(Qt.CheckState.Unchecked)
+                break
+
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+        _process_ui_until(qapp, lambda: table.rowCount() == 2)
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        remove_buttons = popup.findChildren(QPushButton, "outputPreviewDateFilterRemoveButton")
+        assert values_list is not None
+        assert remove_buttons
+        _process_ui_until(qapp, lambda: values_list.count() == 3)
+
+        QTest.mouseClick(remove_buttons[0], Qt.MouseButton.LeftButton)
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 1
+            and [values_list.item(index).text() for index in range(values_list.count())]
+            == ["2026-04-23"]
+            and values_list.item(0).checkState() == Qt.CheckState.Checked,
+        )
+
+        add_button = popup.findChild(QPushButton, "outputPreviewDateFilterAddButton")
+        assert add_button is not None
+        QTest.mouseClick(add_button, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        from_inputs = popup.findChildren(QDateEdit, "outputPreviewDateFilterFromInput")
+        to_inputs = popup.findChildren(QDateEdit, "outputPreviewDateFilterToInput")
+        assert len(from_inputs) == 2
+        assert len(to_inputs) == 2
+        from_inputs[1].setDate(QDate(2026, 4, 25))
+        to_inputs[1].setDate(QDate(2026, 4, 26))
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 3
+            and [values_list.item(index).text() for index in range(values_list.count())]
+            == ["2026-04-23", "2026-04-25", "2026-04-26"],
+        )
+        assert all(values_list.item(index).checkState() == Qt.CheckState.Checked for index in range(values_list.count()))
     finally:
         _dispose_window(qapp, window)
 
@@ -5808,6 +6169,8 @@ def test_show_run_error_details_refreshes_runtime_cache_before_loading_failed_st
     try:
         run_id = "abc"
         step_name = "Write Parquet"
+        started_at_utc = utcnow_text()
+        finished_at_utc = utcnow_text()
         # Prime the runtime-IO cache with no step rows, then write the failure through a separate ledger handle.
         assert window.runtime_binding.runtime_cache_ledger.step_outputs.list_for_run(run_id) == ()
         direct_ledger = RuntimeCacheLedger(window.workspace_paths.runtime_cache_db_path)
@@ -5817,25 +6180,25 @@ def test_show_run_error_details_refreshes_runtime_cache_before_loading_failed_st
                 flow_name="docs_summary",
                 group_name="Docs",
                 source_path=r"C:\input\alternate\docs_flat_1.xlsx",
-                started_at_utc="2026-04-18T21:39:03+00:00",
+                started_at_utc=started_at_utc,
             )
             step_run_id = direct_ledger.execution_state.record_step_started(
                 run_id=run_id,
                 flow_name="docs_summary",
                 step_label=step_name,
-                started_at_utc="2026-04-18T21:39:04+00:00",
+                started_at_utc=started_at_utc,
             )
             direct_ledger.execution_state.record_step_finished(
                 step_run_id=step_run_id,
                 status="failed",
-                finished_at_utc="2026-04-18T21:39:05+00:00",
+                finished_at_utc=finished_at_utc,
                 elapsed_ms=1000,
                 error_text='RuntimeError: Intentional Example Mirror failure for Inspect-modal testing.',
             )
             direct_ledger.execution_state.record_run_finished(
                 run_id=run_id,
                 status="failed",
-                finished_at_utc="2026-04-18T21:39:05+00:00",
+                finished_at_utc=finished_at_utc,
                 error_text='RuntimeError: Intentional Example Mirror failure for Inspect-modal testing.',
             )
         finally:

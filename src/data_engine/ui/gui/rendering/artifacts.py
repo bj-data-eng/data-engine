@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import glob as glob_module
+from datetime import date
 from pathlib import Path
 import pyarrow.parquet as pq
 import polars as pl
-from PySide6.QtCore import QEvent, QPoint, QRect, QSize, QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QDate, QEvent, QPoint, QRect, QSize, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
+    QDateEdit,
     QFileDialog,
     QFrame,
     QHeaderView,
@@ -43,10 +45,12 @@ from data_engine.ui.gui.rendering.preview_filters import (
     ColumnFilter,
     NULL_FILTER_VALUE as _NULL_FILTER_VALUE,
     PreviewSortState,
+    DateFilterRange,
     TextFilterCondition,
     TextFilterOperation,
     build_column_filter_expression,
     build_distinct_value_filter_expression,
+    column_filter_component,
     merge_selected_values,
     should_clear_distinct_filter,
     value_identity,
@@ -63,6 +67,16 @@ _PREVIEW_MODE_TOP = "top"
 
 def _dtype_supports_text_filter(dtype: pl.DataType) -> bool:
     return str(dtype) in {"String", "Categorical", "Enum"}
+
+
+def _dtype_supports_date_filter(dtype: pl.DataType) -> bool:
+    dtype_text = str(dtype)
+    return dtype_text == "Date" or dtype_text.startswith("Datetime")
+
+
+def _qdate_from_iso(value: str) -> QDate:
+    parsed = date.fromisoformat(value)
+    return QDate(parsed.year, parsed.month, parsed.day)
 
 
 class _PreviewHeaderView(QHeaderView):
@@ -318,9 +332,15 @@ class _ParquetFilterPopup(QFrame):
         self._sort_ascending_button: QPushButton | None = None
         self._sort_descending_button: QPushButton | None = None
         self._select_all_button: QPushButton | None = None
+        self._explicitly_unchecked_value_identities: set[tuple[str, object]] = set()
+        self._use_active_selected_values = True
+        self._populating_values = False
         self._is_text_filter_column = _dtype_supports_text_filter(dtype)
+        self._is_date_filter_column = _dtype_supports_date_filter(dtype)
         self._text_filter_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
         self._text_filter_layout: QVBoxLayout | None = None
+        self._date_filter_rows: list[tuple[QFrame, QDateEdit, QDateEdit]] = []
+        self._date_filter_layout: QVBoxLayout | None = None
         self.search_input: QLineEdit | None = None
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
 
@@ -331,7 +351,7 @@ class _ParquetFilterPopup(QFrame):
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(8)
-        title = QLabel(f"{column_name} ({dtype})", self)
+        title = QLabel(column_name, self)
         title.setObjectName("sectionTitle")
         title_row.addWidget(title)
         title_row.addStretch(1)
@@ -344,6 +364,8 @@ class _ParquetFilterPopup(QFrame):
 
         if self._is_text_filter_column:
             layout.addWidget(self._build_text_filter_controls())
+        elif self._is_date_filter_column:
+            layout.addWidget(self._build_date_filter_controls())
         else:
             self.search_input = QLineEdit(self)
             self.search_input.setObjectName("outputPreviewPopupSearch")
@@ -389,7 +411,7 @@ class _ParquetFilterPopup(QFrame):
         self.values_list.setObjectName("outputPreviewPopupList")
         self.values_list.setMinimumWidth(220)
         self.values_list.setMinimumHeight(240)
-        self.values_list.itemChanged.connect(self._sync_select_all_button)
+        self.values_list.itemChanged.connect(self._handle_value_item_changed)
         value_panel_layout.addWidget(self.values_list, 1)
 
         footer = QHBoxLayout()
@@ -477,14 +499,14 @@ class _ParquetFilterPopup(QFrame):
             remove_button.clicked.connect(lambda: self._remove_text_filter_row(row_frame))
             row_layout.addWidget(remove_button)
 
-        combo.currentIndexChanged.connect(lambda _index: self._queue_search())
-        line_edit.textChanged.connect(lambda _text: self._queue_search())
+        combo.currentIndexChanged.connect(lambda _index: self._queue_condition_search())
+        line_edit.textChanged.connect(lambda _text: self._queue_condition_search())
         self._text_filter_rows.append((row_frame, combo, line_edit))
         self._text_filter_layout.addWidget(row_frame)
 
     def _add_empty_text_filter_row(self) -> None:
         self._add_text_filter_row()
-        self._queue_search()
+        self._queue_condition_search()
 
     def _remove_text_filter_row(self, row_frame: QFrame) -> None:
         if len(self._text_filter_rows) <= 1:
@@ -498,15 +520,111 @@ class _ParquetFilterPopup(QFrame):
             else:
                 remaining_rows.append((frame, combo, line_edit))
         self._text_filter_rows = remaining_rows
-        self._queue_search()
+        self._queue_condition_search()
 
     def _active_text_filter_conditions(self) -> tuple[TextFilterCondition, ...]:
-        active_filter = self._explorer.active_column_filter(self._column_name)
-        if active_filter is None or active_filter.kind != "text" or not active_filter.values:
+        active_filter = column_filter_component(self._explorer.active_column_filter(self._column_name), "text")
+        if active_filter is None or not active_filter.values:
             return ()
         if active_filter.operation == "all":
             return tuple((str(operation), str(value)) for operation, value in active_filter.values)
         return ((str(active_filter.operation), str(active_filter.values[0])),)
+
+    def _build_date_filter_controls(self) -> QFrame:
+        date_section = QFrame(self)
+        date_section.setObjectName("outputPreviewDateFilterSection")
+        self._date_filter_layout = QVBoxLayout(date_section)
+        self._date_filter_layout.setContentsMargins(0, 0, 0, 0)
+        self._date_filter_layout.setSpacing(6)
+
+        active_ranges = self._active_date_filter_ranges()
+        if not active_ranges:
+            today = date.today().isoformat()
+            self._add_date_filter_row(start_value=today, end_value=today, active=False)
+            return date_section
+        for start_value, end_value in active_ranges:
+            self._add_date_filter_row(start_value=start_value, end_value=end_value, active=True)
+        return date_section
+
+    def _add_date_filter_row(
+        self,
+        *,
+        start_value: str | None = None,
+        end_value: str | None = None,
+        active: bool = False,
+    ) -> None:
+        if self._date_filter_layout is None:
+            return
+        row_frame = QFrame(self)
+        row_frame.setObjectName("outputPreviewControlBar")
+        row_frame.setProperty("outputPreviewDateRangeActive", active)
+        row_layout = QHBoxLayout(row_frame)
+        row_layout.setContentsMargins(6, 6, 6, 6)
+        row_layout.setSpacing(6)
+
+        from_edit = QDateEdit(row_frame)
+        from_edit.setObjectName("outputPreviewDateFilterFromInput")
+        from_edit.setCalendarPopup(True)
+        from_edit.setDisplayFormat("yyyy-MM-dd")
+        from_edit.setDate(_qdate_from_iso(start_value or date.today().isoformat()))
+        row_layout.addWidget(from_edit, 1)
+
+        to_edit = QDateEdit(row_frame)
+        to_edit.setObjectName("outputPreviewDateFilterToInput")
+        to_edit.setCalendarPopup(True)
+        to_edit.setDisplayFormat("yyyy-MM-dd")
+        to_edit.setDate(_qdate_from_iso(end_value or start_value or date.today().isoformat()))
+        to_edit.setFixedHeight(from_edit.sizeHint().height())
+        from_edit.setFixedHeight(to_edit.sizeHint().height())
+        row_layout.addWidget(to_edit, 1)
+
+        add_button = QPushButton("+", row_frame)
+        add_button.setObjectName("outputPreviewDateFilterAddButton")
+        add_button.setFixedSize(16, to_edit.sizeHint().height())
+        add_button.setToolTip("Add date range")
+        add_button.clicked.connect(self._add_empty_date_filter_row)
+        row_layout.addWidget(add_button)
+
+        if self._date_filter_rows:
+            remove_button = QPushButton("-", row_frame)
+            remove_button.setObjectName("outputPreviewDateFilterRemoveButton")
+            remove_button.setFixedSize(16, to_edit.sizeHint().height())
+            remove_button.setToolTip("Remove date range")
+            remove_button.clicked.connect(lambda: self._remove_date_filter_row(row_frame))
+            row_layout.addWidget(remove_button)
+
+        from_edit.dateChanged.connect(lambda _date: self._activate_date_filter_row(row_frame))
+        to_edit.dateChanged.connect(lambda _date: self._activate_date_filter_row(row_frame))
+        self._date_filter_rows.append((row_frame, from_edit, to_edit))
+        self._date_filter_layout.addWidget(row_frame)
+
+    def _add_empty_date_filter_row(self) -> None:
+        self._add_date_filter_row()
+        self._queue_condition_search()
+
+    def _activate_date_filter_row(self, row_frame: QFrame) -> None:
+        row_frame.setProperty("outputPreviewDateRangeActive", True)
+        self._queue_condition_search()
+
+    def _remove_date_filter_row(self, row_frame: QFrame) -> None:
+        if len(self._date_filter_rows) <= 1:
+            return
+        remaining_rows: list[tuple[QFrame, QDateEdit, QDateEdit]] = []
+        for frame, from_edit, to_edit in self._date_filter_rows:
+            if frame is row_frame:
+                if self._date_filter_layout is not None:
+                    self._date_filter_layout.removeWidget(frame)
+                frame.deleteLater()
+            else:
+                remaining_rows.append((frame, from_edit, to_edit))
+        self._date_filter_rows = remaining_rows
+        self._queue_condition_search()
+
+    def _active_date_filter_ranges(self) -> tuple[DateFilterRange, ...]:
+        active_filter = column_filter_component(self._explorer.active_column_filter(self._column_name), "date")
+        if active_filter is None or not active_filter.values:
+            return ()
+        return tuple((str(start_value), str(end_value)) for start_value, end_value in active_filter.values)
 
     def showEvent(self, event) -> None:  # noqa: N802
         app = QApplication.instance()
@@ -543,12 +661,50 @@ class _ParquetFilterPopup(QFrame):
                     global_pos = getattr(event, "globalPos", lambda: None)()
                     global_point = global_pos
                 if global_point is not None and not self.frameGeometry().contains(global_point):
+                    if self._is_date_calendar_interaction(watched, global_point):
+                        return False
                     self.close()
                     return False
             elif event.type() == QEvent.Type.KeyPress and getattr(event, "key", lambda: None)() == Qt.Key.Key_Escape:
                 self.close()
                 return True
         return super().eventFilter(watched, event)
+
+    def _is_date_calendar_interaction(self, watched: object, global_point: QPoint) -> bool:
+        if self._is_date_calendar_widget(watched):
+            return True
+        widget_at_point = QApplication.widgetAt(global_point)
+        if self._is_date_calendar_widget(widget_at_point):
+            return True
+        for _, from_edit, to_edit in self._date_filter_rows:
+            for date_edit in (from_edit, to_edit):
+                calendar = date_edit.calendarWidget()
+                if calendar is not None and self._widget_contains_global_point(calendar, global_point):
+                    return True
+        return False
+
+    def _is_date_calendar_widget(self, watched: object) -> bool:
+        if not isinstance(watched, QWidget):
+            return False
+        widget: QWidget | None = watched
+        while widget is not None:
+            for _, from_edit, to_edit in self._date_filter_rows:
+                if widget in {from_edit.calendarWidget(), to_edit.calendarWidget()}:
+                    return True
+            widget = widget.parentWidget()
+        return False
+
+    def _widget_contains_global_point(self, widget: QWidget, global_point: QPoint) -> bool:
+        if not widget.isVisible():
+            return False
+        widget_point = widget.mapFromGlobal(global_point)
+        if widget.rect().contains(widget_point):
+            return True
+        window = widget.window()
+        if window is widget or not window.isVisible():
+            return False
+        window_point = window.mapFromGlobal(global_point)
+        return window.rect().contains(window_point)
 
     def set_values(
         self,
@@ -580,17 +736,37 @@ class _ParquetFilterPopup(QFrame):
 
     def _populate_items(self) -> None:
         self.values_list.clear()
-        selected_values = self._explorer.selected_filter_values(self._column_name)
-        for label, value in self._values:
-            item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, value)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(
-                Qt.CheckState.Checked
-                if selected_values is None or value in selected_values
-                else Qt.CheckState.Unchecked
-            )
-            self.values_list.addItem(item)
+        selected_values = self._explorer.selected_filter_values(self._column_name) if self._use_active_selected_values else None
+        selected_value_identities = None
+        if selected_values is not None:
+            selected_value_identities = {value_identity(value) for value in selected_values}
+        self._populating_values = True
+        try:
+            for label, value in self._values:
+                item = QListWidgetItem(label)
+                item.setData(Qt.ItemDataRole.UserRole, value)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                identity = value_identity(value)
+                explicit_uncheck = identity in self._explicitly_unchecked_value_identities
+                selected_value_missing = (
+                    selected_value_identities is not None
+                    and identity not in selected_value_identities
+                )
+                should_check = not (explicit_uncheck or selected_value_missing)
+                item.setCheckState(Qt.CheckState.Checked if should_check else Qt.CheckState.Unchecked)
+                self.values_list.addItem(item)
+        finally:
+            self._populating_values = False
+        self._sync_select_all_button()
+
+    def _handle_value_item_changed(self, item: QListWidgetItem) -> None:
+        if not self._populating_values:
+            value = item.data(Qt.ItemDataRole.UserRole)
+            identity = value_identity(value)
+            if item.checkState() == Qt.CheckState.Unchecked:
+                self._explicitly_unchecked_value_identities.add(identity)
+            else:
+                self._explicitly_unchecked_value_identities.discard(identity)
         self._sync_select_all_button()
 
     def _apply_select_all_state(self, state: Qt.CheckState | int) -> None:
@@ -673,11 +849,14 @@ class _ParquetFilterPopup(QFrame):
         self._apply_select_all_state(target_state)
 
     def _apply_selection(self) -> None:
-        text_filter = self.distinct_list_text_filter()
-        if text_filter is not None:
-            self._explorer.apply_column_filter(text_filter)
-            self.close()
-            return
+        column_filter = self.combined_column_filter()
+        if column_filter is None:
+            self._explorer.clear_column_filter(self._column_name)
+        else:
+            self._explorer.apply_column_filter(column_filter)
+        self.close()
+
+    def _selected_distinct_filter(self) -> ColumnFilter | None:
         selected_values: list[object] = []
         total_values: list[object] = []
         for index in range(self.values_list.count()):
@@ -686,17 +865,28 @@ class _ParquetFilterPopup(QFrame):
             total_values.append(value)
             if item.checkState() == Qt.CheckState.Checked:
                 selected_values.append(value)
-        self._explorer.apply_distinct_filter(
-            self._column_name,
-            tuple(selected_values),
-            tuple(total_values),
-            complete_domain=self._value_domain_complete,
-        )
-        self.close()
+        selected_tuple = tuple(selected_values)
+        total_tuple = tuple(total_values)
+        if should_clear_distinct_filter(selected_tuple, total_tuple, complete_domain=self._value_domain_complete):
+            return None
+        return ColumnFilter.distinct(self._column_name, selected_tuple)
 
     def _clear_column_state(self) -> None:
         for _, _, line_edit in self._text_filter_rows:
             line_edit.clear()
+        for _, from_edit, to_edit in self._date_filter_rows:
+            today = QDate.currentDate()
+            row_frame = from_edit.parentWidget()
+            from_edit.blockSignals(True)
+            to_edit.blockSignals(True)
+            try:
+                from_edit.setDate(today)
+                to_edit.setDate(today)
+            finally:
+                from_edit.blockSignals(False)
+                to_edit.blockSignals(False)
+            if isinstance(row_frame, QFrame):
+                row_frame.setProperty("outputPreviewDateRangeActive", False)
         self._explorer.clear_column_filter_and_sort(self._column_name)
         self._refresh_sort_button_state()
         self._queue_search()
@@ -705,12 +895,32 @@ class _ParquetFilterPopup(QFrame):
     def _queue_search(self) -> None:
         self._search_timer.start()
 
+    def _queue_condition_search(self) -> None:
+        self._use_active_selected_values = False
+        self._explicitly_unchecked_value_identities.clear()
+        self.set_values([], loading=True, complete_domain=False)
+        self._queue_search()
+
     def _dispatch_search(self) -> None:
         search_text = self.search_input.text().strip() if self.search_input is not None else ""
         self._search_token += 1
         self._explorer.request_filter_values(self._column_name, search_text, self._search_token)
 
-    def distinct_list_text_filter(self) -> ColumnFilter | None:
+    def distinct_list_column_filter(self) -> ColumnFilter | None:
+        if self._date_filter_rows:
+            return self._date_filter()
+        return self._text_filter()
+
+    def combined_column_filter(self) -> ColumnFilter | None:
+        condition_filter = self.distinct_list_column_filter()
+        distinct_filter = self._selected_distinct_filter()
+        if condition_filter is None:
+            return distinct_filter
+        if distinct_filter is None:
+            return condition_filter
+        return ColumnFilter.all(self._column_name, (condition_filter, distinct_filter))
+
+    def _text_filter(self) -> ColumnFilter | None:
         conditions: list[TextFilterCondition] = []
         for _, combo, line_edit in self._text_filter_rows:
             filter_value = line_edit.text().strip()
@@ -723,6 +933,24 @@ class _ParquetFilterPopup(QFrame):
             operation, value = conditions[0]
             return ColumnFilter.text(self._column_name, operation, value)
         return ColumnFilter.text_conditions(self._column_name, tuple(conditions))
+
+    def _date_filter(self) -> ColumnFilter | None:
+        ranges: list[DateFilterRange] = []
+        for row_frame, from_edit, to_edit in self._date_filter_rows:
+            if row_frame.property("outputPreviewDateRangeActive") is not True:
+                continue
+            ranges.append(
+                (
+                    from_edit.date().toString("yyyy-MM-dd"),
+                    to_edit.date().toString("yyyy-MM-dd"),
+                )
+            )
+        if not ranges:
+            return None
+        if len(ranges) == 1:
+            start_value, end_value = ranges[0]
+            return ColumnFilter.date_range(self._column_name, start_value, end_value)
+        return ColumnFilter.date_ranges(self._column_name, tuple(ranges))
 
     def _sort_should_append(self) -> bool:
         primary_sort_column = self._explorer.primary_sort_column()
@@ -937,8 +1165,8 @@ class _ParquetExplorerWidget(QWidget):
                 self.status_label.deleteLater()
 
     def selected_filter_values(self, column_name: str) -> tuple[object, ...] | None:
-        column_filter = self._active_filters.get(column_name)
-        if column_filter is None or column_filter.kind != "distinct":
+        column_filter = column_filter_component(self._active_filters.get(column_name), "distinct")
+        if column_filter is None:
             return None
         return column_filter.values
 
@@ -999,9 +1227,13 @@ class _ParquetExplorerWidget(QWidget):
     def request_filter_values(self, column_name: str, search_text: str, token: int) -> None:
         if self._filter_popup is None or self._filter_popup._column_name != column_name:
             return
-        value_filter = self._filter_popup.distinct_list_text_filter()
+        value_filter = self._filter_popup.distinct_list_column_filter()
+        loading_values = [] if value_filter is not None else self._merge_selected_values(
+            column_name,
+            self._preview_distinct_values(column_name),
+        )
         self._filter_popup.set_values(
-            self._merge_selected_values(column_name, self._preview_distinct_values(column_name)),
+            loading_values,
             loading=True,
             complete_domain=False,
         )
@@ -1126,7 +1358,14 @@ class _ParquetExplorerWidget(QWidget):
         return QPoint(section_bottom.x(), section_bottom.y() + 2)
 
     def _handle_distinct_values_loaded(self, column_name: str, token: int, values: object, truncated: bool) -> None:
-        loaded_values = self._merge_selected_values(column_name, list(values))
+        value_filter = None
+        if (
+            self._filter_popup is not None
+            and self._filter_popup._column_name == column_name
+            and self._filter_popup._search_token == token
+        ):
+            value_filter = self._filter_popup.distinct_list_column_filter()
+        loaded_values = list(values) if value_filter is not None else self._merge_selected_values(column_name, list(values))
         popup_search_text = ""
         if (
             self._filter_popup is not None

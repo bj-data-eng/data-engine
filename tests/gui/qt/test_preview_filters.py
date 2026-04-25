@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 import polars as pl
 
@@ -72,6 +72,67 @@ def test_column_filter_expression_compiles_multiple_text_conditions() -> None:
     )
 
     assert result["status"].to_list() == ["opened"]
+
+
+def test_column_filter_expression_combines_text_and_distinct_filters() -> None:
+    frame = pl.DataFrame({"status": ["OPEN", "REOPENED", "PENDING", "CLOSED"]})
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.all(
+                "status",
+                (
+                    ColumnFilter.text("status", "contains", "OPEN"),
+                    ColumnFilter.distinct("status", ("REOPENED",)),
+                ),
+            ),
+            dtype=frame.schema["status"],
+        )
+    )
+
+    assert result["status"].to_list() == ["REOPENED"]
+
+
+def test_column_filter_expression_compiles_date_ranges() -> None:
+    frame = pl.DataFrame(
+        {"created_on": [date(2026, 4, 23), date(2026, 4, 24), date(2026, 4, 25), date(2026, 4, 26)]}
+    )
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.date_ranges(
+                "created_on",
+                (
+                    ("2026-04-23", "2026-04-23"),
+                    ("2026-04-25", "2026-04-26"),
+                ),
+            ),
+            dtype=frame.schema["created_on"],
+        )
+    )
+
+    assert result["created_on"].to_list() == [date(2026, 4, 23), date(2026, 4, 25), date(2026, 4, 26)]
+
+
+def test_column_filter_expression_compiles_datetime_as_date() -> None:
+    frame = pl.DataFrame(
+        {
+            "created_at": [
+                datetime(2026, 4, 23, 23, 59),
+                datetime(2026, 4, 24, 0, 1),
+                datetime(2026, 4, 24, 23, 59),
+            ]
+        }
+    ).with_columns(pl.col("created_at").cast(pl.Datetime("ms")))
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.date_range("created_at", "2026-04-24", "2026-04-24"),
+            dtype=frame.schema["created_at"],
+        )
+    )
+
+    assert result.height == 2
 
 
 def test_distinct_value_filter_expression_preserves_datetime_time_unit_precision() -> None:

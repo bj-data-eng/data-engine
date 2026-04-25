@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Literal
 
 import polars as pl
 
 NULL_FILTER_VALUE = object()
-ColumnFilterKind = Literal["distinct", "text"]
+ColumnFilterKind = Literal["distinct", "text", "date", "all"]
 TextFilterOperation = Literal["equals", "not_equals", "begins_with", "ends_with", "contains", "not_contains"]
 TextFilterCondition = tuple[TextFilterOperation, str]
+DateFilterRange = tuple[str, str]
 
 
 @dataclass(frozen=True)
@@ -170,6 +172,73 @@ class ColumnFilter:
 
         return cls(column_name=str(column_name), kind="text", operation="all", values=conditions)
 
+    @classmethod
+    def date_range(cls, column_name: str, start_date: str, end_date: str) -> ColumnFilter:
+        """Build an inclusive date range filter state.
+
+        Args:
+            column_name: Column being filtered.
+            start_date: Inclusive ISO start date.
+            end_date: Inclusive ISO end date.
+
+        Returns:
+            Date filter state.
+        """
+
+        return cls(column_name=str(column_name), kind="date", operation="range", values=((start_date, end_date),))
+
+    @classmethod
+    def date_ranges(cls, column_name: str, ranges: tuple[DateFilterRange, ...]) -> ColumnFilter:
+        """Build a multi-range date filter state.
+
+        Args:
+            column_name: Column being filtered.
+            ranges: Inclusive ``(start_date, end_date)`` ranges. Ranges are combined with OR.
+
+        Returns:
+            Date filter state containing all ranges.
+        """
+
+        return cls(column_name=str(column_name), kind="date", operation="ranges", values=ranges)
+
+    @classmethod
+    def all(cls, column_name: str, filters: tuple[ColumnFilter, ...]) -> ColumnFilter:
+        """Build a composite filter state.
+
+        Args:
+            column_name: Column being filtered.
+            filters: Column filters to combine with AND.
+
+        Returns:
+            Composite filter state containing active child filters.
+        """
+
+        active_filters = tuple(column_filter for column_filter in filters if column_filter.values)
+        return cls(column_name=str(column_name), kind="all", operation="all", values=active_filters)
+
+
+def column_filter_component(column_filter: ColumnFilter | None, kind: str) -> ColumnFilter | None:
+    """Return the first matching child filter from a plain or composite column filter.
+
+    Args:
+        column_filter: Filter to inspect.
+        kind: Filter family to find.
+
+    Returns:
+        Matching filter, or ``None`` when absent.
+    """
+
+    if column_filter is None:
+        return None
+    if column_filter.kind == kind:
+        return column_filter
+    if column_filter.kind != "all":
+        return None
+    for value in column_filter.values:
+        if isinstance(value, ColumnFilter) and value.kind == kind:
+            return value
+    return None
+
 
 def build_column_filter_expression(column_filter: ColumnFilter, *, dtype: pl.DataType | None = None):
     """Build a Polars expression for one preview column filter.
@@ -186,6 +255,10 @@ def build_column_filter_expression(column_filter: ColumnFilter, *, dtype: pl.Dat
         return build_distinct_value_filter_expression(column_filter.column_name, column_filter.values, dtype=dtype)
     if column_filter.kind == "text":
         return _build_text_filter_expression(column_filter)
+    if column_filter.kind == "date":
+        return _build_date_filter_expression(column_filter, dtype=dtype)
+    if column_filter.kind == "all":
+        return _build_all_filter_expression(column_filter, dtype=dtype)
     raise ValueError(f"Unsupported column filter kind: {column_filter.kind}")
 
 
@@ -218,6 +291,22 @@ def build_distinct_value_filter_expression(
     if include_null:
         null_expression = column.is_null()
         expression = null_expression if expression is None else (expression | null_expression)
+    return expression
+
+
+def _build_all_filter_expression(column_filter: ColumnFilter, *, dtype: pl.DataType | None = None):
+    expressions = []
+    for value in column_filter.values:
+        if not isinstance(value, ColumnFilter):
+            raise TypeError("Composite column filters must contain ColumnFilter values")
+        expression = build_column_filter_expression(value, dtype=dtype)
+        if expression is not None:
+            expressions.append(expression)
+    if not expressions:
+        return None
+    expression = expressions[0]
+    for next_expression in expressions[1:]:
+        expression = expression & next_expression
     return expression
 
 
@@ -258,6 +347,47 @@ def _build_single_text_filter_expression(column_name: str, operation: str, value
     if operation == "not_contains":
         return ~column.str.contains(value, literal=True)
     raise ValueError(f"Unsupported text filter operation: {operation}")
+
+
+def _build_date_filter_expression(column_filter: ColumnFilter, *, dtype: pl.DataType | None = None):
+    if not column_filter.values:
+        return None
+    if column_filter.operation == "ranges":
+        expressions = [
+            _build_single_date_range_filter_expression(column_filter.column_name, str(start), str(end), dtype=dtype)
+            for start, end in column_filter.values
+            if str(start) != "" and str(end) != ""
+        ]
+        expressions = [expression for expression in expressions if expression is not None]
+        if not expressions:
+            return None
+        expression = expressions[0]
+        for next_expression in expressions[1:]:
+            expression = expression | next_expression
+        return expression
+    if column_filter.operation == "range":
+        start, end = column_filter.values[0]
+        return _build_single_date_range_filter_expression(column_filter.column_name, str(start), str(end), dtype=dtype)
+    raise ValueError(f"Unsupported date filter operation: {column_filter.operation}")
+
+
+def _build_single_date_range_filter_expression(
+    column_name: str,
+    start_value: str,
+    end_value: str,
+    *,
+    dtype: pl.DataType | None = None,
+):
+    if start_value == "" or end_value == "":
+        return None
+    start_date = date.fromisoformat(start_value)
+    end_date = date.fromisoformat(end_value)
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    column = pl.col(column_name)
+    if dtype is not None and str(dtype).startswith("Datetime"):
+        column = column.dt.date()
+    return (column >= start_date) & (column <= end_date)
 
 
 def should_clear_distinct_filter(
