@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 import pyarrow.parquet as pq
 import polars as pl
-from PySide6.QtCore import QDate, QEvent, QPoint, QRect, QSize, QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QDate, QEvent, QPoint, QRect, QSize, QThread, QTime, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -51,6 +52,7 @@ from data_engine.ui.gui.rendering.preview_filters import (
     NumberFilterOperation,
     TextFilterCondition,
     TextFilterOperation,
+    TimeFilterRange,
     build_column_filter_expression,
     build_distinct_value_filter_expression,
     column_filter_component,
@@ -78,6 +80,10 @@ def _dtype_supports_date_filter(dtype: pl.DataType) -> bool:
     return base_type in {pl.Date, pl.Datetime}
 
 
+def _dtype_supports_time_filter(dtype: pl.DataType) -> bool:
+    return dtype.base_type() == pl.Time
+
+
 def _dtype_supports_number_filter(dtype: pl.DataType) -> bool:
     base_type = dtype.base_type()
     return base_type in {
@@ -103,6 +109,10 @@ def _dtype_supports_boolean_filter(dtype: pl.DataType) -> bool:
 def _qdate_from_iso(value: str) -> QDate:
     parsed = date.fromisoformat(value)
     return QDate(parsed.year, parsed.month, parsed.day)
+
+
+def _qtime_from_iso(value: str) -> QTime:
+    return QTime.fromString(value, "HH:mm:ss")
 
 
 class _PreviewHeaderView(QHeaderView):
@@ -363,12 +373,15 @@ class _ParquetFilterPopup(QFrame):
         self._populating_values = False
         self._is_text_filter_column = _dtype_supports_text_filter(dtype)
         self._is_date_filter_column = _dtype_supports_date_filter(dtype)
+        self._is_time_filter_column = _dtype_supports_time_filter(dtype)
         self._is_number_filter_column = _dtype_supports_number_filter(dtype)
         self._is_boolean_filter_column = _dtype_supports_boolean_filter(dtype)
         self._text_filter_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
         self._text_filter_layout: QVBoxLayout | None = None
         self._date_filter_rows: list[tuple[QFrame, QDateEdit, QDateEdit]] = []
         self._date_filter_layout: QVBoxLayout | None = None
+        self._time_filter_rows: list[tuple[QFrame, QTimeEdit, QTimeEdit]] = []
+        self._time_filter_layout: QVBoxLayout | None = None
         self._number_filter_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
         self._number_filter_layout: QVBoxLayout | None = None
         self._boolean_filter_combo: QComboBox | None = None
@@ -397,6 +410,8 @@ class _ParquetFilterPopup(QFrame):
             layout.addWidget(self._build_text_filter_controls())
         elif self._is_date_filter_column:
             layout.addWidget(self._build_date_filter_controls())
+        elif self._is_time_filter_column:
+            layout.addWidget(self._build_time_filter_controls())
         elif self._is_boolean_filter_column:
             layout.addWidget(self._build_boolean_filter_controls())
         elif self._is_number_filter_column:
@@ -666,6 +681,99 @@ class _ParquetFilterPopup(QFrame):
 
     def _active_date_filter_ranges(self) -> tuple[DateFilterRange, ...]:
         active_filter = column_filter_component(self._explorer.active_column_filter(self._column_name), "date")
+        if active_filter is None or not active_filter.values:
+            return ()
+        return tuple((str(start_value), str(end_value)) for start_value, end_value in active_filter.values)
+
+    def _build_time_filter_controls(self) -> QFrame:
+        time_section = QFrame(self)
+        time_section.setObjectName("outputPreviewTimeFilterSection")
+        self._time_filter_layout = QVBoxLayout(time_section)
+        self._time_filter_layout.setContentsMargins(0, 0, 0, 0)
+        self._time_filter_layout.setSpacing(6)
+
+        active_ranges = self._active_time_filter_ranges()
+        if not active_ranges:
+            self._add_time_filter_row(start_value="00:00:00", end_value="23:59:59", active=False)
+            return time_section
+        for start_value, end_value in active_ranges:
+            self._add_time_filter_row(start_value=start_value, end_value=end_value, active=True)
+        return time_section
+
+    def _add_time_filter_row(
+        self,
+        *,
+        start_value: str | None = None,
+        end_value: str | None = None,
+        active: bool = False,
+    ) -> None:
+        if self._time_filter_layout is None:
+            return
+        row_frame = QFrame(self)
+        row_frame.setObjectName("outputPreviewControlBar")
+        row_frame.setProperty("outputPreviewTimeRangeActive", active)
+        row_layout = QHBoxLayout(row_frame)
+        row_layout.setContentsMargins(6, 6, 6, 6)
+        row_layout.setSpacing(6)
+
+        from_edit = QTimeEdit(row_frame)
+        from_edit.setObjectName("outputPreviewTimeFilterFromInput")
+        from_edit.setDisplayFormat("HH:mm:ss")
+        from_edit.setTime(_qtime_from_iso(start_value or "00:00:00"))
+        row_layout.addWidget(from_edit, 1)
+
+        to_edit = QTimeEdit(row_frame)
+        to_edit.setObjectName("outputPreviewTimeFilterToInput")
+        to_edit.setDisplayFormat("HH:mm:ss")
+        to_edit.setTime(_qtime_from_iso(end_value or start_value or "23:59:59"))
+        to_edit.setFixedHeight(from_edit.sizeHint().height())
+        from_edit.setFixedHeight(to_edit.sizeHint().height())
+        row_layout.addWidget(to_edit, 1)
+
+        add_button = QPushButton("+", row_frame)
+        add_button.setObjectName("outputPreviewTimeFilterAddButton")
+        add_button.setFixedSize(16, to_edit.sizeHint().height())
+        add_button.setToolTip("Add time range")
+        add_button.clicked.connect(self._add_empty_time_filter_row)
+        row_layout.addWidget(add_button)
+
+        if self._time_filter_rows:
+            remove_button = QPushButton("-", row_frame)
+            remove_button.setObjectName("outputPreviewTimeFilterRemoveButton")
+            remove_button.setFixedSize(16, to_edit.sizeHint().height())
+            remove_button.setToolTip("Remove time range")
+            remove_button.clicked.connect(lambda: self._remove_time_filter_row(row_frame))
+            row_layout.addWidget(remove_button)
+
+        from_edit.timeChanged.connect(lambda _time: self._activate_time_filter_row(row_frame))
+        to_edit.timeChanged.connect(lambda _time: self._activate_time_filter_row(row_frame))
+        self._time_filter_rows.append((row_frame, from_edit, to_edit))
+        self._time_filter_layout.addWidget(row_frame)
+
+    def _add_empty_time_filter_row(self) -> None:
+        self._add_time_filter_row()
+        self._queue_condition_search()
+
+    def _activate_time_filter_row(self, row_frame: QFrame) -> None:
+        row_frame.setProperty("outputPreviewTimeRangeActive", True)
+        self._queue_condition_search()
+
+    def _remove_time_filter_row(self, row_frame: QFrame) -> None:
+        if len(self._time_filter_rows) <= 1:
+            return
+        remaining_rows: list[tuple[QFrame, QTimeEdit, QTimeEdit]] = []
+        for frame, from_edit, to_edit in self._time_filter_rows:
+            if frame is row_frame:
+                if self._time_filter_layout is not None:
+                    self._time_filter_layout.removeWidget(frame)
+                frame.deleteLater()
+            else:
+                remaining_rows.append((frame, from_edit, to_edit))
+        self._time_filter_rows = remaining_rows
+        self._queue_condition_search()
+
+    def _active_time_filter_ranges(self) -> tuple[TimeFilterRange, ...]:
+        active_filter = column_filter_component(self._explorer.active_column_filter(self._column_name), "time")
         if active_filter is None or not active_filter.values:
             return ()
         return tuple((str(start_value), str(end_value)) for start_value, end_value in active_filter.values)
@@ -1053,6 +1161,18 @@ class _ParquetFilterPopup(QFrame):
                 to_edit.blockSignals(False)
             if isinstance(row_frame, QFrame):
                 row_frame.setProperty("outputPreviewDateRangeActive", False)
+        for _, from_edit, to_edit in self._time_filter_rows:
+            row_frame = from_edit.parentWidget()
+            from_edit.blockSignals(True)
+            to_edit.blockSignals(True)
+            try:
+                from_edit.setTime(QTime(0, 0, 0))
+                to_edit.setTime(QTime(23, 59, 59))
+            finally:
+                from_edit.blockSignals(False)
+                to_edit.blockSignals(False)
+            if isinstance(row_frame, QFrame):
+                row_frame.setProperty("outputPreviewTimeRangeActive", False)
         self._explorer.clear_column_filter_and_sort(self._column_name)
         self._refresh_sort_button_state()
         self._queue_search()
@@ -1075,6 +1195,8 @@ class _ParquetFilterPopup(QFrame):
     def distinct_list_column_filter(self) -> ColumnFilter | None:
         if self._date_filter_rows:
             return self._date_filter()
+        if self._time_filter_rows:
+            return self._time_filter()
         if self._boolean_filter_combo is not None:
             return self._boolean_filter()
         if self._number_filter_rows:
@@ -1121,6 +1243,24 @@ class _ParquetFilterPopup(QFrame):
             start_value, end_value = ranges[0]
             return ColumnFilter.date_range(self._column_name, start_value, end_value)
         return ColumnFilter.date_ranges(self._column_name, tuple(ranges))
+
+    def _time_filter(self) -> ColumnFilter | None:
+        ranges: list[TimeFilterRange] = []
+        for row_frame, from_edit, to_edit in self._time_filter_rows:
+            if row_frame.property("outputPreviewTimeRangeActive") is not True:
+                continue
+            ranges.append(
+                (
+                    from_edit.time().toString("HH:mm:ss"),
+                    to_edit.time().toString("HH:mm:ss"),
+                )
+            )
+        if not ranges:
+            return None
+        if len(ranges) == 1:
+            start_value, end_value = ranges[0]
+            return ColumnFilter.time_range(self._column_name, start_value, end_value)
+        return ColumnFilter.time_ranges(self._column_name, tuple(ranges))
 
     def _number_filter(self) -> ColumnFilter | None:
         conditions: list[NumberFilterCondition] = []

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 import polars as pl
 
@@ -133,6 +133,34 @@ def test_column_filter_expression_compiles_datetime_as_date() -> None:
     )
 
     assert result.height == 2
+
+
+def test_column_filter_expression_compiles_time_ranges() -> None:
+    frame = pl.DataFrame(
+        {
+            "received_time": [
+                time(8, 0),
+                time(9, 30),
+                time(13, 15),
+                time(16, 45),
+            ]
+        }
+    )
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.time_ranges(
+                "received_time",
+                (
+                    ("09:00:00", "10:00:00"),
+                    ("16:00:00", "17:00:00"),
+                ),
+            ),
+            dtype=frame.schema["received_time"],
+        )
+    )
+
+    assert result["received_time"].to_list() == [time(9, 30), time(16, 45)]
 
 
 def test_column_filter_expression_compiles_microsecond_datetime_as_date() -> None:

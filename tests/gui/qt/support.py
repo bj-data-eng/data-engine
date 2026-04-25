@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 import json
 import logging
 import os
@@ -11,9 +11,9 @@ import threading
 
 import pytest
 import polars as pl
-from PySide6.QtCore import QDate, QPoint, Qt
+from PySide6.QtCore import QDate, QPoint, Qt, QTime
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QComboBox, QDateEdit, QLabel, QLineEdit, QListWidget, QPushButton, QSpinBox, QTableWidget, QTextEdit, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QDateEdit, QLabel, QLineEdit, QListWidget, QPushButton, QSpinBox, QTableWidget, QTextEdit, QTimeEdit, QWidget
 from shiboken6 import delete as shiboken_delete
 from shiboken6 import isValid as shiboken_is_valid
 
@@ -4424,6 +4424,172 @@ def test_debug_view_date_column_filter_popup_does_not_keep_removed_range_values(
         _dispose_window(qapp, window)
 
 
+def test_debug_view_time_column_filter_popup_applies_time_filter(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 1003, 1004],
+                "received_time": [
+                    time(8, 0),
+                    time(9, 30),
+                    time(13, 15),
+                    time(16, 45),
+                ],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 4)
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        from_input = popup.findChild(QTimeEdit, "outputPreviewTimeFilterFromInput")
+        to_input = popup.findChild(QTimeEdit, "outputPreviewTimeFilterToInput")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert from_input is not None
+        assert to_input is not None
+        assert values_list is not None
+        assert popup.findChild(QLineEdit, "outputPreviewPopupSearch") is None
+        _process_ui_until(qapp, lambda: values_list.count() == 4)
+
+        from_input.setTime(QTime(9, 0, 0))
+        to_input.setTime(QTime(14, 0, 0))
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 2
+            and [values_list.item(index).text() for index in range(values_list.count())]
+            == ["09:30:00", "13:15:00"],
+        )
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+
+        _process_ui_until(qapp, lambda: table.rowCount() == 2 and table.item(0, 1) is not None)
+        assert [table.item(row, 1).text() for row in range(table.rowCount())] == [
+            "09:30:00",
+            "13:15:00",
+        ]
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_debug_view_time_column_filter_popup_supports_multiple_ranges(qapp):
+    window = _make_window()
+    try:
+        debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = debug_dir / "example_manual__Read-Excel__2026-04-19T00-00-00Z__artifact.parquet"
+        pl.DataFrame(
+            {
+                "claim_id": [1001, 1002, 1003, 1004],
+                "received_time": [
+                    time(8, 0),
+                    time(9, 30),
+                    time(13, 15),
+                    time(16, 45),
+                ],
+            }
+        ).write_parquet(artifact_path)
+        artifact_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "debug": {
+                        "workspace_id": window.workspace_paths.workspace_id,
+                        "flow_name": "example_manual",
+                        "step_name": "Read Excel",
+                        "artifact_kind": "dataframe",
+                        "artifact_path": str(artifact_path),
+                        "saved_at_utc": "2026-04-19T00:00:00+00:00",
+                        "display_name": "example_manual / Read Excel / 2026-04-19T00-00-00Z",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        window.debug_button.click()
+        qapp.processEvents()
+
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert table is not None
+        _process_ui_until(qapp, lambda: table.rowCount() == 4)
+
+        explorer._open_filter_popup_for_index(1)
+        qapp.processEvents()
+
+        popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
+        assert popup is not None
+        add_button = popup.findChild(QPushButton, "outputPreviewTimeFilterAddButton")
+        values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
+        assert add_button is not None
+        assert values_list is not None
+
+        from_inputs = popup.findChildren(QTimeEdit, "outputPreviewTimeFilterFromInput")
+        to_inputs = popup.findChildren(QTimeEdit, "outputPreviewTimeFilterToInput")
+        assert len(from_inputs) == 1
+        assert len(to_inputs) == 1
+        from_inputs[0].setTime(QTime(8, 0, 0))
+        to_inputs[0].setTime(QTime(8, 30, 0))
+
+        QTest.mouseClick(add_button, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        from_inputs = popup.findChildren(QTimeEdit, "outputPreviewTimeFilterFromInput")
+        to_inputs = popup.findChildren(QTimeEdit, "outputPreviewTimeFilterToInput")
+        assert len(from_inputs) == 2
+        assert len(to_inputs) == 2
+        from_inputs[1].setTime(QTime(16, 0, 0))
+        to_inputs[1].setTime(QTime(17, 0, 0))
+
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 2
+            and [values_list.item(index).text() for index in range(values_list.count())]
+            == ["08:00:00", "16:45:00"],
+        )
+        buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
+        next(button for button in buttons if button.text() == "Apply").click()
+
+        _process_ui_until(qapp, lambda: table.rowCount() == 2 and table.item(0, 1) is not None)
+        assert [table.item(row, 1).text() for row in range(table.rowCount())] == [
+            "08:00:00",
+            "16:45:00",
+        ]
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_debug_view_number_column_filter_popup_applies_numeric_conditions(qapp):
     window = _make_window()
     try:
@@ -4650,6 +4816,7 @@ def test_debug_view_non_condition_column_filter_popup_hides_dtype_filters(qapp):
         assert popup.findChild(QLineEdit, "outputPreviewNumberFilterInput") is None
         assert popup.findChild(QComboBox, "outputPreviewBooleanFilterCombo") is None
         assert popup.findChild(QDateEdit, "outputPreviewDateFilterFromInput") is None
+        assert popup.findChild(QTimeEdit, "outputPreviewTimeFilterFromInput") is None
         assert popup.findChild(QLineEdit, "outputPreviewPopupSearch") is not None
     finally:
         _dispose_window(qapp, window)

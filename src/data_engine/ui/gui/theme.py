@@ -509,6 +509,8 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     QPushButton#outputPreviewTextFilterRemoveButton,
     QPushButton#outputPreviewDateFilterAddButton,
     QPushButton#outputPreviewDateFilterRemoveButton,
+    QPushButton#outputPreviewTimeFilterAddButton,
+    QPushButton#outputPreviewTimeFilterRemoveButton,
     QPushButton#outputPreviewNumberFilterAddButton,
     QPushButton#outputPreviewNumberFilterRemoveButton {{
         min-width: 16px;
@@ -635,6 +637,7 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     }}
     QComboBox,
     QDateEdit,
+    QTimeEdit,
     QSpinBox {{
         background: {palette.input_bg};
         border: 1px solid {palette.hover_border};
@@ -646,6 +649,7 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
     }}
     QComboBox:hover,
     QDateEdit:hover,
+    QTimeEdit:hover,
     QSpinBox:hover {{
         border-color: {palette.selection_border};
     }}
@@ -760,38 +764,50 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         color: {palette.selection_text};
     }}
     QSpinBox::up-button,
-    QSpinBox::down-button {{
+    QSpinBox::down-button,
+    QTimeEdit::up-button,
+    QTimeEdit::down-button {{
         subcontrol-origin: border;
         background: {palette.button_bg};
         border-left: 1px solid {palette.hover_border};
         width: 14px;
     }}
-    QSpinBox::up-button {{
+    QSpinBox::up-button,
+    QTimeEdit::up-button {{
         subcontrol-position: top right;
         border-top-right-radius: 4px;
         border-bottom: 1px solid {palette.hover_border};
     }}
-    QSpinBox::down-button {{
+    QSpinBox::down-button,
+    QTimeEdit::down-button {{
         subcontrol-position: bottom right;
         border-bottom-right-radius: 4px;
     }}
     QSpinBox::up-button:hover,
-    QSpinBox::down-button:hover {{
+    QSpinBox::down-button:hover,
+    QTimeEdit::up-button:hover,
+    QTimeEdit::down-button:hover {{
         background: {palette.hover_bg};
     }}
     QSpinBox::up-button:pressed,
-    QSpinBox::down-button:pressed {{
+    QSpinBox::down-button:pressed,
+    QTimeEdit::up-button:pressed,
+    QTimeEdit::down-button:pressed {{
         background: {palette.button_hover};
     }}
     QSpinBox::up-arrow,
-    QSpinBox::down-arrow {{
+    QSpinBox::down-arrow,
+    QTimeEdit::up-arrow,
+    QTimeEdit::down-arrow {{
         width: 7px;
         height: 7px;
     }}
-    QSpinBox::up-arrow {{
+    QSpinBox::up-arrow,
+    QTimeEdit::up-arrow {{
         image: url({spin_up_chevron_icon_url});
     }}
-    QSpinBox::down-arrow {{
+    QSpinBox::down-arrow,
+    QTimeEdit::down-arrow {{
         image: url({spin_down_chevron_icon_url});
     }}
     QLineEdit {{

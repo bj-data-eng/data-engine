@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, time
 from typing import Literal
 
 import polars as pl
 
 NULL_FILTER_VALUE = object()
-ColumnFilterKind = Literal["distinct", "text", "date", "number", "boolean", "all"]
+ColumnFilterKind = Literal["distinct", "text", "date", "time", "number", "boolean", "all"]
 TextFilterOperation = Literal["equals", "not_equals", "begins_with", "ends_with", "contains", "not_contains"]
 TextFilterCondition = tuple[TextFilterOperation, str]
 DateFilterRange = tuple[str, str]
+TimeFilterRange = tuple[str, str]
 BooleanFilterValue = Literal["true", "false", "blank"]
 NumberFilterOperation = Literal[
     "equals",
@@ -212,6 +213,35 @@ class ColumnFilter:
         return cls(column_name=str(column_name), kind="date", operation="ranges", values=ranges)
 
     @classmethod
+    def time_range(cls, column_name: str, start_time: str, end_time: str) -> ColumnFilter:
+        """Build an inclusive time range filter state.
+
+        Args:
+            column_name: Column being filtered.
+            start_time: Inclusive ISO start time.
+            end_time: Inclusive ISO end time.
+
+        Returns:
+            Time filter state.
+        """
+
+        return cls(column_name=str(column_name), kind="time", operation="range", values=((start_time, end_time),))
+
+    @classmethod
+    def time_ranges(cls, column_name: str, ranges: tuple[TimeFilterRange, ...]) -> ColumnFilter:
+        """Build a multi-range time filter state.
+
+        Args:
+            column_name: Column being filtered.
+            ranges: Inclusive ``(start_time, end_time)`` ranges. Ranges are combined with OR.
+
+        Returns:
+            Time filter state containing all ranges.
+        """
+
+        return cls(column_name=str(column_name), kind="time", operation="ranges", values=ranges)
+
+    @classmethod
     def number(cls, column_name: str, operation: NumberFilterOperation, value: str) -> ColumnFilter:
         """Build a numeric comparison filter state.
 
@@ -310,6 +340,8 @@ def build_column_filter_expression(column_filter: ColumnFilter, *, dtype: pl.Dat
         return _build_text_filter_expression(column_filter)
     if column_filter.kind == "date":
         return _build_date_filter_expression(column_filter, dtype=dtype)
+    if column_filter.kind == "time":
+        return _build_time_filter_expression(column_filter)
     if column_filter.kind == "number":
         return _build_number_filter_expression(column_filter, dtype=dtype)
     if column_filter.kind == "boolean":
@@ -445,6 +477,43 @@ def _build_single_date_range_filter_expression(
     if dtype is not None and dtype.base_type() == pl.Datetime:
         column = column.dt.date()
     return (column >= start_date) & (column <= end_date)
+
+
+def _build_time_filter_expression(column_filter: ColumnFilter):
+    if not column_filter.values:
+        return None
+    if column_filter.operation == "ranges":
+        expressions = [
+            _build_single_time_range_filter_expression(column_filter.column_name, str(start), str(end))
+            for start, end in column_filter.values
+            if str(start) != "" and str(end) != ""
+        ]
+        expressions = [expression for expression in expressions if expression is not None]
+        if not expressions:
+            return None
+        expression = expressions[0]
+        for next_expression in expressions[1:]:
+            expression = expression | next_expression
+        return expression
+    if column_filter.operation == "range":
+        start, end = column_filter.values[0]
+        return _build_single_time_range_filter_expression(column_filter.column_name, str(start), str(end))
+    raise ValueError(f"Unsupported time filter operation: {column_filter.operation}")
+
+
+def _build_single_time_range_filter_expression(
+    column_name: str,
+    start_value: str,
+    end_value: str,
+):
+    if start_value == "" or end_value == "":
+        return None
+    start_time = time.fromisoformat(start_value)
+    end_time = time.fromisoformat(end_value)
+    if start_time > end_time:
+        start_time, end_time = end_time, start_time
+    column = pl.col(column_name)
+    return (column >= start_time) & (column <= end_time)
 
 
 def _build_number_filter_expression(column_filter: ColumnFilter, *, dtype: pl.DataType | None = None):
