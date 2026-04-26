@@ -494,6 +494,7 @@ def test_daemon_state_service_diff_update_batch_tracks_started_events_without_ac
             source_label="docs.xlsx",
             status="started",
             elapsed_seconds=None,
+            started_at_utc="2026-04-18T12:00:01+00:00",
         ),
     )
     log_update = next(update for update in batch.updates if update.lane == "log_events")

@@ -539,6 +539,22 @@ class RuntimeStateService:
             step_output_index=step_output_index,
         )
 
+    def refresh_operation_tracker_from_step_runs(
+        self,
+        binding: WorkspaceRuntimeBinding,
+        *,
+        flow_cards: Iterable[FlowCatalogLike],
+        fallback: OperationSessionState,
+        now: float,
+    ) -> OperationSessionState:
+        """Return operation row state refreshed from persisted step-run rows."""
+        return self._operation_tracker_from_step_runs(
+            binding,
+            flow_cards=tuple(flow_cards),
+            fallback=fallback,
+            now=now,
+        )
+
     def _build_workspace_snapshot(
         self,
         *,

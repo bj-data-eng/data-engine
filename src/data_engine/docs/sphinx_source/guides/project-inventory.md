@@ -3,7 +3,7 @@
 This page is generated from the current AST map and is intentionally inventory-shaped rather than explanatory.
 
 - package root: `src/data_engine`
-- module count: `208`
+- module count: `210`
 
 - module `data_engine`
   - attribute `__all__`
@@ -1269,6 +1269,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `status`
     - attribute `elapsed_seconds`
     - attribute `run_id`
+    - attribute `started_at_utc`
   - class `FlowLogEntry`
     - attribute `line`
     - attribute `kind`
@@ -1803,6 +1804,29 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `drop_key: bool=True`
     - param `returns: str | None='df'`
 - module `data_engine.helpers.duckdb._maintenance`
+  - function `_default_index_name`
+    - param `*`
+    - param `table: str`
+    - param `columns: tuple[str, ...]`
+  - function `_index_ref`
+    - param `*`
+    - param `schema: str`
+    - param `name: str`
+  - function `_table_index_rows`
+    - param `connection`
+    - param `table: str`
+  - function `_drop_indexes`
+    - param `connection`
+    - param `index_rows: list[dict[str, str]]`
+  - function `_restore_indexes`
+    - param `connection`
+    - param `index_rows: list[dict[str, str]]`
+  - function `ensure_index`
+    - param `db_path: str | Path`
+    - param `table: str`
+    - param `*`
+    - param `columns: str | list[str] | tuple[str, ...]`
+    - param `name: str | None=None`
   - function `compact_database`
     - param `db_path: str | Path`
     - param `*`
@@ -1829,6 +1853,15 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `where: str | None=None`
     - param `limit: int | None=None`
 - module `data_engine.helpers.duckdb._replace`
+  - function `_relation_columns`
+    - param `connection`
+    - param `relation: str`
+  - function `_create_or_extend_table_from_relation`
+    - param `connection`
+    - param `*`
+    - param `table: str`
+    - param `quoted_table: str`
+    - param `relation: str`
   - function `replace_rows_by_file`
     - param `db_path: str | Path`
     - param `table: str`
@@ -1856,31 +1889,61 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `ReturnMode`
   - attribute `WeekMask`
   - attribute `DateLike`
+  - attribute `HolidayDates`
   - attribute `ExprLike`
   - attribute `IntExprLike`
+  - attribute `ColumnExpr`
+  - attribute `ColumnExprs`
+  - attribute `DescendingLike`
   - attribute `_DEFAULT_WEEK_MASK`
   - function `networkdays`
     - param `start: ExprLike`
     - param `end: ExprLike`
     - param `*`
-    - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+    - param `holidays: HolidayDates=None`
     - param `count_first_day: bool=False`
     - param `mask: Iterable[bool] | None=None`
   - function `workday`
     - param `start: ExprLike`
     - param `days: IntExprLike`
     - param `*`
-    - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+    - param `holidays: HolidayDates=None`
     - param `count_first_day: bool=False`
     - param `mask: Iterable[bool] | None=None`
+  - function `propagate_last_value`
+    - param `value: ColumnExpr`
+    - param `*`
+    - param `by: ColumnExprs`
+    - param `sort_by: ColumnExprs`
+    - param `where: pl.Expr | None=None`
+    - param `descending: DescendingLike=False`
+    - param `nulls_last: bool=False`
+    - param `ignore_nulls: bool=True`
+  - function `visit_counter`
+    - param `value: ColumnExpr`
+    - param `*`
+    - param `by: ColumnExprs`
+    - param `sort_by: ColumnExprs`
+    - param `descending: DescendingLike=False`
+    - param `nulls_last: bool=False`
   - function `_coerce_week_mask`
     - param `mask: Iterable[bool] | None`
   - function `_coerce_holiday_dates`
-    - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None`
+    - param `holidays: HolidayDates`
   - function `_as_date_expr`
     - param `value: ExprLike`
   - function `_as_int_expr`
     - param `value: IntExprLike`
+  - function `_as_column_expr`
+    - param `value: ColumnExpr`
+  - function `_as_column_exprs`
+    - param `value: ColumnExprs`
+  - function `_visit_counter_batch`
+    - param `batch: pl.Series`
+    - param `*`
+    - param `sort_names: Sequence[str]`
+    - param `descending: bool | tuple[bool, ...]`
+    - param `nulls_last: bool`
   - function `_is_business_day_expr`
     - param `date_expr: pl.Expr`
     - param `week_mask: WeekMask`
@@ -2000,7 +2063,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `start: ExprLike`
       - param `end: ExprLike`
       - param `*`
-      - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+      - param `holidays: HolidayDates=None`
       - param `count_first_day: bool=False`
       - param `mask: Iterable[bool] | None=None`
     - method `workday`
@@ -2008,9 +2071,27 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `start: ExprLike`
       - param `days: IntExprLike`
       - param `*`
-      - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+      - param `holidays: HolidayDates=None`
       - param `count_first_day: bool=False`
       - param `mask: Iterable[bool] | None=None`
+    - method `propagate_last_value`
+      - param `self`
+      - param `value: ColumnExpr`
+      - param `*`
+      - param `by: ColumnExprs`
+      - param `sort_by: ColumnExprs`
+      - param `where: pl.Expr | None=None`
+      - param `descending: DescendingLike=False`
+      - param `nulls_last: bool=False`
+      - param `ignore_nulls: bool=True`
+    - method `visit_counter`
+      - param `self`
+      - param `value: ColumnExpr`
+      - param `*`
+      - param `by: ColumnExprs`
+      - param `sort_by: ColumnExprs`
+      - param `descending: DescendingLike=False`
+      - param `nulls_last: bool=False`
     - method `write_parquet_atomic`
       - param `self`
       - param `path: PathLike`
@@ -2086,7 +2167,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `start: ExprLike`
       - param `end: ExprLike`
       - param `*`
-      - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+      - param `holidays: HolidayDates=None`
       - param `count_first_day: bool=False`
       - param `mask: Iterable[bool] | None=None`
     - method `workday`
@@ -2094,9 +2175,27 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `start: ExprLike`
       - param `days: IntExprLike`
       - param `*`
-      - param `holidays: list[DateLike | str] | tuple[DateLike | str, ...] | set[DateLike | str] | None=None`
+      - param `holidays: HolidayDates=None`
       - param `count_first_day: bool=False`
       - param `mask: Iterable[bool] | None=None`
+    - method `propagate_last_value`
+      - param `self`
+      - param `value: ColumnExpr`
+      - param `*`
+      - param `by: ColumnExprs`
+      - param `sort_by: ColumnExprs`
+      - param `where: pl.Expr | None=None`
+      - param `descending: DescendingLike=False`
+      - param `nulls_last: bool=False`
+      - param `ignore_nulls: bool=True`
+    - method `visit_counter`
+      - param `self`
+      - param `value: ColumnExpr`
+      - param `*`
+      - param `by: ColumnExprs`
+      - param `sort_by: ColumnExprs`
+      - param `descending: DescendingLike=False`
+      - param `nulls_last: bool=False`
     - method `sink_parquet_atomic`
       - param `self`
       - param `path: PathLike`
@@ -5817,6 +5916,7 @@ This page is generated from the current AST map and is intentionally inventory-s
   - class `_RuntimeCacheHandle`
     - instance attribute `db_path`
     - instance attribute `cache_ttl_seconds`
+    - instance attribute `max_read_cache_entries`
     - instance attribute `_ledger`
     - instance attribute `_lock`
     - instance attribute `_refcount`
@@ -5830,6 +5930,7 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `db_path: Path`
       - param `*`
       - param `cache_ttl_seconds: float=1.0`
+      - param `max_read_cache_entries: int=512`
     - method `acquire`
       - param `self`
     - method `release`
@@ -5855,6 +5956,9 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `key: tuple[object, ...]`
       - param `loader: Callable[[], object]`
+    - method `_prune_read_cache_locked`
+      - param `self`
+      - param `now: float`
   - class `_RuntimeRunsProxy`
     - instance attribute `_handle`
     - instance attribute `_delegate`
@@ -6045,12 +6149,14 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `name: str`
   - class `RuntimeIoLayer`
     - instance attribute `cache_ttl_seconds`
+    - instance attribute `max_read_cache_entries`
     - instance attribute `_lock`
     - instance attribute `_handles`
     - method `__init__`
       - param `self`
       - param `*`
       - param `cache_ttl_seconds: float=1.0`
+      - param `max_read_cache_entries: int=512`
     - method `open_cache_store`
       - param `self`
       - param `db_path: Path`
@@ -6159,6 +6265,8 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `flow_cards: Iterable[FlowCatalogLike]`
   - function `runtime_session_from_workspace_snapshot`
     - param `snapshot: WorkspaceSnapshot`
+  - function `_safe_parse_utc_text`
+    - param `value: object`
   - class `ControlSnapshot`
     - attribute `state`
     - attribute `leased_by_machine_id`
@@ -6264,6 +6372,19 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `runtime_session: RuntimeSessionState`
       - param `*`
       - param `active_runtime_flow_names: tuple[str, ...]`
+    - method `_step_elapsed_seconds`
+      - param `step_run: object`
+    - method `_step_started_at_monotonic`
+      - param `step_run: object`
+      - param `*`
+      - param `now: float`
+    - method `_operation_tracker_from_step_runs`
+      - param `cls`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `flow_cards: tuple[FlowCatalogLike, ...]`
+      - param `fallback: OperationSessionState`
+      - param `now: float`
     - method `_control_snapshot`
       - param `control_state: WorkspaceControlState`
       - param `runtime_session: RuntimeSessionState`
@@ -6277,26 +6398,12 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `daemon_active_flow_names: tuple[str, ...]`
     - method `_flow_state_name`
       - param `state_text: str`
-    - method `_run_state_name`
-      - param `run_group: FlowRunState`
-      - param `*`
-      - param `flow_state: FlowStateName`
-    - method `_current_step_name`
-      - param `run_group: FlowRunState`
-    - method `_run_started_at`
-      - param `run_group: FlowRunState`
-    - method `_run_finished_at`
-      - param `run_group: FlowRunState`
-    - method `_run_error_text`
-      - param `run_group: FlowRunState`
     - method `_live_flow_state_name`
       - param `card: FlowCatalogLike`
       - param `*`
       - param `daemon_live: bool`
       - param `daemon_active_flow_names: tuple[str, ...]`
       - param `daemon_activity: FlowActivityState | None`
-    - method `_latest_run_times`
-      - param `run_groups: tuple[FlowRunState, ...]`
     - method `_snapshot_signature`
       - param `snapshot: WorkspaceSnapshot`
     - method `subscribe`
@@ -6314,6 +6421,13 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `runtime_application: RuntimeApplication`
       - param `flow_cards: Iterable[FlowCatalogLike]`
       - param `runtime_session: RuntimeSessionState`
+      - param `now: float`
+    - method `refresh_operation_tracker_from_step_runs`
+      - param `self`
+      - param `binding: WorkspaceRuntimeBinding`
+      - param `*`
+      - param `flow_cards: Iterable[FlowCatalogLike]`
+      - param `fallback: OperationSessionState`
       - param `now: float`
     - method `_build_workspace_snapshot`
       - param `self`
@@ -7203,6 +7317,9 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `__all__`
 - module `data_engine.ui.gui.controllers.flows`
   - attribute `__all__`
+  - function `_set_label_text`
+    - param `label`
+    - param `text: str`
   - class `_GuiWorkspaceCatalogController`
     - instance attribute `workspace_service`
     - instance attribute `catalog_query_service`
@@ -7419,9 +7536,6 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `step_output_index`
     - method `_current_runtime_session`
       - param `window: 'DataEngineWindow'`
-    - method `_effective_operation_tracker`
-      - param `window: 'DataEngineWindow'`
-      - param `rebuilt_tracker`
     - method `_refresh_runtime_projection_from_logs`
       - param `self`
       - param `window: 'DataEngineWindow'`
@@ -7696,6 +7810,30 @@ This page is generated from the current AST map and is intentionally inventory-s
   - function `main`
 - module `data_engine.ui.gui.presenters`
   - attribute `__all__`
+- module `data_engine.ui.gui.presenters.dataframes`
+  - attribute `__all__`
+  - function `browse_dataframe_file`
+    - param `window: 'DataEngineWindow'`
+  - function `browse_dataframe_folder`
+    - param `window: 'DataEngineWindow'`
+  - function `connect_dataframe_path`
+    - param `window: 'DataEngineWindow'`
+    - param `path: Path`
+  - function `show_dataframe_source`
+    - param `window: 'DataEngineWindow'`
+    - param `path: Path`
+    - param `*`
+    - param `label: str`
+  - function `show_selected_dataframe_file`
+    - param `window: 'DataEngineWindow'`
+  - function `clear_dataframe_preview`
+    - param `window: 'DataEngineWindow'`
+    - param `message: str`
+  - function `_recursive_parquet_glob`
+    - param `path: Path`
+  - function `_release_unused_preview_memory`
+  - function `_clear_layout_widgets`
+    - param `layout`
 - module `data_engine.ui.gui.presenters.debug`
   - attribute `__all__`
   - function `refresh_debug_artifacts`
@@ -7798,12 +7936,12 @@ This page is generated from the current AST map and is intentionally inventory-s
   - function `_refresh_parallel_live_operation_rows`
     - param `window: 'DataEngineWindow'`
     - param `card`
-  - function `_live_step_elapsed_seconds`
-    - param `started_at_utc: str | None`
-    - param `fallback_elapsed_seconds: float | None`
   - function `apply_operation_row_state`
     - param `row_card: QFrame`
     - param `status: str`
+  - function `_set_duration_text`
+    - param `label`
+    - param `text: str`
   - function `flash_operation_row`
     - param `window: 'DataEngineWindow'`
     - param `index: int`
@@ -8027,10 +8165,21 @@ This page is generated from the current AST map and is intentionally inventory-s
   - attribute `_TABLE_RENDER_BATCH_SIZE`
   - attribute `_PREVIEW_DISTINCT_VALUE_LIMIT`
   - attribute `_PREVIEW_MODE_TOP`
-  - attribute `_PREVIEW_MODE_BOTTOM`
-  - attribute `_PREVIEW_MODE_SAMPLE`
-  - attribute `_NULL_FILTER_VALUE`
   - attribute `__all__`
+  - function `_dtype_supports_text_filter`
+    - param `dtype: pl.DataType`
+  - function `_dtype_supports_date_filter`
+    - param `dtype: pl.DataType`
+  - function `_dtype_supports_time_filter`
+    - param `dtype: pl.DataType`
+  - function `_dtype_supports_number_filter`
+    - param `dtype: pl.DataType`
+  - function `_dtype_supports_boolean_filter`
+    - param `dtype: pl.DataType`
+  - function `_qdate_from_iso`
+    - param `value: str`
+  - function `_qtime_from_iso`
+    - param `value: str`
   - function `populate_output_preview`
     - param `layout: QVBoxLayout`
     - param `output_path: Path`
@@ -8038,7 +8187,7 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `*`
     - param `show_summary: bool=True`
     - param `timing_log_path: Path | None=None`
-    - param `external_preview_controls: tuple[QComboBox, QSpinBox] | None=None`
+    - param `external_preview_controls: tuple[QSpinBox, ...] | None=None`
   - function `build_preview_summary_text`
     - param `output_path: Path`
     - param `preview_spec: ArtifactPreviewSpec | None=None`
@@ -8049,17 +8198,33 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `*`
     - param `show_summary: bool`
     - param `timing_log_path: Path | None=None`
-    - param `external_preview_controls: tuple[QComboBox, QSpinBox] | None=None`
+    - param `external_preview_controls: tuple[QSpinBox, ...] | None=None`
   - function `_add_tabular_preview`
     - param `layout: QVBoxLayout`
     - param `frame: pl.DataFrame`
     - param `heading: str`
     - param `*`
     - param `show_summary: bool`
+    - param `output_path: Path | None=None`
   - function `_build_dataframe_table`
     - param `frame: pl.DataFrame`
   - function `_frame_summary_text`
     - param `frame: pl.DataFrame`
+  - function `_first_layout_stretch_index`
+    - param `layout: QHBoxLayout`
+  - function `_export_frame_to_excel`
+    - param `frame: pl.DataFrame`
+    - param `*`
+    - param `source_path: Path | None`
+    - param `parent: QWidget`
+  - function `_default_excel_export_path`
+    - param `source_path: Path | None`
+  - function `_path_contains_glob`
+    - param `path: Path`
+  - function `_glob_base_path`
+    - param `path: Path`
+  - function `_with_excel_suffix`
+    - param `path: Path`
   - function `_prepare_dataframe_table`
     - param `table: QTableWidget`
     - param `frame: pl.DataFrame`
@@ -8080,6 +8245,50 @@ This page is generated from the current AST map and is intentionally inventory-s
   - function `_build_distinct_value_filter_expression`
     - param `column_name: str`
     - param `selected_values: tuple[object, ...]`
+    - param `*`
+    - param `dtype: pl.DataType | None=None`
+  - function `_parquet_row_count_from_metadata`
+    - param `path: Path`
+  - function `_parquet_metadata_paths`
+    - param `path: Path`
+  - function `_sort_parquet_preview_query`
+    - param `query: pl.LazyFrame`
+    - param `sort_columns: tuple[tuple[str, bool], ...]`
+  - function `_sorted_top_parquet_preview`
+    - param `query: pl.LazyFrame`
+    - param `sort_columns: tuple[tuple[str, bool], ...]`
+    - param `row_limit: int`
+  - function `_top_parquet_preview_by_row_index`
+    - param `query: pl.LazyFrame`
+    - param `path: Path`
+    - param `*`
+    - param `filter_expressions: tuple[pl.Expr, ...]`
+    - param `sort_columns: tuple[tuple[str, bool], ...]`
+    - param `row_limit: int`
+    - param `schema_names: tuple[str, ...]`
+  - function `_collect_preview_rows_by_file_row_ids`
+    - param `path: Path`
+    - param `*`
+    - param `row_ids: list[int]`
+    - param `row_index_column: str`
+    - param `order_column: str`
+  - function `_parquet_file_row_offsets`
+    - param `path: Path`
+  - function `_sort_column_names`
+    - param `sort_columns: tuple[tuple[str, bool], ...]`
+  - function `_preview_row_index_column`
+    - param `schema_names: tuple[str, ...]`
+  - function `_preview_order_column`
+    - param `schema_names: tuple[str, ...]`
+    - param `row_index_column: str`
+  - function `_unique_preview_column_name`
+    - param `base_name: str`
+    - param `existing_names: tuple[str, ...]`
+  - function `_event_position`
+    - param `event: object`
+  - function `_header_point_is_resize_handle`
+    - param `header: QHeaderView`
+    - param `point: QPoint`
   - function `_value_identity`
     - param `value: object`
   - function `_cell_text`
@@ -8119,17 +8328,15 @@ This page is generated from the current AST map and is intentionally inventory-s
     - attribute `preview_loaded`
     - attribute `load_failed`
     - instance attribute `_output_path`
-    - instance attribute `_active_value_filters`
+    - instance attribute `_active_filters`
     - instance attribute `_sort_columns`
-    - instance attribute `_preview_mode`
     - instance attribute `_preview_row_limit`
     - method `__init__`
       - param `self`
       - param `output_path: Path`
       - param `*`
-      - param `active_value_filters: dict[str, tuple[object, ...]]`
+      - param `active_filters: dict[str, ColumnFilter]`
       - param `sort_columns: tuple[tuple[str, bool], ...]`
-      - param `preview_mode: str`
       - param `preview_row_limit: int`
     - method `run`
       - param `self`
@@ -8139,7 +8346,9 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `_output_path`
     - instance attribute `_column_name`
     - instance attribute `_token`
-    - instance attribute `_active_value_filters`
+    - instance attribute `_active_filters`
+    - instance attribute `_value_filter`
+    - instance attribute `_sort_descending`
     - instance attribute `_search_text`
     - instance attribute `_value_limit`
     - method `__init__`
@@ -8148,7 +8357,9 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `column_name: str`
       - param `*`
       - param `token: int`
-      - param `active_value_filters: dict[str, tuple[object, ...]]`
+      - param `active_filters: dict[str, ColumnFilter]`
+      - param `value_filter: ColumnFilter | None`
+      - param `sort_descending: bool | None`
       - param `search_text: str`
       - param `value_limit: int=500`
     - method `run`
@@ -8162,6 +8373,23 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `_sort_ascending_button`
     - instance attribute `_sort_descending_button`
     - instance attribute `_select_all_button`
+    - instance attribute `_explicitly_unchecked_value_identities`
+    - instance attribute `_use_active_selected_values`
+    - instance attribute `_populating_values`
+    - instance attribute `_is_text_filter_column`
+    - instance attribute `_is_date_filter_column`
+    - instance attribute `_is_time_filter_column`
+    - instance attribute `_is_number_filter_column`
+    - instance attribute `_is_boolean_filter_column`
+    - instance attribute `_text_filter_rows`
+    - instance attribute `_text_filter_layout`
+    - instance attribute `_date_filter_rows`
+    - instance attribute `_date_filter_layout`
+    - instance attribute `_time_filter_rows`
+    - instance attribute `_time_filter_layout`
+    - instance attribute `_number_filter_rows`
+    - instance attribute `_number_filter_layout`
+    - instance attribute `_boolean_filter_combo`
     - instance attribute `search_input`
     - instance attribute `status_label`
     - instance attribute `values_list`
@@ -8173,6 +8401,77 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `column_name: str`
       - param `dtype: pl.DataType`
       - param `values: list[tuple[str, object]]`
+    - method `_build_text_filter_controls`
+      - param `self`
+    - method `_add_text_filter_row`
+      - param `self`
+      - param `*`
+      - param `operation: TextFilterOperation='contains'`
+      - param `value: str=''`
+    - method `_add_empty_text_filter_row`
+      - param `self`
+    - method `_remove_text_filter_row`
+      - param `self`
+      - param `row_frame: QFrame`
+    - method `_active_text_filter_conditions`
+      - param `self`
+    - method `_build_date_filter_controls`
+      - param `self`
+    - method `_add_date_filter_row`
+      - param `self`
+      - param `*`
+      - param `start_value: str | None=None`
+      - param `end_value: str | None=None`
+      - param `active: bool=False`
+    - method `_style_date_filter_calendar`
+      - param `self`
+      - param `date_edit: QDateEdit`
+    - method `_add_empty_date_filter_row`
+      - param `self`
+    - method `_activate_date_filter_row`
+      - param `self`
+      - param `row_frame: QFrame`
+    - method `_remove_date_filter_row`
+      - param `self`
+      - param `row_frame: QFrame`
+    - method `_active_date_filter_ranges`
+      - param `self`
+    - method `_build_time_filter_controls`
+      - param `self`
+    - method `_add_time_filter_row`
+      - param `self`
+      - param `*`
+      - param `start_value: str | None=None`
+      - param `end_value: str | None=None`
+      - param `active: bool=False`
+    - method `_add_empty_time_filter_row`
+      - param `self`
+    - method `_activate_time_filter_row`
+      - param `self`
+      - param `row_frame: QFrame`
+    - method `_remove_time_filter_row`
+      - param `self`
+      - param `row_frame: QFrame`
+    - method `_active_time_filter_ranges`
+      - param `self`
+    - method `_build_number_filter_controls`
+      - param `self`
+    - method `_add_number_filter_row`
+      - param `self`
+      - param `*`
+      - param `min_value: str=''`
+      - param `max_value: str=''`
+    - method `_add_empty_number_filter_row`
+      - param `self`
+    - method `_remove_number_filter_row`
+      - param `self`
+      - param `row_frame: QFrame`
+    - method `_active_number_filter_ranges`
+      - param `self`
+    - method `_build_boolean_filter_controls`
+      - param `self`
+    - method `_active_boolean_filter_value`
+      - param `self`
     - method `showEvent`
       - param `self`
       - param `event`
@@ -8186,6 +8485,17 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `watched: object`
       - param `event: object`
+    - method `_is_date_calendar_interaction`
+      - param `self`
+      - param `watched: object`
+      - param `global_point: QPoint`
+    - method `_is_date_calendar_widget`
+      - param `self`
+      - param `watched: object`
+    - method `_widget_contains_global_point`
+      - param `self`
+      - param `widget: QWidget`
+      - param `global_point: QPoint`
     - method `set_values`
       - param `self`
       - param `values: list[tuple[str, object]]`
@@ -8198,6 +8508,9 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `message: str`
     - method `_populate_items`
       - param `self`
+    - method `_handle_value_item_changed`
+      - param `self`
+      - param `item: QListWidgetItem`
     - method `_apply_select_all_state`
       - param `self`
       - param `state: Qt.CheckState | int`
@@ -8211,9 +8524,29 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
     - method `_apply_selection`
       - param `self`
+    - method `_selected_distinct_filter`
+      - param `self`
+    - method `_clear_column_state`
+      - param `self`
     - method `_queue_search`
       - param `self`
+    - method `_queue_condition_search`
+      - param `self`
     - method `_dispatch_search`
+      - param `self`
+    - method `distinct_list_column_filter`
+      - param `self`
+    - method `combined_column_filter`
+      - param `self`
+    - method `_text_filter`
+      - param `self`
+    - method `_date_filter`
+      - param `self`
+    - method `_time_filter`
+      - param `self`
+    - method `_number_filter`
+      - param `self`
+    - method `_boolean_filter`
       - param `self`
     - method `_sort_should_append`
       - param `self`
@@ -8232,28 +8565,30 @@ This page is generated from the current AST map and is intentionally inventory-s
     - instance attribute `_lazy_frame`
     - instance attribute `_schema`
     - instance attribute `_current_preview`
-    - instance attribute `_active_value_filters`
+    - instance attribute `_active_filters`
     - instance attribute `_filter_popup`
     - instance attribute `_distinct_loaders`
     - instance attribute `_preview_loader`
     - instance attribute `_pending_preview_refresh`
-    - instance attribute `_preview_mode`
     - instance attribute `_active_preview_request_id`
     - instance attribute `_active_distinct_requests`
     - instance attribute `_open_filter_column_index`
     - instance attribute `_owns_preview_controls`
+    - instance attribute `_external_preview_controls_layout`
+    - instance attribute `_owns_status_label`
     - instance attribute `_table_render_generation`
-    - instance attribute `_sort_columns`
-    - instance attribute `status_label`
+    - instance attribute `_sort_state`
+    - instance attribute `_preview_summary_text`
+    - instance attribute `export_excel_button`
     - instance attribute `table`
-    - instance attribute `preview_mode_combo`
     - instance attribute `preview_limit_spin`
+    - instance attribute `status_label`
     - method `__init__`
       - param `self`
       - param `output_path: Path`
       - param `*`
       - param `timing_log_path: Path | None=None`
-      - param `external_preview_controls: tuple[QComboBox, QSpinBox] | None=None`
+      - param `external_preview_controls: tuple[QSpinBox] | tuple[QSpinBox, QHBoxLayout] | tuple[QSpinBox, QHBoxLayout, QLabel] | None=None`
     - method `_configure_preview_controls`
       - param `self`
     - method `shutdown_background_work`
@@ -8261,6 +8596,14 @@ This page is generated from the current AST map and is intentionally inventory-s
     - method `selected_filter_values`
       - param `self`
       - param `column_name: str`
+    - method `active_column_filter`
+      - param `self`
+      - param `column_name: str`
+    - method `_sort_columns`
+      - param `self`
+    - method `_sort_columns`
+      - param `self`
+      - param `columns: list[tuple[str, bool]] | tuple[tuple[str, bool], ...]`
     - method `apply_distinct_filter`
       - param `self`
       - param `column_name: str`
@@ -8268,6 +8611,20 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `all_values: tuple[object, ...]`
       - param `*`
       - param `complete_domain: bool`
+    - method `apply_text_filter`
+      - param `self`
+      - param `column_name: str`
+      - param `operation: str`
+      - param `value: str`
+    - method `apply_column_filter`
+      - param `self`
+      - param `column_filter: ColumnFilter`
+    - method `clear_column_filter`
+      - param `self`
+      - param `column_name: str`
+    - method `clear_column_filter_and_sort`
+      - param `self`
+      - param `column_name: str`
     - method `request_filter_values`
       - param `self`
       - param `column_name: str`
@@ -8357,6 +8714,11 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `column_name: str`
       - param `values: list[tuple[str, object]]`
+    - method `_export_current_preview`
+      - param `self`
+    - method `_set_preview_status`
+      - param `self`
+      - param `status: str | None`
   - class `_CopyablePreviewTable`
     - method `keyPressEvent`
       - param `self`
@@ -8365,6 +8727,18 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self`
       - param `event`
     - method `_copy_selection_to_clipboard`
+      - param `self`
+  - class `_ExportableFramePreviewWidget`
+    - instance attribute `_frame`
+    - instance attribute `_source_path`
+    - method `__init__`
+      - param `self`
+      - param `frame: pl.DataFrame`
+      - param `*`
+      - param `heading: str`
+      - param `show_summary: bool`
+      - param `source_path: Path | None=None`
+    - method `_export_frame`
       - param `self`
 - module `data_engine.ui.gui.rendering.icons`
   - attribute `__all__`
@@ -8382,6 +8756,156 @@ This page is generated from the current AST map and is intentionally inventory-s
     - param `default_fill_color: QColor | str`
     - param `inset: float=0.0`
     - param `colorize_stroke: bool=False`
+- module `data_engine.ui.gui.rendering.preview_filters`
+  - attribute `NULL_FILTER_VALUE`
+  - attribute `ColumnFilterKind`
+  - attribute `TextFilterOperation`
+  - attribute `TextFilterCondition`
+  - attribute `DateFilterRange`
+  - attribute `TimeFilterRange`
+  - attribute `BooleanFilterValue`
+  - attribute `NumberFilterRange`
+  - function `column_filter_component`
+    - param `column_filter: ColumnFilter | None`
+    - param `kind: str`
+  - function `build_column_filter_expression`
+    - param `column_filter: ColumnFilter`
+    - param `*`
+    - param `dtype: pl.DataType | None=None`
+  - function `build_distinct_value_filter_expression`
+    - param `column_name: str`
+    - param `selected_values: tuple[object, ...]`
+    - param `*`
+    - param `dtype: pl.DataType | None=None`
+  - function `_build_all_filter_expression`
+    - param `column_filter: ColumnFilter`
+    - param `*`
+    - param `dtype: pl.DataType | None=None`
+  - function `_build_text_filter_expression`
+    - param `column_filter: ColumnFilter`
+  - function `_build_single_text_filter_expression`
+    - param `column_name: str`
+    - param `operation: str`
+    - param `value: str`
+  - function `_build_date_filter_expression`
+    - param `column_filter: ColumnFilter`
+    - param `*`
+    - param `dtype: pl.DataType | None=None`
+  - function `_build_single_date_range_filter_expression`
+    - param `column_name: str`
+    - param `start_value: str`
+    - param `end_value: str`
+    - param `*`
+    - param `dtype: pl.DataType | None=None`
+  - function `_build_time_filter_expression`
+    - param `column_filter: ColumnFilter`
+  - function `_build_single_time_range_filter_expression`
+    - param `column_name: str`
+    - param `start_value: str`
+    - param `end_value: str`
+  - function `_build_number_filter_expression`
+    - param `column_filter: ColumnFilter`
+    - param `*`
+    - param `dtype: pl.DataType | None=None`
+  - function `_build_single_number_range_filter_expression`
+    - param `column_name: str`
+    - param `min_value: str`
+    - param `max_value: str`
+    - param `*`
+    - param `dtype: pl.DataType | None=None`
+  - function `_number_filter_literal`
+    - param `value: str`
+    - param `*`
+    - param `dtype: pl.DataType | None=None`
+  - function `_normalized_number_bounds`
+    - param `min_value: str`
+    - param `max_value: str`
+  - function `_build_boolean_filter_expression`
+    - param `column_filter: ColumnFilter`
+  - function `should_clear_distinct_filter`
+    - param `selected_values: tuple[object, ...]`
+    - param `all_values: tuple[object, ...]`
+    - param `*`
+    - param `complete_domain: bool`
+  - function `merge_selected_values`
+    - param `selected_values: tuple[object, ...]`
+    - param `values: list[tuple[str, object]]`
+  - function `value_identity`
+    - param `value: object`
+  - class `PreviewSortState`
+    - attribute `columns`
+    - method `apply`
+      - param `self`
+      - param `column_name: str`
+      - param `*`
+      - param `descending: bool`
+      - param `append: bool`
+    - method `clear`
+      - param `self`
+    - method `remove`
+      - param `self`
+      - param `column_name: str`
+    - method `rank_for`
+      - param `self`
+      - param `column_name: str`
+    - method `direction_for`
+      - param `self`
+      - param `column_name: str`
+    - method `primary_column`
+      - param `self`
+  - class `ColumnFilter`
+    - attribute `column_name`
+    - attribute `kind`
+    - attribute `operation`
+    - attribute `values`
+    - method `distinct`
+      - param `cls`
+      - param `column_name: str`
+      - param `selected_values: tuple[object, ...]`
+    - method `text`
+      - param `cls`
+      - param `column_name: str`
+      - param `operation: TextFilterOperation`
+      - param `value: str`
+    - method `text_conditions`
+      - param `cls`
+      - param `column_name: str`
+      - param `conditions: tuple[TextFilterCondition, ...]`
+    - method `date_range`
+      - param `cls`
+      - param `column_name: str`
+      - param `start_date: str`
+      - param `end_date: str`
+    - method `date_ranges`
+      - param `cls`
+      - param `column_name: str`
+      - param `ranges: tuple[DateFilterRange, ...]`
+    - method `time_range`
+      - param `cls`
+      - param `column_name: str`
+      - param `start_time: str`
+      - param `end_time: str`
+    - method `time_ranges`
+      - param `cls`
+      - param `column_name: str`
+      - param `ranges: tuple[TimeFilterRange, ...]`
+    - method `number_range`
+      - param `cls`
+      - param `column_name: str`
+      - param `min_value: str`
+      - param `max_value: str`
+    - method `number_ranges`
+      - param `cls`
+      - param `column_name: str`
+      - param `ranges: tuple[NumberFilterRange, ...]`
+    - method `boolean`
+      - param `cls`
+      - param `column_name: str`
+      - param `value: BooleanFilterValue`
+    - method `all`
+      - param `cls`
+      - param `column_name: str`
+      - param `filters: tuple[ColumnFilter, ...]`
 - module `data_engine.ui.gui.runtime`
   - attribute `__all__`
   - class `QueueLogHandler`
@@ -8607,6 +9131,18 @@ This page is generated from the current AST map and is intentionally inventory-s
       - param `self: 'DataEngineWindow'`
     - method `_browse_workspace_collection_root_override`
       - param `self: 'DataEngineWindow'`
+    - method `_browse_dataframe_file`
+      - param `self: 'DataEngineWindow'`
+    - method `_browse_dataframe_folder`
+      - param `self: 'DataEngineWindow'`
+    - method `_connect_dataframe_path`
+      - param `self: 'DataEngineWindow'`
+      - param `path: Path`
+    - method `_show_selected_dataframe_file`
+      - param `self: 'DataEngineWindow'`
+    - method `_clear_dataframe_preview`
+      - param `self: 'DataEngineWindow'`
+      - param `message: str`
     - method `_provision_selected_workspace`
       - param `self: 'DataEngineWindow'`
     - method `_force_shutdown_daemon`
@@ -8795,6 +9331,8 @@ This page is generated from the current AST map and is intentionally inventory-s
   - function `build_docs_view`
     - param `window: 'DataEngineWindow'`
   - function `build_debug_view`
+    - param `window: 'DataEngineWindow'`
+  - function `build_dataframes_view`
     - param `window: 'DataEngineWindow'`
   - function `build_settings_view`
     - param `window: 'DataEngineWindow'`

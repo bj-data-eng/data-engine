@@ -182,6 +182,7 @@ def _updates_from_recent_events(
                     source_label=short_source_label(source_path),
                     status="started",
                     elapsed_seconds=None,
+                    started_at_utc=_optional_text(payload_body.get("started_at_utc")),
                 )
             )
             continue
@@ -458,6 +459,7 @@ class DaemonStateService:
                                 source_label=short_source_label(run.source_path),
                                 status="started",
                                 elapsed_seconds=None,
+                                started_at_utc=run.current_step_started_at_utc,
                             )
                             for run in current.active_runs
                             if run.current_step_name

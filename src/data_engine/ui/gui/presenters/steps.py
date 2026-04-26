@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QFrame
 
 from data_engine.domain import RuntimeStepEvent
+from data_engine.domain.time import parse_utc_text
 from data_engine.services import runtime_session_from_workspace_snapshot
 from data_engine.views.models import default_flow_state
 from data_engine.views.presentation import format_seconds
@@ -64,11 +66,16 @@ def apply_runtime_event(window: "DataEngineWindow", event: RuntimeStepEvent) -> 
             else:
                 window._set_flow_state(flow_name, default_flow_state(card.mode))
         return
+    event_monotonic = window._monotonic()
+    if event.status == "started":
+        started_at = parse_utc_text(event.started_at_utc)
+        if started_at is not None:
+            event_monotonic -= max((datetime.now(UTC) - started_at).total_seconds(), 0.0)
     window.operation_tracker, flash_index = window.operation_tracker.apply_event(
         flow_name,
         card.operation_items,
         event,
-        now=window._monotonic(),
+        now=event_monotonic,
     )
     if flash_index is not None and window.selected_flow_name == flow_name:
         flash_operation_row(window, flash_index)

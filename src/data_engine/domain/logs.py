@@ -22,6 +22,7 @@ class RuntimeStepEvent:
     status: str
     elapsed_seconds: float | None = None
     run_id: str | None = None
+    started_at_utc: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class FlowLogEntry:
             event.source_label,
             event.status,
             event.elapsed_seconds,
+            event.started_at_utc,
         ) if event is not None else None
         created_at_key = None if event is not None and event.run_id is not None else self.created_at_utc
         return (

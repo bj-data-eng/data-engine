@@ -204,8 +204,6 @@ class GuiRuntimeController:
             self.sync_from_daemon(window)
             return
         changed_flow_names, requires_log_reload = self._apply_daemon_live_snapshot(window, batch)
-        if requires_log_reload:
-            window.runtime_binding_service.reload_logs(window.runtime_binding)
         if changed_flow_names:
             window._refresh_sidebar_state_views(changed_flow_names)
         selected_flow_name = window.selected_flow_name
@@ -215,6 +213,17 @@ class GuiRuntimeController:
         refresh_summary = False
         refresh_buttons = False
         refresh_workspace_counts_footer = False
+        applied_step_activity = False
+        if requires_log_reload:
+            for update in batch.updates:
+                if update.lane == "step_activity":
+                    for event in update.step_events:
+                        window._apply_runtime_event(event)
+                    applied_step_activity = True
+                    if selected_flow_affected:
+                        refresh_selection = True
+        if requires_log_reload:
+            window.runtime_binding_service.reload_logs(window.runtime_binding)
         for update in batch.updates:
             if update.lane == "control":
                 self.sync_from_daemon(window)
@@ -257,10 +266,23 @@ class GuiRuntimeController:
                     refresh_buttons = True
             if update.lane == "step_activity" and selected_flow_affected:
                 refresh_selection = True
-        for update in batch.updates:
-            if update.lane == "step_activity":
-                for event in update.step_events:
-                    window._apply_runtime_event(event)
+        if not applied_step_activity:
+            if selected_flow_affected and any(
+                event.status == "started"
+                for update in batch.updates
+                if update.lane == "step_activity"
+                for event in update.step_events
+            ):
+                window.operation_tracker = self.runtime_state_service.refresh_operation_tracker_from_step_runs(
+                    window.runtime_binding,
+                    flow_cards=window.flow_cards.values(),
+                    fallback=window.operation_tracker,
+                    now=window._monotonic(),
+                )
+            for update in batch.updates:
+                if update.lane == "step_activity":
+                    for event in update.step_events:
+                        window._apply_runtime_event(event)
         if selected_flow_affected and batch.completed_run_ids:
             projection = self._refresh_runtime_projection_from_logs(window)
             window.step_output_index = projection.step_output_index

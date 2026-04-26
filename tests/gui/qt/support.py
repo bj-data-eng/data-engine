@@ -7353,8 +7353,15 @@ def test_apply_daemon_update_batch_uses_persisted_finished_step_duration_before_
             active_runs={},
         )
         window.runtime_session = RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=False)
-        window.runtime_binding.runtime_cache_ledger.record_step_finished(
-            step_run_id=window.runtime_binding.runtime_cache_ledger.record_step_started(
+        window.runtime_binding.runtime_cache_ledger.execution_state.record_run_started(
+            run_id="run-1",
+            flow_name="poller",
+            group_name="Imports",
+            source_path="docs.xlsx",
+            started_at_utc="2026-04-18T12:00:00+00:00",
+        )
+        window.runtime_binding.runtime_cache_ledger.execution_state.record_step_finished(
+            step_run_id=window.runtime_binding.runtime_cache_ledger.execution_state.record_step_started(
                 run_id="run-1",
                 flow_name="poller",
                 step_label="Read Excel",
@@ -7482,6 +7489,101 @@ def test_apply_daemon_update_batch_streams_log_events_without_waiting_for_reload
         assert len(run_groups) == 1
         assert run_groups[0].status == "success"
         assert run_groups[0].elapsed_seconds == 1.25
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_apply_daemon_update_batch_applies_step_activity_before_log_reload(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        window.workspace_snapshot = WorkspaceSnapshot(
+            workspace_id=window.workspace_paths.workspace_id,
+            version=8,
+            control=ControlSnapshot(state="available"),
+            engine=EngineSnapshot(state="running", daemon_live=True, transport="subscription"),
+            flows={},
+            active_runs={},
+        )
+        window.runtime_session = RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=False)
+        window._pending_daemon_update_batch = DaemonUpdateBatch(
+            snapshot=WorkspaceDaemonSnapshot(
+                live=True,
+                workspace_owned=True,
+                leased_by_machine_id=None,
+                runtime_active=False,
+                runtime_stopping=False,
+                manual_runs=(),
+                last_checkpoint_at_utc=None,
+                source="daemon",
+                projection_version=9,
+                active_runs=(),
+            ),
+            updates=(
+                DaemonLaneUpdate(
+                    "step_activity",
+                    flow_names=("poller",),
+                    run_ids=("run-1",),
+                    completed_run_ids=("run-1",),
+                    step_events=(
+                        RuntimeStepEvent(
+                            run_id="run-1",
+                            flow_name="poller",
+                            step_name="Read Excel",
+                            source_label="docs.xlsx",
+                            status="started",
+                            started_at_utc="2026-04-18T12:00:00+00:00",
+                        ),
+                        RuntimeStepEvent(
+                            run_id="run-1",
+                            flow_name="poller",
+                            step_name="Read Excel",
+                            source_label="docs.xlsx",
+                            status="success",
+                            elapsed_seconds=1.25,
+                        ),
+                    ),
+                ),
+            ),
+            requires_full_sync=False,
+        )
+
+        def _assert_step_finished_before_reload(_binding):
+            assert window.operation_row_widgets[0].row_card.property("stepState") == "success"
+            assert window.operation_row_widgets[0].duration_label.text() == "1.2s"
+
+        monkeypatch.setattr(window.runtime_binding_service, "reload_logs", _assert_step_finished_before_reload)
+
+        window._apply_daemon_update_batch()
+
+        assert window.operation_row_widgets[0].duration_label.text() == "1.2s"
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_started_step_event_uses_runtime_started_timestamp_for_elapsed(qapp, monkeypatch):
+    window = _make_window()
+    try:
+        window._load_flows()
+        window._select_flow("poller")
+        monotonic_now = 100.0
+        started_at = datetime.now(UTC) - timedelta(seconds=3)
+        monkeypatch.setattr(window, "_monotonic", lambda: monotonic_now)
+
+        window._apply_runtime_event(
+            RuntimeStepEvent(
+                run_id="run-1",
+                flow_name="poller",
+                step_name="Read Excel",
+                source_label="docs.xlsx",
+                status="started",
+                started_at_utc=started_at.isoformat(),
+            )
+        )
+
+        assert window.operation_row_widgets[0].row_card.property("stepState") == "running"
+        assert window.operation_row_widgets[0].duration_label.text() == "3.0s"
     finally:
         _dispose_window(qapp, window)
 
