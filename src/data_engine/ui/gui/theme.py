@@ -371,6 +371,12 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         font-size: 11px;
         font-weight: 600;
     }}
+    QLabel#outputPreviewFilterStatusLabel {{
+        background: transparent;
+        color: {palette.muted_text};
+        font-size: 9px;
+        font-weight: 500;
+    }}
     QLabel#workspaceCountsFooter {{
         background: transparent;
         color: {palette.muted_text};

@@ -399,7 +399,7 @@ class _ParquetFilterPopup(QFrame):
         title_row.addWidget(title)
         title_row.addStretch(1)
         self.status_label = QLabel("", self)
-        self.status_label.setObjectName("sectionMeta")
+        self.status_label.setObjectName("outputPreviewFilterStatusLabel")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.status_label.setVisible(False)
         title_row.addWidget(self.status_label)
