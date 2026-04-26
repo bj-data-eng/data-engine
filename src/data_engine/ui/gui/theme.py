@@ -518,7 +518,8 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         padding: 0px;
     }}
     QLineEdit#outputPreviewTextFilterInput,
-    QLineEdit#outputPreviewNumberFilterInput {{
+    QLineEdit#outputPreviewNumberFilterMinInput,
+    QLineEdit#outputPreviewNumberFilterMaxInput {{
         font-size: 10px;
         padding: 2px 6px;
     }}

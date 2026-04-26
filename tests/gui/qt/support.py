@@ -4634,42 +4634,37 @@ def test_debug_view_number_column_filter_popup_applies_numeric_conditions(qapp):
 
         popup = explorer.findChild(QWidget, "outputPreviewFilterPopup")
         assert popup is not None
-        operation = popup.findChild(QComboBox, "outputPreviewNumberFilterCombo")
-        number_filter = popup.findChild(QLineEdit, "outputPreviewNumberFilterInput")
+        min_input = popup.findChild(QLineEdit, "outputPreviewNumberFilterMinInput")
+        max_input = popup.findChild(QLineEdit, "outputPreviewNumberFilterMaxInput")
         add_button = popup.findChild(QPushButton, "outputPreviewNumberFilterAddButton")
         values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
-        assert operation is not None
-        assert number_filter is not None
+        assert min_input is not None
+        assert max_input is not None
         assert add_button is not None
         assert values_list is not None
         assert popup.findChild(QLineEdit, "outputPreviewPopupSearch") is None
 
-        greater_equal_index = operation.findData("greater_than_or_equal")
-        assert greater_equal_index >= 0
-        operation.setCurrentIndex(greater_equal_index)
-        number_filter.setText("1002")
+        min_input.setText("1002")
+        max_input.setText("1003")
+        _process_ui_until(
+            qapp,
+            lambda: values_list.count() == 2
+            and [values_list.item(index).text() for index in range(values_list.count())] == ["1002", "1003"],
+        )
+
+        QTest.mouseClick(add_button, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        min_inputs = popup.findChildren(QLineEdit, "outputPreviewNumberFilterMinInput")
+        max_inputs = popup.findChildren(QLineEdit, "outputPreviewNumberFilterMaxInput")
+        assert len(min_inputs) == 2
+        assert len(max_inputs) == 2
+        min_inputs[1].setText("1004")
+
         _process_ui_until(
             qapp,
             lambda: values_list.count() == 3
             and [values_list.item(index).text() for index in range(values_list.count())]
             == ["1002", "1003", "1004"],
-        )
-
-        QTest.mouseClick(add_button, Qt.MouseButton.LeftButton)
-        qapp.processEvents()
-        operations = popup.findChildren(QComboBox, "outputPreviewNumberFilterCombo")
-        number_inputs = popup.findChildren(QLineEdit, "outputPreviewNumberFilterInput")
-        assert len(operations) == 2
-        assert len(number_inputs) == 2
-        less_than_index = operations[1].findData("less_than")
-        assert less_than_index >= 0
-        operations[1].setCurrentIndex(less_than_index)
-        number_inputs[1].setText("1004")
-
-        _process_ui_until(
-            qapp,
-            lambda: values_list.count() == 2
-            and [values_list.item(index).text() for index in range(values_list.count())] == ["1002", "1003"],
         )
         values_list.item(1).setCheckState(Qt.CheckState.Unchecked)
         buttons = popup.findChildren(QPushButton, "filterPopupActionButton")
@@ -4812,8 +4807,8 @@ def test_debug_view_non_condition_column_filter_popup_hides_dtype_filters(qapp):
         assert popup is not None
         assert popup.findChild(QComboBox, "outputPreviewTextFilterCombo") is None
         assert popup.findChild(QLineEdit, "outputPreviewTextFilterInput") is None
-        assert popup.findChild(QComboBox, "outputPreviewNumberFilterCombo") is None
-        assert popup.findChild(QLineEdit, "outputPreviewNumberFilterInput") is None
+        assert popup.findChild(QLineEdit, "outputPreviewNumberFilterMinInput") is None
+        assert popup.findChild(QLineEdit, "outputPreviewNumberFilterMaxInput") is None
         assert popup.findChild(QComboBox, "outputPreviewBooleanFilterCombo") is None
         assert popup.findChild(QDateEdit, "outputPreviewDateFilterFromInput") is None
         assert popup.findChild(QTimeEdit, "outputPreviewTimeFilterFromInput") is None
@@ -4940,12 +4935,12 @@ def test_debug_view_filter_popup_select_all_checkbox_tracks_visible_values(qapp)
         assert popup is not None
         values_list = popup.findChild(QListWidget, "outputPreviewPopupList")
         select_all = popup.findChild(QPushButton, "outputPreviewSelectAllButton")
-        number_operation = popup.findChild(QComboBox, "outputPreviewNumberFilterCombo")
-        number_filter = popup.findChild(QLineEdit, "outputPreviewNumberFilterInput")
+        min_input = popup.findChild(QLineEdit, "outputPreviewNumberFilterMinInput")
+        max_input = popup.findChild(QLineEdit, "outputPreviewNumberFilterMaxInput")
         assert values_list is not None
         assert select_all is not None
-        assert number_operation is not None
-        assert number_filter is not None
+        assert min_input is not None
+        assert max_input is not None
 
         _process_ui_until(qapp, lambda: values_list.count() == 3 and not explorer._active_distinct_requests)
         assert select_all.property("selectAllState") == Qt.CheckState.Checked.value
@@ -4962,10 +4957,8 @@ def test_debug_view_filter_popup_select_all_checkbox_tracks_visible_values(qapp)
         qapp.processEvents()
         assert select_all.property("selectAllState") == Qt.CheckState.PartiallyChecked.value
 
-        equals_index = number_operation.findData("equals")
-        assert equals_index >= 0
-        number_operation.setCurrentIndex(equals_index)
-        number_filter.setText("1002")
+        min_input.setText("1002")
+        max_input.setText("1002")
         qapp.processEvents()
         _process_ui_until(qapp, lambda: values_list.count() == 1 and values_list.item(0).text() == "1002")
 

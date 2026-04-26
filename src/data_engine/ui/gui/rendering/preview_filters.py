@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, time
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 import polars as pl
@@ -15,15 +16,7 @@ TextFilterCondition = tuple[TextFilterOperation, str]
 DateFilterRange = tuple[str, str]
 TimeFilterRange = tuple[str, str]
 BooleanFilterValue = Literal["true", "false", "blank"]
-NumberFilterOperation = Literal[
-    "equals",
-    "not_equals",
-    "greater_than",
-    "greater_than_or_equal",
-    "less_than",
-    "less_than_or_equal",
-]
-NumberFilterCondition = tuple[NumberFilterOperation, str]
+NumberFilterRange = tuple[str, str]
 
 
 @dataclass(frozen=True)
@@ -242,33 +235,33 @@ class ColumnFilter:
         return cls(column_name=str(column_name), kind="time", operation="ranges", values=ranges)
 
     @classmethod
-    def number(cls, column_name: str, operation: NumberFilterOperation, value: str) -> ColumnFilter:
-        """Build a numeric comparison filter state.
+    def number_range(cls, column_name: str, min_value: str, max_value: str) -> ColumnFilter:
+        """Build an inclusive numeric range filter state.
 
         Args:
             column_name: Column being filtered.
-            operation: Numeric operation to apply.
-            value: Numeric text value to compare.
+            min_value: Inclusive lower bound. Blank means no lower bound.
+            max_value: Inclusive upper bound. Blank means no upper bound.
 
         Returns:
             Numeric filter state.
         """
 
-        return cls(column_name=str(column_name), kind="number", operation=operation, values=(value,))
+        return cls(column_name=str(column_name), kind="number", operation="range", values=((min_value, max_value),))
 
     @classmethod
-    def number_conditions(cls, column_name: str, conditions: tuple[NumberFilterCondition, ...]) -> ColumnFilter:
-        """Build a multi-condition numeric filter state.
+    def number_ranges(cls, column_name: str, ranges: tuple[NumberFilterRange, ...]) -> ColumnFilter:
+        """Build a multi-range numeric filter state.
 
         Args:
             column_name: Column being filtered.
-            conditions: Ordered ``(operation, value)`` numeric conditions. Conditions are combined with AND.
+            ranges: Inclusive ``(min_value, max_value)`` ranges. Ranges are combined with OR.
 
         Returns:
-            Numeric filter state containing all non-empty conditions.
+            Numeric filter state containing all non-empty ranges.
         """
 
-        return cls(column_name=str(column_name), kind="number", operation="all", values=conditions)
+        return cls(column_name=str(column_name), kind="number", operation="ranges", values=ranges)
 
     @classmethod
     def boolean(cls, column_name: str, value: BooleanFilterValue) -> ColumnFilter:
@@ -519,53 +512,77 @@ def _build_single_time_range_filter_expression(
 def _build_number_filter_expression(column_filter: ColumnFilter, *, dtype: pl.DataType | None = None):
     if not column_filter.values:
         return None
-    if column_filter.operation == "all":
+    if column_filter.operation == "ranges":
         expressions = [
-            _build_single_number_filter_expression(column_filter.column_name, str(operation), str(value), dtype=dtype)
-            for operation, value in column_filter.values
-            if str(value).strip() != ""
+            _build_single_number_range_filter_expression(
+                column_filter.column_name,
+                str(min_value),
+                str(max_value),
+                dtype=dtype,
+            )
+            for min_value, max_value in column_filter.values
+            if str(min_value).strip() != "" or str(max_value).strip() != ""
         ]
         expressions = [expression for expression in expressions if expression is not None]
         if not expressions:
             return None
         expression = expressions[0]
         for next_expression in expressions[1:]:
-            expression = expression & next_expression
+            expression = expression | next_expression
         return expression
-    value = str(column_filter.values[0])
-    return _build_single_number_filter_expression(column_filter.column_name, column_filter.operation, value, dtype=dtype)
+    if column_filter.operation == "range":
+        min_value, max_value = column_filter.values[0]
+        return _build_single_number_range_filter_expression(
+            column_filter.column_name,
+            str(min_value),
+            str(max_value),
+            dtype=dtype,
+        )
+    raise ValueError(f"Unsupported number filter operation: {column_filter.operation}")
 
 
-def _build_single_number_filter_expression(
+def _build_single_number_range_filter_expression(
     column_name: str,
-    operation: str,
-    value: str,
+    min_value: str,
+    max_value: str,
     *,
     dtype: pl.DataType | None = None,
 ):
-    value = value.strip()
-    if value == "":
+    min_value = min_value.strip()
+    max_value = max_value.strip()
+    if min_value == "" and max_value == "":
         return None
+    min_value, max_value = _normalized_number_bounds(min_value, max_value)
     column = pl.col(column_name)
-    literal = pl.lit(value)
-    if dtype is not None:
-        literal = literal.cast(dtype, strict=False)
-    else:
-        literal = literal.cast(pl.Float64, strict=False)
+    if dtype is None:
         column = column.cast(pl.Float64, strict=False)
-    if operation == "equals":
-        return column == literal
-    if operation == "not_equals":
-        return column != literal
-    if operation == "greater_than":
-        return column > literal
-    if operation == "greater_than_or_equal":
-        return column >= literal
-    if operation == "less_than":
-        return column < literal
-    if operation == "less_than_or_equal":
-        return column <= literal
-    raise ValueError(f"Unsupported number filter operation: {operation}")
+    expression = None
+    if min_value != "":
+        expression = column >= _number_filter_literal(min_value, dtype=dtype)
+    if max_value != "":
+        max_expression = column <= _number_filter_literal(max_value, dtype=dtype)
+        expression = max_expression if expression is None else expression & max_expression
+    return expression
+
+
+def _number_filter_literal(value: str, *, dtype: pl.DataType | None = None):
+    literal = pl.lit(value)
+    if dtype is None:
+        return literal.cast(pl.Float64, strict=False)
+    return literal.cast(dtype, strict=False)
+
+
+def _normalized_number_bounds(min_value: str, max_value: str) -> tuple[str, str]:
+    if min_value == "" or max_value == "":
+        return min_value, max_value
+    try:
+        min_decimal = Decimal(min_value)
+        max_decimal = Decimal(max_value)
+    except InvalidOperation:
+        return min_value, max_value
+    if min_decimal > max_decimal:
+        return max_value, min_value
+    return min_value, max_value
 
 
 def _build_boolean_filter_expression(column_filter: ColumnFilter):

@@ -48,8 +48,7 @@ from data_engine.ui.gui.rendering.preview_filters import (
     NULL_FILTER_VALUE as _NULL_FILTER_VALUE,
     PreviewSortState,
     DateFilterRange,
-    NumberFilterCondition,
-    NumberFilterOperation,
+    NumberFilterRange,
     TextFilterCondition,
     TextFilterOperation,
     TimeFilterRange,
@@ -382,7 +381,7 @@ class _ParquetFilterPopup(QFrame):
         self._date_filter_layout: QVBoxLayout | None = None
         self._time_filter_rows: list[tuple[QFrame, QTimeEdit, QTimeEdit]] = []
         self._time_filter_layout: QVBoxLayout | None = None
-        self._number_filter_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
+        self._number_filter_rows: list[tuple[QFrame, QLineEdit, QLineEdit]] = []
         self._number_filter_layout: QVBoxLayout | None = None
         self._boolean_filter_combo: QComboBox | None = None
         self.search_input: QLineEdit | None = None
@@ -785,14 +784,14 @@ class _ParquetFilterPopup(QFrame):
         self._number_filter_layout.setContentsMargins(0, 0, 0, 0)
         self._number_filter_layout.setSpacing(6)
 
-        active_conditions = self._active_number_filter_conditions()
-        if not active_conditions:
-            active_conditions = (("equals", ""),)
-        for operation, value in active_conditions:
-            self._add_number_filter_row(operation=operation, value=value)
+        active_ranges = self._active_number_filter_ranges()
+        if not active_ranges:
+            active_ranges = (("", ""),)
+        for min_value, max_value in active_ranges:
+            self._add_number_filter_row(min_value=min_value, max_value=max_value)
         return number_section
 
-    def _add_number_filter_row(self, *, operation: NumberFilterOperation = "equals", value: str = "") -> None:
+    def _add_number_filter_row(self, *, min_value: str = "", max_value: str = "") -> None:
         if self._number_filter_layout is None:
             return
         row_frame = QFrame(self)
@@ -801,45 +800,40 @@ class _ParquetFilterPopup(QFrame):
         row_layout.setContentsMargins(6, 6, 6, 6)
         row_layout.setSpacing(6)
 
-        combo = QComboBox(row_frame)
-        combo.setObjectName("outputPreviewNumberFilterCombo")
-        combo.addItem("Equals", "equals")
-        combo.addItem("Does Not Equal", "not_equals")
-        combo.addItem("Greater Than", "greater_than")
-        combo.addItem("Greater Than Or Equal", "greater_than_or_equal")
-        combo.addItem("Less Than", "less_than")
-        combo.addItem("Less Than Or Equal", "less_than_or_equal")
-        operation_index = combo.findData(operation)
-        if operation_index >= 0:
-            combo.setCurrentIndex(operation_index)
-        row_layout.addWidget(combo)
+        min_edit = QLineEdit(row_frame)
+        min_edit.setObjectName("outputPreviewNumberFilterMinInput")
+        min_edit.setPlaceholderText("Min")
+        min_edit.setClearButtonEnabled(True)
+        min_edit.setText(min_value)
+        row_layout.addWidget(min_edit, 1)
 
-        line_edit = QLineEdit(row_frame)
-        line_edit.setObjectName("outputPreviewNumberFilterInput")
-        line_edit.setPlaceholderText("Number filter")
-        line_edit.setClearButtonEnabled(True)
-        line_edit.setFixedHeight(combo.sizeHint().height())
-        line_edit.setText(value)
-        row_layout.addWidget(line_edit, 1)
+        max_edit = QLineEdit(row_frame)
+        max_edit.setObjectName("outputPreviewNumberFilterMaxInput")
+        max_edit.setPlaceholderText("Max")
+        max_edit.setClearButtonEnabled(True)
+        max_edit.setFixedHeight(min_edit.sizeHint().height())
+        min_edit.setFixedHeight(max_edit.sizeHint().height())
+        max_edit.setText(max_value)
+        row_layout.addWidget(max_edit, 1)
 
         add_button = QPushButton("+", row_frame)
         add_button.setObjectName("outputPreviewNumberFilterAddButton")
-        add_button.setFixedSize(16, combo.sizeHint().height())
-        add_button.setToolTip("Add numeric condition")
+        add_button.setFixedSize(16, max_edit.sizeHint().height())
+        add_button.setToolTip("Add numeric range")
         add_button.clicked.connect(self._add_empty_number_filter_row)
         row_layout.addWidget(add_button)
 
         if self._number_filter_rows:
             remove_button = QPushButton("-", row_frame)
             remove_button.setObjectName("outputPreviewNumberFilterRemoveButton")
-            remove_button.setFixedSize(16, combo.sizeHint().height())
-            remove_button.setToolTip("Remove numeric condition")
+            remove_button.setFixedSize(16, max_edit.sizeHint().height())
+            remove_button.setToolTip("Remove numeric range")
             remove_button.clicked.connect(lambda: self._remove_number_filter_row(row_frame))
             row_layout.addWidget(remove_button)
 
-        combo.currentIndexChanged.connect(lambda _index: self._queue_condition_search())
-        line_edit.textChanged.connect(lambda _text: self._queue_condition_search())
-        self._number_filter_rows.append((row_frame, combo, line_edit))
+        min_edit.textChanged.connect(lambda _text: self._queue_condition_search())
+        max_edit.textChanged.connect(lambda _text: self._queue_condition_search())
+        self._number_filter_rows.append((row_frame, min_edit, max_edit))
         self._number_filter_layout.addWidget(row_frame)
 
     def _add_empty_number_filter_row(self) -> None:
@@ -849,24 +843,22 @@ class _ParquetFilterPopup(QFrame):
     def _remove_number_filter_row(self, row_frame: QFrame) -> None:
         if len(self._number_filter_rows) <= 1:
             return
-        remaining_rows: list[tuple[QFrame, QComboBox, QLineEdit]] = []
-        for frame, combo, line_edit in self._number_filter_rows:
+        remaining_rows: list[tuple[QFrame, QLineEdit, QLineEdit]] = []
+        for frame, min_edit, max_edit in self._number_filter_rows:
             if frame is row_frame:
                 if self._number_filter_layout is not None:
                     self._number_filter_layout.removeWidget(frame)
                 frame.deleteLater()
             else:
-                remaining_rows.append((frame, combo, line_edit))
+                remaining_rows.append((frame, min_edit, max_edit))
         self._number_filter_rows = remaining_rows
         self._queue_condition_search()
 
-    def _active_number_filter_conditions(self) -> tuple[NumberFilterCondition, ...]:
+    def _active_number_filter_ranges(self) -> tuple[NumberFilterRange, ...]:
         active_filter = column_filter_component(self._explorer.active_column_filter(self._column_name), "number")
         if active_filter is None or not active_filter.values:
             return ()
-        if active_filter.operation == "all":
-            return tuple((str(operation), str(value)) for operation, value in active_filter.values)
-        return ((str(active_filter.operation), str(active_filter.values[0])),)
+        return tuple((str(min_value), str(max_value)) for min_value, max_value in active_filter.values)
 
     def _build_boolean_filter_controls(self) -> QFrame:
         boolean_section = QFrame(self)
@@ -1144,8 +1136,9 @@ class _ParquetFilterPopup(QFrame):
     def _clear_column_state(self) -> None:
         for _, _, line_edit in self._text_filter_rows:
             line_edit.clear()
-        for _, _, line_edit in self._number_filter_rows:
-            line_edit.clear()
+        for _, min_edit, max_edit in self._number_filter_rows:
+            min_edit.clear()
+            max_edit.clear()
         if self._boolean_filter_combo is not None:
             self._boolean_filter_combo.setCurrentIndex(0)
         for _, from_edit, to_edit in self._date_filter_rows:
@@ -1263,18 +1256,19 @@ class _ParquetFilterPopup(QFrame):
         return ColumnFilter.time_ranges(self._column_name, tuple(ranges))
 
     def _number_filter(self) -> ColumnFilter | None:
-        conditions: list[NumberFilterCondition] = []
-        for _, combo, line_edit in self._number_filter_rows:
-            filter_value = line_edit.text().strip()
-            if not filter_value:
+        ranges: list[NumberFilterRange] = []
+        for _, min_edit, max_edit in self._number_filter_rows:
+            min_value = min_edit.text().strip()
+            max_value = max_edit.text().strip()
+            if not min_value and not max_value:
                 continue
-            conditions.append((str(combo.currentData()), filter_value))
-        if not conditions:
+            ranges.append((min_value, max_value))
+        if not ranges:
             return None
-        if len(conditions) == 1:
-            operation, value = conditions[0]
-            return ColumnFilter.number(self._column_name, operation, value)
-        return ColumnFilter.number_conditions(self._column_name, tuple(conditions))
+        if len(ranges) == 1:
+            min_value, max_value = ranges[0]
+            return ColumnFilter.number_range(self._column_name, min_value, max_value)
+        return ColumnFilter.number_ranges(self._column_name, tuple(ranges))
 
     def _boolean_filter(self) -> ColumnFilter | None:
         if self._boolean_filter_combo is None:

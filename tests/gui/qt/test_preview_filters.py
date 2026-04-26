@@ -189,12 +189,10 @@ def test_column_filter_expression_compiles_number_operations() -> None:
 
     result = frame.filter(
         build_column_filter_expression(
-            ColumnFilter.number_conditions(
+            ColumnFilter.number_range(
                 "claim_id",
-                (
-                    ("greater_than_or_equal", "1002"),
-                    ("less_than", "1004"),
-                ),
+                "1002",
+                "1003",
             ),
             dtype=frame.schema["claim_id"],
         )
@@ -203,12 +201,44 @@ def test_column_filter_expression_compiles_number_operations() -> None:
     assert result["claim_id"].to_list() == [1002, 1003]
 
 
+def test_column_filter_expression_compiles_multiple_number_ranges() -> None:
+    frame = pl.DataFrame({"event_sequence": [1, 2, 3, 4, 5]})
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.number_ranges(
+                "event_sequence",
+                (
+                    ("1", "2"),
+                    ("4", ""),
+                ),
+            ),
+            dtype=frame.schema["event_sequence"],
+        )
+    )
+
+    assert result["event_sequence"].to_list() == [1, 2, 4, 5]
+
+
+def test_column_filter_expression_normalizes_reversed_number_range_bounds() -> None:
+    frame = pl.DataFrame({"event_sequence": [1, 2, 3, 4]})
+
+    result = frame.filter(
+        build_column_filter_expression(
+            ColumnFilter.number_range("event_sequence", "3", "1"),
+            dtype=frame.schema["event_sequence"],
+        )
+    )
+
+    assert result["event_sequence"].to_list() == [1, 2, 3]
+
+
 def test_column_filter_expression_compiles_float_number_filter() -> None:
     frame = pl.DataFrame({"amount": [10.5, 12.25, 15.75]})
 
     result = frame.filter(
         build_column_filter_expression(
-            ColumnFilter.number("amount", "greater_than", "12"),
+            ColumnFilter.number_range("amount", "12", ""),
             dtype=frame.schema["amount"],
         )
     )
