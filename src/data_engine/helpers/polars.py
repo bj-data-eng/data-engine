@@ -32,6 +32,7 @@ IntExprLike = pl.Expr | str | int
 ColumnExpr = str | pl.Expr
 ColumnExprs = ColumnExpr | Sequence[ColumnExpr]
 DescendingLike = bool | Sequence[bool]
+PolarsFrame = pl.DataFrame | pl.LazyFrame
 _DEFAULT_WEEK_MASK: WeekMask = (True, True, True, True, True, False, False)
 
 
@@ -267,6 +268,48 @@ def workday(
         ),
         return_dtype=pl.Date,
     )
+
+
+def remove_null_columns(frame: PolarsFrame) -> PolarsFrame:
+    """Return a frame without columns that contain no non-null values.
+
+    Columns are kept when at least one row contains a non-null value. Columns
+    containing only nulls are removed. For zero-row dataframes, every column is
+    considered empty and the returned dataframe has no columns.
+
+    Parameters
+    ----------
+    frame : PolarsFrame
+        Dataframe or lazy frame to trim.
+
+    Returns
+    -------
+    PolarsFrame
+        Frame containing only columns with at least one non-null value. Lazy
+        inputs return lazy frames.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        clean = data_engine.helpers.remove_null_columns(df)
+
+        clean = df.de.remove_null_columns()
+    """
+    if isinstance(frame, pl.LazyFrame):
+        return _remove_null_columns_lazy(frame)
+    keep_columns = [name for name in frame.columns if frame.get_column(name).null_count() < frame.height]
+    return frame.select(keep_columns)
+
+
+def _remove_null_columns_lazy(lf: pl.LazyFrame) -> pl.LazyFrame:
+    column_names = tuple(lf.collect_schema().names())
+    if not column_names:
+        return lf
+    counts = lf.select(pl.col(name).is_not_null().sum().alias(name) for name in column_names).collect()
+    row = counts.row(0, named=True)
+    keep_columns = [name for name in column_names if int(row.get(name) or 0) > 0]
+    return lf.select(keep_columns)
 
 
 def propagate_last_value(
@@ -1125,6 +1168,16 @@ class DataEngineDataFrameNamespace:
         """
         return _normalize_column_names(self._df, columns)
 
+    def remove_null_columns(self) -> pl.DataFrame:
+        """Remove columns from this dataframe when every value is null.
+
+        Returns
+        -------
+        pl.DataFrame
+            Dataframe containing only columns with at least one non-null value.
+        """
+        return remove_null_columns(self._df)
+
     def networkdays(
         self,
         start: ExprLike,
@@ -1641,6 +1694,19 @@ class DataEngineLazyFrameNamespace:
             Lazy frame with normalized column names.
         """
         return _normalize_column_names(self._lf, columns)
+
+    def remove_null_columns(self) -> pl.LazyFrame:
+        """Remove columns from this lazy frame when every value is null.
+
+        Returns
+        -------
+        pl.LazyFrame
+            Lazy frame containing only columns with at least one non-null
+            value.
+        """
+        trimmed = remove_null_columns(self._lf)
+        assert isinstance(trimmed, pl.LazyFrame)
+        return trimmed
 
     def networkdays(
         self,

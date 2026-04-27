@@ -9,6 +9,7 @@ import pytest
 
 from data_engine.helpers import networkdays
 from data_engine.helpers import propagate_last_value
+from data_engine.helpers import remove_null_columns
 from data_engine.helpers import sink_parquet_atomic
 from data_engine.helpers import visit_counter
 from data_engine.helpers import workday
@@ -114,6 +115,56 @@ def test_lazyframe_namespace_normalizes_column_names():
     result = lazy_frame.de.normalize_column_names().collect()
 
     assert result.columns == ["claim_id", "workflow_to"]
+
+
+def test_remove_null_columns_drops_all_null_columns():
+    frame = pl.DataFrame(
+        {
+            "claim_id": [1, 2],
+            "all_null": [None, None],
+            "mixed": [None, "ready"],
+            "amount": [10, 20],
+        }
+    )
+
+    result = remove_null_columns(frame)
+
+    assert result.to_dict(as_series=False) == {
+        "claim_id": [1, 2],
+        "mixed": [None, "ready"],
+        "amount": [10, 20],
+    }
+
+
+def test_remove_null_columns_drops_empty_columns_from_zero_row_frame():
+    frame = pl.DataFrame(
+        schema={
+            "claim_id": pl.Int64,
+            "status": pl.String,
+        }
+    )
+
+    result = remove_null_columns(frame)
+
+    assert result.is_empty()
+    assert result.columns == []
+
+
+def test_remove_null_columns_namespace_helpers_work_for_eager_and_lazy_frames():
+    frame = pl.DataFrame(
+        {
+            "claim_id": [1, 2],
+            "all_null": [None, None],
+            "status": ["open", None],
+        }
+    )
+
+    eager = frame.de.remove_null_columns()
+    lazy = frame.lazy().de.remove_null_columns().collect()
+
+    expected = pl.DataFrame({"claim_id": [1, 2], "status": ["open", None]})
+    assert_frame_equal(eager, expected)
+    assert_frame_equal(lazy, expected)
 
 
 def test_networkdays_matches_excel_style_inclusive_business_day_count():
