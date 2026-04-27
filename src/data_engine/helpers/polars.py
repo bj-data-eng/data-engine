@@ -434,7 +434,7 @@ def visit_counter(
 
     return (
         pl.struct(
-            __value=_as_column_expr(value),
+            run_value=_as_column_expr(value),
             **dict(zip(sort_names, sort_expr_list, strict=True)),
         )
         .map_batches(
@@ -526,7 +526,7 @@ def _visit_counter_batch(
     visit_by_value: dict[object, int] = {}
     previous = object()
     for row in ordered.iter_rows(named=True):
-        current = row["__value"]
+        current = row["run_value"]
         if current != previous:
             visit_by_value[current] = visit_by_value.get(current, 0) + 1
             previous = current
