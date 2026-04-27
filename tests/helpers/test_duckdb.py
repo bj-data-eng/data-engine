@@ -214,6 +214,32 @@ def test_denormalize_columns_attaches_natural_columns_by_surrogate_key(tmp_path)
     }
 
 
+def test_denormalize_columns_accepts_star_with_surrounding_whitespace(tmp_path):
+    db_path = tmp_path / "docs.duckdb"
+    build_dimension(
+        db_path,
+        "dim_member",
+        df=pl.DataFrame({"member_id": ["a"], "lob": ["medical"]}),
+        key_column="member_key",
+    )
+
+    keyed = pl.DataFrame({"member_key": [1]})
+
+    denormalized = denormalize_columns(
+        db_path,
+        "dim_member",
+        df=keyed,
+        key_column="member_key",
+        select=" * ",
+    )
+
+    assert denormalized.to_dict(as_series=False) == {
+        "member_key": [1],
+        "member_id": ["a"],
+        "lob": ["medical"],
+    }
+
+
 def test_denormalize_columns_can_select_subset_and_drop_surrogate_key(tmp_path):
     db_path = tmp_path / "docs.duckdb"
     build_dimension(
@@ -868,6 +894,58 @@ def test_read_rows_by_values_quotes_reserved_identifiers_and_supports_single_sel
     assert result.to_dict(as_series=False) == {"status": ["open"]}
 
 
+def test_read_rows_by_values_accepts_star_for_all_columns(tmp_path):
+    db_path = tmp_path / "docs.duckdb"
+    replace_rows_by_file(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame(
+            {
+                "claim_id": [1, 2, 3],
+                "status": ["open", "ready", "done"],
+                "amount": [10, 20, 30],
+            }
+        ),
+        file_hash="file-a",
+    )
+
+    result = read_rows_by_values(
+        db_path,
+        "fact_claim",
+        column="claim_id",
+        is_in=[3, 1],
+        select="*",
+    )
+
+    assert result.to_dict(as_series=False) == {
+        "claim_id": [3, 1],
+        "status": ["done", "open"],
+        "amount": [30, 10],
+        "file_key": ["file-a", "file-a"],
+    }
+
+
+def test_read_rows_by_values_accepts_star_when_values_list_is_empty(tmp_path):
+    db_path = tmp_path / "docs.duckdb"
+    replace_rows_by_file(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [1], "amount": [10]}),
+        file_hash="file-a",
+    )
+
+    result = read_rows_by_values(
+        db_path,
+        "fact_claim",
+        column="claim_id",
+        is_in=[],
+        select=" * ",
+    )
+
+    assert result.is_empty()
+    assert result.columns == ["claim_id", "amount", "file_key"]
+
+
 def test_read_rows_by_values_returns_empty_frame_when_values_list_is_empty(tmp_path):
     db_path = tmp_path / "docs.duckdb"
     replace_rows_by_file(
@@ -964,6 +1042,25 @@ def test_read_table_supports_select_where_and_limit(tmp_path):
     assert result.to_dict(as_series=False) == {
         "claim_id": [2],
         "amount": [20],
+    }
+
+
+def test_read_table_accepts_star_with_surrounding_whitespace(tmp_path):
+    db_path = tmp_path / "docs.duckdb"
+    replace_rows_by_file(
+        db_path,
+        "fact_claim",
+        df=pl.DataFrame({"claim_id": [1], "status": ["open"], "amount": [10]}),
+        file_hash="file-a",
+    )
+
+    result = read_table(db_path, "fact_claim", select=" * ")
+
+    assert result.to_dict(as_series=False) == {
+        "claim_id": [1],
+        "status": ["open"],
+        "amount": [10],
+        "file_key": ["file-a"],
     }
 
 

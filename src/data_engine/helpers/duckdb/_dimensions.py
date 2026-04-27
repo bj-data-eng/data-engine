@@ -17,6 +17,7 @@ from data_engine.helpers.duckdb._common import _quote_identifier
 from data_engine.helpers.duckdb._common import _quote_table_ref
 from data_engine.helpers.duckdb._common import _resolved_db_path
 from data_engine.helpers.duckdb._common import _schema_ref
+from data_engine.helpers.duckdb._common import _selects_all_columns
 from data_engine.helpers.duckdb._common import _table_column_names
 from data_engine.helpers.duckdb._read import read_rows_by_values
 
@@ -191,7 +192,7 @@ def denormalize_columns(
     if normalized_key_column not in table_columns:
         raise ValueError(f"key_column {normalized_key_column!r} must exist in table {table!r}.")
 
-    if select == "*":
+    if _selects_all_columns(select):
         selected_columns = tuple(column for column in table_columns if column != normalized_key_column)
     else:
         selected_columns = _normalize_selected_columns(select)

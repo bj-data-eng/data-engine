@@ -13,7 +13,19 @@ from data_engine.helpers.duckdb._common import _ordered_columns
 from data_engine.helpers.duckdb._common import _quote_identifier
 from data_engine.helpers.duckdb._common import _quote_table_ref
 from data_engine.helpers.duckdb._common import _resolved_db_path
+from data_engine.helpers.duckdb._common import _selects_all_columns
 from data_engine.helpers.duckdb._common import _table_column_names
+
+
+def _source_select_columns(columns: tuple[str, ...]) -> str:
+    return ", ".join(f"source.{_quote_identifier(column)} AS {_quote_identifier(column)}" for column in columns)
+
+
+def _helper_column_name(base: str, selected_columns: tuple[str, ...]) -> str:
+    name = base
+    while name in selected_columns:
+        name = f"{name}_"
+    return name
 
 
 def read_rows_by_values(
@@ -37,7 +49,7 @@ def read_rows_by_values(
     is_in : list[object] | tuple[object, ...]
         Values to include.
     select : str | list[str] | tuple[str, ...]
-        Columns to return.
+        Columns to return, or ``"*"`` for all columns.
 
     Returns
     -------
@@ -54,7 +66,6 @@ def read_rows_by_values(
     if not normalized_column:
         raise ValueError("column must be non-empty.")
 
-    normalized_select = _normalize_selected_columns(select)
     normalized_is_in = tuple(is_in)
     lookup = pl.DataFrame({"lookup_value": list(normalized_is_in)}).unique(maintain_order=True)
     lookup_values = tuple(lookup.get_column("lookup_value").to_list())
@@ -69,7 +80,6 @@ def read_rows_by_values(
 
     quoted_table = _quote_table_ref(table)
     quoted_column = _quote_identifier(normalized_column)
-    quoted_select = _ordered_columns(normalized_select)
 
     temp_lookup = "__data_engine_read_values_lookup"
     resolved_db_path = _resolved_db_path(db_path)
@@ -81,9 +91,11 @@ def read_rows_by_values(
             raise ValueError(f"Table {table!r} does not exist or has no columns.")
         if normalized_column not in table_columns:
             raise ValueError(f"column {normalized_column!r} must exist in table {table!r}.")
-        missing_columns = [name for name in normalized_select if name not in table_columns]
+        selected_columns = table_columns if _selects_all_columns(select) else _normalize_selected_columns(select)
+        missing_columns = [name for name in selected_columns if name not in table_columns]
         if missing_columns:
             raise ValueError(f"select columns must exist in table {table!r}: {missing_columns!r}")
+        quoted_select = _ordered_columns(selected_columns)
         if not normalized_is_in:
             return connection.execute(
                 f"""
@@ -94,11 +106,14 @@ def read_rows_by_values(
             ).pl()
 
         query_parts: list[str] = []
+        source_select = _source_select_columns(selected_columns)
+        lookup_order_column = _helper_column_name("__data_engine_lookup_order", selected_columns)
+        quoted_lookup_order_column = _quote_identifier(lookup_order_column)
         connection.register(temp_lookup, ordered_lookup)
         if non_null_lookup_values:
             query_parts.append(
                 f"""
-                SELECT {quoted_select}, lookup.lookup_order AS __lookup_order
+                SELECT {source_select}, lookup.lookup_order AS {quoted_lookup_order_column}
                 FROM {quoted_table} AS source
                 INNER JOIN {temp_lookup} AS lookup
                     ON source.{quoted_column} = lookup.lookup_value
@@ -108,7 +123,7 @@ def read_rows_by_values(
         if has_null_lookup:
             query_parts.append(
                 f"""
-                SELECT {quoted_select}, lookup.lookup_order AS __lookup_order
+                SELECT {source_select}, lookup.lookup_order AS {quoted_lookup_order_column}
                 FROM {quoted_table} AS source
                 INNER JOIN {temp_lookup} AS lookup
                     ON source.{quoted_column} IS NULL
@@ -116,8 +131,8 @@ def read_rows_by_values(
                 """
             )
         return connection.execute(
-            "\nUNION ALL\n".join(query_parts) + "\nORDER BY __lookup_order"
-        ).pl().drop("__lookup_order")
+            "\nUNION ALL\n".join(query_parts) + f"\nORDER BY {quoted_lookup_order_column}"
+        ).pl().drop(lookup_order_column)
     finally:
         connection.close()
 
@@ -201,7 +216,7 @@ def read_table(
     finally:
         connection.close()
 
-    if select == "*":
+    if _selects_all_columns(select):
         quoted_select = "*"
     else:
         selected_columns = _normalize_selected_columns(select)

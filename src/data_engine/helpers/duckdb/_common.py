@@ -104,6 +104,10 @@ def _normalize_selected_columns(select: str | list[str] | tuple[str, ...]) -> tu
     return normalized
 
 
+def _selects_all_columns(select: str | list[str] | tuple[str, ...]) -> bool:
+    return isinstance(select, str) and select.strip() == "*"
+
+
 def _normalize_key_columns(on: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
     if isinstance(on, str):
         normalized = (on.strip(),)
