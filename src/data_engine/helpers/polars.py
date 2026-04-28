@@ -414,6 +414,80 @@ def propagate_last_value(
     return ordered.last().over(_as_column_exprs(by))
 
 
+def propagate_first_value(
+    value: ColumnExpr,
+    *,
+    by: ColumnExprs,
+    sort_by: ColumnExprs,
+    where: pl.Expr | None = None,
+    descending: DescendingLike = False,
+    nulls_last: bool = False,
+    ignore_nulls: bool = True,
+) -> pl.Expr:
+    """Return an expression that broadcasts the first ordered value per window.
+
+    The helper sorts rows inside each ``by`` window, optionally filters the
+    ordered rows with ``where``, takes the first ``value`` from that ordered
+    candidate set, and propagates it to every row in the same window. Null
+    values are ignored by default.
+
+    Parameters
+    ----------
+    value : ColumnExpr
+        Column name or expression containing the value to propagate.
+    by : ColumnExprs
+        Window column or columns.
+    sort_by : ColumnExprs
+        Ordering column or columns used to define the first row in each window.
+    where : pl.Expr | None
+        Optional row predicate that limits which sorted rows can supply the
+        propagated value.
+    descending : DescendingLike
+        Sort direction passed to ``Expr.sort_by``.
+    nulls_last : bool
+        Whether null sort-key values are ordered last.
+    ignore_nulls : bool
+        Whether null ``value`` rows are skipped before taking the first value.
+
+    Returns
+    -------
+    pl.Expr
+        Window expression suitable for ``with_columns`` or ``select``.
+
+    Examples
+    --------
+    Propagate the first non-null status to every row for a claim:
+
+    .. code-block:: python
+
+        df = df.with_columns(
+            first_status=data_engine.helpers.propagate_first_value(
+                "status",
+                by="claim_id",
+                sort_by="claim_step_index",
+            )
+        )
+    """
+    sort_exprs = _as_column_exprs(sort_by)
+    value_expr = _as_column_expr(value)
+    ordered = value_expr.sort_by(
+        sort_exprs,
+        descending=descending,
+        nulls_last=nulls_last,
+    )
+    if where is not None:
+        ordered = ordered.filter(
+            where.sort_by(
+                sort_exprs,
+                descending=descending,
+                nulls_last=nulls_last,
+            )
+        )
+    if ignore_nulls:
+        ordered = ordered.drop_nulls()
+    return ordered.first().over(_as_column_exprs(by))
+
+
 def visit_counter(
     value: ColumnExpr,
     *,
@@ -1344,6 +1418,57 @@ class DataEngineDataFrameNamespace:
             ignore_nulls=ignore_nulls,
         )
 
+    def propagate_first_value(
+        self,
+        value: ColumnExpr,
+        *,
+        by: ColumnExprs,
+        sort_by: ColumnExprs,
+        where: pl.Expr | None = None,
+        descending: DescendingLike = False,
+        nulls_last: bool = False,
+        ignore_nulls: bool = True,
+    ) -> pl.Expr:
+        """Return an expression broadcasting the first ordered value per window.
+
+        This is a convenience wrapper around
+        :func:`data_engine.helpers.propagate_first_value`.
+
+        Parameters
+        ----------
+        value : ColumnExpr
+            Column name or expression containing the value to propagate.
+        by : ColumnExprs
+            Window column or columns.
+        sort_by : ColumnExprs
+            Ordering column or columns used to define the first row in each
+            window.
+        where : pl.Expr | None
+            Optional row predicate that limits which sorted rows can supply the
+            propagated value.
+        descending : DescendingLike
+            Sort direction passed to ``Expr.sort_by``.
+        nulls_last : bool
+            Whether null sort-key values are ordered last.
+        ignore_nulls : bool
+            Whether null ``value`` rows are skipped before taking the first
+            value.
+
+        Returns
+        -------
+        pl.Expr
+            Window expression suitable for ``with_columns`` or ``select``.
+        """
+        return propagate_first_value(
+            value,
+            by=by,
+            sort_by=sort_by,
+            where=where,
+            descending=descending,
+            nulls_last=nulls_last,
+            ignore_nulls=ignore_nulls,
+        )
+
     def visit_counter(
         self,
         value: ColumnExpr,
@@ -1832,6 +1957,57 @@ class DataEngineLazyFrameNamespace:
             Window expression suitable for ``with_columns`` or ``select``.
         """
         return propagate_last_value(
+            value,
+            by=by,
+            sort_by=sort_by,
+            where=where,
+            descending=descending,
+            nulls_last=nulls_last,
+            ignore_nulls=ignore_nulls,
+        )
+
+    def propagate_first_value(
+        self,
+        value: ColumnExpr,
+        *,
+        by: ColumnExprs,
+        sort_by: ColumnExprs,
+        where: pl.Expr | None = None,
+        descending: DescendingLike = False,
+        nulls_last: bool = False,
+        ignore_nulls: bool = True,
+    ) -> pl.Expr:
+        """Return an expression broadcasting the first ordered value per window.
+
+        This is a convenience wrapper around
+        :func:`data_engine.helpers.propagate_first_value`.
+
+        Parameters
+        ----------
+        value : ColumnExpr
+            Column name or expression containing the value to propagate.
+        by : ColumnExprs
+            Window column or columns.
+        sort_by : ColumnExprs
+            Ordering column or columns used to define the first row in each
+            window.
+        where : pl.Expr | None
+            Optional row predicate that limits which sorted rows can supply the
+            propagated value.
+        descending : DescendingLike
+            Sort direction passed to ``Expr.sort_by``.
+        nulls_last : bool
+            Whether null sort-key values are ordered last.
+        ignore_nulls : bool
+            Whether null ``value`` rows are skipped before taking the first
+            value.
+
+        Returns
+        -------
+        pl.Expr
+            Window expression suitable for ``with_columns`` or ``select``.
+        """
+        return propagate_first_value(
             value,
             by=by,
             sort_by=sort_by,

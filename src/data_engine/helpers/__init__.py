@@ -15,6 +15,7 @@ from data_engine.helpers.duckdb import replace_table
 from data_engine.helpers.polars import DataEngineDataFrameNamespace
 from data_engine.helpers.polars import DataEngineLazyFrameNamespace
 from data_engine.helpers.polars import networkdays
+from data_engine.helpers.polars import propagate_first_value
 from data_engine.helpers.polars import propagate_last_value
 from data_engine.helpers.polars import remove_null_columns
 from data_engine.helpers.polars import sink_parquet_atomic
@@ -38,6 +39,7 @@ __all__ = [
     "ensure_index",
     "networkdays",
     "normalize_columns",
+    "propagate_first_value",
     "propagate_last_value",
     "remove_null_columns",
     "read_rows_by_values",

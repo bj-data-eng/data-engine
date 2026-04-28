@@ -8,6 +8,7 @@ from polars.testing import assert_frame_equal
 import pytest
 
 from data_engine.helpers import networkdays
+from data_engine.helpers import propagate_first_value
 from data_engine.helpers import propagate_last_value
 from data_engine.helpers import remove_null_columns
 from data_engine.helpers import sink_parquet_atomic
@@ -595,6 +596,132 @@ def test_propagate_last_value_accepts_composed_source_row_filters():
         None,
         None,
     ]
+
+
+def test_propagate_first_value_broadcasts_earliest_non_null_value_per_window():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "a", "b", "b", "c"],
+            "step_index": [1, 2, 3, 1, 2, 1],
+            "status": [None, "ready", "closed", "open", "closed", None],
+        }
+    )
+
+    result = frame.with_columns(
+        first_status=propagate_first_value(
+            "status",
+            by="claim_id",
+            sort_by="step_index",
+        )
+    )
+
+    assert result.to_dict(as_series=False)["first_status"] == [
+        "ready",
+        "ready",
+        "ready",
+        "open",
+        "open",
+        None,
+    ]
+
+
+def test_propagate_first_value_accepts_multiple_window_and_sort_columns():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "a", "a", "b"],
+            "line": [1, 1, 1, 2, 1],
+            "step_index": [2, 1, 1, 1, 1],
+            "tie_breaker": [1, 1, 2, 1, 1],
+            "status": ["last", "first", "second", "line-two", "only"],
+        }
+    )
+
+    result = frame.with_columns(
+        first_status=propagate_first_value(
+            "status",
+            by=["claim_id", "line"],
+            sort_by=["step_index", "tie_breaker"],
+        )
+    )
+
+    assert result.to_dict(as_series=False)["first_status"] == [
+        "first",
+        "first",
+        "first",
+        "line-two",
+        "only",
+    ]
+
+
+def test_propagate_first_value_namespace_helpers_work_for_eager_and_lazy_frames():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "b", "b"],
+            "step_index": [1, 2, 1, 2],
+            "status": [None, "open", "queued", "done"],
+        }
+    )
+
+    eager = frame.with_columns(
+        first_status=frame.de.propagate_first_value("status", by="claim_id", sort_by="step_index")
+    )
+    lazy_frame = frame.lazy()
+    lazy = lazy_frame.with_columns(
+        first_status=lazy_frame.de.propagate_first_value("status", by="claim_id", sort_by="step_index")
+    ).collect()
+
+    assert eager.to_dict(as_series=False)["first_status"] == ["open", "open", "queued", "queued"]
+    assert lazy.to_dict(as_series=False)["first_status"] == ["open", "open", "queued", "queued"]
+
+
+def test_propagate_first_value_can_filter_source_rows_and_return_adjacent_values():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "a", "b", "b"],
+            "step_index": [1, 2, 3, 1, 2],
+            "event": ["Open", "Archive", "Archive", "Open", "Archive"],
+            "event_date": ["2026-04-01", "2026-04-02", "2026-04-03", "2026-05-01", "2026-05-02"],
+            "event_time": ["08:00", "09:30", "10:15", "11:00", "12:45"],
+        }
+    )
+
+    result = frame.with_columns(
+        first_archived_at=propagate_first_value(
+            pl.concat_str(["event_date", "event_time"], separator=" "),
+            by="claim_id",
+            sort_by="step_index",
+            where=pl.col("event") == "Archive",
+        )
+    )
+
+    assert result.to_dict(as_series=False)["first_archived_at"] == [
+        "2026-04-02 09:30",
+        "2026-04-02 09:30",
+        "2026-04-02 09:30",
+        "2026-05-02 12:45",
+        "2026-05-02 12:45",
+    ]
+
+
+def test_propagate_first_value_can_keep_nulls_when_requested():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "b", "b"],
+            "step_index": [1, 2, 1, 2],
+            "status": [None, "open", "queued", None],
+        }
+    )
+
+    result = frame.with_columns(
+        first_status=propagate_first_value(
+            "status",
+            by="claim_id",
+            sort_by="step_index",
+            ignore_nulls=False,
+        )
+    )
+
+    assert result.to_dict(as_series=False)["first_status"] == [None, None, "queued", "queued"]
 
 
 def test_visit_counter_counts_repeated_contiguous_value_runs_per_window():
