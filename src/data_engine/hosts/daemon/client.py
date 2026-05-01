@@ -47,6 +47,9 @@ _SHARED_STATE_ADAPTER = DaemonSharedStateAdapter()
 _WINDOWS_ERROR_ALREADY_EXISTS = 183
 _WINDOWS_STARTUP_MUTEXES: dict[str, int] = {}
 
+if not hasattr(ctypes, "windll"):
+    ctypes.windll = None  # type: ignore[attr-defined]
+
 
 def endpoint_address(paths: WorkspacePaths) -> str:
     """Return the Listener/Client address for one workspace."""

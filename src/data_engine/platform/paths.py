@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from pathlib import Path, PosixPath
+import sys
 import unicodedata
 
 
@@ -14,10 +15,10 @@ def normalized_path_text(value: Path | str) -> str:
 
 def stable_absolute_path(value: Path | str) -> Path:
     """Return an absolute path without dereferencing Windows reparse points."""
-    path = Path(value).expanduser()
-    if os.name == "nt":
-        return Path(os.path.abspath(os.fspath(path)))
-    return path.resolve()
+    expanded = os.path.expanduser(os.fspath(value))
+    absolute = os.path.abspath(expanded)
+    path_type = Path if sys.platform == "win32" else PosixPath
+    return path_type(absolute)
 
 
 def stable_path_identity_text(value: Path | str, *, case_insensitive: bool | None = None) -> str:

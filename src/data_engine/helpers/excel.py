@@ -325,7 +325,7 @@ def _replace_atomic(source_path: Path, target_path: Path) -> None:
             os.replace(source_path, target_path)
             return
         except PermissionError as exc:
-            if os.name != "nt" or getattr(exc, "winerror", None) != 5:
+            if getattr(exc, "winerror", None) != 5:
                 raise
             last_error = exc
             continue

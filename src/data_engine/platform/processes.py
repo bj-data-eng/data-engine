@@ -12,6 +12,9 @@ from data_engine.domain.diagnostics import ClassifiedProcessInfo, ProcessInfo, i
 
 _WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _WINDOWS_STILL_ACTIVE = 259
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+_CREATE_NO_WINDOW = 0x08000000
+_DETACHED_PROCESS = 0x00000008
 
 
 class ProcessInspectionError(RuntimeError):
@@ -27,11 +30,11 @@ def windows_subprocess_creationflags(
     """Return Windows subprocess creation flags supported by the host Python."""
     flags = 0
     if new_process_group:
-        flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", _CREATE_NEW_PROCESS_GROUP)
     if no_window:
-        flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        flags |= getattr(subprocess, "CREATE_NO_WINDOW", _CREATE_NO_WINDOW)
     if detached:
-        flags |= getattr(subprocess, "DETACHED_PROCESS", 0)
+        flags |= getattr(subprocess, "DETACHED_PROCESS", _DETACHED_PROCESS)
     return flags
 
 
