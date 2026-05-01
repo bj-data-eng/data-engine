@@ -47,9 +47,6 @@ _SHARED_STATE_ADAPTER = DaemonSharedStateAdapter()
 _WINDOWS_ERROR_ALREADY_EXISTS = 183
 _WINDOWS_STARTUP_MUTEXES: dict[str, int] = {}
 
-if not hasattr(ctypes, "windll"):
-    ctypes.windll = None  # type: ignore[attr-defined]
-
 
 def endpoint_address(paths: WorkspacePaths) -> str:
     """Return the Listener/Client address for one workspace."""
@@ -335,11 +332,19 @@ def _configure_ctypes_function(func: Any, *, argtypes: list[Any], restype: Any) 
         pass
 
 
+def _windows_kernel32() -> Any:
+    """Return the Win32 kernel32 library or fail when Windows ctypes support is unavailable."""
+    windll = getattr(ctypes, "windll", None)
+    if windll is None:
+        raise DaemonClientError("Windows daemon startup locks require ctypes.windll.")
+    return windll.kernel32
+
+
 def _acquire_startup_lock(paths: WorkspacePaths) -> bool:
     """Try to acquire the per-workspace daemon startup lock."""
     if os.name == "nt":
         mutex_name = _windows_startup_mutex_name(paths)
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = _windows_kernel32()
         _configure_ctypes_function(
             kernel32.CreateMutexW,
             argtypes=[ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p],
@@ -384,7 +389,7 @@ def _release_startup_lock(paths: WorkspacePaths) -> None:
         handle = _WINDOWS_STARTUP_MUTEXES.pop(mutex_name, None)
         if handle is None:
             return
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = _windows_kernel32()
         _configure_ctypes_function(kernel32.ReleaseMutex, argtypes=[ctypes.c_void_p], restype=ctypes.c_int)
         _configure_ctypes_function(kernel32.CloseHandle, argtypes=[ctypes.c_void_p], restype=ctypes.c_int)
         try:

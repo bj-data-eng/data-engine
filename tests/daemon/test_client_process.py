@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 from datetime import UTC, datetime, timedelta
 import os
 from pathlib import Path
@@ -36,6 +37,44 @@ from data_engine.runtime.shared_state import (
 from data_engine.services.workspace_io import WorkspaceIoLayer
 
 from .support import _write_demo_flow, resolve_workspace_paths
+
+
+def test_importing_daemon_client_does_not_create_fake_ctypes_windll():
+    if hasattr(ctypes, "windll"):
+        pytest.skip("ctypes.windll is natively available on this platform.")
+
+    assert hasattr(daemon_client.ctypes, "windll") is False
+
+
+def test_windows_subprocess_creationflags_are_zero_on_non_windows(monkeypatch):
+    monkeypatch.setattr("data_engine.platform.processes.os.name", "posix")
+
+    assert daemon_client.windows_subprocess_creationflags(new_process_group=True, no_window=True, detached=True) == 0
+
+
+def test_windows_subprocess_creationflags_uses_numeric_fallbacks_when_simulating_windows(monkeypatch):
+    monkeypatch.setattr("data_engine.platform.processes.os.name", "nt")
+    monkeypatch.delattr("data_engine.platform.processes.subprocess.CREATE_NEW_PROCESS_GROUP", raising=False)
+    monkeypatch.delattr("data_engine.platform.processes.subprocess.CREATE_NO_WINDOW", raising=False)
+    monkeypatch.delattr("data_engine.platform.processes.subprocess.DETACHED_PROCESS", raising=False)
+
+    assert daemon_client.windows_subprocess_creationflags(new_process_group=True, no_window=True, detached=True) == (
+        0x00000200 | 0x08000000 | 0x00000008
+    )
+
+
+def test_windows_startup_lock_requires_windll_when_simulating_windows(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    monkeypatch.setattr(daemon_client.os, "name", "nt")
+    monkeypatch.delattr(daemon_client.ctypes, "windll", raising=False)
+
+    with pytest.raises(DaemonClientError, match="ctypes.windll"):
+        daemon_client._acquire_startup_lock(paths)
+
 
 def test_workspace_daemon_manager_auto_recovers_dead_same_machine_lease(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"

@@ -28,6 +28,8 @@ def windows_subprocess_creationflags(
     detached: bool = False,
 ) -> int:
     """Return Windows subprocess creation flags supported by the host Python."""
+    if os.name != "nt":
+        return 0
     flags = 0
     if new_process_group:
         flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", _CREATE_NEW_PROCESS_GROUP)

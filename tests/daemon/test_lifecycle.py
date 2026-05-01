@@ -468,7 +468,7 @@ def test_windows_startup_lock_uses_named_mutex_without_lock_file(tmp_path, monke
             closed.append(handle)
             return 1
 
-    monkeypatch.setattr(daemon_client.ctypes, "windll", SimpleNamespace(kernel32=_Kernel32()))
+    monkeypatch.setattr(daemon_client.ctypes, "windll", SimpleNamespace(kernel32=_Kernel32()), raising=False)
 
     assert daemon_client._acquire_startup_lock(paths) is True
     assert (paths.runtime_state_dir / ".daemon-start.lock").exists() is False
