@@ -17,11 +17,14 @@ Data Engine has one source of truth for per-flow behavior: the `Flow` returned b
 
 In practice:
 
-- the flow module defines the flow name, group, runtime mode, and ordered steps
+- the flow-module filename is the stable flow identity; `Flow(label=...)` is an optional display title
+- the flow definition provides a group, runtime mode, optional source and mirror bindings, and ordered steps
 - step functions do real work with native libraries such as Polars, DuckDB, and plain Python
 - the GUI, TUI, and egui surfaces discover those flow modules inside the selected workspace and show them as configurable runnable flows
 
 The fluent API owns orchestration, while the step callables own your actual business logic.
+
+`Flow` builder methods are immutable. Each call returns a new `Flow`, which is why flow definitions usually chain methods and return the final object from `build()`.
 
 ## The basic workspace layout
 
@@ -67,7 +70,7 @@ Each flow module should export:
 - optional `DESCRIPTION`
 - `build() -> Flow`
 
-Display titles come from `Flow(label=...)` when provided. Otherwise the UI derives them from the flow-module filename.
+Display titles come from `Flow(label=...)` when provided. Otherwise the UI derives them from the flow-module filename. Avoid setting `name=` in normal flow modules; the module loader provides the discovered name.
 
 ## Your first flow
 
@@ -90,7 +93,7 @@ def write_dates(context):
 
 def build():
     return (
-        Flow(group="Reference")
+        Flow(group="Reference", label="Date Dimension")
         .watch(mode="schedule", run_as="batch", interval="1h")
         .mirror(root="../../example_data/Output/date_dimension")
         .step(build_dates, save_as="dates_df")
@@ -106,7 +109,7 @@ That example shows the full shape:
 4. add ordered `step(...)` callables
 5. return the built flow from `build()`
 
-The return value from each step becomes `context.current`, so later steps can keep operating on the current object or reach back to previously saved objects through `use=`.
+The return value from each step becomes `context.current`. `save_as=` stores a named intermediate in `context.objects`, and `use=` loads a saved object back into `context.current` before a later step runs.
 
 ## What the app actually does with that flow
 
@@ -114,6 +117,7 @@ Once the flow is discovered, the desktop app uses it for:
 
 - grouping and labels in the home view
 - deciding whether the flow is manual, poll, or schedule
+- deciding whether work runs per source file or once for a watched root
 - deciding whether the flow participates in the engine
 - rendering step names and inspectable outputs
 - manual runs and engine runs for the selected workspace
@@ -193,13 +197,15 @@ def build():
     )
 ```
 
-`Flow.collect(...)` returns a `Batch` of `FileRef` items.
+`Flow.collect(...)` returns a `Batch` of `FileRef` items. If `root=` is omitted, it collects from the active source root supplied by the runtime context.
 
 `Flow.map(...)` runs one callable per item and returns a new `Batch`.
 
 `Flow.step_each(...)` is the same operation with a name that can read more clearly in some flows.
 
 If the batch is empty, both forms raise immediately. That behavior makes batch-flow outcomes explicit and easy to diagnose.
+
+`Batch` is iterable and also exposes small helpers such as `names()` and `paths()` when every item has the matching attribute.
 
 ## Running flows from Python
 
@@ -221,6 +227,8 @@ flows = discover_flows()
 run(*flows)
 ```
 
+`run_once()` returns one completed `FlowContext` per executed source. Inspect `context.current`, `context.objects`, `context.source`, and `context.metadata` when you need details from a run.
+
 For preview-oriented authoring outside a compiled flow module, you can still inspect a flow with:
 
 ```python
@@ -236,7 +244,7 @@ For poll flows that watch a folder, `preview(...)` uses one deterministic startu
 
 ### Manual
 
-- `watch(mode="manual")`
+- no `watch(...)` call, or `watch(mode="manual")` when you want to set `run_as`, `max_parallel`, or a source binding explicitly
 - `context.current` starts as `None`
 - useful for ad hoc or UI-driven runs
 - works well for flows that build data in memory or start from operator actions
@@ -248,13 +256,30 @@ For poll flows that watch a folder, `preview(...)` uses one deterministic startu
 - the first step receives the active source through `context.source`
 - freshness compares the current source file signature against the runtime ledger
 - `extensions=` and `settle=` only apply here
+- `max_parallel=` controls concurrent source-file runs for `run_as="individual"`
 
 ### Schedule
 
 - `watch(mode="schedule", ...)`
 - runs on an interval or on one or more wall-clock times
 - supports one `time="HH:MM"` value or a collection of times
+- accepts exactly one of `interval=` or `time=`
 - often starts by building data in memory or loading from a known source root
+
+For poll and schedule, `run_as="individual"` means one run per concrete source file. `run_as="batch"` means one run for the watched root, which is the usual companion to `collect(...)`.
+
+## Runtime context essentials
+
+Inside a step, `context` is the runtime surface:
+
+- `context.current` is the value flowing through the pipeline
+- `context.objects` contains values saved by `save_as=`
+- `context.source` is available for source-backed runs and can report `path`, `root`, `folder`, and sidecar paths
+- `context.mirror` is available after `mirror(root=...)` and returns write-ready output paths
+- `context.config` lazily reads workspace-local TOML files from `config/`
+- `context.database("name.duckdb")` returns a write-ready path under the workspace `databases/` directory
+- `context.source_metadata()` returns file metadata for the active source when one exists
+- `context.debug` is available when debug artifact capture is enabled by the runtime
 
 ## A few good habits early
 
@@ -264,6 +289,7 @@ For poll flows that watch a folder, `preview(...)` uses one deterministic startu
 - move reusable SQL, parsing helpers, and constants into `flow_modules/flow_helpers/`
 - use `context.config` for workspace-local TOML configuration
 - use `context.database(...)` when you want a conventional workspace-local database path
+- use `context.debug.save_frame(...)` or `context.debug.save_json(...)` sparingly for runtime diagnostics when the debug context is available
 
 ## Next steps
 

@@ -4,6 +4,10 @@ Per-flow configuration lives in the fluent `Flow` chain, not in TOML.
 
 That applies to both `.py` and `.ipynb` flow modules: the authored `Flow(...)` definition is the runtime contract, and workspace-local TOML in `config/` is for step logic and runtime parameters consumed by your code.
 
+For the method-by-method tour, see [Flow Methods](flow-methods.md). For the
+step-time runtime object, see [FlowContext](flow-context.md). For complete
+patterns that combine the pieces, see [Recipes](recipes.md).
+
 That is an important design choice:
 
 - the runtime shape of a flow belongs in the authored `Flow(...)` definition
@@ -113,7 +117,7 @@ Common values are:
 
 Use `individual` when each source file should be processed independently.
 
-Use `batch` when the flow should reason about the watched source as one collection, such as "all current workbooks in this folder."
+Use `batch` when the flow should reason about the watched source as one collection, such as "all current files in this folder."
 
 ### Poll-specific options
 
@@ -186,3 +190,6 @@ If you are deciding where a piece of information belongs:
 
 - if it shapes orchestration, put it in the `Flow` chain
 - if it shapes step logic, put it in your code or in `context.config`
+
+The API reference renders the docstrings for exact signatures and validation
+rules; this guide stays focused on where each kind of configuration belongs.

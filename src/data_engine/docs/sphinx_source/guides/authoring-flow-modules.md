@@ -18,12 +18,16 @@ Notebook-authored flow modules are compiled into runtime-ready Python modules be
 
 The flow-module filename is the durable flow identity used by discovery and runtime state. If you rename the file, you are effectively creating a different flow as far as the system is concerned.
 
+For the fluent `Flow` chain itself, see [Configuring Flows](configuring-flows.md)
+and [Flow Methods](flow-methods.md). For the runtime object passed into steps,
+see [FlowContext](flow-context.md).
+
 ## Required contract
 
 ```python
 from data_engine import Flow
 
-DESCRIPTION = "Reads workbook inputs and writes mirrored parquet outputs."
+DESCRIPTION = "Reads source inputs and writes mirrored parquet outputs."
 
 
 def build():
@@ -77,6 +81,7 @@ Use native libraries directly inside those steps:
 
 - Polars for dataframe reads, transforms, and writes
 - DuckDB for SQL and database work
+- focused helpers from `data_engine.helpers` when they remove repeated flow code
 - `pathlib` and normal Python for filesystem logic
 
 That simplicity is the intended authoring experience. Flow modules should feel like normal Python modules with a small orchestration surface.
@@ -112,6 +117,11 @@ Usually worth avoiding:
 ## Helper modules
 
 Helper modules are regular Python files under `flow_modules/flow_helpers/`. They are compiled into workspace-local runtime artifacts and are importable from both notebook-authored and Python-authored flows.
+
+Use `flow_modules/flow_helpers/` for workspace-local code that belongs to one
+workspace. Use public helpers from `data_engine.helpers` for reusable package
+behavior such as schema normalization, business-day expressions, atomic Polars
+writes, and DuckDB loading shortcuts.
 
 Example:
 

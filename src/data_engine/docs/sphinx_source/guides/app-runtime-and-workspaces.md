@@ -286,7 +286,7 @@ Practically, the selected workspace governs:
 - which runtime ledger is open
 - which daemon is being queried or controlled
 - which logs and runs are visible in the main view
-- which workspace-relative `context.config(...)` and `context.database(...)` calls make sense during authoring
+- which workspace-relative `context.config` and `context.database(...)` calls make sense during authoring
 
 ## Workspace provisioning
 

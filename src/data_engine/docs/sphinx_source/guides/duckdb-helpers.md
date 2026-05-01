@@ -4,9 +4,9 @@
 
 The function-by-function reference lives in the helper docstrings and is
 rendered in the API reference. Keep signature details and copyable examples
-beside the functions in `src/data_engine/helpers/duckdb.py`; that keeps editor
+beside the functions in `src/data_engine/helpers/duckdb/`; that keeps editor
 hover help and the packaged docs aligned. This page explains the shared design
-shape and when the helper family is a good fit.
+shape, the current helper coverage, and when the helper family is a good fit.
 
 These helpers are intentionally:
 
@@ -70,6 +70,9 @@ Notes:
 - `return_df=True` means "return the dataframe result for this helper"
 - identifiers such as table names and column names are quoted safely, including reserved words such as `group`
 - schema-qualified tables such as `"mart.fact_claim"` are supported
+- parent directories for the DuckDB path are created before connecting
+- Polars `LazyFrame` inputs are collected before writing or joining
+- `select="*"` means "all persisted table columns" for helpers that accept it
 
 ## `build_dimension(...)`
 
@@ -91,9 +94,13 @@ build_dimension(
 Behavior:
 
 - treats every column in `df` as part of the natural key
+- requires at least one incoming column
+- rejects a `key_column` that already exists in `df`
+- creates the target schema when `table` is schema-qualified
 - creates the table if it does not exist
+- creates a unique index over the natural-key columns
 - inserts only missing unique combinations
-- assigns deterministic integer surrogate keys
+- assigns integer surrogate keys after the current maximum key, ordered by natural-key values
 - returns the natural-key-to-surrogate-key mapping when `return_df=True`
 
 Example:
@@ -134,6 +141,7 @@ attach_dimension(
 Key arguments:
 
 - `on` can be one column name or a list of column names
+- every `on` column must exist in `df`
 - `drop_key=False` keeps the natural-key columns by default
 - set `drop_key=True` when you want the attached surrogate key without the original key columns
 
@@ -171,6 +179,7 @@ normalize_columns(
 Key arguments:
 
 - `on` can be one column name or a list of column names
+- every `on` column is treated as part of the natural key
 - `drop_key=True` removes the natural-key columns after the surrogate key is joined back
 - `returns="df"` returns the normalized dataframe
 - `returns="map"` returns only the persisted mapping
@@ -223,8 +232,9 @@ denormalize_columns(
 Key arguments:
 
 - `key_column` is the surrogate key used to join from `df` into the dimension table
-- `select="*"` attaches every non-key column from the dimension table
+- `select="*"` attaches every non-key column from the dimension table; this is the default
 - `select=[...]` lets you attach only a subset of natural columns
+- `select` must not include `key_column`
 - `drop_key=False` keeps the surrogate key by default
 
 Example:
@@ -259,10 +269,13 @@ replace_rows_by_file(
 Behavior:
 
 - adds a constant file-hash column to `df`
+- rejects a blank `file_hash` or a `file_hash_column` that already exists in `df`
+- creates the target schema when `table` is schema-qualified
 - creates the table if it does not exist
 - expands the table schema when new columns appear
 - deletes existing rows for that file hash
 - appends the current batch
+- returns the incoming dataframe with the added file-hash column when `return_df=True`
 
 Example:
 
@@ -323,6 +336,10 @@ such as `replace_rows_by_file(...)`, `replace_rows_by_values(...)`, or
 `read_rows_by_values(...)` against a large table. They use extra disk and make
 writes maintain the index, so create them intentionally for hot lookup paths.
 
+When `name` is omitted, Data Engine generates an `idx_de_...` name from the
+table and column list. If you pass `name`, it is used as the DuckDB index name
+and must be non-empty.
+
 ## `replace_rows_by_values(...)`
 
 Use this helper when one incoming dataframe represents the full current contents for one logical value slice.
@@ -342,10 +359,14 @@ replace_rows_by_values(
 
 Behavior:
 
+- requires `df` to contain at least one row
 - takes the distinct values from `df[column]`
 - deletes existing rows in the target table where `column` matches any of those values
+- matches null values with DuckDB's `IS NOT DISTINCT FROM` semantics
 - appends the current batch
+- creates the target schema when `table` is schema-qualified
 - creates and expands the table as needed
+- returns the incoming dataframe when `return_df=True`
 
 Example:
 
@@ -402,6 +423,24 @@ summary = compact_database(
 This is a good fit for manual maintenance flows where you want a simple
 one-liner per database.
 
+Compaction targets all user tables when `tables=None`. Pass one table name, a
+list, or a tuple to compact a smaller set. Missing requested tables raise a
+`ValueError`.
+
+The summary dataframe includes:
+
+- `db_path`
+- `table`
+- `dropped_column_count`
+- `dropped_columns`
+- `indexes_dropped`
+- `indexes_recreated`
+- `indexes_skipped`
+- `vacuum_requested`
+- `vacuumed`
+- `size_before_bytes`
+- `size_after_bytes`
+
 ## `read_rows_by_values(...)`
 
 Use this helper when you want a small filtered lookup out of DuckDB as a Polars dataframe.
@@ -422,8 +461,11 @@ read_rows_by_values(
 Behavior:
 
 - returns rows where `column` matches one of the provided values
-- returns only the selected columns
+- returns only the selected columns, or all columns when `select="*"`
 - uses a temporary lookup table internally, which works better than manually assembling long SQL `IN (...)` strings
+- preserves the first-seen order of distinct lookup values
+- matches `None` lookup values to persisted nulls
+- returns an empty dataframe with the selected schema when `is_in` is empty
 
 Example:
 
@@ -497,9 +539,9 @@ result = read_table(
 
 This helper is intentionally small:
 
-- `select` can be `"*"` or a list of column names
+- `select` can be `"*"` or a list of column names; `"*"` is the default
 - `where` is passed through as SQL
-- `limit` is optional
+- `limit` is optional and must be non-negative
 
 ## `replace_table(...)`
 
@@ -519,10 +561,13 @@ replace_table(
 
 Behavior:
 
+- requires `df` to include at least one column
+- creates the target schema when `table` is schema-qualified
 - creates the table if it does not exist
 - expands the table schema when new columns appear
 - deletes all existing rows
 - inserts the current dataframe
+- returns the incoming dataframe when `return_df=True`
 
 Example:
 

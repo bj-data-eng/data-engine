@@ -1,534 +1,568 @@
 # FlowContext
 
-`FlowContext` is the runtime object passed to every step.
+`FlowContext` is the mutable runtime object passed to normal flow steps. It is
+the main authoring surface for reading the active value, reusing named
+intermediates, resolving source and output paths, loading workspace config, and
+publishing runtime metadata.
 
-It is the main place where the runtime meets your step code.
-
-If you are authoring flows day to day, this is the surface you will use most often.
-
-## What `FlowContext` contains
-
-Common fields and helpers you will read directly:
-
-- `flow_name`
-- `group`
-- `source`
-- `mirror`
-- `config`
-- `debug`
-- `database(...)`
-- `current`
-- `objects`
-- `metadata`
-- `source_metadata()`
-
-Example:
+Most steps only need one or two context features:
 
 ```python
-def inspect_context(context):
-    print(context.flow_name)
-    print(context.group)
-    print(context.current)
-    if context.source is not None:
-        print(context.source.path)
+def capture_row_count(context):
+    context.metadata["row_count"] = len(context.current)
     return context.current
 ```
 
-## The three most important ideas
+## Runtime fields
 
-When in doubt, remember these three ideas:
+`FlowContext` exposes these fields:
 
-1. `current` is the moving value in the pipeline.
-2. `objects` is the named stash of saved intermediates.
+- `flow_name`: stable flow name for the current execution
+- `group`: flow group used by operator surfaces
+- `source`: `SourceContext | None` for source-backed executions
+- `mirror`: `MirrorContext | None` when the flow configured `mirror(root=...)`
+- `current`: the active value moving through the pipeline
+- `objects`: named intermediate values saved with `save_as=`
+- `metadata`: free-form metadata attached to the execution
+- `config`: lazy reader for workspace `config/*.toml`
+- `debug`: optional debug artifact writer for the active run
+
+The core model is small:
+
+1. `current` is the value handed from step to step.
+2. `objects` stores named values created by `save_as=`.
 3. `source` and `mirror` are path namespaces, not open files or connections.
-
-Everything else in `FlowContext` builds on those ideas.
 
 ## `flow_name` and `group`
 
-These are the flow identity fields available at runtime.
+Use `flow_name` and `group` when a step needs to label outputs, metadata, logs,
+or diagnostics with flow identity:
 
-- `flow_name` comes from the flow-module filename
-- `group` comes from `Flow(group=...)`
+```python
+def stamp_identity(context):
+    context.metadata["flow"] = context.flow_name
+    context.metadata["group"] = context.group
+    return context.current
+```
 
-They are useful when you want to:
-
-- stamp metadata
-- label outputs
-- branch behavior lightly by flow identity
-- emit operator-facing details into `context.metadata`
+`flow_name` comes from the authored flow module identity. `group` comes from the
+flow definition, such as `Flow(group="Documents")`.
 
 ## `current`
 
-`context.current` is the moving runtime slot.
+`context.current` is the active runtime slot:
 
-- before the first manual or scheduled step, it is `None`
+- before the first manual or scheduled step, it is usually `None`
 - after each step, it becomes that step's return value
-- if `use=` is set, the runtime loads the named object into `current` before running the step
-
-This is why most steps are so small:
+- when a step declares `use=`, the runtime loads that named object into
+  `current` before calling the step
 
 ```python
-def clean_docs(context):
-    return context.current.filter(...)
+def keep_open_rows(context):
+    frame = context.current
+    return frame.filter(frame["status"] == "open")
 ```
-
-The runtime always hands the step the current value.
 
 ## `objects`
 
-Saved objects live in `context.objects`.
-
-That is what `save_as=` and `use=` operate on.
-
-Example:
+`context.objects` is the dictionary behind `save_as=` and `use=`.
 
 ```python
 (
-    Flow(group="Docs")
-    .step(read_docs, save_as="raw_df")
-    .step(clean_docs, use="raw_df", save_as="clean_df")
-    .step(write_output, use="clean_df")
+    Flow(group="Documents")
+    .step(read_input, save_as="raw")
+    .step(clean_rows, use="raw", save_as="clean")
+    .step(write_output, use="clean")
 )
 ```
 
-Inside a step you can also read those values directly:
+A step can also read multiple saved values directly:
 
 ```python
 def compare_versions(context):
-    raw_df = context.objects["raw_df"]
-    clean_df = context.objects["clean_df"]
-    ...
+    previous = context.objects["previous"]
+    current = context.objects["current"]
+    return build_delta(previous, current)
 ```
 
-This is especially useful when a later step needs more than one previously saved object.
+Use direct `objects` access when a step needs more than the one active value
+provided by `use=`.
 
 ## `metadata`
 
-`context.metadata` is a free-form runtime metadata dictionary.
+`context.metadata` is a free-form dictionary for execution annotations. It is a
+good fit for row counts, selected config values, source details, warning flags,
+and other lightweight operator diagnostics.
 
-Use it when a step wants to publish details about what happened during execution.
-
-The runtime also seeds a few values automatically:
+The runtime seeds execution metadata, including:
 
 - `started_at_utc`
 - `run_id`
 - `step_outputs`
 - `file_hash` when the run is bound to a concrete source file
 
-`file_hash` is a stable SHA-1 hash of the source-relative path when one exists. For single-file bindings, it falls back to the concrete source path text.
-
-Examples:
-
-- row counts
-- source metadata
-- selected config values
-- warning flags
-- lightweight operator diagnostics
-
-Example:
+`file_hash` is a stable SHA-1 hash of the source-relative path when one exists.
+For single-file bindings, it falls back to the concrete source path text.
 
 ```python
 def capture_stats(context):
-    context.metadata["row_count"] = len(context.current)
-    context.metadata["flow_name"] = context.flow_name
+    context.metadata["rows"] = len(context.current)
+    context.metadata["source"] = (
+        context.source.path.name if context.source and context.source.path else None
+    )
     return context.current
 ```
 
-The runtime also records step output paths here when a step returns an existing `Path`.
-
-That is what powers the UI `Inspect` button for a step: if a step writes a file and returns its existing path, the UI can enable inspection for that step.
-
-## `debug`
-
-`context.debug` is the in-app debug artifact sink for a concrete flow run.
-
-It is available when the runtime is configured to save debug artifacts for the
-current execution, and it is the best fit when you want the desktop app's
-Debug view to retain an intermediate dataframe without changing the main flow
-result.
-
-The main helper is:
-
-```python
-context.debug.save_frame(context.current, name="clean_df")
-```
-
-`save_frame(...)` accepts a Polars `DataFrame` or `LazyFrame`, materializes the
-dataframe if needed, saves it as a parquet artifact, and writes linked metadata
-for in-app previewing.
-
-Example:
-
-```python
-import polars as pl
-
-
-def keep_completed(context):
-    frame = context.current.filter(pl.col("Step TO") == "COMPLETED")
-    if context.debug is not None:
-        context.debug.save_frame(
-            frame,
-            name="completed_rows",
-            info={"stage": "filtered"},
-        )
-    return frame
-```
-
-Use `context.debug.save_frame(...)` when:
-
-- you want a dataframe visible in the app's Debug tab
-- you want to capture an intermediate result without changing the primary flow output
-- you want extra debug metadata alongside the saved frame
-
-Use `save_as=` and `use=` when:
-
-- later steps in the same flow need to reuse the value
-- you want notebook previewing to stop at a named waypoint
-- the intermediate is part of the flow's normal orchestration, not just an inspection aid
+When a step writes a file and returns an existing `Path`, the runtime records
+that output path in metadata so operator surfaces can inspect it.
 
 ## `config`
 
-`context.config` is lazy read-only access to `config/*.toml` files in the current authored workspace.
+`context.config` is a `WorkspaceConfigContext`. It lazily reads TOML files from
+the authored workspace's `config/` directory and returns plain dictionaries.
+It is read-only from the flow author's perspective.
 
-Available helpers are:
+Available helpers:
 
 ```python
-context.config.get("docs")
-context.config.require("docs")
+context.config.config_dir
 context.config.names()
+context.config.get("runtime")
+context.config.require("runtime")
 context.config.all()
 ```
 
-### `get(name)`
+### `config_dir`
 
-Returns a parsed `dict` or `None`.
-
-Use this when the config file is optional:
-
-```python
-def apply_runtime_config(context):
-    cfg = context.config.get("docs")
-    if cfg is None:
-        return context.current
-    batch_size = cfg.get("runtime", {}).get("batch_size", 5000)
-    context.metadata["batch_size"] = batch_size
-    return context.current
-```
-
-### `require(name)`
-
-Returns the parsed `dict` or raises when the file is missing.
-
-Use this when the config is part of the flow's contract:
+`config_dir` is the workspace `config/` path, or `None` when the context is not
+attached to an authored workspace.
 
 ```python
-def load_required_settings(context):
-    cfg = context.config.require("database")
-    dsn = cfg["connection"]["dsn"]
-    context.metadata["dsn"] = dsn
+def note_config_location(context):
+    if context.config.config_dir is not None:
+        context.metadata["config_dir"] = context.config.config_dir.name
     return context.current
 ```
 
 ### `names()`
 
-Returns available config stems such as:
+`names()` returns available non-hidden TOML stems as a tuple, such as
+`("runtime", "sources")`. If there is no workspace config directory, it returns
+an empty tuple.
 
 ```python
-("docs", "runtime")
+def capture_config_names(context):
+    context.metadata["config_names"] = context.config.names()
+    return context.current
 ```
 
-This is mostly useful for introspection or diagnostics.
+### `get(name)`
+
+`get(name)` returns a parsed dictionary or `None` when the file is missing.
+Names must be non-empty.
+
+```python
+def apply_optional_limit(context):
+    cfg = context.config.get("runtime") or {}
+    limit = cfg.get("limits", {}).get("max_rows")
+    if limit is None:
+        return context.current
+    return context.current.head(limit)
+```
+
+### `require(name)`
+
+`require(name)` returns the parsed dictionary or raises `FlowValidationError`
+when the file is missing or config lookup is unavailable. Use it for config
+that is part of the flow's contract.
+
+```python
+def load_required_destination(context):
+    cfg = context.config.require("destination")
+    context.metadata["target_table"] = cfg["table"]["name"]
+    return context.current
+```
+
+Invalid TOML also raises `FlowValidationError`.
 
 ### `all()`
 
-Returns every parsed config mapping keyed by file stem.
-
-Example:
+`all()` parses every available config file and returns a dictionary keyed by
+file stem.
 
 ```python
-all_config = context.config.all()
+def count_config_files(context):
+    context.metadata["config_file_count"] = len(context.config.all())
+    return context.current
 ```
 
-### What `config` is good for
-
-`context.config` is a good fit for:
-
-- file names and folder names
-- thresholds and batch sizes
-- optional feature flags
-- SQL parameters
-- external table names
-
-`context.config` complements the `Flow(...)` chain. The orchestration shape still belongs in the fluent flow definition.
+Use `context.config` for environment-specific settings such as file names,
+folder names, thresholds, batch sizes, SQL parameters, and external table
+names. Keep the flow's orchestration shape in the `Flow(...)` chain.
 
 ## `database(...)`
 
-`context.database(...)` returns a write-ready path beneath `databases/` in the current authored workspace.
-
-Example:
+`context.database(name)` returns an absolute, write-ready path beneath the
+authored workspace's `databases/` directory. Parent directories are created
+automatically.
 
 ```python
-db_path = context.database("docs/db.duckdb")
+def database_path(context):
+    return context.database("analytics/runtime.duckdb")
 ```
-
-That resolves to:
-
-- `workspaces/<workspace_id>/databases/docs/db.duckdb`
 
 Rules:
 
-- the path must be relative
-- parent directories are created automatically
+- `name` must be relative
+- `name` must be non-empty
 - the helper is only available for authored workspace flows
-- it returns a `Path` for your step to open
-
-Typical usage:
+- the helper returns a `Path`; your code owns the database connection lifecycle
 
 ```python
 import duckdb
 
 
 def write_summary(context):
-    db_path = context.database("docs/analytics.duckdb")
+    db_path = context.database("analytics/summary.duckdb")
     conn = duckdb.connect(db_path)
     try:
-        ...
+        conn.register("input_frame", context.current)
+        conn.sql("create or replace table summary as select count(*) as rows from input_frame")
     finally:
         conn.close()
+    return db_path
 ```
-
-This is intentionally simple. Data Engine gives you the path and your code owns the connection lifecycle.
 
 ## `source_metadata()`
 
-`context.source_metadata()` returns basic filesystem metadata for the current source file when one exists.
+`context.source_metadata()` returns filesystem metadata for the active source
+file, or `None` when there is no concrete source file.
 
-It gives you:
+Returned fields:
 
-- path
-- file name
-- size in bytes
-- modified time in UTC
-
-Example:
+- `path`
+- `name`
+- `size_bytes`
+- `modified_at_utc`
 
 ```python
-def capture_source_info(context):
+def capture_source_metadata(context):
     metadata = context.source_metadata()
     if metadata is not None:
         context.metadata["source_name"] = metadata.name
         context.metadata["source_size_bytes"] = metadata.size_bytes
+        context.metadata["source_modified_at_utc"] = metadata.modified_at_utc.isoformat()
     return context.current
 ```
 
-This is useful for audit trails, diagnostics, and output manifests.
-
 ## `source`
 
-`context.source` is the input-side namespace for the active source.
+`context.source` is a `SourceContext` for the active source namespace. It is
+usually present for source-backed poll or scheduled flows, and it may be `None`
+for manual or in-memory flows.
 
-It is usually present for poll flows and for scheduled flows that bind a source.
-
-It may be `None` for manual flows or scheduled flows that build data entirely in memory.
-
-Core helpers are:
+The read-oriented helpers return resolved paths and do not create directories:
 
 ```python
+context.source.root
 context.source.path
+context.source.relative_path
 context.source.dir
 context.source.folder
-context.source.with_extension(".json")
 context.source.with_suffix(".json")
+context.source.with_extension(".json")
 context.source.file("notes.json")
-context.source.namespaced_file("notes.json")
+context.source.namespaced_file("details.json")
 context.source.root_file("lookup.csv")
 ```
 
-### `path`
+### Source properties
 
-The concrete active source file path.
+`root` is the watched source root. `path` is the concrete active source file
+when the run has one. `relative_path` is the active source's path relative to
+the source root.
 
-This is the simplest and most direct read-side path:
+`dir` is the namespace directory for files derived from the active source. If
+the active source is `incoming/orders.csv`, `dir` points at
+`incoming/orders/`.
 
-```python
-def read_docs(context):
-    return pl.read_excel(context.source.path)
-```
-
-### `dir`
-
-The namespace directory for files derived from the active source.
-
-### `folder`
-
-The active source file's parent folder.
-
-### `with_extension(...)` and `with_suffix(...)`
-
-These give you the same source-relative file with a new extension.
+`folder` is the active source file's parent folder, or the source root when no
+relative path is available.
 
 ```python
-def find_json_sidecar(context):
-    return context.source.with_extension(".json")
+def capture_source_shape(context):
+    if context.source is None:
+        return context.current
+    context.metadata["source_root_name"] = context.source.root.name
+    context.metadata["source_folder_name"] = context.source.folder.name
+    return context.current
 ```
 
-### `file(...)`
+### Source file helpers
 
-Gives you a path in the active source file's parent folder.
+`with_suffix(...)` and `with_extension(...)` return the active source-relative
+path with a new suffix. They require a concrete source file.
 
 ```python
-def find_notes(context):
-    return context.source.file("notes.json")
+def read_json_sidecar(context):
+    sidecar = context.source.with_extension(".json")
+    if sidecar.exists():
+        return sidecar.read_text(encoding="utf-8")
+    return None
 ```
 
-### `namespaced_file(...)`
-
-Gives you a path under the active source file's namespace.
+`file(name)` returns a path in the active source file's parent folder.
 
 ```python
-def find_namespaced_notes(context):
-    return context.source.namespaced_file("notes.json")
+def read_neighbor_notes(context):
+    notes = context.source.file("notes.json")
+    return notes.read_text(encoding="utf-8") if notes.exists() else "{}"
 ```
 
-### `root_file(...)`
-
-Gives you a path directly under the source root.
+`namespaced_file(name)` returns a path inside the active source namespace and
+requires a concrete source file.
 
 ```python
-def load_lookup(context):
-    return context.source.root_file("lookup.csv")
+def read_derived_input(context):
+    details = context.source.namespaced_file("details.json")
+    return details.read_text(encoding="utf-8") if details.exists() else "{}"
 ```
 
-### Common `source` patterns
+`root_file(name)` returns a path directly under the source root.
 
-Use `source` when you need:
+```python
+def read_lookup(context):
+    lookup = context.source.root_file("lookup.csv")
+    return lookup
+```
 
-- the active input file
-- a sidecar file near that input
-- a lookup file under the watched source root
-- namespace-aware paths derived from the current source item
+All source helper names must be relative and non-empty.
 
 ## `mirror`
 
-`context.mirror` is the mirrored output namespace for the active source.
+`context.mirror` is a `MirrorContext` for the mirrored output namespace. It is
+available when the flow uses `mirror(root=...)`.
 
-It is present when the flow uses `mirror(root=...)`.
-
-Core helpers are:
+The write-oriented helpers return resolved paths and create parent directories:
 
 ```python
 context.mirror.root
+context.mirror.source_path
+context.mirror.relative_path
 context.mirror.dir
 context.mirror.folder
-context.mirror.with_extension(".parquet")
 context.mirror.with_suffix(".parquet")
-context.mirror.file("open_docs.parquet")
-context.mirror.namespaced_file("open_docs.parquet")
-context.mirror.root_file("analytics.duckdb")
+context.mirror.with_extension(".parquet")
+context.mirror.file("summary.json")
+context.mirror.namespaced_file("open.parquet")
+context.mirror.root_file("latest.parquet")
 ```
 
-### `with_extension(...)` and `with_suffix(...)`
+### Mirror properties
 
-These are for the common "mirror this source file into another format" case.
+`root` is the configured mirror root. `source_path` and `relative_path` identify
+the source file being mirrored when the run has one.
+
+`dir` is the output namespace for files derived from the active source. If the
+source-relative file is `incoming/orders.csv`, `dir` points at
+`<mirror-root>/incoming/orders/`.
+
+`folder` is the mirrored parent folder for the active source file, or the
+mirror root when no relative path is available.
+
+### Mirror file helpers
+
+`with_suffix(...)` and `with_extension(...)` return the canonical mirrored
+source path with a new suffix. They require a concrete source file.
 
 ```python
-def write_target(context):
+def write_parquet(context):
     output = context.mirror.with_extension(".parquet")
     context.current.write_parquet(output)
     return output
 ```
 
-Returning that written `Path` is what makes the step inspectable in the UI.
+Returning the written `Path` allows runtime and UI surfaces to record the step
+output for inspection.
 
-### `file(...)`
-
-Use this for a custom file name in the mirrored source folder:
+`file(name)` returns a custom file path in the mirrored source folder.
 
 ```python
 def write_summary(context):
-    summary_path = context.mirror.file("summary.json")
-    summary_path.write_text("{}", encoding="utf-8")
-    return summary_path
+    output = context.mirror.file("summary.json")
+    output.write_text('{"status": "ok"}', encoding="utf-8")
+    return output
 ```
 
-### `namespaced_file(...)`
-
-Use this for multiple outputs derived from one source:
+`namespaced_file(name)` returns a path inside the mirrored source namespace.
+Use it for multiple outputs derived from one source.
 
 ```python
-def write_outputs(context):
-    open_path = context.mirror.namespaced_file("open_docs.parquet")
-    closed_path = context.mirror.namespaced_file("closed_docs.parquet")
-    ...
+def write_split_outputs(context):
+    open_path = context.mirror.namespaced_file("open.parquet")
+    closed_path = context.mirror.namespaced_file("closed.parquet")
+    context.current["open"].write_parquet(open_path)
+    context.current["closed"].write_parquet(closed_path)
+    return open_path
 ```
 
-### `root_file(...)`
-
-Use this when you want one stable artifact under the mirror root for the whole flow.
+`root_file(name)` returns a path directly beneath the mirror root. Use it for
+stable flow-level artifacts.
 
 ```python
-def write_snapshot(context):
-    snapshot = context.mirror.root_file("artifacts/latest.parquet")
-    context.current.write_parquet(snapshot)
-    return snapshot
+def write_latest_snapshot(context):
+    output = context.mirror.root_file("latest.parquet")
+    context.current.write_parquet(output)
+    return output
 ```
 
-### Common `mirror` patterns
+All mirror helper names must be relative and non-empty.
 
-Use `mirror` when you want to:
+## Missing context surfaces
 
-- preserve source-relative output structure
-- create many derived outputs from one source
-- write stable summary artifacts under one output root
-- avoid hand-building output folder math
-
-All helpers return write-ready paths with parent directories prepared.
-
-## When `source` or `mirror` may be missing
-
-Not every flow has every context surface available.
-
-Examples:
+Not every flow has every context surface:
 
 - a manual flow may have no `source`
-- a purely in-memory scheduled flow may have no `source`
+- an in-memory scheduled flow may have no `source`
 - a flow with no `mirror(root=...)` has no `mirror`
+- `debug` is only present when debug artifact capture is configured for the run
+- `database(...)` and `config` file lookup require an authored workspace
 
-So it is reasonable to write defensive code when the flow shape allows those cases:
+Write defensive checks when the flow shape permits those cases:
 
 ```python
-def maybe_capture_source(context):
-    if context.source is None:
+def maybe_write_output(context):
+    if context.mirror is None:
         return context.current
-    context.metadata["source_path"] = str(context.source.path)
+    output = context.mirror.root_file("latest.parquet")
+    context.current.write_parquet(output)
+    return output
+```
+
+## `debug`
+
+`context.debug` is a `FlowDebugContext | None`. It writes debug artifacts for a
+concrete flow run so the desktop app can preview intermediate data without
+changing the main flow result.
+
+Available helpers:
+
+```python
+context.debug.set_step("Clean rows")
+context.debug.save_frame(frame, name="clean_rows", info={"stage": "clean"})
+context.debug.save_json(payload, name="quality_report")
+```
+
+The runtime manages the active step label during normal execution, so flow
+steps usually call only `save_frame(...)` or `save_json(...)`.
+
+### `save_frame(...)`
+
+`save_frame(frame, name=None, info=None)` accepts a Polars `DataFrame` or
+`LazyFrame`. Lazy frames are collected before saving. The helper writes a
+Parquet artifact plus linked metadata for in-app previewing, and returns the
+artifact `Path`.
+
+```python
+def debug_filtered_rows(context):
+    frame = context.current.filter(context.current["status"] == "open")
+    if context.debug is not None:
+        context.debug.save_frame(
+            frame,
+            name="open_rows",
+            info={"rows": len(frame)},
+        )
+    return frame
+```
+
+Use `save_frame(...)` for inspectable tabular debug data. Use `save_as=` and
+`use=` when later steps in the same flow need the value as normal
+orchestration state.
+
+### `save_json(...)`
+
+`save_json(value, name=None, info=None)` writes a JSON debug artifact and
+returns the artifact `Path`. Values and `info` are converted to JSON-safe
+representations.
+
+```python
+def debug_quality_report(context):
+    report = {"columns": list(context.current.columns), "rows": len(context.current)}
+    if context.debug is not None:
+        context.debug.save_json(report, name="quality_report")
     return context.current
 ```
 
-## Batch values
+## `FileRef`
 
-`Flow.collect(...)` returns a `Batch` of `FileRef` items.
+`FileRef` is a thin wrapper around one resolved filesystem path. It is commonly
+used for batch-oriented file collection and mapped steps.
 
-That means later steps can work with:
-
-- `file_ref.name`
-- `file_ref.path`
-- `file_ref.stem`
-- `file_ref.suffix`
-- `file_ref.parent`
-
-Example:
+Fields and helpers:
 
 ```python
-def read_docs(file_ref):
-    return pl.read_excel(file_ref.path)
+file_ref.path
+file_ref.name
+file_ref.stem
+file_ref.suffix
+file_ref.parent
+file_ref.exists()
+str(file_ref)
 ```
 
-When you are in a mapped step, the item is often simpler than the full `context`, and that is by design.
+`FileRef` also implements `__fspath__`, so APIs that accept filesystem paths
+can usually accept a `FileRef` directly.
 
-## A practical context walkthrough
+```python
+def read_text_file(file_ref):
+    if not file_ref.exists():
+        return ""
+    return file_ref.path.read_text(encoding="utf-8")
+```
 
-Here is a representative flow using several parts of the context together:
+## `Batch`
+
+`Batch[T]` is a small iterable container used instead of exposing raw lists by
+default. `Flow.collect(...)` and `collect_files(...)` return `Batch[FileRef]`.
+
+Supported operations:
+
+```python
+len(batch)
+batch[0]
+for item in batch:
+    ...
+batch.names()
+batch.paths()
+```
+
+`names()` returns each item name when every item exposes a string `name`.
+`paths()` returns each item path when every item exposes a `Path`-valued `path`.
+Both raise `FlowValidationError` when an item does not expose the expected
+shape.
+
+```python
+def capture_batch_manifest(context):
+    batch = context.current
+    context.metadata["file_names"] = batch.names()
+    context.metadata["file_count"] = len(batch)
+    return batch
+```
+
+Mapped steps often receive the item directly instead of the full context:
+
+```python
+def read_file(file_ref):
+    return file_ref.path.read_text(encoding="utf-8")
+```
+
+For cookbook examples that include spreadsheet inputs, see the
+[recipes guide](recipes.md).
+
+## Practical walkthrough
+
+This flow uses the core context surfaces together without hiding ordinary
+Python work:
 
 ```python
 import duckdb
@@ -537,53 +571,49 @@ import polars as pl
 from data_engine import Flow
 
 
-def read_docs(file_ref):
-    return pl.read_excel(file_ref.path)
+def read_source_file(file_ref):
+    return pl.read_csv(file_ref.path)
 
 
-def combine_docs(context):
-    cfg = context.config.get("docs") or {}
-    batch_size = cfg.get("runtime", {}).get("batch_size", 5000)
+def combine_files(context):
+    cfg = context.config.get("runtime") or {}
+    batch_size = cfg.get("limits", {}).get("batch_size", 5000)
     context.metadata["batch_size"] = batch_size
     return pl.concat(context.current, how="vertical_relaxed")
 
 
 def summarize(context):
-    db_path = context.database("docs/analytics.duckdb")
+    db_path = context.database("documents/analytics.duckdb")
     conn = duckdb.connect(db_path)
     try:
-        conn.register("input", context.current)
-        summary = conn.sql("select count(*) as row_count from input").pl()
+        conn.register("input_frame", context.current)
+        summary = conn.sql("select count(*) as row_count from input_frame").pl()
     finally:
         conn.close()
-    output = context.mirror.file("summary.parquet")
+
+    output = context.mirror.root_file("summaries/latest.parquet")
     summary.write_parquet(output)
     context.metadata["summary_path"] = str(output)
+
     if context.debug is not None:
-        context.debug.save_frame(summary, name="summary_df", info={"rows": summary.height})
+        context.debug.save_frame(summary, name="summary", info={"rows": summary.height})
+        context.debug.save_json({"output": str(output)}, name="summary_manifest")
+
     return output
 
 
 def build():
     return (
-        Flow(group="Docs")
-        .watch(mode="schedule", run_as="batch", interval="15m", source="../../example_data/Input/docs_flat")
-        .mirror(root="../../example_data/Output/example_summary")
-        .collect([".xlsx"], save_as="doc_files")
-        .map(read_docs, use="doc_files", save_as="doc_frames")
-        .step(combine_docs, use="doc_frames", save_as="raw_df")
-        .step(summarize, use="raw_df")
+        Flow(group="Documents")
+        .watch(mode="schedule", run_as="batch", interval="15m", source="data/incoming")
+        .mirror(root="data/outgoing")
+        .collect([".csv"], save_as="source_files")
+        .map(read_source_file, use="source_files", save_as="frames")
+        .step(combine_files, use="frames", save_as="combined")
+        .step(summarize, use="combined")
     )
 ```
 
-That one flow uses:
-
-- `Batch` and `FileRef`
-- `current`
-- `objects`
-- `config`
-- `database(...)`
-- `mirror`
-- `metadata`
-
-That is the intended shape of the authoring model: small runtime helpers that make native Python data work easier to organize.
+This shape keeps orchestration in the `Flow(...)` chain while step code uses
+`FlowContext` for runtime state, workspace settings, debug artifacts, and
+source-aware paths.

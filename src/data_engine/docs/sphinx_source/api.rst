@@ -1,13 +1,35 @@
 API Reference
 =============
 
-The package entrypoints most users will import are:
+This reference renders the docstrings for the public authoring surface and the
+helper modules intended for flow code. For task-oriented examples, start with
+the author guides:
+
+- :doc:`guides/configuring-flows`
+- :doc:`guides/authoring-flow-modules`
+- :doc:`guides/flow-methods`
+- :doc:`guides/flow-context`
+- :doc:`guides/duckdb-helpers`
+- :doc:`guides/polars-helpers`
+- :doc:`guides/excel-helpers`
+- :doc:`guides/recipes`
+
+The package entrypoints most flow authors import are:
 
 - ``data_engine.Flow``
+- ``data_engine.Batch``
+- ``data_engine.FileRef``
 - ``data_engine.FlowContext``
 - ``data_engine.discover_flows``
 - ``data_engine.load_flow``
 - ``data_engine.run``
+
+Top-Level Package
+-----------------
+
+.. automodule:: data_engine
+   :members:
+   :undoc-members:
 
 Flow Authoring
 --------------
@@ -70,12 +92,25 @@ File Watching
 Authoring Helpers
 -----------------
 
+``data_engine.helpers`` re-exports the commonly used helper functions for
+flow modules. Importing from a focused helper module is still encouraged when
+it keeps the flow dependency clear.
+
+.. automodule:: data_engine.helpers
+   :members:
+   :undoc-members:
+
 .. automodule:: data_engine.helpers.schema
    :members:
    :undoc-members:
    :show-inheritance:
 
 .. automodule:: data_engine.helpers.polars
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: data_engine.helpers.excel
    :members:
    :undoc-members:
    :show-inheritance:

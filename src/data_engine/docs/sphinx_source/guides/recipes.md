@@ -1,6 +1,8 @@
 # Recipes
 
-This page collects complete end-to-end examples.
+This page collects complete patterns that are useful when composing flow
+modules. It avoids repeating every method parameter from the API reference and
+instead shows how the authoring pieces fit together.
 
 When a recipe matches a shipped starter flow, the starter flow name is called out explicitly.
 
@@ -9,7 +11,11 @@ notebook-friendly way to pause on a named intermediate, and
 `context.debug.save_frame(...)` is the runtime-friendly way to keep a dataframe
 visible in the app's Debug view.
 
-## Recipe: Mirror every workbook
+For exact flow-method signatures, see [Flow Methods](flow-methods.md). For
+runtime path and config helpers, see [FlowContext](flow-context.md). For the
+function-by-function helper reference, see [API Reference](../api.rst).
+
+## Recipe: Mirror source files
 
 Starter flow: `example_mirror`
 
@@ -38,7 +44,7 @@ def build():
             extensions=[".xlsx", ".xlsm"],
         )
         .mirror(root="../../example_data/Output/example_mirror")
-        .step(read_docs, label="Read Excel")
+        .step(read_docs, label="Read Source")
         .step(write_target, label="Write Parquet")
     )
 ```
@@ -142,6 +148,7 @@ def read_selected_sheets(context):
 ```
 
 This is a good reminder that step code stays native and can call the underlying dataframe library directly.
+For composed workbook output, see [Excel Helpers](excel-helpers.md).
 
 ## Recipe: Single-file settings workflow
 
@@ -270,6 +277,28 @@ def apply_threshold(context):
 
 This is a clean way to keep operator-tunable values out of the flow chain while still making the dependency explicit.
 
+## Recipe: Normalize inbound column names before validation
+
+```python
+from data_engine.helpers import normalize_column_names
+
+
+REQUIRED_DOC_COLUMNS = {"document_id", "status", "amount"}
+
+
+def normalize_docs(context):
+    frame = normalize_column_names(context.current)
+    missing = REQUIRED_DOC_COLUMNS.difference(frame.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+    return frame
+```
+
+Use this when source files arrive with inconsistent casing, spaces, or
+punctuation in column names. Keep small validation rules close to the transform
+that relies on them; use `TableSchema` when you also want reusable projections,
+casts, renames, or drops.
+
 ## Recipe: Save an intermediate dataframe to the Debug view
 
 ```python
@@ -340,6 +369,21 @@ df = df.with_columns(
 Use `count_first_day=True` when the received day itself should count as day 1
 for SLA-style deadlines.
 
+## Recipe: Write dataframe outputs atomically
+
+```python
+from data_engine.helpers import write_parquet_atomic
+
+
+def write_target(context):
+    output = context.mirror.with_suffix(".parquet")
+    write_parquet_atomic(context.current, output)
+    return output
+```
+
+Use the atomic write helpers when readers may inspect an output folder while a
+flow is writing new results.
+
 ## Recipe: Propagate the last matching row value across a window
 
 ```python
@@ -384,6 +428,29 @@ Use this when a document can leave and later return to the same workflow. For
 ordered workflow values `w1, w1, w1, w2, w2, w1, w1, w1`, the visit counter is
 `1, 1, 1, 1, 1, 2, 2, 2`: the second `w1` run is visit 2 for `w1`, while the
 first `w2` run remains visit 1 for `w2`.
+
+## Recipe: Replace one source slice in a DuckDB table
+
+```python
+from data_engine.helpers.duckdb import ensure_index
+from data_engine.helpers.duckdb import replace_rows_by_file
+
+
+def load_current_source(context):
+    db_path = context.database("warehouse.duckdb")
+    updated = replace_rows_by_file(
+        db_path,
+        "canon.docs",
+        df=context.current,
+        file_hash=context.metadata["file_hash"],
+    )
+    ensure_index(db_path, "canon.docs", columns="file_key")
+    return updated
+```
+
+Use this for incremental folder ingestion where each run replaces the rows for
+one source file while leaving the rest of the table intact. See
+[DuckDB Helpers](duckdb-helpers.md) for the broader helper family.
 
 ## Recipe: Write several outputs for one source
 
