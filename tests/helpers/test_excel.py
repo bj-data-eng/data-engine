@@ -195,6 +195,35 @@ def test_compose_excel_template_resizes_existing_table_to_new_frame_shape(tmp_pa
     assert_frame_equal(pl.read_excel(template, sheet_name="Claims"), frame)
 
 
+def test_compose_excel_template_updates_multiple_sheets_in_one_call(tmp_path: Path):
+    template = tmp_path / "multi_template.xlsx"
+    workbook = Workbook()
+    workbook.active.title = "Claims"
+    workbook.create_sheet("Summary")
+    workbook.create_sheet("Pivot")
+    workbook["Pivot"]["A1"] = "preserved"
+    workbook.save(template)
+    claims = pl.DataFrame({"claim_id": [1, 2], "workflow": ["Appeals", "Review"]})
+    summary = pl.DataFrame({"workflow": ["Appeals", "Review"], "count": [1, 1]})
+
+    compose_excel(
+        template,
+        sheets=[
+            ExcelSheet(name="Claims", df=claims, table_name="claims"),
+            ExcelSheet(name="Summary", df=summary, table_name="workflow_summary"),
+        ],
+        template=template,
+    )
+
+    updated = load_workbook(template)
+    assert updated.sheetnames == ["Claims", "Summary", "Pivot"]
+    assert updated["Pivot"]["A1"].value == "preserved"
+    assert set(updated["Claims"].tables) == {"claims"}
+    assert set(updated["Summary"].tables) == {"workflow_summary"}
+    assert_frame_equal(pl.read_excel(template, sheet_name="Claims"), claims)
+    assert_frame_equal(pl.read_excel(template, sheet_name="Summary"), summary)
+
+
 def test_compose_excel_template_supports_cell_and_tuple_positions(tmp_path: Path):
     template = tmp_path / "template.xlsx"
     workbook = Workbook()
@@ -267,6 +296,62 @@ def test_compose_excel_template_requires_existing_workbook(tmp_path: Path):
             sheets=[ExcelSheet(name="Claims", df=pl.DataFrame({"claim_id": [1]}))],
             template=tmp_path / "missing_template.xlsx",
         )
+
+
+def test_dataframe_namespace_composes_single_sheet_workbook(tmp_path: Path):
+    target = tmp_path / "namespace.xlsx"
+    frame = pl.DataFrame({"claim_id": [1], "workflow": ["Appeals"]})
+
+    returned_path = frame.de.compose_excel(
+        target,
+        sheet_name="Claims",
+        table_name="claims",
+        table_style="TableStyleMedium9",
+        freeze_panes="A2",
+    )
+
+    assert returned_path == target.resolve()
+    assert_frame_equal(pl.read_excel(target, sheet_name="Claims"), frame)
+    worksheet = load_workbook(target)["Claims"]
+    assert worksheet.tables["claims"].tableStyleInfo.name == "TableStyleMedium9"
+    assert worksheet.freeze_panes == "A2"
+
+
+def test_lazyframe_namespace_composes_single_sheet_workbook(tmp_path: Path):
+    target = tmp_path / "lazy_namespace.xlsx"
+    frame = pl.DataFrame({"claim_id": [2, 1], "workflow": ["Review", "Appeals"]})
+
+    returned_path = frame.lazy().sort("claim_id").de.compose_excel(
+        target,
+        sheet_name="Claims",
+        table_name="claims",
+    )
+
+    expected = pl.DataFrame({"claim_id": [1, 2], "workflow": ["Appeals", "Review"]})
+    assert returned_path == target.resolve()
+    assert_frame_equal(pl.read_excel(target, sheet_name="Claims"), expected)
+    assert set(load_workbook(target)["Claims"].tables) == {"claims"}
+
+
+def test_dataframe_namespace_compose_excel_supports_template_mode(tmp_path: Path):
+    template = tmp_path / "template.xlsx"
+    workbook = Workbook()
+    workbook.active.title = "Claims"
+    workbook.create_sheet("Pivot")
+    workbook["Pivot"]["A1"] = "preserved"
+    workbook.save(template)
+    frame = pl.DataFrame({"claim_id": [1], "workflow": ["Appeals"]})
+
+    frame.de.compose_excel(
+        template,
+        sheet_name="Claims",
+        table_name="claims",
+        template=template,
+    )
+
+    workbook = load_workbook(template)
+    assert workbook["Pivot"]["A1"].value == "preserved"
+    assert_frame_equal(pl.read_excel(template, sheet_name="Claims"), frame)
 
 
 @pytest.mark.parametrize(

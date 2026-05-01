@@ -19,6 +19,8 @@ from data_engine.helpers.duckdb import normalize_columns as _normalize_columns
 from data_engine.helpers.duckdb import replace_rows_by_file as _replace_rows_by_file
 from data_engine.helpers.duckdb import replace_rows_by_values as _replace_rows_by_values
 from data_engine.helpers.duckdb import replace_table as _replace_table
+from data_engine.helpers.excel import ExcelSheet as _ExcelSheet
+from data_engine.helpers.excel import compose_excel as _compose_excel
 from data_engine.helpers.schema import normalize_column_names as _normalize_column_names
 
 PathLike = str | os.PathLike[str]
@@ -1553,6 +1555,71 @@ class DataEngineDataFrameNamespace:
         """
         return write_excel_atomic(self._df, path, worksheet=worksheet, **write_options)
 
+    def compose_excel(
+        self,
+        path: PathLike,
+        *,
+        sheet_name: str,
+        table_name: str | None = None,
+        template: PathLike | None = None,
+        position: str | tuple[int, int] = "A1",
+        table_style: str | dict[str, object] | None = None,
+        autofit: bool = True,
+        autofilter: bool = True,
+        freeze_panes: object | None = None,
+        **write_options: object,
+    ) -> Path:
+        """Compose this dataframe into a single-sheet Excel workbook.
+
+        This is a convenience wrapper around
+        :func:`data_engine.helpers.compose_excel`.
+
+        Parameters
+        ----------
+        path : PathLike
+            Target Excel workbook path.
+        sheet_name : str
+            Worksheet name to write.
+        table_name : str | None
+            Optional Excel table name for this dataframe.
+        template : PathLike | None
+            Optional template workbook path.
+        position : str | tuple[int, int]
+            Top-left cell where the dataframe table should be written.
+        table_style : str | dict[str, object] | None
+            Optional table style.
+        autofit : bool
+            Whether Polars should autofit columns in fresh-workbook mode.
+        autofilter : bool
+            Whether the generated table should include filter controls.
+        freeze_panes : object | None
+            Optional freeze-pane setting.
+        **write_options : object
+            Additional write options forwarded to the sheet specification.
+
+        Returns
+        -------
+        Path
+            Absolute target path that was replaced.
+        """
+        return _compose_excel(
+            path,
+            sheets=[
+                _ExcelSheet(
+                    name=sheet_name,
+                    df=self._df,
+                    table_name=table_name,
+                    position=position,
+                    table_style=table_style,
+                    autofit=autofit,
+                    autofilter=autofilter,
+                    freeze_panes=freeze_panes,
+                    write_options=dict(write_options),
+                )
+            ],
+            template=template,
+        )
+
     def build_dimension(
         self,
         db_path: PathLike,
@@ -2076,6 +2143,72 @@ class DataEngineLazyFrameNamespace:
             Absolute target path that was replaced.
         """
         return sink_parquet_atomic(self._lf, path, **sink_options)
+
+    def compose_excel(
+        self,
+        path: PathLike,
+        *,
+        sheet_name: str,
+        table_name: str | None = None,
+        template: PathLike | None = None,
+        position: str | tuple[int, int] = "A1",
+        table_style: str | dict[str, object] | None = None,
+        autofit: bool = True,
+        autofilter: bool = True,
+        freeze_panes: object | None = None,
+        **write_options: object,
+    ) -> Path:
+        """Compose this lazy frame into a single-sheet Excel workbook.
+
+        This is a convenience wrapper around
+        :func:`data_engine.helpers.compose_excel`. The lazy frame is collected
+        when the workbook is composed.
+
+        Parameters
+        ----------
+        path : PathLike
+            Target Excel workbook path.
+        sheet_name : str
+            Worksheet name to write.
+        table_name : str | None
+            Optional Excel table name for this lazy frame.
+        template : PathLike | None
+            Optional template workbook path.
+        position : str | tuple[int, int]
+            Top-left cell where the lazy frame table should be written.
+        table_style : str | dict[str, object] | None
+            Optional table style.
+        autofit : bool
+            Whether Polars should autofit columns in fresh-workbook mode.
+        autofilter : bool
+            Whether the generated table should include filter controls.
+        freeze_panes : object | None
+            Optional freeze-pane setting.
+        **write_options : object
+            Additional write options forwarded to the sheet specification.
+
+        Returns
+        -------
+        Path
+            Absolute target path that was replaced.
+        """
+        return _compose_excel(
+            path,
+            sheets=[
+                _ExcelSheet(
+                    name=sheet_name,
+                    df=self._lf,
+                    table_name=table_name,
+                    position=position,
+                    table_style=table_style,
+                    autofit=autofit,
+                    autofilter=autofilter,
+                    freeze_panes=freeze_panes,
+                    write_options=dict(write_options),
+                )
+            ],
+            template=template,
+        )
 
     def build_dimension(
         self,
