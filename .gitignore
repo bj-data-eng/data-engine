@@ -5,6 +5,8 @@
 .venv/
 .vscode/
 src/data_engine/docs/html/
+src/data_engine/docs/sphinx_source/guides/project-inventory.md
+src/data_engine/docs/sphinx_source/guides/project-map.md
 __pycache__/
 *.pyc
 build/

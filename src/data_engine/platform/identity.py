@@ -7,7 +7,7 @@ from typing import Final
 APP_INTERNAL_ID: Final[str] = "data_engine"
 APP_DISTRIBUTION_NAME: Final[str] = "py-data-engine"
 APP_DISPLAY_NAME: Final[str] = "Data Engine"
-APP_VERSION: Final[str] = "0.3.9"
+APP_VERSION: Final[str] = "0.3.10"
 APP_ENV_PREFIX: Final[str] = "DATA_ENGINE"
 APP_CACHE_DIR_NAME: Final[str] = "data_engine"
 APP_RUNTIME_NAMESPACE: Final[str] = "data_engine"

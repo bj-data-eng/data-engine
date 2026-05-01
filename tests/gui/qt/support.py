@@ -6198,7 +6198,8 @@ def test_refresh_log_view_refreshes_runtime_cache_before_querying_ledger_runs(qa
 
         direct_ledger = RuntimeCacheLedger(window.workspace_paths.runtime_cache_db_path)
         try:
-            started_at = "2026-04-20T09:00:00+00:00"
+            finished_at = datetime.now(UTC).replace(microsecond=0)
+            started_at = (finished_at - timedelta(seconds=8)).isoformat()
             direct_ledger.execution_state.record_run_started(
                 run_id="run-1",
                 flow_name=flow_name,
@@ -6209,7 +6210,7 @@ def test_refresh_log_view_refreshes_runtime_cache_before_querying_ledger_runs(qa
             direct_ledger.execution_state.record_run_finished(
                 run_id="run-1",
                 status="success",
-                finished_at_utc="2026-04-20T09:00:08+00:00",
+                finished_at_utc=finished_at.isoformat(),
             )
         finally:
             direct_ledger.close()
