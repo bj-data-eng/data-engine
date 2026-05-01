@@ -12,6 +12,8 @@ from data_engine.helpers.duckdb import read_table
 from data_engine.helpers.duckdb import replace_rows_by_file
 from data_engine.helpers.duckdb import replace_rows_by_values
 from data_engine.helpers.duckdb import replace_table
+from data_engine.helpers.excel import ExcelSheet
+from data_engine.helpers.excel import compose_excel
 from data_engine.helpers.polars import DataEngineDataFrameNamespace
 from data_engine.helpers.polars import DataEngineLazyFrameNamespace
 from data_engine.helpers.polars import networkdays
@@ -32,9 +34,11 @@ __all__ = [
     "TableSchema",
     "DataEngineDataFrameNamespace",
     "DataEngineLazyFrameNamespace",
+    "ExcelSheet",
     "attach_dimension",
     "build_dimension",
     "compact_database",
+    "compose_excel",
     "denormalize_columns",
     "ensure_index",
     "networkdays",
