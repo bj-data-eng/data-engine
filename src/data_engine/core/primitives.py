@@ -461,6 +461,9 @@ class FlowContext:
         Use this for workspace-owned DuckDB files and other durable database
         artifacts. The returned path is rooted under
         ``<workspace>/databases/`` and parent directories are created for you.
+        A ``FlowValidationError`` is raised when the flow is not running from
+        an authored workspace, or when ``name`` is absolute, empty, or escapes
+        the workspace databases directory.
 
         Parameters
         ----------
@@ -473,11 +476,6 @@ class FlowContext:
         Path
             Absolute write-ready database path.
 
-        Raises
-        ------
-        FlowValidationError
-            If the flow is not running from an authored workspace, or if
-            ``name`` is absolute or empty.
         """
         path = self._workspace_path(
             name,
@@ -492,7 +490,10 @@ class FlowContext:
 
         Use this for workspace-owned template files such as Excel workbook
         shells. The returned path is rooted under ``<workspace>/templates/``
-        and parent directories are created for you.
+        and parent directories are created for you. A ``FlowValidationError``
+        is raised when the flow is not running from an authored workspace, or
+        when ``name`` is absolute, empty, or escapes the workspace templates
+        directory.
         """
         path = self._workspace_path(
             name,
@@ -510,7 +511,13 @@ class FlowContext:
             raise FlowValidationError(f"context.{helper_name}() name must be relative.")
         if not str(candidate).strip():
             raise FlowValidationError(f"context.{helper_name}() name must be non-empty.")
-        return (self.config.workspace_root / directory_name / candidate).resolve()
+        base = (self.config.workspace_root / directory_name).resolve()
+        path = (base / candidate).resolve()
+        try:
+            path.relative_to(base)
+        except ValueError as exc:
+            raise FlowValidationError(f"context.{helper_name}() name must stay under the workspace {directory_name} directory.") from exc
+        return path
 
 
 @dataclass

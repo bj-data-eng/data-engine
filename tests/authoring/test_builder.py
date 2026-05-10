@@ -743,6 +743,14 @@ def test_flow_context_database_rejects_absolute_paths(tmp_path):
         FlowRuntime((flow.step(lambda context: context.database(tmp_path / "outside.duckdb")),), continuous=False).run()
 
 
+def test_flow_context_database_rejects_traversal_paths(tmp_path):
+    workspace_root = tmp_path / "workspace"
+    flow = Flow(name="docs", group="Docs")._clone(_workspace_root=workspace_root)
+
+    with pytest.raises(FlowValidationError, match="must stay under"):
+        FlowRuntime((flow.step(lambda context: context.database("../outside.duckdb")),), continuous=False).run()
+
+
 def test_flow_context_template_returns_write_ready_workspace_template_path(tmp_path):
     workspace_root = tmp_path / "workspace"
     (workspace_root / "templates").mkdir(parents=True)
@@ -760,6 +768,14 @@ def test_flow_context_template_rejects_absolute_paths(tmp_path):
 
     with pytest.raises(FlowValidationError, match="name must be relative"):
         FlowRuntime((flow.step(lambda context: context.template(tmp_path / "outside.xlsx")),), continuous=False).run()
+
+
+def test_flow_context_template_rejects_traversal_paths(tmp_path):
+    workspace_root = tmp_path / "workspace"
+    flow = Flow(name="docs", group="Docs")._clone(_workspace_root=workspace_root)
+
+    with pytest.raises(FlowValidationError, match="must stay under"):
+        FlowRuntime((flow.step(lambda context: context.template("../outside.xlsx")),), continuous=False).run()
 
 
 def test_poll_missing_source_dir_records_failed_run_and_log(tmp_path):
