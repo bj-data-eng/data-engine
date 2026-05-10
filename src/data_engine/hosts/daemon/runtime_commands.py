@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import threading
 import traceback
+import inspect
 from typing import TYPE_CHECKING, Any
 
+from data_engine.core.model import FlowValidationError
+from data_engine.core.primitives import normalize_manual_inputs
 from data_engine.domain.time import utcnow_text
 from data_engine.hosts.daemon.ownership import lease_error_text, try_claim_released_workspace
 
@@ -26,7 +29,14 @@ class DaemonRuntimeCommandHandler:
             if card.valid and card.mode in {"poll", "schedule"}
         )
 
-    def run_flow(self, *, name: str, wait: bool, request_id: str | None = None) -> dict[str, Any]:
+    def run_flow(
+        self,
+        *,
+        name: str,
+        wait: bool,
+        inputs: dict[str, object] | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
         service = self.service
         with service._timed_operation(
             "daemon.runtime",
@@ -44,6 +54,10 @@ class DaemonRuntimeCommandHandler:
                 return {"ok": False, "error": f"Unknown flow: {name}"}
             if not card.valid:
                 return {"ok": False, "error": card.error or f"Flow {name} is invalid."}
+            try:
+                normalized_inputs = normalize_manual_inputs(card.manual_inputs, inputs)
+            except FlowValidationError as exc:
+                return {"ok": False, "error": str(exc)}
             with service._state_lock:
                 existing_thread = service.state.manual_run_threads.get(name)
                 if (existing_thread is not None and existing_thread.is_alive()) or name in service.state.pending_manual_run_names:
@@ -100,13 +114,15 @@ class DaemonRuntimeCommandHandler:
                                     "run_manual_and_discard",
                                     runtime_execution_service.run_manual,
                                 )
-                            run_manual(
-                                flow,
-                                runtime_ledger=service.runtime_execution_ledger,
-                                runtime_stop_event=runtime_stop_event,
-                                flow_stop_event=flow_stop_event,
-                                workspace_id=service.paths.workspace_id,
-                            )
+                            run_manual_kwargs = {
+                                "runtime_ledger": service.runtime_execution_ledger,
+                                "runtime_stop_event": runtime_stop_event,
+                                "flow_stop_event": flow_stop_event,
+                                "workspace_id": service.paths.workspace_id,
+                            }
+                            if "inputs" in inspect.signature(run_manual).parameters:
+                                run_manual_kwargs["inputs"] = normalized_inputs
+                            run_manual(flow, **run_manual_kwargs)
                         service._debug_log(f"manual flow completed name={name}")
                     except Exception as exc:
                         service._debug_log(f"manual flow crashed name={name} error={exc!r}")

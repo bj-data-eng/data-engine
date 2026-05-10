@@ -8,7 +8,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from data_engine.core.primitives import FlowContext, FlowDebugContext, MirrorContext, SourceContext, WatchSpec, WorkspaceConfigContext
+from data_engine.core.primitives import (
+    FlowContext,
+    FlowDebugContext,
+    MirrorContext,
+    SourceContext,
+    WatchSpec,
+    WorkspaceConfigContext,
+    normalize_manual_inputs,
+)
 from data_engine.domain.source_state import SourceSignature
 from data_engine.domain.time import utcnow_text
 
@@ -28,9 +36,16 @@ class QueuedRunJob:
 class RuntimeContextBuilder:
     """Build runtime flow contexts for concrete or root-level executions."""
 
-    def __init__(self, *, debug_root: Path | None = None, workspace_id: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        debug_root: Path | None = None,
+        workspace_id: str | None = None,
+        inputs: dict[str, object] | None = None,
+    ) -> None:
         self.debug_root = Path(debug_root).resolve() if debug_root is not None else None
         self.workspace_id = workspace_id
+        self.inputs = dict(inputs or {})
 
     @staticmethod
     def _source_key_text(*, source_path: Path | None, relative_path: Path | None) -> str | None:
@@ -55,6 +70,7 @@ class RuntimeContextBuilder:
         context = FlowContext(
             flow_name=flow.name,
             group=flow.group,
+            inputs=normalize_manual_inputs(getattr(flow, "manual_inputs", ()), self.inputs),
             metadata=metadata,
             config=WorkspaceConfigContext(workspace_root=flow._workspace_root),
         )

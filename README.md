@@ -235,6 +235,7 @@ def build():
 - `.watch(mode="schedule", time="HH:MM", source=None, run_as="individual" | "batch")`
 - `.watch(mode="schedule", time=["08:15", "14:45"], source=..., run_as="individual" | "batch")`
 - `.mirror(root=...)`
+- `.date_range_input(name="period", label="Reporting Period")` for manual-only pre-run start/end date selection
 - `.step(fn, use=None, save_as=None, label=None)`
 - `.collect(extensions, root=None, recursive=False, use=None, save_as=None, label=None)`
 - `.map(fn, use=None, save_as=None, label=None)`

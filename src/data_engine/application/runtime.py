@@ -242,13 +242,21 @@ class RuntimeApplication:
             signature=signature,
         )
 
-    def run_flow(self, paths: WorkspacePaths, *, name: str, wait: bool = False, timeout: float = 2.0) -> DaemonCommandResult:
+    def run_flow(
+        self,
+        paths: WorkspacePaths,
+        *,
+        name: str,
+        wait: bool = False,
+        timeout: float = 2.0,
+        inputs: dict[str, object] | None = None,
+    ) -> DaemonCommandResult:
         """Request one manual flow run through the daemon."""
         if not authored_workspace_is_available(paths):
             return DaemonCommandResult(ok=False, error="Workspace root is no longer available.")
         return self._spawn_and_request(
             paths,
-            {"command": "run_flow", "name": name, "wait": wait},
+            {"command": "run_flow", "name": name, "wait": wait, "inputs": dict(inputs or {})},
             timeout=timeout,
         )
 

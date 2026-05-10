@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 import tomllib
@@ -56,6 +56,74 @@ class StepSpec:
     save_as: str | None
     label: str
     function_name: str
+
+
+@dataclass(frozen=True)
+class DateRangeInputValue:
+    """Submitted inclusive date range for one manual flow run."""
+
+    start: str
+    end: str
+    inclusive: bool = True
+
+
+@dataclass(frozen=True)
+class ManualInputSpec:
+    """One pre-run operator input required by a manual flow."""
+
+    name: str
+    label: str
+    kind: str
+    required: bool = True
+    inclusive: bool = True
+
+
+def _normalize_iso_date(value: object, *, field_name: str) -> str:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value.isoformat()
+    if not isinstance(value, str) or not value.strip():
+        raise FlowValidationError(f"Manual input {field_name} must be a YYYY-MM-DD date string.")
+    raw = value.strip()
+    try:
+        parsed = date.fromisoformat(raw)
+    except ValueError as exc:
+        raise FlowValidationError(f"Manual input {field_name} must be a valid YYYY-MM-DD date.") from exc
+    return parsed.isoformat()
+
+
+def normalize_manual_inputs(
+    specs: tuple[ManualInputSpec, ...],
+    values: dict[str, object] | None,
+) -> dict[str, object]:
+    """Validate and normalize submitted manual-run input values."""
+    if not specs:
+        return {}
+    raw_values = values or {}
+    if not isinstance(raw_values, dict):
+        raise FlowValidationError("Manual flow inputs must be provided as a mapping.")
+    normalized: dict[str, object] = {}
+    for spec in specs:
+        if spec.name not in raw_values:
+            if spec.required:
+                raise FlowValidationError(f"Manual input {spec.name!r} is required.")
+            continue
+        raw_value = raw_values[spec.name]
+        if spec.kind == "date_range":
+            if isinstance(raw_value, DateRangeInputValue):
+                if date.fromisoformat(raw_value.start) > date.fromisoformat(raw_value.end):
+                    raise FlowValidationError(f"Manual input {spec.name!r} start date must be on or before end date.")
+                normalized[spec.name] = raw_value
+                continue
+            if not isinstance(raw_value, dict):
+                raise FlowValidationError(f"Manual input {spec.name!r} must be a date range mapping.")
+            start = _normalize_iso_date(raw_value.get("start"), field_name=f"{spec.name}.start")
+            end = _normalize_iso_date(raw_value.get("end"), field_name=f"{spec.name}.end")
+            if date.fromisoformat(start) > date.fromisoformat(end):
+                raise FlowValidationError(f"Manual input {spec.name!r} start date must be on or before end date.")
+            normalized[spec.name] = DateRangeInputValue(start=start, end=end, inclusive=spec.inclusive)
+            continue
+        raise FlowValidationError(f"Unsupported manual input kind: {spec.kind}")
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -337,6 +405,8 @@ class FlowContext:
         Active value passed between steps.
     objects : dict[str, object]
         Named intermediate values saved by ``save_as``.
+    inputs : dict[str, object]
+        Normalized manual-run inputs collected before execution starts.
     metadata : dict[str, object]
         Runtime metadata attached to the execution.
     config : WorkspaceConfigContext
@@ -363,6 +433,7 @@ class FlowContext:
     mirror: MirrorContext | None = None
     current: object | None = None
     objects: dict[str, object] = field(default_factory=dict)
+    inputs: dict[str, object] = field(default_factory=dict)
     metadata: dict[str, object] = field(default_factory=dict)
     config: WorkspaceConfigContext = field(default_factory=WorkspaceConfigContext)
     debug: FlowDebugContext | None = None
@@ -619,9 +690,11 @@ def collect_files(
 
 __all__ = [
     "Batch",
+    "DateRangeInputValue",
     "FileRef",
     "FlowContext",
     "FlowDebugContext",
+    "ManualInputSpec",
     "MirrorContext",
     "MirrorSpec",
     "SourceContext",
@@ -630,4 +703,5 @@ __all__ = [
     "WatchSpec",
     "WorkspaceConfigContext",
     "collect_files",
+    "normalize_manual_inputs",
 ]

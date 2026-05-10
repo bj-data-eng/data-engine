@@ -18,6 +18,7 @@ from shiboken6 import delete as shiboken_delete
 from shiboken6 import isValid as shiboken_is_valid
 
 from data_engine.core.model import FlowValidationError
+from data_engine.core.primitives import ManualInputSpec
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot
 from data_engine.domain import (
     ActiveRunState,
@@ -5137,6 +5138,46 @@ def test_run_selected_flow_prefers_empty_daemon_live_truth_over_stale_manual_ses
         _dispose_window(qapp, window)
 
 
+def test_run_selected_flow_collects_declared_manual_inputs(qapp, monkeypatch):
+    control_application = _FakeControlApplication()
+    control_application.run_selected_flow_result = type(
+        "Result",
+        (),
+        {
+            "requested": True,
+            "sync_after": False,
+            "status_text": None,
+            "error_text": None,
+        },
+    )()
+    submitted_inputs = {"period": {"start": "2026-01-01", "end": "2026-01-31"}}
+
+    def _fake_input_dialog(window, card):
+        del window
+        assert card.name == "manual_review"
+        return submitted_inputs
+
+    monkeypatch.setattr("data_engine.ui.gui.dialogs.show_manual_inputs_dialog", _fake_input_dialog)
+    window = _make_window(command_service=_command_service_for_test(control_application=control_application))
+    try:
+        window._select_flow("manual_review")
+        cards = window.flow_cards
+        cards["manual_review"] = replace(
+            cards["manual_review"],
+            manual_inputs=(
+                ManualInputSpec(name="period", label="Reporting Period", kind="date_range"),
+            ),
+        )
+        window.flow_cards = cards
+
+        window._run_selected_flow()
+        _process_ui_until(qapp, lambda: len(control_application.run_selected_flow_calls) == 1)
+
+        assert control_application.run_selected_flow_calls[0]["inputs"] == submitted_inputs
+    finally:
+        _dispose_window(qapp, window)
+
+
 def test_reset_flow_button_clears_selected_flow_logs_before_rebuild(qapp, monkeypatch):
     del monkeypatch
     reset_service = _FakeResetService()
@@ -8112,5 +8153,3 @@ def test_rebuild_runtime_snapshot_drops_stopping_runtime_state_for_completed_flo
         assert window.flow_states["poller_b"] == "schedule ready"
     finally:
         _dispose_window(qapp, window)
-
-

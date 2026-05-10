@@ -9,7 +9,7 @@ from time import sleep
 from time import monotonic
 
 from data_engine.core.model import FlowStoppedError
-from data_engine.core.primitives import FlowContext
+from data_engine.core.primitives import DateRangeInputValue, FlowContext
 from data_engine.platform.workspace_models import DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR
 from data_engine.runtime.execution.continuous import ContinuousRuntimeLoop
 from data_engine.runtime.execution.context import QueuedRunJob
@@ -152,6 +152,79 @@ def test_flow_run_executor_does_not_emit_routine_success_logs() -> None:
         for call in calls
     )
     assert next(call for call in calls if call[0] == "record_run_finished")[1]["status"] == "success"
+
+
+def test_flow_runtime_adds_manual_inputs_to_context() -> None:
+    captured: list[object] = []
+
+    class _MemoryLedger:
+        db_path = None
+
+        class _Runs:
+            def list(self, *args, **kwargs):
+                return ()
+
+        class _Logs:
+            def append(self, *args, **kwargs):
+                return None
+
+        class _State:
+            def record_run_started(self, *args, **kwargs):
+                return None
+
+            def record_run_finished(self, *args, **kwargs):
+                return None
+
+            def record_step_started(self, *args, **kwargs):
+                return 1
+
+            def record_step_finished(self, *args, **kwargs):
+                return None
+
+            def upsert_file_state(self, *args, **kwargs):
+                return None
+
+        class _Source:
+            def list_file_states(self, *args, **kwargs):
+                return ()
+
+            def upsert_file_state(self, *args, **kwargs):
+                return None
+
+        runs = _Runs()
+        logs = _Logs()
+        execution_state = _State()
+        source_signatures = _Source()
+
+        def close_current_thread_connection(self):
+            return None
+
+        def close(self):
+            return None
+
+    def _capture(context):
+        captured.append(context.inputs["period"])
+        return context.inputs["period"]
+
+    from data_engine.authoring.flow import Flow
+
+    flow = (
+        Flow(name="manual_report", group="Reports")
+        .watch(mode="manual")
+        .date_range_input(name="period", label="Reporting Period")
+        .step(_capture)
+    )
+    runtime = FlowRuntime(
+        (flow,),
+        continuous=False,
+        runtime_ledger=_MemoryLedger(),
+        inputs={"period": {"start": "2026-01-01", "end": "2026-01-31"}},
+    )
+
+    results = runtime.run()
+
+    assert captured == [DateRangeInputValue(start="2026-01-01", end="2026-01-31", inclusive=True)]
+    assert results[0].inputs["period"] == captured[0]
 
 
 def test_flow_run_executor_logs_failure_before_publishing_run_finished_state() -> None:
@@ -330,4 +403,3 @@ def test_continuous_runtime_loop_sleeps_until_next_poll_without_pending_futures(
 
     assert isinstance(recorded["seconds"], float)
     assert 0.0 <= recorded["seconds"] <= 0.2
-

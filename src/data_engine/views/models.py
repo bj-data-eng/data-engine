@@ -32,6 +32,7 @@ class QtFlowCard:
     category: str = ""
     error: str = ""
     parallelism: str = "1"
+    manual_inputs: tuple[object, ...] = ()
 
 def qt_flow_card_from_entry(entry: FlowCatalogEntry) -> QtFlowCard:
     """Map one catalog entry into a shared surface card."""
@@ -52,6 +53,7 @@ def qt_flow_card_from_entry(entry: FlowCatalogEntry) -> QtFlowCard:
         valid=entry.valid,
         category=entry.category,
         error=entry.error,
+        manual_inputs=entry.manual_inputs,
     )
 
 
@@ -74,6 +76,7 @@ def flow_catalog_entry_from_qt_card(card: QtFlowCard) -> FlowCatalogEntry:
         valid=card.valid,
         category=card.category,
         error=card.error,
+        manual_inputs=card.manual_inputs,
     )
 
 

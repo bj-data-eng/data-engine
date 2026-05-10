@@ -80,9 +80,11 @@ class DaemonCommandHandler:
             if command == "refresh_flows":
                 return {"ok": True, "flows": [asdict(card) for card in self.state_sync.load_flow_cards(force=True)]}
             if command == "run_flow":
+                raw_inputs = payload.get("inputs")
                 return self.runtime_commands.run_flow(
                     name=str(payload.get("name", "")),
                     wait=bool(payload.get("wait", False)),
+                    inputs=raw_inputs if isinstance(raw_inputs, dict) else None,
                     request_id=request_id,
                 )
             if command == "start_engine":

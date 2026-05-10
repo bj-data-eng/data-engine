@@ -26,6 +26,7 @@ class FlowCatalogEntry:
     category: str = ""
     error: str = ""
     parallelism: str = "1"
+    manual_inputs: tuple[object, ...] = ()
 
 
 class FlowCatalogLike(Protocol):
@@ -47,6 +48,7 @@ class FlowCatalogLike(Protocol):
     category: str
     error: str
     parallelism: str
+    manual_inputs: tuple[object, ...]
 
 
 def flow_category(mode: str) -> str:

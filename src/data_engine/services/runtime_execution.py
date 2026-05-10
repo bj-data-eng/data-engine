@@ -41,12 +41,14 @@ class RuntimeExecutionService:
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
         workspace_id: str | None = None,
+        inputs: dict[str, object] | None = None,
     ) -> RuntimeEngine:
         return self._runtime_engine_type(
             runtime_ledger=runtime_ledger,
             runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             workspace_id=workspace_id,
+            inputs=inputs,
             flow_runtime_type=self._flow_runtime_type,
             grouped_runtime_type=self._grouped_runtime_type,
             run_stop_controller=self._run_stop_controller,
@@ -60,6 +62,7 @@ class RuntimeExecutionService:
         runtime_stop_event: Event | None = None,
         flow_stop_event: Event | None = None,
         workspace_id: str | None = None,
+        inputs: dict[str, object] | None = None,
     ) -> object:
         """Run one flow as a one-shot execution."""
         return self._engine(
@@ -67,6 +70,7 @@ class RuntimeExecutionService:
             flow_stop_event=flow_stop_event,
             runtime_ledger=runtime_ledger,
             workspace_id=workspace_id,
+            inputs=inputs,
         ).run_once(flow)
 
     def run_source(
@@ -126,6 +130,7 @@ class RuntimeExecutionService:
         runtime_stop_event: Event,
         flow_stop_event: Event | None = None,
         workspace_id: str | None = None,
+        inputs: dict[str, object] | None = None,
     ) -> object:
         """Run one flow as a manual one-shot execution."""
         result = self.run_once(
@@ -134,6 +139,7 @@ class RuntimeExecutionService:
             runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             workspace_id=workspace_id,
+            inputs=inputs,
         )
         return release_completed_results(result)
 
@@ -145,6 +151,7 @@ class RuntimeExecutionService:
         runtime_stop_event: Event,
         flow_stop_event: Event | None = None,
         workspace_id: str | None = None,
+        inputs: dict[str, object] | None = None,
     ) -> None:
         """Run one flow manually while discarding completed results immediately."""
         self._engine(
@@ -152,6 +159,7 @@ class RuntimeExecutionService:
             runtime_stop_event=runtime_stop_event,
             flow_stop_event=flow_stop_event,
             workspace_id=workspace_id,
+            inputs=inputs,
         ).run_once_and_discard(flow)
 
     def run_continuous(

@@ -10,7 +10,7 @@ import pytest
 import data_engine.authoring.flow as authoring_flow_module
 from data_engine.authoring.flow import Flow, discover_flows, load_flow, run
 from data_engine.core.model import FlowStoppedError, FlowValidationError
-from data_engine.core.primitives import Batch, FileRef, MirrorContext, SourceContext
+from data_engine.core.primitives import Batch, DateRangeInputValue, FileRef, MirrorContext, SourceContext
 from data_engine.flow_modules.flow_module_loader import compiled_flow_module_context
 from data_engine.runtime.execution import FlowRuntime, GroupedFlowRuntime
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
@@ -165,6 +165,44 @@ def test_watch_manual_individual_iterates_directory_files(tmp_path):
     )
 
     assert [item.current for item in results] == ["a.xlsx", "b.xlsx"]
+
+
+def test_date_range_input_is_manual_only_and_available_to_steps():
+    flow = (
+        Flow(name="manual_report", group="Reports")
+        .watch(mode="manual")
+        .date_range_input(name="period", label="Reporting Period")
+        .step(lambda context: context.inputs["period"])
+    )
+
+    assert len(flow.manual_inputs) == 1
+    assert flow.manual_inputs[0].name == "period"
+    assert flow.manual_inputs[0].label == "Reporting Period"
+    assert flow.manual_inputs[0].kind == "date_range"
+
+    results = flow.run_once(inputs={"period": {"start": "2026-01-01", "end": "2026-01-31"}})
+
+    assert len(results) == 1
+    assert results[0].current == DateRangeInputValue(start="2026-01-01", end="2026-01-31", inclusive=True)
+
+
+def test_date_range_input_rejects_automated_flows(tmp_path):
+    poll_source = tmp_path / "input"
+    poll_source.mkdir()
+
+    with pytest.raises(FlowValidationError, match="manual flows"):
+        (
+            Flow(name="poll_report", group="Reports")
+            .watch(mode="poll", source=poll_source, interval="5s")
+            .date_range_input(name="period", label="Reporting Period")
+        )
+
+    with pytest.raises(FlowValidationError, match="manual inputs"):
+        (
+            Flow(name="manual_report", group="Reports")
+            .date_range_input(name="period", label="Reporting Period")
+            .watch(mode="schedule", interval="5m")
+        )
 
 
 
@@ -1075,4 +1113,3 @@ def test_grouped_runtime_keeps_order_within_group():
     grouped.run()
 
     assert order == ["first", "second"]
-

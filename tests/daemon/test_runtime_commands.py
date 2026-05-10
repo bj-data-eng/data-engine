@@ -5,6 +5,7 @@ import time
 
 
 from data_engine.authoring.flow import Flow
+from data_engine.core.primitives import DateRangeInputValue, ManualInputSpec
 from data_engine.domain import DaemonLifecyclePolicy
 from data_engine.hosts.daemon.app import (
     DataEngineDaemonService,
@@ -84,6 +85,102 @@ def test_manual_run_closes_worker_sqlite_connection(tmp_path, monkeypatch):
             assert worker_thread_id not in service.runtime_cache_ledger._connections  # noqa: SLF001 - proves worker connection was closed
 
         assert set(service.runtime_cache_ledger._connections) == baseline_connection_ids  # noqa: SLF001 - no worker-thread connections accumulate
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
+def test_run_flow_forwards_manual_inputs_to_runtime(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    captured_inputs: list[object] = []
+
+    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None, inputs=None):
+        del flow, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id
+        captured_inputs.append(inputs)
+
+    monkeypatch.setattr(service.runtime_execution_service, "run_manual", _run_manual)
+
+    service.initialize()
+    try:
+        service._cached_flow_cards = (  # noqa: SLF001
+            QtFlowCard(
+                name="demo",
+                group="Demo",
+                title="Demo",
+                description="",
+                source_root="(not set)",
+                target_root="(not set)",
+                mode="manual",
+                interval="-",
+                operations="Run",
+                operation_items=("Run",),
+                state="manual",
+                valid=True,
+                category="manual",
+                manual_inputs=(ManualInputSpec(name="period", label="Reporting Period", kind="date_range"),),
+            ),
+        )
+        response = service._handle_command(  # noqa: SLF001
+            {
+                "command": "run_flow",
+                "name": "demo",
+                "wait": True,
+                "inputs": {"period": {"start": "2026-01-01", "end": "2026-01-31"}},
+            }
+        )
+
+        assert response["ok"] is True
+        assert captured_inputs == [{"period": DateRangeInputValue(start="2026-01-01", end="2026-01-31", inclusive=True)}]
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
+def test_run_flow_rejects_missing_required_manual_inputs_before_starting(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    started = threading.Event()
+
+    def _run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None, inputs=None):
+        del flow, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id, inputs
+        started.set()
+
+    monkeypatch.setattr(service.runtime_execution_service, "run_manual", _run_manual)
+
+    service.initialize()
+    try:
+        service._cached_flow_cards = (  # noqa: SLF001
+            QtFlowCard(
+                name="demo",
+                group="Demo",
+                title="Demo",
+                description="",
+                source_root="(not set)",
+                target_root="(not set)",
+                mode="manual",
+                interval="-",
+                operations="Run",
+                operation_items=("Run",),
+                state="manual",
+                valid=True,
+                category="manual",
+                manual_inputs=(ManualInputSpec(name="period", label="Reporting Period", kind="date_range"),),
+            ),
+        )
+
+        response = service._handle_command({"command": "run_flow", "name": "demo", "wait": True})  # noqa: SLF001
+
+        assert response == {"ok": False, "error": "Manual input 'period' is required."}
+        assert started.is_set() is False
     finally:
         service._shutdown()  # noqa: SLF001
 
@@ -900,4 +997,3 @@ def test_daemon_projection_tracks_engine_lifecycle(tmp_path, monkeypatch):
     finally:
         release_engine.set()
         service._shutdown()  # noqa: SLF001
-

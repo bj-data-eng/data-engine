@@ -33,6 +33,7 @@ class RuntimeEngine:
         flow_stop_event: Event | None = None,
         status_callback: Callable[[str], None] | None = None,
         workspace_id: str | None = None,
+        inputs: dict[str, object] | None = None,
         flow_runtime_type: type[FlowRuntime] = FlowRuntime,
         grouped_runtime_type: type[GroupedFlowRuntime] = GroupedFlowRuntime,
         run_stop_controller: RuntimeStopController | None = None,
@@ -42,6 +43,7 @@ class RuntimeEngine:
         self.flow_stop_event = flow_stop_event
         self.status_callback = status_callback
         self.workspace_id = workspace_id
+        self.inputs = dict(inputs or {})
         self.flow_runtime_type = flow_runtime_type
         self.grouped_runtime_type = grouped_runtime_type
         self.run_stop_controller = run_stop_controller or RuntimeStopController()
@@ -121,6 +123,8 @@ class RuntimeEngine:
             kwargs["workspace_id"] = self.workspace_id
         if self.runtime_ledger is not None:
             kwargs["runtime_ledger"] = self.runtime_ledger
+        if self.inputs:
+            kwargs["inputs"] = self.inputs
         kwargs["run_stop_controller"] = self.run_stop_controller
         return kwargs
 

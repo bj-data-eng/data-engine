@@ -70,6 +70,7 @@ def flow_catalog_entry_from_flow(flow: Flow, *, description: str | None) -> Flow
         state=default_flow_state(mode),
         valid=True,
         category=flow_category(mode),
+        manual_inputs=flow.manual_inputs,
     )
 
 

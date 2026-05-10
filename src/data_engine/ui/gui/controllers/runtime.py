@@ -545,6 +545,14 @@ class GuiRuntimeController:
         if not action_state.flow_run_enabled:
             window.flow_controller.refresh_action_buttons(window)
             return
+        inputs = None
+        if card is not None and card.manual_inputs:
+            from data_engine.ui.gui.dialogs import show_manual_inputs_dialog
+
+            inputs = show_manual_inputs_dialog(window, card)
+            if inputs is None:
+                window.flow_controller.refresh_action_buttons(window)
+                return
         action_args = (
             window,
             {
@@ -554,6 +562,7 @@ class GuiRuntimeController:
                 "selected_flow_valid": bool(card is not None and card.valid),
                 "blocked_status_text": self._blocked_status_text(window),
                 "timeout": 5.0,
+                "inputs": inputs,
             },
             card.name if card is not None else None,
         )

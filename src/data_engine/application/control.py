@@ -55,6 +55,7 @@ class OperatorControlApplication:
         selected_flow_valid: bool,
         blocked_status_text: str,
         timeout: float = 2.0,
+        inputs: dict[str, object] | None = None,
     ) -> OperatorActionResult:
         """Validate and request one manual run for the selected flow."""
         if not authored_workspace_is_available(paths):
@@ -76,12 +77,14 @@ class OperatorControlApplication:
             return OperatorActionResult(requested=False)
         if not action_context.control_available:
             return OperatorActionResult(requested=False, status_text=blocked_status_text)
-        result = self.runtime_application.run_flow(
-            paths,
-            name=selected_flow_name,
-            wait=False,
-            timeout=timeout,
-        )
+        run_kwargs: dict[str, object] = {
+            "name": selected_flow_name,
+            "wait": False,
+            "timeout": timeout,
+        }
+        if inputs is not None:
+            run_kwargs["inputs"] = inputs
+        result = self.runtime_application.run_flow(paths, **run_kwargs)
         if not result.ok:
             return OperatorActionResult(
                 requested=False,

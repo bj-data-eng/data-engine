@@ -86,6 +86,7 @@ class Flow(_CoreFlow):
     def run_once(
         self,
         *,
+        inputs: dict[str, object] | None = None,
         authoring_services: AuthoringServices | None = None,
         runtime_execution_service: RuntimeExecutionService | None = None,
     ) -> list[FlowContext]:
@@ -95,6 +96,8 @@ class Flow(_CoreFlow):
         ----------
         authoring_services : AuthoringServices | None
             Optional service bundle used by tests or embedded hosts.
+        inputs : dict[str, object] | None
+            Submitted manual-run input values for flows that declare them.
         runtime_execution_service : RuntimeExecutionService | None
             Optional runtime execution service override.
 
@@ -108,7 +111,9 @@ class Flow(_CoreFlow):
             authoring_services=authoring_services,
             runtime_execution_service=runtime_execution_service,
         ).runtime_execution_service
-        return service.run_once(flow)
+        if inputs is None:
+            return service.run_once(flow)
+        return service.run_once(flow, inputs=inputs)
 
     def preview(
         self,

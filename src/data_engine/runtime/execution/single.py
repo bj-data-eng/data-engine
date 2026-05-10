@@ -69,6 +69,7 @@ class FlowRuntime:
         runtime_ledger_factory: Callable[[], RuntimeCacheStore] | None = None,
         run_stop_controller: RuntimeStopController | None = None,
         workspace_id: str | None = None,
+        inputs: dict[str, object] | None = None,
     ) -> None:
         self.flows = tuple(flows)
         self.continuous = continuous
@@ -83,7 +84,7 @@ class FlowRuntime:
         runtime_db_path = getattr(self.runtime_ledger, "db_path", None)
         debug_root = Path(runtime_db_path).expanduser().resolve().parent / "debug_artifacts" if runtime_db_path is not None else None
         self._timing_log_path = Path(runtime_db_path).expanduser().resolve().parent / "daemon_timing.log" if runtime_db_path is not None else None
-        self.context_builder = RuntimeContextBuilder(debug_root=debug_root, workspace_id=workspace_id)
+        self.context_builder = RuntimeContextBuilder(debug_root=debug_root, workspace_id=workspace_id, inputs=inputs)
         self._queued_log_sink = acquire_queued_runtime_log_sink(self.runtime_ledger.logs)
         self.log_emitter = RuntimeLogEmitter(self._queued_log_sink, workspace_id=workspace_id)
         self.polling = RuntimePollingSupport(self.runtime_ledger.source_signatures)

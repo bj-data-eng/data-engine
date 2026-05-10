@@ -19,7 +19,7 @@ from data_engine.core.helpers import (
     _validate_slot_name,
 )
 from data_engine.core.model import FlowValidationError
-from data_engine.core.primitives import Batch, FlowContext, MirrorSpec, StepSpec, WatchSpec, collect_files
+from data_engine.core.primitives import Batch, FlowContext, ManualInputSpec, MirrorSpec, StepSpec, WatchSpec, collect_files
 
 
 @dataclass(frozen=True)
@@ -59,6 +59,8 @@ class Flow:
         Mirrored output path configuration.
     steps : tuple[StepSpec, ...]
         Ordered callable steps to run.
+    manual_inputs : tuple[ManualInputSpec, ...]
+        Pre-run operator inputs required before manual execution starts.
 
     Notes
     -----
@@ -71,6 +73,7 @@ class Flow:
     trigger: WatchSpec | None = None
     mirror_spec: MirrorSpec | None = None
     steps: tuple[StepSpec, ...] = ()
+    manual_inputs: tuple[ManualInputSpec, ...] = ()
     _workspace_root: Path | None = None
 
     def __post_init__(self) -> None:
@@ -80,6 +83,8 @@ class Flow:
             raise FlowValidationError("Flow label must be a non-empty string when provided.")
         if not isinstance(self.group, str) or not self.group.strip():
             raise FlowValidationError("Flow group must be a non-empty string.")
+        if self.manual_inputs and self.mode != "manual":
+            raise FlowValidationError("Flow manual inputs are only supported for manual flows.")
 
     def _clone(self, **kwargs) -> "Flow":
         return replace(self, **kwargs)
@@ -156,6 +161,8 @@ class Flow:
         normalized_mode = str(mode).strip().lower()
         if normalized_mode not in {"manual", "poll", "schedule"}:
             raise FlowValidationError("watch() mode must be one of 'manual', 'poll', or 'schedule'.")
+        if normalized_mode != "manual" and self.manual_inputs:
+            raise FlowValidationError("watch() cannot configure automated modes on flows with manual inputs.")
 
         normalized_run_as = str(run_as).strip().lower()
         if normalized_run_as not in {"individual", "batch"}:
@@ -263,6 +270,41 @@ class Flow:
             A new flow with mirror output helpers enabled.
         """
         return self._clone(mirror_spec=MirrorSpec(root=_resolve_flow_path(root)))
+
+    def date_range_input(
+        self,
+        *,
+        name: str,
+        label: str,
+        required: bool = True,
+        inclusive: bool = True,
+    ) -> "Flow":
+        """Require one start/end date range before a manual run starts.
+
+        Operator surfaces collect the value before starting the run. Runtime
+        steps can read the normalized ``DateRangeInputValue`` from
+        ``context.inputs[name]``.
+        """
+        if self.mode != "manual":
+            raise FlowValidationError("date_range_input() is only supported for manual flows.")
+        normalized_name = _validate_slot_name(method_name="date_range_input", slot_name="name", value=name)
+        normalized_label = _validate_label(method_name="date_range_input", label=label)
+        assert normalized_name is not None
+        assert normalized_label is not None
+        if normalized_name in {item.name for item in self.manual_inputs}:
+            raise FlowValidationError(f"date_range_input() name {normalized_name!r} is already defined.")
+        return self._clone(
+            manual_inputs=(
+                *self.manual_inputs,
+                ManualInputSpec(
+                    name=normalized_name,
+                    label=normalized_label,
+                    kind="date_range",
+                    required=bool(required),
+                    inclusive=bool(inclusive),
+                ),
+            )
+        )
 
     def step(
         self,
