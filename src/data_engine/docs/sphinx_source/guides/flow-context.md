@@ -23,6 +23,7 @@ def capture_row_count(context):
 - `mirror`: `MirrorContext | None` when the flow configured `mirror(root=...)`
 - `current`: the active value moving through the pipeline
 - `objects`: named intermediate values saved with `save_as=`
+- `inputs`: normalized manual-run values collected before execution starts
 - `metadata`: free-form metadata attached to the execution
 - `config`: lazy reader for workspace `config/*.toml`
 - `debug`: optional debug artifact writer for the active run
@@ -31,7 +32,8 @@ The core model is small:
 
 1. `current` is the value handed from step to step.
 2. `objects` stores named values created by `save_as=`.
-3. `source` and `mirror` are path namespaces, not open files or connections.
+3. `inputs` stores operator-provided values declared on manual flows.
+4. `source` and `mirror` are path namespaces, not open files or connections.
 
 ## `flow_name` and `group`
 
@@ -87,6 +89,51 @@ def compare_versions(context):
 
 Use direct `objects` access when a step needs more than the one active value
 provided by `use=`.
+
+## `inputs`
+
+`context.inputs` contains normalized values supplied before a manual run starts.
+Inputs are declared on the flow and are validated before any step executes.
+
+```python
+from datetime import date
+
+import polars as pl
+
+from data_engine import Flow
+
+
+def filter_reporting_period(context):
+    period = context.inputs["reporting_period"]
+    start = date.fromisoformat(period.start)
+    end = date.fromisoformat(period.end)
+    return context.current.filter(
+        pl.col("received_date").is_between(start, end, closed="both")
+    )
+
+
+flow = (
+    Flow(group="Reports")
+    .date_range_input(name="reporting_period", label="Reporting Period")
+    .step(read_claims)
+    .step(filter_reporting_period)
+)
+```
+
+For date-range inputs, the stored value is a `DateRangeInputValue`:
+
+```python
+def capture_selected_range(context):
+    period = context.inputs["reporting_period"]
+    context.metadata["selected_start_date"] = period.start
+    context.metadata["selected_end_date"] = period.end
+    context.metadata["selected_range_inclusive"] = period.inclusive
+    return context.current
+```
+
+The `start` and `end` fields are ISO `YYYY-MM-DD` strings. Convert them with
+`date.fromisoformat(...)` when filtering typed date columns, or write the strings
+directly to metadata, logs, reports, and audit sheets.
 
 ## `metadata`
 

@@ -228,6 +228,53 @@ flow = Flow(group="Reports").collect([".csv"], root="incoming").step_each(summar
 Choose whichever name makes the chain read better. The signature, validation,
 and returned `Batch` behavior are the same as `map(...)`.
 
+## `date_range_input(name, label, required=True, inclusive=True)`
+
+Declare one operator-provided start/end date range for a manual flow.
+
+```python
+from datetime import date
+
+import polars as pl
+
+from data_engine import Flow
+
+
+def filter_reporting_period(context):
+    period = context.inputs["reporting_period"]
+    start = date.fromisoformat(period.start)
+    end = date.fromisoformat(period.end)
+    return context.current.filter(
+        pl.col("received_date").is_between(start, end, closed="both")
+    )
+
+
+flow = (
+    Flow(group="Reports")
+    .date_range_input(name="reporting_period", label="Reporting Period")
+    .step(read_claims)
+    .step(filter_reporting_period, label="Apply Reporting Period")
+    .step(write_report)
+)
+```
+
+Rules:
+
+- `date_range_input(...)` is only valid on manual flows.
+- `name` is the stable key used by runtime steps as
+  `context.inputs[name]`.
+- `label` is the operator-facing label shown by input dialogs.
+- Submitted values are normalized to `DateRangeInputValue` objects with
+  `start`, `end`, and `inclusive` fields.
+- `start` and `end` are ISO `YYYY-MM-DD` strings, validated before the run
+  starts.
+- `start` must be on or before `end`.
+- `required=True` makes the input mandatory before the manual run starts.
+
+Use this when a manual run needs an operator-selected reporting period,
+extract window, or reconciliation range. For the context-side retrieval pattern,
+see the `FlowContext` guide's `inputs` section.
+
 ## `run_once()`
 
 Run the flow once and return completed `FlowContext` objects.
@@ -239,6 +286,19 @@ first_result = contexts[0].current
 
 This is useful for one-off Python-driven execution. A source-backed individual
 flow may return more than one context, one for each executed source.
+
+Manual flows with declared inputs can pass values directly from Python:
+
+```python
+contexts = flow.run_once(
+    inputs={
+        "reporting_period": {
+            "start": "2026-04-01",
+            "end": "2026-04-30",
+        }
+    }
+)
+```
 
 ## `run()`
 
