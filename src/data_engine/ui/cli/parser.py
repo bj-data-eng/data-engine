@@ -20,7 +20,6 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  data-engine run gui\n"
-            "  data-engine run egui\n"
             "  data-engine run tui\n"
             "  data-engine create workspace .\\workspaces\\docs\n"
             "  data-engine create workspace ./workspaces/docs\n"
@@ -36,9 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="{start,create,run,doctor}")
 
     start_parser = subparsers.add_parser("start", help="Launch one Data Engine operator surface.")
-    start_subparsers = start_parser.add_subparsers(dest="start_command", required=True, metavar="{gui,egui,tui}")
+    start_subparsers = start_parser.add_subparsers(dest="start_command", required=True, metavar="{gui,tui}")
     start_subparsers.add_parser("gui", help="Launch the desktop GUI.")
-    start_subparsers.add_parser("egui", help="Launch the experimental egui surface.")
     start_subparsers.add_parser("tui", help="Launch the terminal UI.")
 
     create_parser = subparsers.add_parser("create", help="Create Data Engine scaffolding.")
@@ -47,9 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     workspace_parser.add_argument("path", type=Path, help="Path to the workspace root to create.")
 
     run_parser = subparsers.add_parser("run", help="Run helpful project tasks or launch one operator surface.")
-    run_subparsers = run_parser.add_subparsers(dest="run_command", required=True, metavar="{gui,egui,tui,tests}")
+    run_subparsers = run_parser.add_subparsers(dest="run_command", required=True, metavar="{gui,tui,tests}")
     run_subparsers.add_parser("gui", help="Launch the desktop GUI.")
-    run_subparsers.add_parser("egui", help="Launch the experimental egui surface.")
     run_subparsers.add_parser("tui", help="Launch the terminal UI.")
     tests_parser = run_subparsers.add_parser("tests", help="Run one curated test slice.")
     tests_parser.add_argument("slice", nargs="?", default="unit", choices=TEST_SLICE_CHOICES, help="Named test slice to run.")
@@ -59,4 +56,3 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_subparsers = doctor_parser.add_subparsers(dest="doctor_command", required=False, metavar="{daemons}")
     doctor_subparsers.add_parser("daemons", help="Inspect Data Engine daemon and related process state.")
     return parser
-

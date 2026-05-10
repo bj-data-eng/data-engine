@@ -7,7 +7,6 @@ It provides:
 - a workspace-based runtime for authored flows
 - a desktop GUI for operators
 - a terminal UI for headless/local operation
-- an experimental Rust-backed `egui` surface
 - parquet-first inspect/debug tooling for dataframe outputs
 
 Flows are plain Python modules that declare how source files, settings workbooks, schedules, and manual runs should move through Polars, DuckDB, and file outputs.
@@ -79,12 +78,6 @@ Desktop GUI:
 
 ```bash
 data-engine start gui
-```
-
-Experimental Rust `egui` surface:
-
-```bash
-data-engine start egui
 ```
 
 Terminal UI:
