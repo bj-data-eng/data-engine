@@ -6,6 +6,7 @@ from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_models import (
     DATA_ENGINE_APP_ROOT_ENV_VAR,
     WORKSPACE_FLOW_HELPERS_DIR_NAME,
+    WORKSPACE_TEMPLATES_DIR_NAME,
 )
 from data_engine.ui.cli.app import main
 from data_engine.ui.cli.commands_workspace import workspace_vscode_settings as _workspace_vscode_settings
@@ -28,6 +29,7 @@ def test_cli_create_workspace_scaffolds_directories_vscode_and_default_selection
     assert (workspace_root / "flow_modules" / WORKSPACE_FLOW_HELPERS_DIR_NAME).is_dir()
     assert (workspace_root / "config").is_dir()
     assert (workspace_root / "databases").is_dir()
+    assert (workspace_root / WORKSPACE_TEMPLATES_DIR_NAME).is_dir()
     collection_vscode_settings = json.loads((workspace_root.parent / ".vscode" / "settings.json").read_text(encoding="utf-8"))
     vscode_settings = json.loads((workspace_root / ".vscode" / "settings.json").read_text(encoding="utf-8"))
     assert collection_vscode_settings["terminal.integrated.env.osx"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(
@@ -69,5 +71,4 @@ def test_workspace_vscode_settings_only_adds_checkout_specific_entries_when_pres
     assert "python.analysis.extraPaths" not in settings
     assert "python.testing.pytestEnabled" not in settings
     assert "python.testing.pytestArgs" not in settings
-
 

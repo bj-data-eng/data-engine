@@ -12,7 +12,11 @@ from typing import Callable, Generic, Iterator, TypeVar
 from data_engine.core.helpers import _normalize_extensions, _resolve_flow_path
 from data_engine.core.model import FlowValidationError
 from data_engine.domain.time import utcnow_text
-from data_engine.platform.workspace_models import WORKSPACE_CONFIG_DIR_NAME, WORKSPACE_DATABASES_DIR_NAME
+from data_engine.platform.workspace_models import (
+    WORKSPACE_CONFIG_DIR_NAME,
+    WORKSPACE_DATABASES_DIR_NAME,
+    WORKSPACE_TEMPLATES_DIR_NAME,
+)
 from data_engine.services.debug_artifacts import (
     build_debug_metadata,
     sanitize_debug_name,
@@ -475,16 +479,38 @@ class FlowContext:
             If the flow is not running from an authored workspace, or if
             ``name`` is absolute or empty.
         """
-        if self.config.workspace_root is None:
-            raise FlowValidationError("context.database() is only available for authored workspace flows.")
-        candidate = Path(name)
-        if candidate.is_absolute():
-            raise FlowValidationError("context.database() name must be relative.")
-        if not str(candidate).strip():
-            raise FlowValidationError("context.database() name must be non-empty.")
-        path = (self.config.workspace_root / WORKSPACE_DATABASES_DIR_NAME / candidate).resolve()
+        path = self._workspace_path(
+            name,
+            helper_name="database",
+            directory_name=WORKSPACE_DATABASES_DIR_NAME,
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
+
+    def template(self, name: str | Path) -> Path:
+        """Return a write-ready path beneath the workspace templates directory.
+
+        Use this for workspace-owned template files such as Excel workbook
+        shells. The returned path is rooted under ``<workspace>/templates/``
+        and parent directories are created for you.
+        """
+        path = self._workspace_path(
+            name,
+            helper_name="template",
+            directory_name=WORKSPACE_TEMPLATES_DIR_NAME,
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _workspace_path(self, name: str | Path, *, helper_name: str, directory_name: str) -> Path:
+        if self.config.workspace_root is None:
+            raise FlowValidationError(f"context.{helper_name}() is only available for authored workspace flows.")
+        candidate = Path(name)
+        if candidate.is_absolute():
+            raise FlowValidationError(f"context.{helper_name}() name must be relative.")
+        if not str(candidate).strip():
+            raise FlowValidationError(f"context.{helper_name}() name must be non-empty.")
+        return (self.config.workspace_root / directory_name / candidate).resolve()
 
 
 @dataclass

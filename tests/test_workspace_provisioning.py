@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from data_engine.platform.workspace_models import WORKSPACE_FLOW_HELPERS_DIR_NAME
+from data_engine.platform.workspace_models import WORKSPACE_FLOW_HELPERS_DIR_NAME, WORKSPACE_TEMPLATES_DIR_NAME
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.services.workspace_provisioning import (
     WorkspaceProvisioningService,
@@ -27,6 +27,7 @@ def test_workspace_provisioning_creates_missing_workspace_assets(monkeypatch, tm
     assert (paths.flow_modules_dir / WORKSPACE_FLOW_HELPERS_DIR_NAME).is_dir()
     assert paths.config_dir.is_dir()
     assert paths.databases_dir.is_dir()
+    assert (paths.workspace_root / WORKSPACE_TEMPLATES_DIR_NAME).is_dir()
     assert (paths.workspace_collection_root / ".vscode" / "settings.json").is_file()
     assert (paths.workspace_root / ".vscode" / "settings.json").is_file()
     assert result.created_anything is True
@@ -82,4 +83,3 @@ def test_collection_vscode_settings_use_collection_root_terminal_env(monkeypatch
     assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(collection_root)
     assert "DATA_ENGINE_WORKSPACE_ROOT" not in settings["terminal.integrated.env.osx"]
     assert "DATA_ENGINE_WORKSPACE_ROOT" not in settings["terminal.integrated.env.windows"]
-

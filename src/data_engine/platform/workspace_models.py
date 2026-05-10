@@ -38,6 +38,7 @@ WORKSPACE_CONFIG_DIR_NAME: str = "config"
 WORKSPACE_FLOW_MODULES_DIR_NAME: str = "flow_modules"
 WORKSPACE_FLOW_HELPERS_DIR_NAME: str = "flow_helpers"
 WORKSPACE_DATABASES_DIR_NAME: str = "databases"
+WORKSPACE_TEMPLATES_DIR_NAME: str = "templates"
 WORKSPACE_STATE_DIR_NAME: str = ".workspace_state"
 WORKSPACE_AVAILABLE_MARKERS_DIR_NAME: str = "available"
 WORKSPACE_LEASED_MARKERS_DIR_NAME: str = "leased"
@@ -180,6 +181,7 @@ __all__ = [
     "WORKSPACE_SHARED_STEP_RUNS_DIR_NAME",
     "WORKSPACE_STALE_MARKERS_DIR_NAME",
     "WORKSPACE_STATE_DIR_NAME",
+    "WORKSPACE_TEMPLATES_DIR_NAME",
     "WorkspacePaths",
     "WorkspaceSettings",
     "_stable_workspace_path",

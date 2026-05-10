@@ -233,6 +233,24 @@ def write_summary(context):
     return db_path
 ```
 
+## `template(...)`
+
+`context.template(name)` returns an absolute, write-ready path beneath the
+authored workspace's `templates/` directory. Parent directories are created
+automatically.
+
+```python
+def template_path(context):
+    return context.template("reports/base.xlsx")
+```
+
+Rules:
+
+- `name` must be relative
+- `name` must be non-empty
+- the helper is only available for authored workspace flows
+- the helper returns a `Path`; your code owns the template file lifecycle
+
 ## `source_metadata()`
 
 `context.source_metadata()` returns filesystem metadata for the active source

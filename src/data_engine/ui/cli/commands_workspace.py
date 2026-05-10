@@ -10,6 +10,7 @@ from data_engine.platform.workspace_models import (
     WORKSPACE_DATABASES_DIR_NAME,
     WORKSPACE_FLOW_HELPERS_DIR_NAME,
     WORKSPACE_FLOW_MODULES_DIR_NAME,
+    WORKSPACE_TEMPLATES_DIR_NAME,
     WorkspaceSettings,
     validate_workspace_id,
 )
@@ -43,6 +44,7 @@ def create_workspace(path: Path, *, dependencies) -> int:
         f"{WORKSPACE_FLOW_MODULES_DIR_NAME}/{WORKSPACE_FLOW_HELPERS_DIR_NAME}",
         WORKSPACE_CONFIG_DIR_NAME,
         WORKSPACE_DATABASES_DIR_NAME,
+        WORKSPACE_TEMPLATES_DIR_NAME,
     ):
         (target / child).mkdir(parents=True, exist_ok=True)
     write_collection_vscode_settings(target.parent, dependencies=dependencies)

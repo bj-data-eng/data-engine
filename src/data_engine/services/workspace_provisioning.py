@@ -11,6 +11,7 @@ from data_engine.platform.interpreters import console_python_executable
 from data_engine.platform.workspace_models import (
     DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR,
     WORKSPACE_FLOW_HELPERS_DIR_NAME,
+    WORKSPACE_TEMPLATES_DIR_NAME,
     WorkspacePaths,
     validate_workspace_id,
 )
@@ -207,6 +208,7 @@ class WorkspaceProvisioningService:
             workspace_paths.flow_modules_dir / WORKSPACE_FLOW_HELPERS_DIR_NAME,
             workspace_paths.config_dir,
             workspace_paths.databases_dir,
+            workspace_paths.workspace_root / WORKSPACE_TEMPLATES_DIR_NAME,
         ):
             if directory.exists():
                 preserved_paths.append(directory)

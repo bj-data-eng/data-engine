@@ -46,6 +46,7 @@ The parts you will usually author directly are:
 - `flow_modules/flow_helpers/`: reusable helper modules imported from flows
 - `config/`: workspace-local TOML files available through `context.config`
 - `databases/`: a conventional home for workspace-local databases used through `context.database(...)`
+- `templates/`: a conventional home for workspace-local template files used through `context.template(...)`
 
 The app can provision that shape for you without overwriting existing content.
 
@@ -278,6 +279,7 @@ Inside a step, `context` is the runtime surface:
 - `context.mirror` is available after `mirror(root=...)` and returns write-ready output paths
 - `context.config` lazily reads workspace-local TOML files from `config/`
 - `context.database("name.duckdb")` returns a write-ready path under the workspace `databases/` directory
+- `context.template("name.xlsx")` returns a write-ready path under the workspace `templates/` directory
 - `context.source_metadata()` returns file metadata for the active source when one exists
 - `context.debug` is available when debug artifact capture is enabled by the runtime
 
@@ -289,6 +291,7 @@ Inside a step, `context` is the runtime surface:
 - move reusable SQL, parsing helpers, and constants into `flow_modules/flow_helpers/`
 - use `context.config` for workspace-local TOML configuration
 - use `context.database(...)` when you want a conventional workspace-local database path
+- use `context.template(...)` when you want a conventional workspace-local template path
 - use `context.debug.save_frame(...)` or `context.debug.save_json(...)` sparingly for runtime diagnostics when the debug context is available
 
 ## Next steps

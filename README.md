@@ -258,6 +258,8 @@ def build():
 - `context.current`
 - `context.objects`
 - `context.metadata`
+- `context.database("analytics.duckdb")`
+- `context.template("reports/base.xlsx")`
 - `context.source_metadata()`
 - `context.debug`
 
