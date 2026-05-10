@@ -313,6 +313,14 @@ class FlowRuntime:
                 key = self.polling.job_key(job.flow, job.source_path)
                 flow_name = job.flow.name
                 active_count = sum(1 for pending_job, _ in pending_futures.values() if pending_job.flow.name == flow_name)
+                active_group_flow_names = {
+                    pending_job.flow.name
+                    for pending_job, _ in pending_futures.values()
+                    if self._flow_group_key(pending_job.flow) == self._flow_group_key(job.flow)
+                }
+                if active_group_flow_names and flow_name not in active_group_flow_names:
+                    queue.append(job)
+                    continue
                 if active_count >= self.max_parallel_for_flow(job.flow):
                     queue.append(job)
                     continue
@@ -380,6 +388,11 @@ class FlowRuntime:
     def _release_completed_context(self, context: FlowContext) -> None:
         """Drop bulky run-owned references once a completed context is no longer needed."""
         release_context_values(context)
+
+    @staticmethod
+    def _flow_group_key(flow: "CoreFlow") -> str:
+        group = str(getattr(flow, "group", "") or "").strip()
+        return group or str(getattr(flow, "name", "") or "")
 
     def _preview_one(self, flow: "CoreFlow", source_path: "Path | None", *, use: str | None) -> FlowContext:
         return self.run_executor.preview_one(flow, source_path, use=use)

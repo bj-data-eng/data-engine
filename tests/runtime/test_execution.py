@@ -9,7 +9,7 @@ from time import sleep
 from time import monotonic
 
 from data_engine.core.model import FlowStoppedError
-from data_engine.core.primitives import DateRangeInputValue, FlowContext
+from data_engine.core.primitives import DateRangeInputValue, FlowContext, WatchSpec
 from data_engine.platform.workspace_models import DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR
 from data_engine.runtime.execution.continuous import ContinuousRuntimeLoop
 from data_engine.runtime.execution.context import QueuedRunJob
@@ -124,6 +124,52 @@ class _StopController:
         del run_id
 
 
+class _MemoryRuntimeLedger:
+    db_path = None
+
+    class _Runs:
+        def list(self, *args, **kwargs):
+            return ()
+
+    class _Logs:
+        def append(self, *args, **kwargs):
+            return None
+
+    class _State:
+        def record_run_started(self, *args, **kwargs):
+            return None
+
+        def record_run_finished(self, *args, **kwargs):
+            return None
+
+        def record_step_started(self, *args, **kwargs):
+            return 1
+
+        def record_step_finished(self, *args, **kwargs):
+            return None
+
+        def upsert_file_state(self, *args, **kwargs):
+            return None
+
+    class _Source:
+        def list_file_states(self, *args, **kwargs):
+            return ()
+
+        def upsert_file_state(self, *args, **kwargs):
+            return None
+
+    runs = _Runs()
+    logs = _Logs()
+    execution_state = _State()
+    source_signatures = _Source()
+
+    def close_current_thread_connection(self):
+        return None
+
+    def close(self):
+        return None
+
+
 def _executor(calls: list[tuple[str, object]]) -> FlowRunExecutor:
     return FlowRunExecutor(
         FlowRunExecutionPorts(
@@ -225,6 +271,48 @@ def test_flow_runtime_adds_manual_inputs_to_context() -> None:
 
     assert captured == [DateRangeInputValue(start="2026-01-01", end="2026-01-31", inclusive=True)]
     assert results[0].inputs["period"] == captured[0]
+
+
+def test_flow_runtime_dispatches_only_one_flow_per_group_while_allowing_same_flow_parallel_jobs() -> None:
+    calls: list[tuple[object, object]] = []
+    runtime = FlowRuntime(
+        (),
+        continuous=True,
+        runtime_ledger=_MemoryRuntimeLedger(),
+    )
+    first = _Flow(
+        name="parallel_a",
+        group="Shared",
+        steps=(),
+        trigger=WatchSpec(mode="poll", run_as="individual", max_parallel=2),
+    )
+    second = _Flow(
+        name="parallel_b",
+        group="Shared",
+        steps=(),
+        trigger=WatchSpec(mode="poll", run_as="individual", max_parallel=2),
+    )
+    queue = deque(
+        (
+            QueuedRunJob(first, Path("a-1.xlsx")),
+            QueuedRunJob(first, Path("a-2.xlsx")),
+            QueuedRunJob(second, Path("b-1.xlsx")),
+        )
+    )
+    queued_keys = {runtime.polling.job_key(job.flow, job.source_path) for job in queue}
+    pending_futures: dict[Future[FlowContext], tuple[QueuedRunJob, int]] = {}
+
+    class _Executor:
+        def submit(self, fn, job):
+            del fn
+            future: Future[FlowContext] = Future()
+            calls.append((job.flow.name, job.source_path))
+            return future
+
+    runtime.dispatch_queued_jobs(queue, queued_keys, pending_futures, _Executor(), results=None)
+
+    assert calls == [("parallel_a", Path("a-1.xlsx")), ("parallel_a", Path("a-2.xlsx"))]
+    assert [job.flow.name for job in queue] == ["parallel_b"]
 
 
 def test_flow_run_executor_logs_failure_before_publishing_run_finished_state() -> None:
