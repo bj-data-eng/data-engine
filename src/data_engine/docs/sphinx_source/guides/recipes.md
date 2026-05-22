@@ -394,7 +394,7 @@ import polars as pl
 df = df.with_columns(
     archived_at=data_engine.helpers.propagate_last_value(
         pl.col("archive_date").dt.combine(pl.col("archive_time")),
-        by="claim_id",
+        over="claim_id",
         sort_by="claim_step_index",
         where=pl.col("status") == "Archive",
     )
@@ -418,7 +418,7 @@ import data_engine.helpers
 df = df.with_columns(
     workflow_visit=data_engine.helpers.visit_counter(
         "workflow",
-        by="document_id",
+        over="document_id",
         sort_by="step_index",
     )
 )

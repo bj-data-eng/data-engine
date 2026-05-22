@@ -122,7 +122,7 @@ group.
 df = df.with_columns(
     latest_status=data_engine.helpers.propagate_last_value(
         "status",
-        by="claim_id",
+        over="claim_id",
         sort_by="step_index",
     )
 )
@@ -132,7 +132,7 @@ df = df.with_columns(
 df = df.with_columns(
     first_reviewer=df.de.propagate_first_value(
         "reviewer",
-        by=["claim_id", "workflow"],
+        over=["claim_id", "workflow"],
         sort_by=["step_index", "event_time"],
         where=pl.col("reviewer").is_not_null(),
     )
@@ -141,7 +141,7 @@ df = df.with_columns(
 
 Behavior:
 
-- rows are ordered inside each `by` window by `sort_by`
+- rows are ordered inside each `over` window by `sort_by`
 - `where=...` limits which ordered rows can supply the propagated value
 - null values are skipped by default with `ignore_nulls=True`
 - `descending` and `nulls_last` are forwarded to Polars ordering
@@ -154,14 +154,14 @@ visit number, and later returns to that value should increment it.
 df = df.with_columns(
     workflow_visit=data_engine.helpers.visit_counter(
         "workflow",
-        by="document_id",
+        over="document_id",
         sort_by="step_index",
     )
 )
 ```
 
 For ordered values `w1, w1, w1, w2, w2, w1`, the result is `1, 1, 1, 1, 1, 2`.
-The count is per current value inside the `by` window, so the first contiguous
+The count is per current value inside the `over` window, so the first contiguous
 run of each distinct value is visit 1.
 
 ## Atomic Writes And Sinks

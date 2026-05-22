@@ -456,7 +456,7 @@ def test_propagate_last_value_broadcasts_latest_non_null_value_per_window():
     result = frame.with_columns(
         latest_status=propagate_last_value(
             "status",
-            by="claim_id",
+            over="claim_id",
             sort_by="step_index",
         )
     )
@@ -485,7 +485,7 @@ def test_propagate_last_value_accepts_multiple_window_and_sort_columns():
     result = frame.with_columns(
         latest_status=propagate_last_value(
             "status",
-            by=["claim_id", "line"],
+            over=["claim_id", "line"],
             sort_by=["step_index", "tie_breaker"],
         )
     )
@@ -509,11 +509,11 @@ def test_propagate_last_value_namespace_helpers_work_for_eager_and_lazy_frames()
     )
 
     eager = frame.with_columns(
-        latest_status=frame.de.propagate_last_value("status", by="claim_id", sort_by="step_index")
+        latest_status=frame.de.propagate_last_value("status", over="claim_id", sort_by="step_index")
     )
     lazy_frame = frame.lazy()
     lazy = lazy_frame.with_columns(
-        latest_status=lazy_frame.de.propagate_last_value("status", by="claim_id", sort_by="step_index")
+        latest_status=lazy_frame.de.propagate_last_value("status", over="claim_id", sort_by="step_index")
     ).collect()
 
     assert eager.to_dict(as_series=False)["latest_status"] == ["open", "open", "done", "done"]
@@ -532,7 +532,7 @@ def test_propagate_last_value_can_keep_nulls_when_requested():
     result = frame.with_columns(
         latest_status=propagate_last_value(
             "status",
-            by="claim_id",
+            over="claim_id",
             sort_by="step_index",
             ignore_nulls=False,
         )
@@ -555,7 +555,7 @@ def test_propagate_last_value_can_filter_source_rows_and_return_adjacent_values(
     result = frame.with_columns(
         archived_at=propagate_last_value(
             pl.concat_str(["event_date", "event_time"], separator=" "),
-            by="claim_id",
+            over="claim_id",
             sort_by="step_index",
             where=pl.col("event") == "Archive",
         )
@@ -583,7 +583,7 @@ def test_propagate_last_value_accepts_composed_source_row_filters():
     result = frame.with_columns(
         last_non_archive_date=propagate_last_value(
             "event_date",
-            by="claim_id",
+            over="claim_id",
             sort_by="step_index",
             where=pl.col("event") != "Archive",
         )
@@ -610,7 +610,7 @@ def test_propagate_first_value_broadcasts_earliest_non_null_value_per_window():
     result = frame.with_columns(
         first_status=propagate_first_value(
             "status",
-            by="claim_id",
+            over="claim_id",
             sort_by="step_index",
         )
     )
@@ -639,7 +639,7 @@ def test_propagate_first_value_accepts_multiple_window_and_sort_columns():
     result = frame.with_columns(
         first_status=propagate_first_value(
             "status",
-            by=["claim_id", "line"],
+            over=["claim_id", "line"],
             sort_by=["step_index", "tie_breaker"],
         )
     )
@@ -663,11 +663,11 @@ def test_propagate_first_value_namespace_helpers_work_for_eager_and_lazy_frames(
     )
 
     eager = frame.with_columns(
-        first_status=frame.de.propagate_first_value("status", by="claim_id", sort_by="step_index")
+        first_status=frame.de.propagate_first_value("status", over="claim_id", sort_by="step_index")
     )
     lazy_frame = frame.lazy()
     lazy = lazy_frame.with_columns(
-        first_status=lazy_frame.de.propagate_first_value("status", by="claim_id", sort_by="step_index")
+        first_status=lazy_frame.de.propagate_first_value("status", over="claim_id", sort_by="step_index")
     ).collect()
 
     assert eager.to_dict(as_series=False)["first_status"] == ["open", "open", "queued", "queued"]
@@ -688,7 +688,7 @@ def test_propagate_first_value_can_filter_source_rows_and_return_adjacent_values
     result = frame.with_columns(
         first_archived_at=propagate_first_value(
             pl.concat_str(["event_date", "event_time"], separator=" "),
-            by="claim_id",
+            over="claim_id",
             sort_by="step_index",
             where=pl.col("event") == "Archive",
         )
@@ -715,7 +715,7 @@ def test_propagate_first_value_can_keep_nulls_when_requested():
     result = frame.with_columns(
         first_status=propagate_first_value(
             "status",
-            by="claim_id",
+            over="claim_id",
             sort_by="step_index",
             ignore_nulls=False,
         )
@@ -734,7 +734,7 @@ def test_visit_counter_counts_repeated_contiguous_value_runs_per_window():
     )
 
     result = frame.with_columns(
-        workflow_visit=visit_counter("workflow", by="document_id", sort_by="step_index")
+        workflow_visit=visit_counter("workflow", over="document_id", sort_by="step_index")
     )
 
     assert result.to_dict(as_series=False)["workflow_visit"] == [1, 1, 1, 1, 1, 2, 2, 2]
@@ -750,7 +750,7 @@ def test_visit_counter_maps_results_back_to_original_row_order():
     )
 
     result = frame.with_columns(
-        workflow_visit=visit_counter("workflow", by="document_id", sort_by="step_index")
+        workflow_visit=visit_counter("workflow", over="document_id", sort_by="step_index")
     )
 
     assert result.to_dict(as_series=False)["workflow_visit"] == [2, 1, 1, 1, 1]
@@ -770,7 +770,7 @@ def test_visit_counter_accepts_multiple_window_and_sort_columns():
     result = frame.with_columns(
         workflow_visit=visit_counter(
             "workflow",
-            by=["document_id", "section"],
+            over=["document_id", "section"],
             sort_by=["step_index", "tie_breaker"],
         )
     )
@@ -788,11 +788,11 @@ def test_visit_counter_namespace_helpers_work_for_eager_and_lazy_frames():
     )
 
     eager = frame.with_columns(
-        workflow_visit=frame.de.visit_counter("workflow", by="document_id", sort_by="step_index")
+        workflow_visit=frame.de.visit_counter("workflow", over="document_id", sort_by="step_index")
     )
     lazy_frame = frame.lazy()
     lazy = lazy_frame.with_columns(
-        workflow_visit=lazy_frame.de.visit_counter("workflow", by="document_id", sort_by="step_index")
+        workflow_visit=lazy_frame.de.visit_counter("workflow", over="document_id", sort_by="step_index")
     ).collect()
 
     assert eager.to_dict(as_series=False)["workflow_visit"] == [1, 1, 2]

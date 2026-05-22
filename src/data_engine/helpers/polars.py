@@ -317,7 +317,7 @@ def _remove_null_columns_lazy(lf: pl.LazyFrame) -> pl.LazyFrame:
 def propagate_last_value(
     value: ColumnExpr,
     *,
-    by: ColumnExprs,
+    over: ColumnExprs,
     sort_by: ColumnExprs,
     where: pl.Expr | None = None,
     descending: DescendingLike = False,
@@ -326,7 +326,7 @@ def propagate_last_value(
 ) -> pl.Expr:
     """Return an expression that broadcasts the last ordered value per window.
 
-    The helper sorts rows inside each ``by`` window, optionally filters the
+    The helper sorts rows inside each ``over`` window, optionally filters the
     ordered rows with ``where``, takes the last ``value`` from that ordered
     candidate set, and propagates it to every row in the same window. Null
     values are ignored by default, which matches the common pattern where only
@@ -336,7 +336,7 @@ def propagate_last_value(
     ----------
     value : ColumnExpr
         Column name or expression containing the value to propagate.
-    by : ColumnExprs
+    over : ColumnExprs
         Window column or columns.
     sort_by : ColumnExprs
         Ordering column or columns used to define the last row in each window.
@@ -364,7 +364,7 @@ def propagate_last_value(
         df = df.with_columns(
             latest_status=data_engine.helpers.propagate_last_value(
                 "status",
-                by="claim_id",
+                over="claim_id",
                 sort_by="claim_step_index",
             )
         )
@@ -377,7 +377,7 @@ def propagate_last_value(
         df = df.with_columns(
             archived_at=data_engine.helpers.propagate_last_value(
                 pl.col("archive_date").dt.combine(pl.col("archive_time")),
-                by="claim_id",
+                over="claim_id",
                 sort_by="claim_step_index",
                 where=pl.col("status") == "Archive",
             )
@@ -390,7 +390,7 @@ def propagate_last_value(
         df = df.with_columns(
             last_active_at=data_engine.helpers.propagate_last_value(
                 pl.col("event_date").dt.combine(pl.col("event_time")),
-                by="claim_id",
+                over="claim_id",
                 sort_by="claim_step_index",
                 where=pl.col("status") != "Archive",
             )
@@ -413,13 +413,13 @@ def propagate_last_value(
         )
     if ignore_nulls:
         ordered = ordered.drop_nulls()
-    return ordered.last().over(_as_column_exprs(by))
+    return ordered.last().over(_as_column_exprs(over))
 
 
 def propagate_first_value(
     value: ColumnExpr,
     *,
-    by: ColumnExprs,
+    over: ColumnExprs,
     sort_by: ColumnExprs,
     where: pl.Expr | None = None,
     descending: DescendingLike = False,
@@ -428,7 +428,7 @@ def propagate_first_value(
 ) -> pl.Expr:
     """Return an expression that broadcasts the first ordered value per window.
 
-    The helper sorts rows inside each ``by`` window, optionally filters the
+    The helper sorts rows inside each ``over`` window, optionally filters the
     ordered rows with ``where``, takes the first ``value`` from that ordered
     candidate set, and propagates it to every row in the same window. Null
     values are ignored by default.
@@ -437,7 +437,7 @@ def propagate_first_value(
     ----------
     value : ColumnExpr
         Column name or expression containing the value to propagate.
-    by : ColumnExprs
+    over : ColumnExprs
         Window column or columns.
     sort_by : ColumnExprs
         Ordering column or columns used to define the first row in each window.
@@ -465,7 +465,7 @@ def propagate_first_value(
         df = df.with_columns(
             first_status=data_engine.helpers.propagate_first_value(
                 "status",
-                by="claim_id",
+                over="claim_id",
                 sort_by="claim_step_index",
             )
         )
@@ -487,20 +487,20 @@ def propagate_first_value(
         )
     if ignore_nulls:
         ordered = ordered.drop_nulls()
-    return ordered.first().over(_as_column_exprs(by))
+    return ordered.first().over(_as_column_exprs(over))
 
 
 def visit_counter(
     value: ColumnExpr,
     *,
-    by: ColumnExprs,
+    over: ColumnExprs,
     sort_by: ColumnExprs,
     descending: DescendingLike = False,
     nulls_last: bool = False,
 ) -> pl.Expr:
     """Return a per-value contiguous-run visit number inside each window.
 
-    Rows are ordered inside each ``by`` window, then consecutive rows with the
+    Rows are ordered inside each ``over`` window, then consecutive rows with the
     same ``value`` are treated as one visit. When a value leaves and later
     returns in the same window, the returned run gets the next visit number for
     that value.
@@ -509,7 +509,7 @@ def visit_counter(
     ----------
     value : ColumnExpr
         Column name or expression containing the state to count visits for.
-    by : ColumnExprs
+    over : ColumnExprs
         Window column or columns.
     sort_by : ColumnExprs
         Ordering column or columns used to define row sequence inside each
@@ -534,7 +534,7 @@ def visit_counter(
         df = df.with_columns(
             workflow_visit=data_engine.helpers.visit_counter(
                 "workflow",
-                by="document_id",
+                over="document_id",
                 sort_by="step_index",
             )
         )
@@ -565,7 +565,7 @@ def visit_counter(
             ),
             return_dtype=pl.UInt32,
         )
-        .over(_as_column_exprs(by))
+        .over(_as_column_exprs(over))
     )
 
 
@@ -1373,7 +1373,7 @@ class DataEngineDataFrameNamespace:
         self,
         value: ColumnExpr,
         *,
-        by: ColumnExprs,
+        over: ColumnExprs,
         sort_by: ColumnExprs,
         where: pl.Expr | None = None,
         descending: DescendingLike = False,
@@ -1389,7 +1389,7 @@ class DataEngineDataFrameNamespace:
         ----------
         value : ColumnExpr
             Column name or expression containing the value to propagate.
-        by : ColumnExprs
+        over : ColumnExprs
             Window column or columns.
         sort_by : ColumnExprs
             Ordering column or columns used to define the last row in each
@@ -1412,7 +1412,7 @@ class DataEngineDataFrameNamespace:
         """
         return propagate_last_value(
             value,
-            by=by,
+            over=over,
             sort_by=sort_by,
             where=where,
             descending=descending,
@@ -1424,7 +1424,7 @@ class DataEngineDataFrameNamespace:
         self,
         value: ColumnExpr,
         *,
-        by: ColumnExprs,
+        over: ColumnExprs,
         sort_by: ColumnExprs,
         where: pl.Expr | None = None,
         descending: DescendingLike = False,
@@ -1440,7 +1440,7 @@ class DataEngineDataFrameNamespace:
         ----------
         value : ColumnExpr
             Column name or expression containing the value to propagate.
-        by : ColumnExprs
+        over : ColumnExprs
             Window column or columns.
         sort_by : ColumnExprs
             Ordering column or columns used to define the first row in each
@@ -1463,7 +1463,7 @@ class DataEngineDataFrameNamespace:
         """
         return propagate_first_value(
             value,
-            by=by,
+            over=over,
             sort_by=sort_by,
             where=where,
             descending=descending,
@@ -1475,7 +1475,7 @@ class DataEngineDataFrameNamespace:
         self,
         value: ColumnExpr,
         *,
-        by: ColumnExprs,
+        over: ColumnExprs,
         sort_by: ColumnExprs,
         descending: DescendingLike = False,
         nulls_last: bool = False,
@@ -1489,7 +1489,7 @@ class DataEngineDataFrameNamespace:
         ----------
         value : ColumnExpr
             Column name or expression containing the state to count visits for.
-        by : ColumnExprs
+        over : ColumnExprs
             Window column or columns.
         sort_by : ColumnExprs
             Ordering column or columns used to define row sequence inside each
@@ -1508,7 +1508,7 @@ class DataEngineDataFrameNamespace:
         """
         return visit_counter(
             value,
-            by=by,
+            over=over,
             sort_by=sort_by,
             descending=descending,
             nulls_last=nulls_last,
@@ -1986,7 +1986,7 @@ class DataEngineLazyFrameNamespace:
         self,
         value: ColumnExpr,
         *,
-        by: ColumnExprs,
+        over: ColumnExprs,
         sort_by: ColumnExprs,
         where: pl.Expr | None = None,
         descending: DescendingLike = False,
@@ -2002,7 +2002,7 @@ class DataEngineLazyFrameNamespace:
         ----------
         value : ColumnExpr
             Column name or expression containing the value to propagate.
-        by : ColumnExprs
+        over : ColumnExprs
             Window column or columns.
         sort_by : ColumnExprs
             Ordering column or columns used to define the last row in each
@@ -2025,7 +2025,7 @@ class DataEngineLazyFrameNamespace:
         """
         return propagate_last_value(
             value,
-            by=by,
+            over=over,
             sort_by=sort_by,
             where=where,
             descending=descending,
@@ -2037,7 +2037,7 @@ class DataEngineLazyFrameNamespace:
         self,
         value: ColumnExpr,
         *,
-        by: ColumnExprs,
+        over: ColumnExprs,
         sort_by: ColumnExprs,
         where: pl.Expr | None = None,
         descending: DescendingLike = False,
@@ -2053,7 +2053,7 @@ class DataEngineLazyFrameNamespace:
         ----------
         value : ColumnExpr
             Column name or expression containing the value to propagate.
-        by : ColumnExprs
+        over : ColumnExprs
             Window column or columns.
         sort_by : ColumnExprs
             Ordering column or columns used to define the first row in each
@@ -2076,7 +2076,7 @@ class DataEngineLazyFrameNamespace:
         """
         return propagate_first_value(
             value,
-            by=by,
+            over=over,
             sort_by=sort_by,
             where=where,
             descending=descending,
@@ -2088,7 +2088,7 @@ class DataEngineLazyFrameNamespace:
         self,
         value: ColumnExpr,
         *,
-        by: ColumnExprs,
+        over: ColumnExprs,
         sort_by: ColumnExprs,
         descending: DescendingLike = False,
         nulls_last: bool = False,
@@ -2102,7 +2102,7 @@ class DataEngineLazyFrameNamespace:
         ----------
         value : ColumnExpr
             Column name or expression containing the state to count visits for.
-        by : ColumnExprs
+        over : ColumnExprs
             Window column or columns.
         sort_by : ColumnExprs
             Ordering column or columns used to define row sequence inside each
@@ -2121,7 +2121,7 @@ class DataEngineLazyFrameNamespace:
         """
         return visit_counter(
             value,
-            by=by,
+            over=over,
             sort_by=sort_by,
             descending=descending,
             nulls_last=nulls_last,
