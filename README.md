@@ -51,20 +51,33 @@ python -m pip install py-data-engine
 Editable local install:
 
 ```bash
-python -m pip install -e .
+python -m pip install --constraint requirements/constraints.txt -e .
 ```
 
 Notebook-authored flow modules (`.ipynb`) work with the base install. Install the optional notebook extra only when you want Jupyter authoring tools:
 
 ```bash
-python -m pip install -e ".[notebook]"
+python -m pip install --constraint requirements/constraints.txt -e ".[notebook]"
 ```
 
 For contributors:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install --constraint requirements/constraints.txt -e ".[dev]"
 ```
+
+Local installer scripts use the same pinned constraints file so development and
+docs builds resolve through reviewed package versions.
+
+Hash-checked runtime dependency install for Windows Python 3.14:
+
+```bash
+python -m pip install --require-hashes -r requirements/locked-runtime-win-py314.txt
+```
+
+That lock covers Data Engine's runtime dependency set. Install Data Engine
+itself from a trusted wheel or editable checkout after the locked dependencies
+are present.
 
 Core requirements:
 

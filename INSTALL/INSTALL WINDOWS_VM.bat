@@ -5,6 +5,8 @@ for %%I in ("%~f0") do set "SCRIPT_DIR=%%~dpI"
 for %%I in ("%SCRIPT_DIR%..") do set "PROJECT_ROOT=%%~fI"
 set "VENV_DIR=%PROJECT_ROOT%\.venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
+set "CONSTRAINTS_FILE=%PROJECT_ROOT%\requirements\constraints.txt"
+set "PIP_DISABLE_PIP_VERSION_CHECK=1"
 
 if not exist "%PROJECT_ROOT%\pyproject.toml" (
   echo Could not locate pyproject.toml next to the installer.
@@ -54,11 +56,11 @@ if not exist "%VENV_PYTHON%" (
 )
 
 echo.
-echo Upgrading pip...
-"%VENV_PYTHON%" -m pip install --upgrade pip
+echo Installing pinned pip...
+"%VENV_PYTHON%" -m pip install --constraint "%CONSTRAINTS_FILE%" --upgrade pip
 if errorlevel 1 (
   echo.
-  echo pip upgrade failed.
+  echo pip installation failed.
   echo.
   pause
   exit /b 1
@@ -66,7 +68,7 @@ if errorlevel 1 (
 
 echo.
 echo Installing Data Engine with dev extras and Polars LTS CPU...
-"%VENV_PYTHON%" -m pip install -e "%PROJECT_ROOT%[dev,polars-lts]"
+"%VENV_PYTHON%" -m pip install --constraint "%CONSTRAINTS_FILE%" -e "%PROJECT_ROOT%[dev,polars-lts]"
 if errorlevel 1 (
   echo.
   echo Installation failed.

@@ -6,6 +6,8 @@ SCRIPT_PATH="${0:A}"
 PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd -P)"
 VENV_DIR="$PROJECT_ROOT/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
+CONSTRAINTS_FILE="$PROJECT_ROOT/requirements/constraints.txt"
+export PIP_DISABLE_PIP_VERSION_CHECK=1
 
 if [[ ! -f "$PROJECT_ROOT/pyproject.toml" ]]; then
   echo "Could not locate pyproject.toml next to the docs builder."
@@ -38,8 +40,8 @@ if [[ ! -x "$VENV_PYTHON" ]]; then
 fi
 
 echo "Installing docs build dependencies..."
-"$VENV_PYTHON" -m pip install --upgrade pip
-"$VENV_PYTHON" -m pip install -e "${PROJECT_ROOT}[docs,polars]"
+"$VENV_PYTHON" -m pip install --constraint "$CONSTRAINTS_FILE" --upgrade pip
+"$VENV_PYTHON" -m pip install --constraint "$CONSTRAINTS_FILE" -e "${PROJECT_ROOT}[docs]"
 
 echo "Building packaged docs..."
 "$VENV_PYTHON" "$PROJECT_ROOT/scripts/build_packaged_docs.py"
