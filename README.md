@@ -1,91 +1,44 @@
 # Data Engine
 
-Data Engine is a GUI orchestrator for Python-based dataframe transform pipelines.
+Data Engine is a GUI orchestrator for Python dataframe workflows. It lets you
+author flows as plain Python modules, run them manually or automatically, and
+inspect parquet-first outputs from the desktop app.
 
-It provides:
+The runtime is built around:
 
-- a workspace-based runtime for authored flows
-- a desktop GUI for operators
-- a terminal UI for headless/local operation
-- parquet-first inspect/debug tooling for dataframe outputs
-
-Flows are plain Python modules that declare how source files, settings workbooks, schedules, and manual runs should move through Polars, DuckDB, and file outputs.
-
-## What It Is
-
-Data Engine is not just a dataframe library and not just a scheduler. It is the operator/runtime layer around Python-authored flow modules.
-
-The package handles:
-
-- workspace discovery and selection
-- daemon ownership and control handoff
+- workspace-based flow discovery
 - manual, poll, and schedule execution modes
-- mirrored output routing
-- persisted run/log/state history
-- dataframe inspection inside the app
-
-Step functions use normal Python libraries directly. In practice that usually means:
-
-- Polars for dataframe transforms
-- DuckDB for SQL-oriented work
-- pathlib-style file output
+- Polars and DuckDB-friendly flow steps
+- mirrored output paths for source-driven runs
+- saved run, log, and dataframe inspection state
+- desktop and terminal operator surfaces
 
 ## Install
 
-### Installer scripts
-
-Use the installer that matches your environment:
+Use the installer for your environment:
 
 - macOS: [INSTALL/INSTALL MAC.command](INSTALL/INSTALL%20MAC.command)
 - Windows: [INSTALL/INSTALL WINDOWS.bat](INSTALL/INSTALL%20WINDOWS.bat)
 - Windows VM / CPU-safe Polars path: [INSTALL/INSTALL WINDOWS_VM.bat](INSTALL/INSTALL%20WINDOWS_VM.bat)
 
-### Manual install
-
-Base install:
-
-```bash
-python -m pip install py-data-engine
-```
-
-Editable local install:
-
-```bash
-python -m pip install --constraint requirements/constraints.txt -e .
-```
-
-Notebook-authored flow modules (`.ipynb`) work with the base install. Install the optional notebook extra only when you want Jupyter authoring tools:
-
-```bash
-python -m pip install --constraint requirements/constraints.txt -e ".[notebook]"
-```
-
-For contributors:
+For local development:
 
 ```bash
 python -m pip install --constraint requirements/constraints.txt -e ".[dev]"
 ```
 
-Local installer scripts use the same pinned constraints file so development and
-docs builds resolve through reviewed package versions.
-
-Hash-checked runtime dependency install for Windows Python 3.14:
+For a published package install:
 
 ```bash
-python -m pip install --require-hashes -r requirements/locked-runtime-win-py314.txt
+python -m pip install py-data-engine
 ```
 
-That lock covers Data Engine's runtime dependency set. Install Data Engine
-itself from a trusted wheel or editable checkout after the locked dependencies
-are present.
+Data Engine requires Python `>=3.14`.
 
-Core requirements:
+Dependency pinning, constrained installs, and hash-locked runtime installs are
+documented in [SECURITY.md](SECURITY.md).
 
-- Python `>=3.14`
-- PySide6 for the desktop GUI
-- Textual for the terminal UI
-
-## Start The App
+## Start
 
 Desktop GUI:
 
@@ -99,13 +52,7 @@ Terminal UI:
 data-engine start tui
 ```
 
-You can also launch from module form if needed:
-
-```bash
-python -m data_engine.ui.cli.app start gui
-```
-
-## Headless CLI
+Headless commands:
 
 ```bash
 data-engine list
@@ -114,39 +61,7 @@ data-engine run --once example_summary
 data-engine run
 ```
 
-`data-engine run` starts the automated engine headlessly for discovered automated flows and keeps running until stopped. Use `--once` to force a single pass instead.
-
-## Public API
-
-```python
-from data_engine import Flow, FlowContext, discover_flows, load_flow, run
-```
-
-## Workspace Model
-
-Data Engine discovers workspaces from a collection root resolved from:
-
-- `DATA_ENGINE_WORKSPACE_COLLECTION_ROOT`, when explicitly set
-- `DATA_ENGINE_WORKSPACE_ROOT`, when binding directly to one authored workspace
-- otherwise the machine-local app settings store
-
-Each immediate child folder containing `flow_modules/` is treated as a workspace, for example:
-
-- `workspaces/example_workspace/flow_modules/`
-- `workspaces/docs2/flow_modules/`
-
-Shared workspace state lives inside each authored workspace:
-
-- `workspaces/<workspace_id>/.workspace_state/`
-
-Machine-local runtime state lives under the app artifacts root:
-
-- `artifacts/workspace_cache/<workspace_id>/`
-- `artifacts/runtime_state/<workspace_id>/`
-
-The app's selected workspace and collection-root preference are machine-local settings, not repo-local config.
-
-## Flow Shape
+## Minimal Flow
 
 ```python
 from data_engine import Flow
@@ -184,80 +99,46 @@ def build():
     )
 ```
 
-Each flow module exports:
+Each authored flow module exports `build() -> Flow`. The module filename is the
+flow identity.
 
-- optional `DESCRIPTION`
-- `build() -> Flow`
+## Workspaces
 
-The module filename is the flow identity. Authored flow modules should set `Flow(group=...)` and let the loader inject the final flow name from the module filename.
+Data Engine discovers workspaces from a collection root. Each workspace keeps
+authored flows under:
 
-## Runtime Modes
-
-Flows can run as:
-
-- `manual`
-- `poll`
-- `schedule`
-
-At a high level:
-
-- `manual` runs on operator request
-- `poll` watches source inputs for new or changed files
-- `schedule` runs on a time-based cadence
-
-## Batch Helpers
-
-For batch-oriented flows, use `Flow.collect(...)` plus either `Flow.map(...)` or `Flow.step_each(...)`.
-
-```python
-from data_engine import Flow
-
-
-def validate_workbook(context, file_ref):
-    return {
-        "name": file_ref.name,
-        "path": file_ref.path,
-        "ok": file_ref.exists(),
-    }
-
-
-def build():
-    return (
-        Flow(group="Docs")
-        .watch(mode="schedule", run_as="batch", interval="15m", source="../../../example_data/Input/docs_flat")
-        .collect([".xlsx"])
-        .map(validate_workbook)
-    )
+```text
+workspaces/<workspace_id>/flow_modules/
 ```
 
-`Flow.collect(...)` returns a `Batch` of `FileRef` items. `Flow.map(...)` applies one callable to each item and returns a new `Batch`. `Flow.step_each(...)` is the equivalent readability-first alias.
+Shared workspace state lives under:
 
-## Flow API
+```text
+workspaces/<workspace_id>/.workspace_state/
+```
 
-- `Flow(group=...)`
-- `.watch(mode="manual", source=None, run_as="individual")`
-- `.watch(mode="poll", source=..., interval=..., extensions=None, settle=1, run_as="individual")`
-- `.watch(mode="schedule", interval=..., source=None, run_as="individual" | "batch")`
-- `.watch(mode="schedule", time="HH:MM", source=None, run_as="individual" | "batch")`
-- `.watch(mode="schedule", time=["08:15", "14:45"], source=..., run_as="individual" | "batch")`
-- `.mirror(root=...)`
-- `.date_range_input(name="period", label="Reporting Period")` for manual-only pre-run start/end date selection
-- `.step(fn, use=None, save_as=None, label=None)`
-- `.collect(extensions, root=None, recursive=False, use=None, save_as=None, label=None)`
-- `.map(fn, use=None, save_as=None, label=None)`
-- `.step_each(fn, use=None, save_as=None, label=None)`
-- `.preview(use=None)`
+Machine-local runtime artifacts are stored outside the authored workspace.
+
+## Useful APIs
+
+```python
+from data_engine import Flow, FlowContext, discover_flows, load_flow, run
+```
+
+Common `Flow` methods:
+
+- `.watch(...)`
+- `.mirror(...)`
+- `.date_range_input(...)`
+- `.step(...)`
+- `.collect(...)`
+- `.map(...)`
+- `.step_each(...)`
+- `.preview(...)`
 - `.run_once()`
 - `.run()`
-- `.show()`
 
-`step()` callables always receive one `FlowContext` parameter and return the next value for `context.current`.
-
-`map()` and `step_each()` callables accept either `(item)` or `(context, item)` and return a mapped `Batch`.
-
-## FlowContext
-
-`FlowContext` exposes the active run state:
+Common `FlowContext` values:
 
 - `context.source`
 - `context.mirror`
@@ -266,92 +147,18 @@ def build():
 - `context.metadata`
 - `context.database("analytics.duckdb")`
 - `context.template("reports/base.xlsx")`
-- `context.source_metadata()`
 - `context.debug`
 
-Useful source helpers:
+The full authoring guide and helper reference live in
+`src/data_engine/docs/sphinx_source/guides/`.
 
-- `context.source.path`
-- `context.source.with_extension(".json")`
-- `context.source.with_suffix(".json")`
-- `context.source.file("notes.json")`
-- `context.source.namespaced_file("notes.json")`
-- `context.source.root_file("lookup.csv")`
+## Testing
 
-Useful mirror helpers:
-
-- `context.mirror.with_extension(".parquet")`
-- `context.mirror.with_suffix(".parquet")`
-- `context.mirror.file("open_docs.parquet")`
-- `context.mirror.namespaced_file("open_docs.parquet")`
-
-`use="name"` loads `context.objects["name"]` into `context.current` before the step runs. `save_as="name"` stores the returned value into `context.objects["name"]`.
-
-## Dataframe Debugging
-
-The app includes a dataframe-first debug pane for saved parquet artifacts.
-
-From a flow step, save a debug dataframe with:
-
-```python
-context.debug.save_frame(context.current, name="raw_docs")
+```bash
+python -m pytest -q
+python -m build
+python -m twine check dist/*
 ```
-
-That writes:
-
-- a parquet artifact for the dataframe
-- companion metadata used by the UI
-
-The desktop GUI can then:
-
-- list saved dataframe artifacts by flow/step/timestamp
-- inspect parquet outputs in-app
-- preview top N, bottom N, or sampled rows
-- filter columns with Excel-style distinct-value popups
-- copy one or more selected cells from the table
-
-The inspect modal reuses the same dataframe rendering path.
-
-## Notebook Preview
-
-For notebook or REPL-style authoring outside a compiled flow module, `preview()` is usually the most useful helper:
-
-```python
-build().preview(use="raw_df").head(10)
-build().preview(use="filtered_df")
-```
-
-`preview(use="name")` runs the flow until that `save_as="name"` object exists, then returns the real object without running later steps. `preview()` is not available from inside compiled flow modules, so use it from an external notebook, REPL, or script while iterating on the flow.
-
-## Discovery And Compilation
-
-Starter flow modules live in:
-
-- `workspaces/<workspace_id>/flow_modules/`
-- `artifacts/workspace_cache/<workspace_id>/compiled_flow_modules/`
-
-Authored flow modules compile into:
-
-- `artifacts/workspace_cache/<workspace_id>/compiled_flow_modules/*.py`
-
-The runtime loads discovered flows from those compiled modules.
-
-## Workspace Layout
-
-- `src/data_engine/`
-  Runtime package, operator surfaces, and services
-- `workspaces/<workspace_id>/flow_modules/`
-  Authored flow sources (`.py` or `.ipynb`)
-- `workspaces/<workspace_id>/.workspace_state/`
-  Shared lease markers and checkpoint parquet snapshots
-- `artifacts/workspace_cache/<workspace_id>/compiled_flow_modules/`
-  Generated importable flow modules
-- `artifacts/runtime_state/<workspace_id>/`
-  Machine-local runtime and daemon state
-- `src/data_engine/docs/`
-  Packaged documentation content
-
-## Smoke Data
 
 Generate local smoke data with:
 
@@ -359,29 +166,9 @@ Generate local smoke data with:
 python scripts/generate_smoke_data.py --root . --workspace-id example_workspace --workspace-id docs2
 ```
 
-Generated local data and workspaces are intentionally ignored:
-
-- `data/`
-- `data2/`
-- `workspaces/`
-
-## Packaging
-
-Distribution name:
-
-- `py-data-engine`
-
-Version source of truth:
-
-- `src/data_engine/platform/identity.py`
-
-Build checks:
-
-```bash
-python -m build
-python -m twine check dist/*
-```
+Generated `data/`, `data2/`, and `workspaces/` content is intentionally ignored.
 
 ## Status
 
-This project is pre-alpha. Internal architecture is still moving quickly, and backwards compatibility is not a current goal.
+This project is pre-alpha. Internal architecture is still moving quickly, and
+backwards compatibility is not a current goal.
