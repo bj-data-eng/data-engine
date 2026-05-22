@@ -23,17 +23,14 @@ def show_manual_inputs_dialog(window: "DataEngineWindow", card: "QtFlowCard") ->
     if not card.manual_inputs:
         return {}
 
+    date_range_specs = tuple(spec for spec in card.manual_inputs if spec.kind == "date_range")
     dialog = QDialog(window)
-    dialog.setWindowTitle(card.title)
+    dialog.setWindowTitle(date_range_specs[0].label if len(date_range_specs) == 1 else card.title)
     dialog.setModal(True)
-    dialog.resize(440, 220)
+    dialog.resize(360, 140)
     layout = QVBoxLayout(dialog)
-    layout.setContentsMargins(20, 18, 20, 18)
-    layout.setSpacing(14)
-
-    title_label = QLabel(card.title, dialog)
-    title_label.setObjectName("sectionTitle")
-    layout.addWidget(title_label)
+    layout.setContentsMargins(16, 14, 16, 14)
+    layout.setSpacing(10)
 
     error_label = QLabel("", dialog)
     error_label.setObjectName("errorText")
@@ -42,19 +39,12 @@ def show_manual_inputs_dialog(window: "DataEngineWindow", card: "QtFlowCard") ->
     layout.addWidget(error_label)
 
     date_range_widgets: dict[str, tuple[QDateEdit, QDateEdit]] = {}
-    for spec in card.manual_inputs:
-        if spec.kind != "date_range":
-            continue
+    for spec in date_range_specs:
         frame = QFrame(dialog)
         frame.setObjectName("configRow")
         row = QHBoxLayout(frame)
-        row.setContentsMargins(0, 6, 0, 6)
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(10)
-
-        label = QLabel(spec.label, frame)
-        label.setObjectName("fieldLabel")
-        label.setMinimumWidth(120)
-        row.addWidget(label, 0)
 
         start_edit = QDateEdit(frame)
         start_edit.setObjectName(f"{spec.name}StartDate")
