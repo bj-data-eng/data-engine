@@ -160,14 +160,6 @@ python -m build
 python -m twine check dist/*
 ```
 
-Generate local smoke data with:
-
-```bash
-python scripts/generate_smoke_data.py --root . --workspace-id example_workspace --workspace-id docs2
-```
-
-Generated `data/`, `data2/`, and `workspaces/` content is intentionally ignored.
-
 ## Status
 
 This project is pre-alpha. Internal architecture is still moving quickly, and
