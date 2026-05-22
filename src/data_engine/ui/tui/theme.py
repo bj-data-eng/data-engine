@@ -72,6 +72,20 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         margin-left: 1;
     }}
 
+    #view-nav {{
+        height: 3;
+        padding: 0 1;
+        align: left middle;
+    }}
+
+    .nav-button {{
+        min-width: 12;
+    }}
+
+    #views {{
+        height: 1fr;
+    }}
+
     .pane-title {{
         height: auto;
         color: {palette.section_text};
@@ -91,6 +105,19 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         grid-rows: 1fr;
         height: 1fr;
         padding: 1;
+        grid-gutter: 1;
+    }}
+
+    .surface-view {{
+        height: 1fr;
+        padding: 1;
+    }}
+
+    .two-pane-view {{
+        layout: grid;
+        grid-size: 2 1;
+        grid-columns: 42 1fr;
+        grid-rows: 1fr;
         grid-gutter: 1;
     }}
 
@@ -118,16 +145,40 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         background: {palette.panel_bg};
     }}
 
+    #dataframes-view,
+    #settings-view,
+    #debug-list-pane,
+    #debug-preview-pane,
+    #docs-list-pane,
+    #docs-preview-pane {{
+        height: 1fr;
+        layout: vertical;
+        border: round $surface;
+        padding: 1;
+        background: {palette.panel_bg};
+    }}
+
     #flow-list,
-    #detail-view {{
+    #detail-view,
+    #dataframe-table,
+    #debug-table,
+    #docs-preview,
+    #settings-summary {{
         height: 1fr;
     }}
 
-    #detail-view {{
+    #detail-view,
+    #dataframe-status,
+    #debug-status,
+    #docs-status,
+    #docs-preview,
+    #settings-summary {{
         color: {palette.text};
     }}
 
-    #flow-list {{
+    #flow-list,
+    #debug-artifact-list,
+    #docs-page-list {{
         padding: 0 1;
     }}
 
@@ -136,6 +187,22 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         border: round {palette.panel_border};
         padding: 0 1;
         background: {palette.panel_bg};
+    }}
+
+    #dataframe-path-input {{
+        width: 1fr;
+    }}
+
+    #dataframe-limit-input {{
+        width: 12;
+    }}
+
+    #dataframe-status,
+    #debug-status,
+    #docs-status {{
+        height: auto;
+        color: {palette.muted_text};
+        padding-bottom: 1;
     }}
 
     #flow-list .label {{
@@ -164,14 +231,35 @@ def stylesheet(theme_name: str = DEFAULT_THEME) -> str:
         color: {palette.text};
     }}
 
+    #debug-artifact-list .label,
+    #docs-page-list .label {{
+        height: auto;
+        color: {palette.text};
+    }}
+
     #log-run-list > .list-view--item-highlight {{
         background: {palette.selection_bg};
         color: {palette.selection_text};
     }}
 
-    #flow-list > .list-view--item-highlight {{
+    #flow-list > .list-view--item-highlight,
+    #debug-artifact-list > .list-view--item-highlight,
+    #docs-page-list > .list-view--item-highlight {{
         background: {palette.selection_bg};
         color: {palette.selection_text};
+    }}
+
+    DataTable {{
+        height: 1fr;
+        border: round {palette.panel_border};
+        background: {palette.panel_bg};
+    }}
+
+    Input {{
+        height: 3;
+        background: {palette.panel_bg};
+        color: {palette.text};
+        border: round {palette.panel_border};
     }}
 
     Button {{

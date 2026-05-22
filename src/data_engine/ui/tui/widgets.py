@@ -59,6 +59,16 @@ class RunGroupListItem(ListItem):
         self.label.update(run_group_row_text(self.run_group))
 
 
+class TextListItem(ListItem):
+    """Simple labelled list item carrying one payload value."""
+
+    def __init__(self, title: str, subtitle: str = "", *, value: object | None = None) -> None:
+        self.value = value
+        text = title if not subtitle else f"{title}\n    {subtitle}"
+        self.label = Label(text)
+        super().__init__(self.label)
+
+
 class InfoModal(ModalScreen[None]):
     """Simple centered information modal for TUI drill-ins."""
 
@@ -120,4 +130,4 @@ class InfoModal(ModalScreen[None]):
         self.dismiss(None)
 
 
-__all__ = ["FlowListItem", "GroupHeaderListItem", "InfoModal", "RunGroupListItem"]
+__all__ = ["FlowListItem", "GroupHeaderListItem", "InfoModal", "RunGroupListItem", "TextListItem"]

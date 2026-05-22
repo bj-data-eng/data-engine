@@ -94,10 +94,10 @@ class Flow(_CoreFlow):
 
         Parameters
         ----------
-        authoring_services : AuthoringServices | None
-            Optional service bundle used by tests or embedded hosts.
         inputs : dict[str, object] | None
             Submitted manual-run input values for flows that declare them.
+        authoring_services : AuthoringServices | None
+            Optional service bundle used by tests or embedded hosts.
         runtime_execution_service : RuntimeExecutionService | None
             Optional runtime execution service override.
 
