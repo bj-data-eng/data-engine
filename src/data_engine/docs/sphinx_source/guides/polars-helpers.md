@@ -116,7 +116,9 @@ values in Monday-first order.
 
 Use `propagate_value(...)` when one row in an ordered group carries a value that
 should be visible on every row in the same group. Choose the source row with
-`which="first"` or `which="last"`.
+`which="first"` or `which="last"`. Use `which="before_first"`,
+`which="after_first"`, `which="before_last"`, or `which="after_last"` when the
+value should come from the row adjacent to the matching row.
 
 ```python
 df = df.with_columns(
@@ -140,6 +142,18 @@ df = df.with_columns(
 )
 ```
 
+```python
+df = df.with_columns(
+    previous_step=df.de.propagate_value(
+        "step_name",
+        over="claim_id",
+        sort_by=["step_index", "event_time"],
+        which="before_first",
+        where=pl.col("reviewer").is_not_null(),
+    )
+)
+```
+
 `propagate_last_value(...)` and `propagate_first_value(...)` are convenience
 wrappers over `propagate_value(...)` for code that reads more clearly with an
 explicit helper name.
@@ -148,6 +162,8 @@ Behavior:
 
 - rows are ordered inside each `over` window by `sort_by`
 - `where=...` limits which ordered rows can supply the propagated value
+- adjacent selectors use the row immediately before or after the first or last
+  matching row; missing adjacent rows return null
 - null values are skipped by default with `ignore_nulls=True`
 - `descending` and `nulls_last` are forwarded to Polars ordering
 - the result is a normal expression suitable for `with_columns` or `select`

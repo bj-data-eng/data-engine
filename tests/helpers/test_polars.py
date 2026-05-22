@@ -490,6 +490,136 @@ def test_propagate_value_selects_first_or_last_value_per_window():
     assert result.to_dict(as_series=False)["last_status"] == ["closed", "closed", "closed", "done", "done"]
 
 
+def test_propagate_value_selects_rows_relative_to_first_or_last_match():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a"] * 5 + ["b"] * 4,
+            "step_index": [1, 2, 3, 4, 5, 1, 2, 3, 4],
+            "reviewer": [None, "ann", None, "bob", None, None, "cam", None, None],
+            "status": [
+                "queued",
+                "review",
+                "waiting",
+                "review",
+                "done",
+                "queued",
+                "review",
+                "done",
+                "closed",
+            ],
+        }
+    )
+    reviewer_exists = pl.col("reviewer").is_not_null()
+
+    result = frame.with_columns(
+        before_first=propagate_value(
+            "status",
+            over="claim_id",
+            sort_by="step_index",
+            which="before_first",
+            where=reviewer_exists,
+        ),
+        after_first=propagate_value(
+            "status",
+            over="claim_id",
+            sort_by="step_index",
+            which="after_first",
+            where=reviewer_exists,
+        ),
+        before_last=propagate_value(
+            "status",
+            over="claim_id",
+            sort_by="step_index",
+            which="before_last",
+            where=reviewer_exists,
+        ),
+        after_last=propagate_value(
+            "status",
+            over="claim_id",
+            sort_by="step_index",
+            which="after_last",
+            where=reviewer_exists,
+        ),
+    )
+
+    assert result.to_dict(as_series=False)["before_first"] == [
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+    ]
+    assert result.to_dict(as_series=False)["after_first"] == [
+        "waiting",
+        "waiting",
+        "waiting",
+        "waiting",
+        "waiting",
+        "done",
+        "done",
+        "done",
+        "done",
+    ]
+    assert result.to_dict(as_series=False)["before_last"] == [
+        "waiting",
+        "waiting",
+        "waiting",
+        "waiting",
+        "waiting",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+    ]
+    assert result.to_dict(as_series=False)["after_last"] == [
+        "done",
+        "done",
+        "done",
+        "done",
+        "done",
+        "done",
+        "done",
+        "done",
+        "done",
+    ]
+
+
+def test_propagate_value_relative_selectors_return_null_when_adjacent_row_is_missing():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "b", "b"],
+            "step_index": [1, 2, 1, 2],
+            "reviewer": ["ann", None, None, "cam"],
+            "status": ["review", "done", "queued", "review"],
+        }
+    )
+    reviewer_exists = pl.col("reviewer").is_not_null()
+
+    result = frame.with_columns(
+        before_first=propagate_value(
+            "status",
+            over="claim_id",
+            sort_by="step_index",
+            which="before_first",
+            where=reviewer_exists,
+        ),
+        after_last=propagate_value(
+            "status",
+            over="claim_id",
+            sort_by="step_index",
+            which="after_last",
+            where=reviewer_exists,
+        ),
+    )
+
+    assert result.to_dict(as_series=False)["before_first"] == [None, None, "queued", "queued"]
+    assert result.to_dict(as_series=False)["after_last"] == ["done", "done", None, None]
+
+
 def test_propagate_value_rejects_unknown_selector():
     with pytest.raises(ValueError, match="which"):
         propagate_value("status", over="claim_id", sort_by="step_index", which="middle")

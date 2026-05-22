@@ -342,7 +342,9 @@ def propagate_value(
     sort_by : ColumnExprs
         Ordering column or columns used to define row order in each window.
     which : str
-        Ordered value selector. Use ``"first"`` or ``"last"``.
+        Ordered value selector. Use ``"first"``, ``"last"``,
+        ``"before_first"``, ``"after_first"``, ``"before_last"``, or
+        ``"after_last"``.
     where : pl.Expr | None
         Optional row predicate that limits which sorted rows can supply the
         propagated value.
@@ -361,7 +363,7 @@ def propagate_value(
     Raises
     ------
     ValueError
-        If ``which`` is not ``"first"`` or ``"last"``.
+        If ``which`` is not one of the supported selectors.
 
     Examples
     --------
@@ -417,10 +419,28 @@ def propagate_value(
                 where=pl.col("reviewer").is_not_null(),
             )
         )
+
+    Use ``which="before_first"`` to propagate the row immediately before the
+    first matching row:
+
+    .. code-block:: python
+
+        df = df.with_columns(
+            previous_reviewer=data_engine.helpers.propagate_value(
+                "reviewer",
+                over="claim_id",
+                sort_by="claim_step_index",
+                which="before_first",
+                where=pl.col("reviewer").is_not_null(),
+            )
+        )
     """
-    normalized_which = which.strip().lower()
-    if normalized_which not in {"first", "last"}:
-        raise ValueError("which must be 'first' or 'last'.")
+    normalized_which = str(which).strip().lower()
+    selectors = {"first", "last", "before_first", "after_first", "before_last", "after_last"}
+    if normalized_which not in selectors:
+        raise ValueError(
+            "which must be 'first', 'last', 'before_first', 'after_first', 'before_last', or 'after_last'."
+        )
     sort_exprs = _as_column_exprs(sort_by)
     value_expr = _as_column_expr(value)
     ordered = value_expr.sort_by(
@@ -428,17 +448,37 @@ def propagate_value(
         descending=descending,
         nulls_last=nulls_last,
     )
-    if where is not None:
-        ordered = ordered.filter(
-            where.sort_by(
-                sort_exprs,
-                descending=descending,
-                nulls_last=nulls_last,
-            )
+    sorted_where = (
+        where.sort_by(
+            sort_exprs,
+            descending=descending,
+            nulls_last=nulls_last,
         )
-    if ignore_nulls:
-        ordered = ordered.drop_nulls()
-    selected = ordered.first() if normalized_which == "first" else ordered.last()
+        if where is not None
+        else pl.lit(True)
+    )
+    if normalized_which == "first":
+        ordered = ordered.filter(sorted_where)
+        if ignore_nulls:
+            ordered = ordered.drop_nulls()
+        selected = ordered.first()
+    elif normalized_which == "last":
+        ordered = ordered.filter(sorted_where)
+        if ignore_nulls:
+            ordered = ordered.drop_nulls()
+        selected = ordered.last()
+    else:
+        first_match = sorted_where & (sorted_where.cast(pl.UInt32).cum_sum() == 1)
+        last_match = sorted_where & (sorted_where.reverse().cast(pl.UInt32).cum_sum().reverse() == 1)
+        match normalized_which:
+            case "before_first":
+                selected = ordered.filter(first_match.shift(-1).fill_null(False)).first()
+            case "after_first":
+                selected = ordered.filter(first_match.shift(1).fill_null(False)).first()
+            case "before_last":
+                selected = ordered.filter(last_match.shift(-1).fill_null(False)).last()
+            case "after_last":
+                selected = ordered.filter(last_match.shift(1).fill_null(False)).last()
     return selected.over(_as_column_exprs(over))
 
 
@@ -447,6 +487,7 @@ def propagate_last_value(
     *,
     over: ColumnExprs,
     sort_by: ColumnExprs,
+    which: str = "last",
     where: pl.Expr | None = None,
     descending: DescendingLike = False,
     nulls_last: bool = False,
@@ -454,14 +495,14 @@ def propagate_last_value(
 ) -> pl.Expr:
     """Return an expression that broadcasts the last ordered value per window.
 
-    This is a convenience wrapper around :func:`propagate_value` with
-    ``which="last"``.
+    This is a convenience wrapper around :func:`propagate_value` with a default
+    ``which="last"`` selector.
     """
     return propagate_value(
         value,
         over=over,
         sort_by=sort_by,
-        which="last",
+        which=which,
         where=where,
         descending=descending,
         nulls_last=nulls_last,
@@ -474,6 +515,7 @@ def propagate_first_value(
     *,
     over: ColumnExprs,
     sort_by: ColumnExprs,
+    which: str = "first",
     where: pl.Expr | None = None,
     descending: DescendingLike = False,
     nulls_last: bool = False,
@@ -481,8 +523,8 @@ def propagate_first_value(
 ) -> pl.Expr:
     """Return an expression that broadcasts the first ordered value per window.
 
-    This is a convenience wrapper around :func:`propagate_value` with
-    ``which="first"``.
+    This is a convenience wrapper around :func:`propagate_value` with a default
+    ``which="first"`` selector.
 
     Parameters
     ----------
@@ -492,6 +534,8 @@ def propagate_first_value(
         Window column or columns.
     sort_by : ColumnExprs
         Ordering column or columns used to define the first row in each window.
+    which : str
+        Ordered value selector. Defaults to ``"first"``.
     where : pl.Expr | None
         Optional row predicate that limits which sorted rows can supply the
         propagated value.
@@ -525,7 +569,7 @@ def propagate_first_value(
         value,
         over=over,
         sort_by=sort_by,
-        which="first",
+        which=which,
         where=where,
         descending=descending,
         nulls_last=nulls_last,
@@ -1446,6 +1490,7 @@ class DataEngineDataFrameNamespace:
         *,
         over: ColumnExprs,
         sort_by: ColumnExprs,
+        which: str = "last",
         where: pl.Expr | None = None,
         descending: DescendingLike = False,
         nulls_last: bool = False,
@@ -1465,6 +1510,8 @@ class DataEngineDataFrameNamespace:
         sort_by : ColumnExprs
             Ordering column or columns used to define the last row in each
             window.
+        which : str
+            Ordered value selector. Defaults to ``"last"``.
         where : pl.Expr | None
             Optional row predicate that limits which sorted rows can supply the
             propagated value.
@@ -1485,6 +1532,7 @@ class DataEngineDataFrameNamespace:
             value,
             over=over,
             sort_by=sort_by,
+            which=which,
             where=where,
             descending=descending,
             nulls_last=nulls_last,
@@ -1497,6 +1545,7 @@ class DataEngineDataFrameNamespace:
         *,
         over: ColumnExprs,
         sort_by: ColumnExprs,
+        which: str = "first",
         where: pl.Expr | None = None,
         descending: DescendingLike = False,
         nulls_last: bool = False,
@@ -1516,6 +1565,8 @@ class DataEngineDataFrameNamespace:
         sort_by : ColumnExprs
             Ordering column or columns used to define the first row in each
             window.
+        which : str
+            Ordered value selector. Defaults to ``"first"``.
         where : pl.Expr | None
             Optional row predicate that limits which sorted rows can supply the
             propagated value.
@@ -1536,6 +1587,7 @@ class DataEngineDataFrameNamespace:
             value,
             over=over,
             sort_by=sort_by,
+            which=which,
             where=where,
             descending=descending,
             nulls_last=nulls_last,
@@ -2087,6 +2139,7 @@ class DataEngineLazyFrameNamespace:
         *,
         over: ColumnExprs,
         sort_by: ColumnExprs,
+        which: str = "last",
         where: pl.Expr | None = None,
         descending: DescendingLike = False,
         nulls_last: bool = False,
@@ -2106,6 +2159,8 @@ class DataEngineLazyFrameNamespace:
         sort_by : ColumnExprs
             Ordering column or columns used to define the last row in each
             window.
+        which : str
+            Ordered value selector. Defaults to ``"last"``.
         where : pl.Expr | None
             Optional row predicate that limits which sorted rows can supply the
             propagated value.
@@ -2126,6 +2181,7 @@ class DataEngineLazyFrameNamespace:
             value,
             over=over,
             sort_by=sort_by,
+            which=which,
             where=where,
             descending=descending,
             nulls_last=nulls_last,
@@ -2138,6 +2194,7 @@ class DataEngineLazyFrameNamespace:
         *,
         over: ColumnExprs,
         sort_by: ColumnExprs,
+        which: str = "first",
         where: pl.Expr | None = None,
         descending: DescendingLike = False,
         nulls_last: bool = False,
@@ -2157,6 +2214,8 @@ class DataEngineLazyFrameNamespace:
         sort_by : ColumnExprs
             Ordering column or columns used to define the first row in each
             window.
+        which : str
+            Ordered value selector. Defaults to ``"first"``.
         where : pl.Expr | None
             Optional row predicate that limits which sorted rows can supply the
             propagated value.
@@ -2177,6 +2236,7 @@ class DataEngineLazyFrameNamespace:
             value,
             over=over,
             sort_by=sort_by,
+            which=which,
             where=where,
             descending=descending,
             nulls_last=nulls_last,
