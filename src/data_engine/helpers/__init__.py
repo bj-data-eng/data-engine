@@ -19,6 +19,7 @@ from data_engine.helpers.polars import DataEngineLazyFrameNamespace
 from data_engine.helpers.polars import networkdays
 from data_engine.helpers.polars import propagate_first_value
 from data_engine.helpers.polars import propagate_last_value
+from data_engine.helpers.polars import propagate_value
 from data_engine.helpers.polars import remove_null_columns
 from data_engine.helpers.polars import sink_parquet_atomic
 from data_engine.helpers.polars import visit_counter
@@ -45,6 +46,7 @@ __all__ = [
     "normalize_columns",
     "propagate_first_value",
     "propagate_last_value",
+    "propagate_value",
     "remove_null_columns",
     "read_rows_by_values",
     "read_sql",

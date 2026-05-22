@@ -114,16 +114,17 @@ values in Monday-first order.
 
 ## Ordered Window Helpers
 
-Use `propagate_last_value(...)` and `propagate_first_value(...)` when one row in
-an ordered group carries a value that should be visible on every row in the same
-group.
+Use `propagate_value(...)` when one row in an ordered group carries a value that
+should be visible on every row in the same group. Choose the source row with
+`which="first"` or `which="last"`.
 
 ```python
 df = df.with_columns(
-    latest_status=data_engine.helpers.propagate_last_value(
+    latest_status=data_engine.helpers.propagate_value(
         "status",
         over="claim_id",
         sort_by="step_index",
+        which="last",
     )
 )
 ```
@@ -138,6 +139,10 @@ df = df.with_columns(
     )
 )
 ```
+
+`propagate_last_value(...)` and `propagate_first_value(...)` are convenience
+wrappers over `propagate_value(...)` for code that reads more clearly with an
+explicit helper name.
 
 Behavior:
 

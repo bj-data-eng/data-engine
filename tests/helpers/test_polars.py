@@ -10,6 +10,7 @@ import pytest
 from data_engine.helpers import networkdays
 from data_engine.helpers import propagate_first_value
 from data_engine.helpers import propagate_last_value
+from data_engine.helpers import propagate_value
 from data_engine.helpers import remove_null_columns
 from data_engine.helpers import sink_parquet_atomic
 from data_engine.helpers import visit_counter
@@ -471,6 +472,29 @@ def test_propagate_last_value_broadcasts_latest_non_null_value_per_window():
     ]
 
 
+def test_propagate_value_selects_first_or_last_value_per_window():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "a", "b", "b"],
+            "step_index": [1, 2, 3, 1, 2],
+            "status": ["open", None, "closed", "queued", "done"],
+        }
+    )
+
+    result = frame.with_columns(
+        first_status=propagate_value("status", over="claim_id", sort_by="step_index", which="first"),
+        last_status=propagate_value("status", over="claim_id", sort_by="step_index", which="last"),
+    )
+
+    assert result.to_dict(as_series=False)["first_status"] == ["open", "open", "open", "queued", "queued"]
+    assert result.to_dict(as_series=False)["last_status"] == ["closed", "closed", "closed", "done", "done"]
+
+
+def test_propagate_value_rejects_unknown_selector():
+    with pytest.raises(ValueError, match="which"):
+        propagate_value("status", over="claim_id", sort_by="step_index", which="middle")
+
+
 def test_propagate_last_value_accepts_multiple_window_and_sort_columns():
     frame = pl.DataFrame(
         {
@@ -518,6 +542,27 @@ def test_propagate_last_value_namespace_helpers_work_for_eager_and_lazy_frames()
 
     assert eager.to_dict(as_series=False)["latest_status"] == ["open", "open", "done", "done"]
     assert lazy.to_dict(as_series=False)["latest_status"] == ["open", "open", "done", "done"]
+
+
+def test_propagate_value_namespace_helpers_work_for_eager_and_lazy_frames():
+    frame = pl.DataFrame(
+        {
+            "claim_id": ["a", "a", "b", "b"],
+            "step_index": [1, 2, 1, 2],
+            "status": ["open", "closed", "queued", "done"],
+        }
+    )
+
+    eager = frame.with_columns(
+        selected_status=frame.de.propagate_value("status", over="claim_id", sort_by="step_index", which="first")
+    )
+    lazy_frame = frame.lazy()
+    lazy = lazy_frame.with_columns(
+        selected_status=lazy_frame.de.propagate_value("status", over="claim_id", sort_by="step_index", which="last")
+    ).collect()
+
+    assert eager.to_dict(as_series=False)["selected_status"] == ["open", "open", "queued", "queued"]
+    assert lazy.to_dict(as_series=False)["selected_status"] == ["closed", "closed", "done", "done"]
 
 
 def test_propagate_last_value_can_keep_nulls_when_requested():

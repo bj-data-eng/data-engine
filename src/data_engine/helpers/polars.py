@@ -314,20 +314,21 @@ def _remove_null_columns_lazy(lf: pl.LazyFrame) -> pl.LazyFrame:
     return lf.select(keep_columns)
 
 
-def propagate_last_value(
+def propagate_value(
     value: ColumnExpr,
     *,
     over: ColumnExprs,
     sort_by: ColumnExprs,
+    which: str = "last",
     where: pl.Expr | None = None,
     descending: DescendingLike = False,
     nulls_last: bool = False,
     ignore_nulls: bool = True,
 ) -> pl.Expr:
-    """Return an expression that broadcasts the last ordered value per window.
+    """Return an expression that broadcasts one ordered value per window.
 
     The helper sorts rows inside each ``over`` window, optionally filters the
-    ordered rows with ``where``, takes the last ``value`` from that ordered
+    ordered rows with ``where``, takes the selected ``value`` from that ordered
     candidate set, and propagates it to every row in the same window. Null
     values are ignored by default, which matches the common pattern where only
     one row in a window contains the value to carry across the group.
@@ -339,7 +340,9 @@ def propagate_last_value(
     over : ColumnExprs
         Window column or columns.
     sort_by : ColumnExprs
-        Ordering column or columns used to define the last row in each window.
+        Ordering column or columns used to define row order in each window.
+    which : str
+        Ordered value selector. Use ``"first"`` or ``"last"``.
     where : pl.Expr | None
         Optional row predicate that limits which sorted rows can supply the
         propagated value.
@@ -354,6 +357,11 @@ def propagate_last_value(
     -------
     pl.Expr
         Window expression suitable for ``with_columns`` or ``select``.
+
+    Raises
+    ------
+    ValueError
+        If ``which`` is not ``"first"`` or ``"last"``.
 
     Examples
     --------
@@ -395,7 +403,24 @@ def propagate_last_value(
                 where=pl.col("status") != "Archive",
             )
         )
+
+    Use ``which="first"`` to propagate the first matching row:
+
+    .. code-block:: python
+
+        df = df.with_columns(
+            first_reviewer=data_engine.helpers.propagate_value(
+                "reviewer",
+                over="claim_id",
+                sort_by="claim_step_index",
+                which="first",
+                where=pl.col("reviewer").is_not_null(),
+            )
+        )
     """
+    normalized_which = which.strip().lower()
+    if normalized_which not in {"first", "last"}:
+        raise ValueError("which must be 'first' or 'last'.")
     sort_exprs = _as_column_exprs(sort_by)
     value_expr = _as_column_expr(value)
     ordered = value_expr.sort_by(
@@ -413,7 +438,35 @@ def propagate_last_value(
         )
     if ignore_nulls:
         ordered = ordered.drop_nulls()
-    return ordered.last().over(_as_column_exprs(over))
+    selected = ordered.first() if normalized_which == "first" else ordered.last()
+    return selected.over(_as_column_exprs(over))
+
+
+def propagate_last_value(
+    value: ColumnExpr,
+    *,
+    over: ColumnExprs,
+    sort_by: ColumnExprs,
+    where: pl.Expr | None = None,
+    descending: DescendingLike = False,
+    nulls_last: bool = False,
+    ignore_nulls: bool = True,
+) -> pl.Expr:
+    """Return an expression that broadcasts the last ordered value per window.
+
+    This is a convenience wrapper around :func:`propagate_value` with
+    ``which="last"``.
+    """
+    return propagate_value(
+        value,
+        over=over,
+        sort_by=sort_by,
+        which="last",
+        where=where,
+        descending=descending,
+        nulls_last=nulls_last,
+        ignore_nulls=ignore_nulls,
+    )
 
 
 def propagate_first_value(
@@ -428,10 +481,8 @@ def propagate_first_value(
 ) -> pl.Expr:
     """Return an expression that broadcasts the first ordered value per window.
 
-    The helper sorts rows inside each ``over`` window, optionally filters the
-    ordered rows with ``where``, takes the first ``value`` from that ordered
-    candidate set, and propagates it to every row in the same window. Null
-    values are ignored by default.
+    This is a convenience wrapper around :func:`propagate_value` with
+    ``which="first"``.
 
     Parameters
     ----------
@@ -470,24 +521,16 @@ def propagate_first_value(
             )
         )
     """
-    sort_exprs = _as_column_exprs(sort_by)
-    value_expr = _as_column_expr(value)
-    ordered = value_expr.sort_by(
-        sort_exprs,
+    return propagate_value(
+        value,
+        over=over,
+        sort_by=sort_by,
+        which="first",
+        where=where,
         descending=descending,
         nulls_last=nulls_last,
+        ignore_nulls=ignore_nulls,
     )
-    if where is not None:
-        ordered = ordered.filter(
-            where.sort_by(
-                sort_exprs,
-                descending=descending,
-                nulls_last=nulls_last,
-            )
-        )
-    if ignore_nulls:
-        ordered = ordered.drop_nulls()
-    return ordered.first().over(_as_column_exprs(over))
 
 
 def visit_counter(
@@ -1369,6 +1412,34 @@ class DataEngineDataFrameNamespace:
             mask=mask,
         )
 
+    def propagate_value(
+        self,
+        value: ColumnExpr,
+        *,
+        over: ColumnExprs,
+        sort_by: ColumnExprs,
+        which: str = "last",
+        where: pl.Expr | None = None,
+        descending: DescendingLike = False,
+        nulls_last: bool = False,
+        ignore_nulls: bool = True,
+    ) -> pl.Expr:
+        """Return an expression broadcasting one ordered value per window.
+
+        This is a convenience wrapper around
+        :func:`data_engine.helpers.propagate_value`.
+        """
+        return propagate_value(
+            value,
+            over=over,
+            sort_by=sort_by,
+            which=which,
+            where=where,
+            descending=descending,
+            nulls_last=nulls_last,
+            ignore_nulls=ignore_nulls,
+        )
+
     def propagate_last_value(
         self,
         value: ColumnExpr,
@@ -1980,6 +2051,34 @@ class DataEngineLazyFrameNamespace:
             holidays=holidays,
             count_first_day=count_first_day,
             mask=mask,
+        )
+
+    def propagate_value(
+        self,
+        value: ColumnExpr,
+        *,
+        over: ColumnExprs,
+        sort_by: ColumnExprs,
+        which: str = "last",
+        where: pl.Expr | None = None,
+        descending: DescendingLike = False,
+        nulls_last: bool = False,
+        ignore_nulls: bool = True,
+    ) -> pl.Expr:
+        """Return an expression broadcasting one ordered value per window.
+
+        This is a convenience wrapper around
+        :func:`data_engine.helpers.propagate_value`.
+        """
+        return propagate_value(
+            value,
+            over=over,
+            sort_by=sort_by,
+            which=which,
+            where=where,
+            descending=descending,
+            nulls_last=nulls_last,
+            ignore_nulls=ignore_nulls,
         )
 
     def propagate_last_value(
