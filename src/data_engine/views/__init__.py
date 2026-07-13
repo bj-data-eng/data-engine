@@ -13,7 +13,7 @@ from data_engine.domain import (
     short_source_label,
 )
 from data_engine.views.logs import FlowLogStore
-from data_engine.views.actions import GuiActionState, TuiActionState, build_operator_action_context
+from data_engine.views.actions import GuiActionState, build_operator_action_context
 from data_engine.views.artifacts import ArtifactPreviewSpec, classify_artifact_preview, is_text_artifact
 from data_engine.views.flow_display import FlowRowDisplay, GroupRowDisplay
 from data_engine.views.models import (
@@ -31,8 +31,6 @@ from data_engine.views.presentation import (
     group_cards,
     group_label,
     group_secondary_text,
-    operation_marker,
-    state_dot,
     status_color_name,
 )
 from data_engine.views.state import (
@@ -46,15 +44,6 @@ from data_engine.views.state import (
 from data_engine.views.status import WORKSPACE_UNAVAILABLE_TEXT, surface_control_status_text
 from data_engine.views.runs import RunGroupDisplay, format_raw_log_message
 from data_engine.views.selection import SelectedFlowPresentation, build_selected_flow_presentation
-from data_engine.views.text import (
-    format_optional_seconds,
-    pad,
-    render_operation_lines,
-    render_run_group_lines,
-    render_selected_flow_lines,
-    run_group_row_text,
-    short_datetime,
-)
 
 __all__ = [
     "FlowLogStore",
@@ -72,7 +61,6 @@ __all__ = [
     "RunGroupDisplay",
     "RunKey",
     "RuntimeStepEvent",
-    "TuiActionState",
     "artifact_key_for_operation",
     "build_flow_summary",
     "capture_step_outputs",
@@ -84,7 +72,6 @@ __all__ = [
     "format_log_line",
     "format_raw_log_message",
     "format_runtime_message",
-    "format_optional_seconds",
     "format_seconds",
     "group_cards",
     "group_label",
@@ -92,19 +79,11 @@ __all__ = [
     "is_text_artifact",
     "is_inspectable_operation",
     "load_qt_flow_cards",
-    "operation_marker",
-    "pad",
     "parse_runtime_event",
     "parse_runtime_message",
-    "render_operation_lines",
-    "render_run_group_lines",
-    "render_selected_flow_lines",
-    "run_group_row_text",
     "SelectedFlowPresentation",
-    "short_datetime",
     "short_source_label",
     "surface_control_status_text",
-    "state_dot",
     "status_color_name",
     "WORKSPACE_UNAVAILABLE_TEXT",
     "build_selected_flow_presentation",

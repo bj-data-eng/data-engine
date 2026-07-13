@@ -20,47 +20,27 @@ et-xmlfile==2.0.0 \
     --hash=sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa
 fastexcel==0.19.0 \
     --hash=sha256:fbbdf9de79c3ef3572809bb187927c0dc5840968ffe513ea015a383024b7c6b0
-linkify-it-py==2.1.0 \
-    --hash=sha256:0d252c1594ecba2ecedc444053db5d3a9b7ec1b0dd929c8f1d74dce89f86c05e
-markdown-it-py==4.0.0 \
-    --hash=sha256:87327c59b172c5011896038353a81343b6754500a08cd7a4973bb48c6d578147
-mdit-py-plugins==0.5.0 \
-    --hash=sha256:07a08422fc1936a5d26d146759e9155ea466e842f5ab2f7d2266dd084c8dab1f
-mdurl==0.1.2 \
-    --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8
 numpy==2.4.4 \
     --hash=sha256:715d1c092715954784bc79e1174fc2a90093dc4dc84ea15eb14dad8abdcdeb74
 openpyxl==3.1.5 \
     --hash=sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2
-platformdirs==4.9.6 \
-    --hash=sha256:e61adb1d5e5cb3441b4b7710bea7e4c12250ca49439228cc1021c00dcfac0917
 polars==1.39.3 \
     --hash=sha256:c2b955ccc0a08a2bc9259785decf3d5c007b489b523bf2390cf21cec2bb82a56
 polars-runtime-32==1.39.3 \
     --hash=sha256:d66ca522517554a883446957539c40dc7b75eb0c2220357fb28bc8940d305339
 pyarrow==23.0.1 \
     --hash=sha256:3a4c85ef66c134161987c17b147d6bffdca4566f9a4c1d81a0a01cdf08414ea5
-pygments==2.20.0 \
-    --hash=sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176
 pyside6==6.11.0 \
     --hash=sha256:9092cb002ca43c64006afb2e0d0f6f51aef17aa737c33a45e502326a081ddcbc
 pyside6-addons==6.11.0 \
     --hash=sha256:413e6121c24f5ffdce376298059eddecff74aa6d638e94e0f6015b33d29b889e
 pyside6-essentials==6.11.0 \
     --hash=sha256:3b3362882ad9389357a80504e600180006a957731fec05786fced7b038461fdf
-rich==14.3.3 \
-    --hash=sha256:793431c1f8619afa7d3b52b2cdec859562b950ea0d4b6b505397612db8d5362d
 shiboken6==6.11.0 \
     --hash=sha256:483ff78a73c7b3189ca924abc694318084f078bcfeaffa68e32024ff2d025ee1
-textual==8.2.3 \
-    --hash=sha256:5008ac581bebf1f6fa0520404261844a231e5715fdbddd10ca73916a3af48ca2
-typing-extensions==4.15.0 \
-    --hash=sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548
 tzdata==2026.1 \
     --hash=sha256:4b1d2be7ac37ceafd7327b961aa3a54e467efbdb563a23655fbfe0d39cfc42a9
 tzlocal==5.3.1 \
     --hash=sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d
-uc-micro-py==2.0.0 \
-    --hash=sha256:3603a3859af53e5a39bc7677713c78ea6589ff188d70f4fee165db88e22b242c
 xlsxwriter==3.2.9 \
     --hash=sha256:9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3

@@ -61,28 +61,6 @@ def test_cli_start_gui_reports_immediate_startup_failure(monkeypatch, capsys):
 
     assert result == 2
     assert "exited during startup" in capsys.readouterr().err
-
-
-def test_cli_start_tui_launches_terminal_surface(monkeypatch):
-    launched: list[str] = []
-    monkeypatch.setattr("data_engine.ui.cli.commands_start.launch_terminal_ui", lambda: launched.append("tui") or 0)
-
-    result = main(["start", "tui"])
-
-    assert result == 0
-    assert launched == ["tui"]
-
-
-def test_cli_run_tui_launches_terminal_surface(monkeypatch):
-    launched: list[str] = []
-    monkeypatch.setattr("data_engine.ui.cli.commands_start.launch_terminal_ui", lambda: launched.append("tui") or 0)
-
-    result = main(["run", "tui"])
-
-    assert result == 0
-    assert launched == ["tui"]
-
-
 def test_preferred_gui_python_executable_preserves_venv_python_on_macos(monkeypatch, tmp_path):
     venv_python = tmp_path / ".venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)

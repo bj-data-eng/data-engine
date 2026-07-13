@@ -1,4 +1,4 @@
-"""Shared operator action-state view models across GUI and TUI."""
+"""Operator action-state view models for the desktop UI."""
 
 from __future__ import annotations
 
@@ -18,10 +18,8 @@ def build_operator_action_context(
     engine_truth_known: bool = False,
     live_runs: dict[str, object] | None = None,
     engine_active_flow_names: tuple[str, ...] = (),
-    has_logs: bool,
     has_automated_flows: bool,
     workspace_available: bool = True,
-    selected_run_group_present: bool = False,
     local_request_pending: bool = False,
     overlay: PendingWorkspaceActionOverlay | None = None,
 ) -> OperatorActionContext:
@@ -32,7 +30,6 @@ def build_operator_action_context(
         runtime_session=runtime_session,
         flow_groups_by_name=flow_groups_by_name,
         active_flow_states=active_flow_states,
-        has_logs=has_logs,
         live_runs=live_runs,
         engine_active_flow_names=engine_active_flow_names,
     )
@@ -57,7 +54,6 @@ def build_operator_action_context(
         live_truth_known=live_runs is not None,
         live_manual_run_active=live_manual_run_active,
         workspace_available=workspace_available,
-        selected_run_group_present=selected_run_group_present,
         local_request_pending=local_request_pending,
         overlay=PendingWorkspaceActionOverlay() if overlay is None else overlay,
     )
@@ -171,55 +167,7 @@ class GuiActionState:
         )
 
 
-@dataclass(frozen=True)
-class TuiActionState:
-    """Button and control state for the terminal UI surface."""
-
-    refresh_disabled: bool
-    run_once_disabled: bool
-    start_engine_disabled: bool
-    stop_engine_disabled: bool
-    view_config_disabled: bool
-    view_log_disabled: bool
-    clear_flow_log_disabled: bool
-    @classmethod
-    def from_context(cls, context: OperatorActionContext) -> "TuiActionState":
-        """Return the TUI action state derived from one operator action context."""
-        engine_starting = context.engine_starting
-        engine_busy = context.engine_running
-        overlay = context.overlay
-        busy = context.engine_busy or context.manual_run_active or overlay.engine_transition_pending
-        return cls(
-            refresh_disabled=busy or overlay.refresh_flows_pending,
-            run_once_disabled=(
-                engine_starting
-                or overlay.run_selected_flow_pending
-                or (context.selected_flow.automated and context.engine_busy)
-                or
-                context.selected_flow.group_active
-                or not context.control_available
-                or not context.workspace_available
-            ),
-            start_engine_disabled=busy or not context.control_available or not context.workspace_available,
-            stop_engine_disabled=(
-                not (engine_busy or context.manual_run_active)
-                or not context.control_available
-                or not context.workspace_available
-            ),
-            view_config_disabled=not context.selected_flow.present,
-            view_log_disabled=not context.selected_run_group_present,
-            clear_flow_log_disabled=(
-                not context.selected_flow.present
-                or busy
-                or context.selected_flow.group_active
-                or not context.control_available
-                or not context.workspace_available
-            ),
-        )
-
-
 __all__ = [
     "build_operator_action_context",
     "GuiActionState",
-    "TuiActionState",
 ]

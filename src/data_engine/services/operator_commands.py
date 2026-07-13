@@ -1,4 +1,4 @@
-"""Operator command port for GUI/TUI surfaces."""
+"""Operator command port for the desktop surface."""
 
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ class CommandPort(Protocol):
 
 
 class OperatorCommandService:
-    """Own explicit operator command orchestration for GUI/TUI surfaces."""
+    """Own explicit operator command orchestration for the desktop surface."""
 
     def __init__(
         self,

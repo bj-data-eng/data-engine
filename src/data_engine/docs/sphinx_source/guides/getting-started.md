@@ -20,7 +20,7 @@ In practice:
 - the flow-module filename is the stable flow identity; `Flow(label=...)` is an optional display title
 - the flow definition provides a group, runtime mode, optional source and mirror bindings, and ordered steps
 - step functions do real work with native libraries such as Polars, DuckDB, and plain Python
-- the GUI and TUI surfaces discover those flow modules inside the selected workspace and show them as configurable runnable flows
+- the GUI discovers those flow modules inside the selected workspace and shows them as configurable runnable flows
 
 The fluent API owns orchestration, while the step callables own your actual business logic.
 

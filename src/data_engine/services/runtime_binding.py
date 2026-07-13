@@ -153,7 +153,7 @@ class WorkspaceRuntimeBinding:
 
 
 class WorkspaceRuntimeBindingService:
-    """Own concrete runtime binding lifecycle for GUI/TUI surfaces."""
+    """Own concrete runtime binding lifecycle for the desktop surface."""
 
     def __init__(
         self,

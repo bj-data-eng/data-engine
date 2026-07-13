@@ -19,8 +19,6 @@ def start_surface(surface: str) -> int:
     """Launch one operator surface."""
     if surface == "gui":
         return start_gui_subprocess()
-    if surface == "tui":
-        return launch_terminal_ui()
     raise FlowValidationError(f"Unknown surface: {surface}")
 
 
@@ -68,17 +66,8 @@ def launch_desktop_ui(*, theme_name: str | None = None) -> int:
     return 0
 
 
-def launch_terminal_ui() -> int:
-    """Launch the Textual terminal UI in the current process."""
-    from data_engine.ui.tui.app import main as tui_main
-
-    tui_main()
-    return 0
-
-
 __all__ = [
     "launch_desktop_ui",
-    "launch_terminal_ui",
     "preferred_gui_python_executable",
     "start_gui_subprocess",
     "start_surface",

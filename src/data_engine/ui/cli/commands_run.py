@@ -10,7 +10,7 @@ import sys
 from data_engine.core.model import FlowValidationError
 from data_engine.platform.processes import windows_subprocess_creationflags
 
-TEST_SLICE_CHOICES = ("all", "unit", "ui", "qt", "tui", "integration", "live")
+TEST_SLICE_CHOICES = ("all", "unit", "ui", "qt", "integration", "live")
 
 
 def checkout_tests_dir(app_root: Path) -> Path:
@@ -48,7 +48,6 @@ def raise_open_file_limit(*, minimum_soft_limit: int = 4096) -> None:
 def test_slice_args(slice_name: str, *, app_root: Path) -> tuple[str, ...]:
     tests_dir = checkout_tests_dir(app_root)
     qt_tests = tests_dir / "gui" / "qt"
-    tui_tests = tests_dir / "tui"
     integration_tests = tests_dir / "integration"
     live_tests = tests_dir / "daemon" / "test_live_runtime_suite.py"
     match slice_name:
@@ -58,16 +57,13 @@ def test_slice_args(slice_name: str, *, app_root: Path) -> tuple[str, ...]:
             return (
                 str(tests_dir),
                 f"--ignore={qt_tests}",
-                f"--ignore={tui_tests}",
                 f"--ignore={integration_tests}",
                 f"--ignore={live_tests}",
             )
         case "ui":
-            return (str(qt_tests), str(tui_tests))
+            return (str(qt_tests),)
         case "qt":
             return (str(qt_tests),)
-        case "tui":
-            return (str(tui_tests),)
         case "integration":
             return (str(integration_tests),)
         case "live":

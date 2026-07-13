@@ -30,7 +30,6 @@ def test_build_parser_exposes_new_public_commands():
     assert type(parser._get_formatter()) is _HelpFormatter
     assert parser.parse_args(["start", "gui"]).start_command == "gui"
     assert parser.parse_args(["run", "gui"]).run_command == "gui"
-    assert parser.parse_args(["run", "tui"]).run_command == "tui"
     assert parser.parse_args(["create", "workspace", "/tmp/example"]).create_command == "workspace"
     assert parser.parse_args(["run", "tests"]).slice == "unit"
     assert parser.parse_args(["run", "tests", "all"]).slice == "all"
@@ -109,8 +108,8 @@ def test_test_slice_args_cover_named_human_slices(tmp_path):
     tests_dir.mkdir(parents=True)
 
     assert _test_slice_args("all", app_root=app_root) == (str(tests_dir),)
+    assert _test_slice_args("ui", app_root=app_root) == (str(tests_dir / "gui" / "qt"),)
     assert _test_slice_args("qt", app_root=app_root) == (str(tests_dir / "gui" / "qt"),)
-    assert _test_slice_args("tui", app_root=app_root) == (str(tests_dir / "tui"),)
     assert _test_slice_args("integration", app_root=app_root) == (str(tests_dir / "integration"),)
     assert _test_slice_args("live", app_root=app_root) == (str(tests_dir / "daemon" / "test_live_runtime_suite.py"),)
     unit_args = _test_slice_args("unit", app_root=app_root)

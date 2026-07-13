@@ -22,7 +22,6 @@ from data_engine.ui.cli import commands_doctor as _commands_doctor
 from data_engine.ui.cli import commands_run as _commands_run
 from data_engine.ui.cli.commands_start import (
     launch_desktop_ui as _launch_desktop_ui,
-    launch_terminal_ui as _launch_terminal_ui,
     preferred_gui_python_executable as _preferred_gui_python_executable,
     start_gui_subprocess as _start_gui_subprocess,
     start_surface as _start_surface,
@@ -90,7 +89,7 @@ def _infer_project_root_from_cwd(cwd: Path) -> Path | None:
 
 
 def _run_command(args: argparse.Namespace, *, dependencies: CliDependencies) -> int:
-    if args.run_command in {"gui", "tui"}:
+    if args.run_command == "gui":
         return _start_surface(args.run_command)
     if args.run_command == "tests":
         return _run_tests(slice_name=args.slice, list_slices=args.list_slices, dependencies=dependencies)
@@ -152,7 +151,6 @@ __all__ = [
     "_doctor_daemons",
     "_infer_project_root_from_cwd",
     "_launch_desktop_ui",
-    "_launch_terminal_ui",
     "_preferred_gui_python_executable",
     "_run_command",
     "_run_process_listing",

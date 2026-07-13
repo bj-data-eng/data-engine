@@ -1,4 +1,4 @@
-"""Shared presentation helpers across GUI and TUI surfaces."""
+"""Presentation helpers for operator-facing views."""
 
 from __future__ import annotations
 
@@ -83,28 +83,6 @@ def status_color_name(state: str) -> str:
     return "idle"
 
 
-def state_dot(state: str) -> str:
-    """Return one small textual state marker for compact terminal displays."""
-    if state == "failed":
-        return "!"
-    if state in {"running", "polling", "scheduled", "success", "finished"}:
-        return "*"
-    if state in {"stopping flow", "stopping runtime"}:
-        return "~"
-    return "·"
-
-
-def operation_marker(status: str) -> str:
-    """Return one small textual marker for operation-level progress."""
-    if status == "running":
-        return ">"
-    if status == "success":
-        return "+"
-    if status == "failed":
-        return "!"
-    return "·"
-
-
 def format_seconds(seconds: float) -> str:
     """Render elapsed seconds into the compact duration text used across surfaces."""
 
@@ -131,7 +109,5 @@ __all__ = [
     "group_cards",
     "group_label",
     "group_secondary_text",
-    "operation_marker",
-    "state_dot",
     "status_color_name",
 ]

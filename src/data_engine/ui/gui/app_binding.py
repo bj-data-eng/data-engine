@@ -183,8 +183,6 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window._last_log_view_flow_name = None
     window._last_log_view_run_keys = ()
     window._last_log_view_signature = ()
-    window._selected_flow_has_logs = False
-    window._selected_flow_has_logs_flow_name = None
     window._workspace_counts_footer_cache: dict[str, str] = {}
     window._last_gui_action_state = None
     window._debug_artifact_records = ()

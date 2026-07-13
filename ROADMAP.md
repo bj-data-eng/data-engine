@@ -8,9 +8,6 @@
 - Improve the UI model for parallel and scheduled activity.
   The app should stay honest when several source-scoped runs are active at once. Add better live summary surfaces for concurrent poll/schedule flows, keep stop-state feedback consistent across engine and manual actions, and avoid implying that one flow-level step pane represents one coherent run when activity is parallel.
 
-- Bring the TUI closer to desktop UI parity.
-  The desktop UI has become the richer product surface. The TUI should catch up on the most important operator and developer workflows so the two interfaces do not drift.
-
 - Add no-terminal GUI launchers.
   The current `.command` and `.bat` launchers are terminal-oriented. Add platform-appropriate GUI launch paths so the desktop UI can be opened without leaving a console window attached.
 

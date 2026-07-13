@@ -332,7 +332,7 @@ class WorkspaceDaemonManager:
         *,
         daemon_startup_in_progress: bool = False,
     ) -> str | None:
-        """Return plain-language control status text for UI/TUI display."""
+        """Return plain-language control status text for UI display."""
         return self.control_state(
             snapshot,
             daemon_startup_in_progress=daemon_startup_in_progress,

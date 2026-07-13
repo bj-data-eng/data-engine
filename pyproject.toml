@@ -43,7 +43,6 @@ dependencies = [
   "polars==1.39.3",
   "pyarrow==23.0.1",
   "PySide6==6.11.0",
-  "textual==8.2.3",
   "xlsxwriter==3.2.9",
 ]
 

@@ -11,7 +11,7 @@ The runtime is built around:
 - Polars and DuckDB-friendly flow steps
 - mirrored output paths for source-driven runs
 - saved run, log, and dataframe inspection state
-- desktop and terminal operator surfaces
+- a desktop operator surface
 
 ## Install
 
@@ -44,12 +44,6 @@ Desktop GUI:
 
 ```bash
 data-engine start gui
-```
-
-Terminal UI:
-
-```bash
-data-engine start tui
 ```
 
 Headless commands:

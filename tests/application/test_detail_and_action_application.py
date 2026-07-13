@@ -118,14 +118,10 @@ def test_action_state_application_builds_selected_flow_context() -> None:
         runtime_session=RuntimeSessionState.empty().with_runtime_flags(active=True, stopping=True).with_active_runtime_flow_names(("poller",)),
         flow_groups_by_name={"poller": "Examples"},
         active_flow_states={"running", "polling", "scheduled", "stopping flow", "stopping runtime"},
-        has_logs=True,
         has_automated_flows=True,
-        selected_run_group_present=True,
     )
 
     assert context.selected_flow.present is True
     assert context.selected_flow.running is True
     assert context.selected_flow.group_active is True
-    assert context.selected_flow.has_logs is True
     assert context.has_automated_flows is True
-    assert context.selected_run_group_present is True

@@ -5450,8 +5450,6 @@ def test_rebind_workspace_context_recreates_daemon_subscription_and_clears_log_c
         window._last_log_view_flow_name = "poller"
         window._last_log_view_run_keys = (("poller", "run-1"),)
         window._last_log_view_signature = ((("poller", "run-1"), "x", "y", "z", None),)
-        window._selected_flow_has_logs = True
-        window._selected_flow_has_logs_flow_name = "poller"
 
         window._rebind_workspace_context(workspace_id="docs2")
 
@@ -5467,7 +5465,6 @@ def test_rebind_workspace_context_recreates_daemon_subscription_and_clears_log_c
         assert "Workspace reset failed" not in window.reset_workspace_status_label.text()
         assert window._last_log_view_run_keys != (("poller", "run-1"),)
         assert window._last_log_view_signature != ((("poller", "run-1"), "x", "y", "z", None),)
-        assert window._selected_flow_has_logs is False or window._selected_flow_has_logs_flow_name != "poller"
         assert window._pending_control_actions == set()
         assert window._pending_control_action_tokens == {}
     finally:

@@ -74,7 +74,6 @@ class SelectedFlowState:
     live_state: str = ""
     live_truth_known: bool = False
     live_manual_running: bool = False
-    has_logs: bool = False
     group_active: bool = False
 
     @property
@@ -167,7 +166,6 @@ class SelectedFlowState:
         runtime_session: RuntimeSessionState,
         flow_groups_by_name: Mapping[str, str],
         active_flow_states: Container[str],
-        has_logs: bool,
         live_runs: Mapping[str, Any] | None = None,
         engine_active_flow_names: Container[str] = (),
     ) -> "SelectedFlowState":
@@ -188,7 +186,6 @@ class SelectedFlowState:
             live_state=live_state,
             live_truth_known=live_runs is not None,
             live_manual_running=live_manual_running,
-            has_logs=has_logs,
             group_active=(
                 live_group_active
                 or runtime_session.is_group_active(card.group, flow_groups_by_name)
@@ -212,7 +209,6 @@ class OperatorActionContext:
     live_truth_known: bool = False
     live_manual_run_active: bool = False
     workspace_available: bool = True
-    selected_run_group_present: bool = False
     local_request_pending: bool = False
     overlay: PendingWorkspaceActionOverlay = field(default_factory=PendingWorkspaceActionOverlay)
 
@@ -232,10 +228,6 @@ class OperatorActionContext:
             if self.runtime_session.runtime_active
             else "idle"
         )
-
-    @property
-    def engine_starting(self) -> bool:
-        return self.normalized_engine_state == "starting"
 
     @property
     def engine_running(self) -> bool:

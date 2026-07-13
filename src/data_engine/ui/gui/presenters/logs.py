@@ -54,8 +54,6 @@ def refresh_log_view(window: "DataEngineWindow", *, force_scroll_to_bottom: bool
                 flow_name=current_flow_name,
             )
         )
-    window._selected_flow_has_logs_flow_name = current_flow_name
-    window._selected_flow_has_logs = bool(run_groups)
     workspace_snapshot = getattr(window, "workspace_snapshot", None)
     presentation = build_selected_flow_presentation(
         card=card,

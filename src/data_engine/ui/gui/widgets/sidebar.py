@@ -22,7 +22,7 @@ def group_secondary_text(window: "DataEngineWindow", group_name: str, entries: l
 
 def flow_secondary_text(window: "DataEngineWindow", card: "QtFlowCard") -> str:
     state = window.flow_states.get(card.name, card.state)
-    return FlowRowDisplay.from_card(card, state, primary="name").secondary
+    return FlowRowDisplay.from_card(card, state).secondary
 
 
 def flow_primary_text(card: "QtFlowCard") -> str:
@@ -76,7 +76,7 @@ def build_group_row_widget(window: "DataEngineWindow", group_name: str, entries:
 
 
 def build_flow_row_widget(window: "DataEngineWindow", card: "QtFlowCard") -> QFrame:
-    flow_display = FlowRowDisplay.from_card(card, window.flow_states.get(card.name, card.state), primary="name")
+    flow_display = FlowRowDisplay.from_card(card, window.flow_states.get(card.name, card.state))
     frame = QFrame(window.sidebar_content)
     frame.setObjectName("sidebarFlowRow")
     frame.setProperty("selected", False)

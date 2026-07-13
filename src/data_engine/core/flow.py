@@ -47,7 +47,7 @@ class Flow:
     Attributes
     ----------
     group : str
-        Display group used by the GUI, TUI, and runtime summaries.
+        Display group used by the GUI and runtime summaries.
     name : str | None
         Stable flow identifier. When omitted in a flow module, the module loader
         can derive it from the module name.

@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from data_engine.authoring.flow import Flow
-from data_engine.domain import FlowLogEntry, FlowRunState, OperatorActionContext, RunStepState, RuntimeSessionState, RuntimeStepEvent, SelectedFlowState
+from data_engine.domain import FlowLogEntry, FlowRunState, OperatorActionContext, RuntimeSessionState, RuntimeStepEvent, SelectedFlowState
 from data_engine.services.flow_catalog import flow_catalog_entry_from_flow
-from data_engine.views.actions import GuiActionState, TuiActionState
+from data_engine.views.actions import GuiActionState
 from data_engine.views.artifacts import classify_artifact_preview, is_text_artifact
 from data_engine.views.flow_display import FlowRowDisplay, GroupRowDisplay
 from data_engine.views.models import qt_flow_card_from_entry
@@ -14,13 +14,10 @@ from data_engine.views.presentation import (
     flow_group_name,
     flow_secondary_text,
     format_seconds,
-    operation_marker,
-    state_dot,
     status_color_name,
 )
 from data_engine.views.runs import RunGroupDisplay, format_raw_log_message
 from data_engine.views.status import WORKSPACE_UNAVAILABLE_TEXT, surface_control_status_text
-from data_engine.views.text import format_optional_seconds, pad, render_run_group_lines, run_group_row_text, short_datetime
 
 
 def _card(name: str, *, group: str | None = "Docs", mode: str = "manual", valid: bool = True):
@@ -44,36 +41,31 @@ def test_flow_group_name_falls_back_to_mode_when_group_missing():
     assert flow_group_name(card) == "poll"
 
 
-def test_flow_row_display_uses_failed_dot_for_invalid_cards():
+def test_flow_row_display_uses_requested_failed_state_for_invalid_cards():
     card = _card("broken_flow", valid=False)
 
-    display = FlowRowDisplay.from_card(card, "manual", primary="name")
+    display = FlowRowDisplay.from_card(card, "failed")
 
-    assert display.primary == "broken_flow"
-    assert display.dot == "!"
-    assert display.tooltip.endswith("| group=Docs")
+    assert display.secondary == "manual - failed"
+    assert display.state_color == "error"
 
 
 def test_flow_row_display_keeps_state_color_from_requested_state_for_invalid_card():
     card = _card("broken_flow", valid=False)
 
-    display = FlowRowDisplay.from_card(card, "running", primary="title")
+    display = FlowRowDisplay.from_card(card, "running")
 
-    assert display.primary == "Broken Flow"
+    assert display.secondary == "manual - running"
     assert display.state_color == "success"
-    assert display.dot == "!"
 
 
-def test_flow_row_display_keeps_unknown_group_out_of_tooltip_and_uses_name_primary():
+def test_flow_row_display_uses_idle_state_for_manual_flow_without_group():
     card = _card("manual_review").__class__(**{**_card("manual_review").__dict__, "group": None})
 
-    display = FlowRowDisplay.from_card(card, "manual", primary="name")
+    display = FlowRowDisplay.from_card(card, "manual")
 
-    assert display.primary == "manual_review"
     assert display.secondary == "manual"
     assert display.state_color == "idle"
-    assert display.dot == "·"
-    assert "group=" not in display.tooltip
 
 
 def test_presentation_helpers_cover_remaining_state_branches():
@@ -81,83 +73,11 @@ def test_presentation_helpers_cover_remaining_state_branches():
     assert flow_secondary_text("manual", "failed") == "manual - failed"
     assert status_color_name("started") == "started"
     assert status_color_name("manual") == "idle"
-    assert state_dot("stopping flow") == "~"
-    assert state_dot("manual") == "·"
-    assert operation_marker("running") == ">"
-    assert operation_marker("idle") == "·"
     assert format_seconds(0.048) == "48ms"
     assert format_seconds(0.04899) == "48ms"
     assert format_seconds(0.9999) == "999ms"
     assert format_seconds(61.2) == "1.0m"
     assert format_seconds(3665.9) == "1.0h"
-
-
-def test_text_helpers_cover_padding_datetime_and_optional_duration_edges():
-    assert pad("abcdef", 1) == "a"
-    assert pad("abcdef", 4) == "abc…"
-    assert short_datetime("2026-04-06") == "2026-04-06"
-    assert short_datetime("2026-04-06 09:15:00 AM") == "09:15:00 AM"
-    assert short_datetime("09:15:00 AM") == "09:15:00 AM"
-    assert format_optional_seconds(None) == "-"
-    assert format_optional_seconds(1.23) == "1.2s"
-
-
-def test_run_group_row_text_uses_default_duration_placeholder():
-    run_state = FlowRunState(
-        key=("docs_summary", "run-1"),
-        display_label="2026-04-06 09:15:00 AM",
-        source_label="input.xlsx",
-        status="running",
-        elapsed_seconds=None,
-        summary_entry=None,
-        steps=(),
-        entries=(),
-    )
-
-    row = run_group_row_text(run_state)
-
-    assert "RUNNING" in row
-    assert "input.xlsx" in row
-    assert " -" in row
-
-
-def test_render_run_group_lines_keeps_placeholder_duration_for_missing_step_elapsed():
-    step_entry = FlowLogEntry(
-        line="step",
-        kind="flow",
-        flow_name="docs_summary",
-        event=RuntimeStepEvent(
-            run_id="run-1",
-            flow_name="docs_summary",
-            step_name="Read Excel",
-            source_label="input.xlsx",
-            status="failed",
-            elapsed_seconds=None,
-        ),
-    )
-    run_state = FlowRunState(
-        key=("docs_summary", "run-1"),
-        display_label="2026-04-06 09:15:00 AM",
-        source_label="input.xlsx",
-        status="failed",
-        elapsed_seconds=None,
-        summary_entry=None,
-        steps=(
-            RunStepState(
-                step_name="Read Excel",
-                status="failed",
-                elapsed_seconds=None,
-                entry=step_entry,
-            ),
-        ),
-        entries=(),
-    )
-
-    lines = render_run_group_lines(run_state)
-
-    assert "[FAILED]" in lines[0]
-    assert lines[1].endswith(" -")
-
 
 def test_run_group_display_uses_gui_canonical_status_mapping():
     run_state = FlowRunState(
@@ -338,59 +258,42 @@ def test_artifact_preview_text_detection_covers_mimetype_fallback_and_unknown_su
 
 def test_action_state_builders_cover_control_and_runtime_branches():
     card = _card("docs_summary")
-    selected = SelectedFlowState(card=card, state="running", group_active=True, has_logs=True)
+    selected = SelectedFlowState(card=card, state="running", group_active=True)
     session = RuntimeSessionState(runtime_active=True)
     context = OperatorActionContext(
         runtime_session=session,
         selected_flow=selected,
         has_automated_flows=True,
         workspace_available=False,
-        selected_run_group_present=True,
     )
 
     gui = GuiActionState.from_context(context)
-    tui = TuiActionState.from_context(context)
-
     assert gui.flow_run_label == "Running..."
     assert gui.flow_run_state == "run"
     assert gui.flow_run_enabled is False
     assert gui.engine_label == "Stop Engine"
     assert gui.refresh_enabled is False
     assert gui.clear_flow_log_enabled is False
-    assert tui.refresh_disabled is True
-    assert tui.run_once_disabled is True
-    assert tui.start_engine_disabled is True
-    assert tui.stop_engine_disabled is True
-    assert tui.view_log_disabled is False
 
 
 def test_action_state_builders_cover_idle_control_available_branches():
     card = _card("docs_summary")
-    selected = SelectedFlowState(card=card, state="manual", group_active=False, has_logs=False)
+    selected = SelectedFlowState(card=card, state="manual", group_active=False)
     session = RuntimeSessionState(workspace_owned=False, leased_by_machine_id=None, runtime_active=False, runtime_stopping=False)
     context = OperatorActionContext(
         runtime_session=session,
         selected_flow=selected,
         has_automated_flows=False,
         workspace_available=True,
-        selected_run_group_present=False,
     )
 
     gui = GuiActionState.from_context(context)
-    tui = TuiActionState.from_context(context)
-
     assert gui.flow_run_enabled is True
     assert gui.flow_run_state == "run"
     assert gui.engine_enabled is False
     assert gui.engine_label == "Start Engine"
     assert gui.request_control_visible is True
     assert gui.request_control_enabled is False
-    assert tui.refresh_disabled is False
-    assert tui.run_once_disabled is False
-    assert tui.start_engine_disabled is False
-    assert tui.stop_engine_disabled is True
-    assert tui.view_config_disabled is False
-    assert tui.clear_flow_log_disabled is False
 
 
 def test_action_state_builders_cover_no_selection_idle_branches():
@@ -399,21 +302,15 @@ def test_action_state_builders_cover_no_selection_idle_branches():
         selected_flow=SelectedFlowState(card=None),
         has_automated_flows=False,
         workspace_available=True,
-        selected_run_group_present=False,
     )
 
     gui = GuiActionState.from_context(context)
-    tui = TuiActionState.from_context(context)
-
     assert gui.flow_run_label == "Run Once"
     assert gui.flow_run_state == "run"
     assert gui.flow_run_enabled is False
     assert gui.flow_config_enabled is False
     assert gui.clear_flow_log_enabled is False
     assert gui.request_control_enabled is False
-    assert tui.view_config_disabled is True
-    assert tui.view_log_disabled is True
-    assert tui.clear_flow_log_disabled is True
 
 
 def test_group_row_display_from_bucket_uses_shared_group_title_and_error_summary():
@@ -428,6 +325,4 @@ def test_group_row_display_from_bucket_uses_shared_group_title_and_error_summary
     )
 
     assert display.title == "Docs"
-    assert display.uppercase_title == "DOCS"
     assert display.secondary == "2 flow(s)  Error: 1"
-

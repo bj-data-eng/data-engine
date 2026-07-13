@@ -310,8 +310,6 @@ class _GuiWorkspaceCatalogController:
                     window.runtime_binding,
                     flow_name=flow_name,
                 )
-                if window._selected_flow_has_logs_flow_name == flow_name:
-                    window._selected_flow_has_logs = False
             window._rebuild_runtime_snapshot()
             return
         result = payload
@@ -396,11 +394,6 @@ class _GuiFlowPresentationController:
                 ()
                 if workspace_snapshot is None
                 else workspace_snapshot.engine.active_flow_names
-            ),
-            has_logs=bool(
-                card is not None
-                and window._selected_flow_has_logs_flow_name == card.name
-                and window._selected_flow_has_logs
             ),
             has_automated_flows=any(flow_card.valid and flow_card.mode in {"poll", "schedule"} for flow_card in window.flow_cards.values()),
             workspace_available=window._has_authored_workspace(),

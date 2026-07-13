@@ -12,7 +12,7 @@ def test_cli_run_tests_lists_named_slices(capsys):
     result = main(["run", "tests", "--list-slices"])
 
     assert result == 0
-    assert capsys.readouterr().out.splitlines() == ["all", "unit", "ui", "qt", "tui", "integration", "live"]
+    assert capsys.readouterr().out.splitlines() == ["all", "unit", "ui", "qt", "integration", "live"]
 
 
 def test_cli_run_tests_executes_named_slice(monkeypatch, tmp_path):

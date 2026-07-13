@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 class RuntimeEngine:
     """Execute flows through explicit runtime commands.
 
-    The engine does not know about GUI, TUI, CLI, local settings, or daemon
+    The engine does not know about GUI, CLI, local settings, or daemon
     wiring. Hosts pass state/event collaborators in explicitly; the current
     implementation adapts the existing sequential and grouped runtimes while
     giving higher layers a command-shaped seam to target.

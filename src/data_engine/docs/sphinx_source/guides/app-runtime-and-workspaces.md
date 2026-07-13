@@ -1,6 +1,6 @@
 # App Runtime and Workspaces
 
-This guide explains how the GUI and TUI surfaces share authored workspaces, shared workspace state, and machine-local runtime state.
+This guide explains how the GUI uses authored workspaces, shared workspace state, and machine-local runtime state.
 
 If you are writing flows, this is the missing "how the whole thing hangs together" page.
 
@@ -36,7 +36,7 @@ That authored workspace is what the app binds to when you select a workspace in 
 
 ## How the app is structured
 
-The GUI is a single-window operator surface that binds to one authored workspace at a time. The TUI uses the same workspace and runtime model.
+The GUI is a single-window operator surface that binds to one authored workspace at a time.
 
 When you change the selected workspace, the app rebinds:
 

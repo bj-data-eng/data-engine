@@ -1,3 +1,3 @@
 """Operator surface packages for Data Engine."""
 
-__all__ = ["gui", "tui"]
+__all__ = ["gui"]

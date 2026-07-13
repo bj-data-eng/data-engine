@@ -2,25 +2,25 @@
 
 Date: 2026-07-13
 
+Revision note: updated after removal of the retired operator interface; findings and scope specific to it have been removed.
+
 Reviewed commit: `b6a01b70d37c7d6bb9885f132e1218eb07d46f62` (`main`)
 
-Remote status: `HEAD` equals `origin/main` after `git fetch --prune`
+Remote status at review baseline: the reviewed commit matched `origin/main` after `git fetch --prune`.
 
-Scope: runtime, shared state, daemon lifecycle, platform behavior, CLI, GUI, TUI, authoring helpers, tests, packaging, and repository quality controls
+Scope: runtime, shared state, daemon lifecycle, platform behavior, CLI, GUI, authoring helpers, tests, packaging, and repository quality controls
 
 ## Executive summary
 
-The repository has a strong clean baseline: all 959 tests pass, Ruff and pydoclint are clean, installed dependencies are consistent, and an isolated PEP 517 wheel build succeeds. The review nevertheless found 31 reproducible or deterministic defects that are not covered by the current suite:
+The repository has a strong clean baseline: all 916 post-removal tests pass, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and a PEP 517 wheel build succeeds. The review nevertheless found 26 reproducible or deterministic defects that are not covered by the current suite:
 
 | Priority | Count | Meaning |
 |---|---:|---|
-| P1 | 10 | Safety, ownership, data-consistency, cross-workspace, or indefinite-hang risk; address before relying on the affected path in production. |
-| P2 | 18 | Material functional or platform-correctness defect; schedule promptly. |
-| P3 | 3 | Lower-frequency edge case or action-state defect. |
+| P1 | 8 | Safety, ownership, data-consistency, cross-workspace, or indefinite-hang risk; address before relying on the affected path in production. |
+| P2 | 16 | Material functional or platform-correctness defect; schedule promptly. |
+| P3 | 2 | Lower-frequency edge case. |
 
 The highest-risk cluster is daemon/workspace ownership. Lease mutation is not fenced, forced shutdown can target a reused PID, stop/handoff can release ownership while worker threads are still alive, and POSIX force-stop does not terminate descendants. The next cluster is runtime projection consistency: a reader can accept a torn shared snapshot, hydration can invalidate incremental cursors indefinitely, and a double-close can shut down a shared writer and hang another client forever.
-
-No production code was changed as part of this review.
 
 ## P1 findings
 
@@ -118,36 +118,7 @@ Impact: an ordinary duplicate cleanup path can permanently hang another window, 
 
 Recommendation: make each proxy close idempotent; reject submissions atomically once shutdown starts; complete pending requests with an error; and add double-close, stale-proxy, and concurrent-close tests.
 
-### P1-8 — TUI workspace switching leaves its daemon subscription bound to the old workspace
-
-Evidence:
-
-- `src/data_engine/ui/tui/app_binding.py:93-112`
-- `src/data_engine/ui/tui/controllers/flows.py:192-225`
-- `src/data_engine/services/daemon_state.py:343-371`
-- `src/data_engine/ui/tui/controllers/runtime.py:109-125`
-
-TUI construction captures the initial binding's daemon manager in `DaemonUpdateSubscription`. The workspace-switch path replaces `runtime_binding` but never stops or recreates the subscription. Its worker therefore keeps reading workspace A while update application uses the current workspace B binding. The still-live A worker also prevents a B subscription from starting.
-
-Impact: workspace A state and log notifications can be projected into workspace B, and B can stop receiving native updates.
-
-Recommendation: mirror the GUI rebind lifecycle: stop and join the old subscription, clear pending batches, construct a subscription for the new manager, and attach a binding-generation token so queued stale updates are rejected.
-
-### P1-9 — TUI exposes workspace reset without ownership, idle-state, confirmation, or rebind safeguards
-
-Evidence:
-
-- `src/data_engine/ui/tui/app.py:119-125,180-198,460-478`
-- `src/data_engine/services/reset.py:41-58`
-- Compare `src/data_engine/ui/gui/presenters/workspace_settings.py:149-170`
-
-The TUI reset button is always available and directly invokes a destructive reset on the UI thread. It does not check local control, active work, or workspace availability and does not ask for confirmation. Reset deletes local and shared state, clears the control database and daemon log, and closes both ledgers currently held by the live binding. The GUI already applies the missing gates.
-
-Impact: a user can erase runtime/control state beneath active work or a remotely controlled workspace, then leave the TUI using closed binding resources.
-
-Recommendation: centralize reset authorization in the shared application layer, require local control and an idle runtime, confirm explicitly, perform work off the UI thread, and replace/rebind the runtime binding after success.
-
-### P1-10 — Hostname-only machine identity can collapse distinct workstations into one owner
+### P1-8 — Hostname-only machine identity can collapse distinct workstations into one owner
 
 Evidence:
 
@@ -244,17 +215,16 @@ Evidence:
 
 Recommendation: distinguish embedded JSON artifacts from sidecars by payload metadata or an unambiguous sidecar naming convention, then add save/list/view round-trip coverage.
 
-### P2-8 — GUI and TUI workspace switching leave a live client-session row in each old workspace
+### P2-8 — GUI workspace switching leaves a live client-session row in each old workspace
 
 Evidence:
 
 - `src/data_engine/ui/gui/presenters/workspace_binding.py:75-109`
-- `src/data_engine/ui/tui/controllers/flows.py:192-212`
 - `src/data_engine/services/runtime_binding.py:190-205`
 - `src/data_engine/runtime/runtime_control_store.py:140-179`
 - `src/data_engine/hosts/daemon/lifecycle.py:138-154`
 
-Both surfaces register the new binding and close the old binding without removing the old client session. Session liveness is based on the UI PID, which remains alive after switching, so every old row remains live. Ephemeral-daemon shutdown depends on the live count reaching zero. An existing GUI test explicitly asserts that no removal occurs.
+The GUI registers the new binding and closes the old binding without removing the old client session. Session liveness is based on the UI PID, which remains alive after switching, so every old row remains live. Ephemeral-daemon shutdown depends on the live count reaching zero. An existing GUI test explicitly asserts that no removal occurs.
 
 Impact: old workspace daemons remain alive and automated work can continue after the UI has detached.
 
@@ -271,21 +241,7 @@ Creating an empty child workspace forces `overwrite=True` for the parent collect
 
 Recommendation: preserve or merge by default, write only Data Engine-owned keys, and require an explicit force option for whole-file replacement.
 
-### P2-10 — TUI cannot run flows that declare required manual inputs
-
-Evidence:
-
-- `src/data_engine/ui/tui/controllers/flows.py:299-317`
-- `src/data_engine/ui/gui/controllers/runtime.py:532-565`
-- `src/data_engine/hosts/daemon/runtime_commands.py:35-60`
-
-The TUI sends `run_selected_flow` without `inputs`, while the daemon validates every declared manual input. The GUI has an input dialog; no equivalent handling exists in the TUI.
-
-Impact: “Run Once” always fails for author-defined flows with required inputs.
-
-Recommendation: add a Textual input modal and pass normalized values. Until implemented, disable the action with a precise unsupported-state message.
-
-### P2-11 — Excel template composition crashes on worksheets containing merged cells
+### P2-10 — Excel template composition crashes on worksheets containing merged cells
 
 Evidence:
 
@@ -295,7 +251,7 @@ Evidence:
 
 Recommendation: define the intended merged-range policy and either unmerge affected ranges before clearing or recreate the replaced worksheet. Add merged-template coverage.
 
-### P2-12 — The checkpoint error handler can throw and permanently terminate the checkpoint thread
+### P2-11 — The checkpoint error handler can throw and permanently terminate the checkpoint thread
 
 Evidence:
 
@@ -305,7 +261,7 @@ After the second checkpoint failure, the exception handler calls `_update_daemon
 
 Recommendation: isolate degraded-state publication from checkpoint recovery and add an outer lifecycle boundary that either continues retrying or safely relinquishes ownership.
 
-### P2-13 — Windows daemon request timeouts do not bound named-pipe connection time
+### P2-12 — Windows daemon request timeouts do not bound named-pipe connection time
 
 Evidence:
 
@@ -315,7 +271,7 @@ The requested timeout starts only after `multiprocessing.connection.Client()` re
 
 Recommendation: implement a genuinely deadline-bounded Windows connection path and test unavailable and busy pipes on Windows.
 
-### P2-14 — Workspace IDs are neither portable Windows components nor bounded for Unix socket paths
+### P2-13 — Workspace IDs are neither portable Windows components nor bounded for Unix socket paths
 
 Evidence:
 
@@ -326,7 +282,7 @@ Validation accepts Windows-reserved names (`CON`, `NUL`), reserved characters (`
 
 Recommendation: enforce a portable, bounded workspace-component grammar including Windows device-name rules, and construct IPC endpoints from a short fixed prefix plus a digest rather than the full ID.
 
-### P2-15 — Persisted settings override the explicit collection-root environment variable
+### P2-14 — Persisted settings override the explicit collection-root environment variable
 
 Evidence:
 
@@ -336,7 +292,7 @@ When `DATA_ENGINE_WORKSPACE_COLLECTION_ROOT` is set, `load_settings()` initially
 
 Recommendation: make the explicit environment value authoritative, consistent with the runtime-root and app-root behavior, and test differing stored/environment values.
 
-### P2-16 — Catalog-load failure can leave `engine_starting=True` indefinitely
+### P2-15 — Catalog-load failure can leave `engine_starting=True` indefinitely
 
 Evidence:
 
@@ -346,7 +302,7 @@ Evidence:
 
 Recommendation: wrap every operation after reservation in a `try/finally` that clears the reservation unless startup commits successfully.
 
-### P2-17 — Daemon manager reports a dead snapshot while retaining `daemon_live=True`
+### P2-16 — Daemon manager reports a dead snapshot while retaining `daemon_live=True`
 
 Evidence:
 
@@ -357,17 +313,6 @@ If the initial ping succeeds but the following status request fails, `sync()` re
 Impact: callers can gate commands using contradictory liveness values.
 
 Recommendation: set liveness false on status failure, or avoid the race by using one status request as the liveness probe.
-
-### P2-18 — TUI control commands perform multi-second daemon RPCs on the Textual event loop
-
-Evidence:
-
-- `src/data_engine/ui/tui/controllers/flows.py:299-368`
-- `src/data_engine/ui/tui/controllers/runtime.py:220-245`
-
-Run, start, and stop handlers synchronously refresh daemon state and then execute RPCs with five-second timeouts. A slow or unavailable daemon blocks rendering and input for several seconds, and some paths perform another synchronous refresh afterward.
-
-Recommendation: run sync and control RPCs in Textual workers and generation-tag completions so results from a prior workspace cannot mutate the current one.
 
 ## P3 findings
 
@@ -382,17 +327,7 @@ After choosing an existing `QApplication` or creating one, `QApplication.instanc
 
 Recommendation: capture ownership before construction, call `exec()` only when this function creates the app, and return or retain the window for embedded use.
 
-### P3-2 — TUI action-state enables commands that cannot succeed
-
-Evidence:
-
-- `src/data_engine/views/actions.py:174-218`
-
-`run_once_disabled` does not reject an absent or invalid selected flow, and `start_engine_disabled` does not reject a context with no automated flows. The handlers fail only after a click.
-
-Recommendation: align the TUI predicates with the GUI action model and add no-selection, invalid-flow, and no-automated-flow tests.
-
-### P3-3 — A malformed daemon auth-key file permanently wedges communication
+### P3-2 — A malformed daemon auth-key file permanently wedges communication
 
 Evidence:
 
@@ -407,12 +342,13 @@ Recommendation: validate exact decoded length, quarantine malformed files atomic
 ### What is working well
 
 - The repository was clean and synchronized with `origin/main` before this report was added.
-- The full suite passes: `959 passed in 50.10s` on Python 3.14.6.
+- The full suite passes: `916 passed in 40.05s` on Python 3.14.6.
 - Ruff passes with no configured violations.
 - pydoclint reports no violations under `src/data_engine`.
 - `pip check` reports no broken requirements.
-- Full-suite statement coverage is 83% (`20,576` statements, `3,490` missed).
-- An isolated PEP 517 wheel build from `git archive HEAD` succeeded: `py_data_engine-0.3.12-py3-none-any.whl`.
+- Full-suite statement coverage is 83% (`19,162` statements, `3,211` missed).
+- A PEP 517 wheel build from the post-removal working tree succeeded: `py_data_engine-0.3.12-py3-none-any.whl`.
+- The hash-locked Windows CPython 3.14 runtime requirements resolved and downloaded successfully with `--require-hashes`.
 - Focused runtime, daemon/CLI/platform, and UI/authoring suites also passed during the audit.
 
 ### Systemic gaps exposed by the findings
@@ -421,7 +357,7 @@ Recommendation: validate exact decoded length, quarantine malformed files atomic
 
 2. **No static type-checking gate.** The real/fake `PersistedStepRun` mismatch in P2-2 is the kind of protocol drift a configured Pyright or mypy check should catch.
 
-3. **Coverage is weakest in orchestration boundaries where several findings live.** Examples from the full coverage run include GUI launcher 0%, TUI flow controller 61%, platform process helpers 68%, continuous execution 73%, daemon ownership 73%, runtime commands 78%, and daemon manager 79%. Overall percentage is healthy, but branch/fault/interleaving behavior matters more than line execution for these modules.
+3. **Coverage is weakest in orchestration boundaries where several findings live.** Examples from the full coverage run include GUI launcher 0%, platform process helpers 68%, continuous execution 73%, daemon ownership 73%, runtime commands 78%, and daemon manager 79%. Overall percentage is healthy, but branch/fault/interleaving behavior matters more than line execution for these modules.
 
 4. **Fakes sometimes diverge from production contracts.** P2-2 passes because the fake supplies a nonexistent property. Prefer protocol-conforming fakes plus at least one real-ledger integration test for service boundaries.
 
@@ -433,12 +369,12 @@ The documented `python -m build` and `twine check` commands were not run directl
 
 ## Recommended repair order
 
-1. Introduce lease fencing and verified daemon/process identity (P1-1, P1-3, P1-10).
+1. Introduce lease fencing and verified daemon/process identity (P1-1, P1-3, P1-8).
 2. Make stop/handoff wait for actual worker termination and implement safe POSIX tree termination (P1-2, P1-4).
 3. Add a committed shared-snapshot manifest and generation-aware cache invalidation (P1-5, P1-6).
 4. Make runtime-I/O ownership idempotent and fail closed instead of hanging (P1-7).
-5. Fix TUI workspace rebind and destructive reset lifecycle (P1-8, P1-9), then clean old client sessions (P2-8).
-6. Repair explicit workspace-ID propagation and platform-safe naming (P2-1, P2-14).
+5. Clean old GUI client sessions during workspace switching (P2-8).
+6. Repair explicit workspace-ID propagation and platform-safe naming (P2-1, P2-13).
 7. Address the remaining deterministic runtime/API defects, then add the CI, type-checking, concurrency, and platform test gates described above.
 
 ## Review limitations

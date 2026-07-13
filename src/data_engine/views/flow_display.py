@@ -1,37 +1,26 @@
-"""Shared flow/group row display models across GUI and TUI."""
+"""Flow and group row display models for the desktop UI."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from data_engine.views.models import QtFlowCard
-from data_engine.views.presentation import FlowGroupBucket, flow_secondary_text, group_label, group_secondary_text, state_dot, status_color_name
+from data_engine.views.presentation import FlowGroupBucket, flow_secondary_text, group_label, group_secondary_text, status_color_name
 
 
 @dataclass(frozen=True)
 class FlowRowDisplay:
     """Display metadata for one flow row in a list/tree surface."""
 
-    primary: str
     secondary: str
     state_color: str
-    dot: str
-    tooltip: str
 
     @classmethod
-    def from_card(cls, card: QtFlowCard, state: str, *, primary: str = "title") -> "FlowRowDisplay":
+    def from_card(cls, card: QtFlowCard, state: str) -> "FlowRowDisplay":
         """Return display metadata for one flow row."""
-        primary_text = card.title if primary == "title" else card.name
-        resolved_state = state if card.valid else "failed"
-        tooltip = f"{card.name} | {card.title} | {state}"
-        if card.group:
-            tooltip = f"{tooltip} | group={card.group}"
         return cls(
-            primary=primary_text,
             secondary=flow_secondary_text(card.mode, state),
             state_color=status_color_name(state),
-            dot=state_dot(resolved_state),
-            tooltip=tooltip,
         )
 
 
@@ -41,7 +30,7 @@ class GroupRowDisplay:
 
     title: str
     secondary: str
-    uppercase_title: str
+
     @classmethod
     def from_group(
         cls,
@@ -54,7 +43,6 @@ class GroupRowDisplay:
         return cls(
             title=title,
             secondary=group_secondary_text(list(entries), flow_states),
-            uppercase_title=title.upper(),
         )
 
     @classmethod

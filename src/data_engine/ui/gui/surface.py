@@ -174,7 +174,7 @@ def flush_deferred_ui_updates(window: "DataEngineWindow") -> None:
 
 
 def append_log_line(window: "DataEngineWindow", line: str, *, flow_name: str | None = None) -> None:
-    """Append one simple textual log line."""
+    """Append one simple plain-text log line."""
     from data_engine.domain import FlowLogEntry
 
     kind = "flow" if flow_name is not None else "system"
