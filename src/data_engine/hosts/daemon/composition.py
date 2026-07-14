@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 import threading
 from uuid import uuid4
 from typing import Callable
 
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
-from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
+from data_engine.platform.machine_identity import host_name_text, machine_id_text
+from data_engine.platform.workspace_models import WorkspacePaths
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger
 from data_engine.services.flow_catalog import FlowCatalogService
 from data_engine.services.flow_execution import FlowExecutionService
@@ -75,14 +77,16 @@ class DaemonHostIdentity:
     """Process and machine identity for one daemon host instance."""
 
     machine_id: str
+    host_name: str
     daemon_id: str
     pid: int
 
     @classmethod
-    def current_process(cls) -> "DaemonHostIdentity":
+    def current_process(cls, *, app_root: Path | None = None) -> "DaemonHostIdentity":
         """Build the current-process identity for one daemon host."""
         return cls(
-            machine_id=machine_id_text(),
+            machine_id=machine_id_text(app_root=app_root),
+            host_name=host_name_text(),
             daemon_id=uuid4().hex,
             pid=os.getpid(),
         )
@@ -96,6 +100,7 @@ class DaemonHostState:
     last_checkpoint_at_utc: str
     workspace_owned: bool
     leased_by_machine_id: str | None
+    leased_by_host_name: str | None
     runtime_active: bool
     runtime_stopping: bool
     engine_starting: bool
@@ -122,6 +127,7 @@ class DaemonHostState:
             last_checkpoint_at_utc=started_at_utc,
             workspace_owned=False,
             leased_by_machine_id=None,
+            leased_by_host_name=None,
             runtime_active=False,
             runtime_stopping=False,
             engine_starting=False,
@@ -145,12 +151,20 @@ class DaemonHostState:
         """Mark the current daemon as owning the workspace."""
         self.workspace_owned = True
         self.leased_by_machine_id = None
+        self.leased_by_host_name = None
         self.status = "idle"
 
-    def release_workspace(self, *, leased_by_machine_id: str | None = None, status: str | None = None) -> None:
+    def release_workspace(
+        self,
+        *,
+        leased_by_machine_id: str | None = None,
+        leased_by_host_name: str | None = None,
+        status: str | None = None,
+    ) -> None:
         """Mark the current daemon as no longer owning the workspace."""
         self.workspace_owned = False
         self.leased_by_machine_id = leased_by_machine_id
+        self.leased_by_host_name = leased_by_host_name
         if status is not None:
             self.status = status
 
@@ -186,9 +200,10 @@ class DaemonHostState:
         if status is not None:
             self.status = status
 
-    def set_leased_by_machine_id(self, machine_id: str | None) -> None:
-        """Update the current lease owner identifier."""
+    def set_lease_owner(self, machine_id: str | None, host_name: str | None) -> None:
+        """Update the current lease owner identity and display hostname."""
         self.leased_by_machine_id = machine_id
+        self.leased_by_host_name = host_name
 
     def increment_checkpoint_failures(self) -> int:
         """Increment the repeated-checkpoint failure counter."""
@@ -306,6 +321,14 @@ class DaemonHostFacade:
     @leased_by_machine_id.setter
     def leased_by_machine_id(self, value: str | None) -> None:
         self.state.leased_by_machine_id = value
+
+    @property
+    def leased_by_host_name(self) -> str | None:
+        return self.state.leased_by_host_name
+
+    @leased_by_host_name.setter
+    def leased_by_host_name(self, value: str | None) -> None:
+        self.state.leased_by_host_name = value
 
     @property
     def runtime_active(self) -> bool:

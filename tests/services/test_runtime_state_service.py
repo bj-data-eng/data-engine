@@ -472,8 +472,9 @@ def test_runtime_state_service_incremental_snapshot_from_daemon_updates_live_tru
         active_runs={},
     )
     daemon_status = DaemonStatusState(
-        workspace_owned=True,
-        leased_by_machine_id=None,
+        workspace_owned=False,
+        leased_by_machine_id="2a0ec090-7599-4578-a726-fd760f76f7f8",
+        leased_by_host_name="worker-02",
         engine_active=True,
         engine_stopping=False,
         engine_starting=False,
@@ -504,6 +505,8 @@ def test_runtime_state_service_incremental_snapshot_from_daemon_updates_live_tru
 
     assert snapshot.version == 5
     assert snapshot.control.request_pending is True
+    assert snapshot.control.leased_by_machine_id == "2a0ec090-7599-4578-a726-fd760f76f7f8"
+    assert snapshot.control.leased_by_host_name == "worker-02"
     assert snapshot.engine.state == "running"
     assert snapshot.engine.active_flow_names == ("poller",)
     assert snapshot.flows["poller"].state == "polling"

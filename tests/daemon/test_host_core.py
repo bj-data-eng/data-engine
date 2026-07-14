@@ -25,7 +25,8 @@ from data_engine.hosts.daemon.client import (
 )
 from data_engine.hosts.daemon.runtime_control import stop_active_work
 from data_engine.hosts.daemon.server import serve_forever, serve_workspace_daemon
-from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR, machine_id_text
+from data_engine.platform.machine_identity import host_name_text, machine_id_text
+from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger, utcnow_text
 from data_engine.runtime.shared_state import (
     checkpoint_workspace_state,
@@ -49,6 +50,8 @@ def test_daemon_service_initializes_and_serves_commands(tmp_path, monkeypatch):
         status = service._handle_command({"command": "daemon_status"})  # noqa: SLF001 - direct daemon contract test
         assert status["ok"] is True
         assert status["status"]["workspace_id"] == "default"
+        assert status["status"]["machine_id"] == machine_id_text(app_root=paths.app_root)
+        assert status["status"]["host_name"] == host_name_text()
 
         flows = service._handle_command({"command": "list_flows"})  # noqa: SLF001 - direct daemon contract test
         assert flows["ok"] is True
@@ -219,10 +222,12 @@ def test_daemon_host_dependencies_build_default_uses_injected_factories(tmp_path
         dependencies.runtime_control_ledger.close()
 
 
-def test_daemon_host_identity_current_process_uses_current_pid():
-    identity = DaemonHostIdentity.current_process()
+def test_daemon_host_identity_current_process_uses_current_pid(tmp_path):
+    app_root = tmp_path / "data_engine"
+    identity = DaemonHostIdentity.current_process(app_root=app_root)
 
-    assert identity.machine_id == machine_id_text()
+    assert identity.machine_id == machine_id_text(app_root=app_root)
+    assert identity.host_name == host_name_text()
     assert identity.pid == os.getpid()
     assert len(identity.daemon_id) == 32
 
@@ -247,9 +252,14 @@ def test_daemon_host_state_transitions_cover_core_mutators():
     assert state.leased_by_machine_id is None
     assert state.status == "idle"
 
-    state.release_workspace(leased_by_machine_id="other-machine", status="leased")
+    state.release_workspace(
+        leased_by_machine_id="other-machine",
+        leased_by_host_name="other-host",
+        status="leased",
+    )
     assert state.workspace_owned is False
     assert state.leased_by_machine_id == "other-machine"
+    assert state.leased_by_host_name == "other-host"
     assert state.status == "leased"
 
     state.begin_runtime(status="running")
@@ -273,8 +283,9 @@ def test_daemon_host_state_transitions_cover_core_mutators():
     assert state.last_checkpoint_at_utc == "2026-04-06T00:01:00+00:00"
     assert state.status == "degraded"
 
-    state.set_leased_by_machine_id("machine-b")
+    state.set_lease_owner("machine-b", "host-b")
     assert state.leased_by_machine_id == "machine-b"
+    assert state.leased_by_host_name == "host-b"
     assert state.increment_checkpoint_failures() == 1
     state.reset_checkpoint_failures()
     assert state.consecutive_checkpoint_failures == 0
@@ -321,7 +332,8 @@ def test_initialize_service_claims_workspace_and_records_idle_snapshot(tmp_path,
     try:
         metadata = read_lease_metadata(paths)
         assert metadata is not None
-        assert metadata["machine_id"] == machine_id_text()
+        assert metadata["machine_id"] == machine_id_text(app_root=paths.app_root)
+        assert metadata["host_name"] == host_name_text()
         assert metadata["status"] == "idle"
         assert service.host.workspace_owned is True
         assert service.host.status == "idle"
@@ -343,6 +355,7 @@ def test_initialize_service_enters_observer_mode_for_other_machine_lease(tmp_pat
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -888,7 +901,7 @@ def test_daemon_initialize_writes_lease_metadata_before_first_checkpoint(tmp_pat
     metadata = read_lease_metadata(paths)
     assert metadata is not None
     assert metadata["status"] == "starting"
-    assert metadata["machine_id"] == machine_id_text()
+    assert metadata["machine_id"] == machine_id_text(app_root=paths.app_root)
 
 
 def test_daemon_service_can_start_in_observer_mode_when_workspace_is_leased(tmp_path, monkeypatch):
@@ -905,6 +918,7 @@ def test_daemon_service_can_start_in_observer_mode_when_workspace_is_leased(tmp_
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -921,6 +935,7 @@ def test_daemon_service_can_start_in_observer_mode_when_workspace_is_leased(tmp_
         assert status["status"]["status"] == "leased"
         assert status["status"]["workspace_owned"] is False
         assert status["status"]["leased_by_machine_id"] == "machine-a"
+        assert status["status"]["leased_by_host_name"] == "test-host"
 
         flows = service._handle_command({"command": "list_flows"})  # noqa: SLF001
         assert flows["ok"] is True
@@ -928,7 +943,7 @@ def test_daemon_service_can_start_in_observer_mode_when_workspace_is_leased(tmp_
 
         denied = service._handle_command({"command": "start_engine"})  # noqa: SLF001
         assert denied["ok"] is False
-        assert "leased by machine-a" in denied["error"]
+        assert "leased by test-host" in denied["error"]
     finally:
         service._shutdown()  # noqa: SLF001
 
@@ -946,7 +961,8 @@ def test_daemon_service_reclaims_unreachable_same_machine_lease(tmp_path, monkey
         paths,
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
-        machine_id=machine_id_text(),
+        machine_id=machine_id_text(app_root=paths.app_root),
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",

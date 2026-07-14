@@ -13,7 +13,8 @@ from data_engine.hosts.daemon.app import (
 )
 from data_engine.hosts.daemon.lifecycle import relinquish_workspace_for_control_request
 from data_engine.hosts.daemon.ownership import honor_control_request_if_needed, try_claim_requested_control
-from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR, machine_id_text
+from data_engine.platform.machine_identity import host_name_text, machine_id_text
+from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.runtime.shared_state import (
     checkpoint_workspace_state,
@@ -243,7 +244,7 @@ def test_control_handoff_stops_in_flight_manual_run(tmp_path, monkeypatch):
         response = service._handle_command({"command": "run_flow", "name": "demo", "wait": False})  # noqa: SLF001
         assert response["ok"] is True
 
-        relinquish_workspace_for_control_request(service, "machine-b")
+        relinquish_workspace_for_control_request(service, "machine-b", "host-b")
         release_gate.set()
 
         assert stop_seen.wait(timeout=1.0) is True
@@ -298,6 +299,7 @@ def test_observer_daemon_claims_workspace_after_local_control_request(tmp_path, 
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -313,8 +315,8 @@ def test_observer_daemon_claims_workspace_after_local_control_request(tmp_path, 
         write_control_request(
             paths,
             workspace_id="default",
-            requester_machine_id=machine_id_text(),
-            requester_host_name=machine_id_text(),
+            requester_machine_id=machine_id_text(app_root=paths.app_root),
+            requester_host_name=host_name_text(),
             requester_pid=303,
             requester_client_kind="ui",
             requested_at_utc=utcnow_text(),

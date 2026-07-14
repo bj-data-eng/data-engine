@@ -34,6 +34,7 @@ class DaemonRuntimeProjectionSnapshot:
     status: str
     workspace_owned: bool
     leased_by_machine_id: str | None
+    leased_by_host_name: str | None
     runtime_active: bool
     runtime_stopping: bool
     engine_starting: bool
@@ -128,6 +129,7 @@ class DaemonRuntimeProjector:
                     status=refreshed.status,
                     workspace_owned=refreshed.workspace_owned,
                     leased_by_machine_id=refreshed.leased_by_machine_id,
+                    leased_by_host_name=refreshed.leased_by_host_name,
                     runtime_active=refreshed.runtime_active,
                     runtime_stopping=refreshed.runtime_stopping,
                     engine_starting=refreshed.engine_starting,
@@ -209,6 +211,7 @@ class DaemonRuntimeProjector:
             status=previous.status,
             workspace_owned=previous.workspace_owned,
             leased_by_machine_id=previous.leased_by_machine_id,
+            leased_by_host_name=previous.leased_by_host_name,
             runtime_active=previous.runtime_active,
             runtime_stopping=previous.runtime_stopping,
             engine_starting=previous.engine_starting,
@@ -294,6 +297,7 @@ class DaemonRuntimeProjector:
                     status=refreshed.status,
                     workspace_owned=refreshed.workspace_owned,
                     leased_by_machine_id=refreshed.leased_by_machine_id,
+                    leased_by_host_name=refreshed.leased_by_host_name,
                     runtime_active=refreshed.runtime_active,
                     runtime_stopping=refreshed.runtime_stopping,
                     engine_starting=refreshed.engine_starting,
@@ -375,6 +379,7 @@ class DaemonRuntimeProjector:
             and previous.status == refreshed.status
             and previous.workspace_owned == refreshed.workspace_owned
             and previous.leased_by_machine_id == refreshed.leased_by_machine_id
+            and previous.leased_by_host_name == refreshed.leased_by_host_name
             and previous.runtime_active == refreshed.runtime_active
             and previous.runtime_stopping == refreshed.runtime_stopping
             and previous.engine_starting == refreshed.engine_starting
@@ -399,6 +404,7 @@ class DaemonRuntimeProjector:
             status=str(state.get("status", "starting")),
             workspace_owned=bool(state.get("workspace_owned", False)),
             leased_by_machine_id=_coerce_optional_text(state.get("leased_by_machine_id")),
+            leased_by_host_name=_coerce_optional_text(state.get("leased_by_host_name")),
             runtime_active=bool(state.get("runtime_active", False)),
             runtime_stopping=bool(state.get("runtime_stopping", False)),
             engine_starting=bool(state.get("engine_starting", False)),

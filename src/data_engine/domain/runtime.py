@@ -78,6 +78,7 @@ class RuntimeSessionState:
 
     workspace_owned: bool = True
     leased_by_machine_id: str | None = None
+    leased_by_host_name: str | None = None
     runtime_active: bool = False
     runtime_stopping: bool = False
     active_runtime_flow_names: tuple[str, ...] = ()
@@ -114,6 +115,7 @@ class RuntimeSessionState:
         return cls(
             workspace_owned=snapshot.workspace_owned,
             leased_by_machine_id=snapshot.leased_by_machine_id,
+            leased_by_host_name=snapshot.leased_by_host_name,
             runtime_active=snapshot.runtime_active,
             runtime_stopping=snapshot.runtime_stopping,
             active_runtime_flow_names=active_runtime_flow_names,
@@ -191,6 +193,7 @@ class DaemonStatusState:
 
     workspace_owned: bool = True
     leased_by_machine_id: str | None = None
+    leased_by_host_name: str | None = None
     engine_active: bool = False
     engine_stopping: bool = False
     engine_starting: bool = False
@@ -215,6 +218,7 @@ class DaemonStatusState:
         return cls(
             workspace_owned=snapshot.workspace_owned,
             leased_by_machine_id=snapshot.leased_by_machine_id,
+            leased_by_host_name=snapshot.leased_by_host_name,
             engine_active=snapshot.runtime_active,
             engine_stopping=snapshot.runtime_stopping,
             engine_starting=snapshot.engine_starting,
@@ -235,6 +239,7 @@ class DaemonStatusState:
             type("SnapshotProxy", (), {
                 "workspace_owned": self.workspace_owned,
                 "leased_by_machine_id": self.leased_by_machine_id,
+                "leased_by_host_name": self.leased_by_host_name,
                 "runtime_active": self.engine_active,
                 "runtime_stopping": self.engine_stopping,
                 "active_engine_flow_names": self.active_engine_flow_names,
@@ -301,7 +306,7 @@ class WorkspaceControlState:
                 else:
                     control_status_text = "This Workstation has control"
         else:
-            owner = status.leased_by_machine_id or "Another machine"
+            owner = status.leased_by_host_name or status.leased_by_machine_id or "Another machine"
             if local_request_pending:
                 control_status_text = f"Control requested from {owner}"
             elif checkpoint_at is None:
@@ -317,7 +322,8 @@ class WorkspaceControlState:
         if status.leased_by_machine_id is None:
             blocked_status_text = "Takeover available."
         else:
-            blocked_status_text = f"{status.leased_by_machine_id} currently has control of this workspace."
+            owner = status.leased_by_host_name or status.leased_by_machine_id
+            blocked_status_text = f"{owner} currently has control of this workspace."
 
         return cls(
             daemon_status=status,

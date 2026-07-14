@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sqlite3
+from uuid import UUID, uuid4
 
 from data_engine.platform.identity import APP_CACHE_DIR_NAME, env_var
 from data_engine.platform.paths import stable_absolute_path
@@ -12,6 +13,20 @@ from data_engine.platform.paths import stable_absolute_path
 
 DATA_ENGINE_APP_ROOT_ENV_VAR = env_var("app_root")
 DATA_ENGINE_STATE_ROOT_ENV_VAR = env_var("state_root")
+_INSTALLATION_ID_SETTING_KEY = "installation_id"
+
+
+def _canonical_installation_id(value: object) -> str | None:
+    """Return one canonical version-4 UUID string when ``value`` is valid."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = UUID(value.strip())
+    except (AttributeError, ValueError):
+        return None
+    if parsed.version != 4:
+        return None
+    return str(parsed)
 
 
 def default_state_root(*, app_root: Path | None = None) -> Path:
@@ -121,6 +136,47 @@ class LocalSettingsStore:
                     (key, str(value)),
                 )
             connection.commit()
+        finally:
+            connection.close()
+
+    def installation_id(self) -> str:
+        """Return the durable random identity for this local installation.
+
+        Creation and repair run inside an immediate SQLite transaction so
+        concurrent processes always converge on the same persisted UUID. A
+        malformed value is replaced with a new version-4 UUID. Storage errors
+        propagate instead of falling back to a process-local identity that
+        could silently change ownership decisions.
+        """
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?",
+                (_INSTALLATION_ID_SETTING_KEY,),
+            ).fetchone()
+            stored_value = row["value"] if row is not None else None
+            installation_id = _canonical_installation_id(stored_value)
+            if installation_id is None:
+                installation_id = str(uuid4())
+                connection.execute(
+                    """
+                    INSERT INTO settings (key, value)
+                    VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (_INSTALLATION_ID_SETTING_KEY, installation_id),
+                )
+            elif stored_value != installation_id:
+                connection.execute(
+                    "UPDATE settings SET value = ? WHERE key = ?",
+                    (installation_id, _INSTALLATION_ID_SETTING_KEY),
+                )
+            connection.commit()
+            return installation_id
+        except BaseException:
+            connection.rollback()
+            raise
         finally:
             connection.close()
 

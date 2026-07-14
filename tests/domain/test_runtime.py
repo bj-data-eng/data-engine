@@ -145,7 +145,8 @@ def test_workspace_control_state_derives_control_and_blocked_text():
         WorkspaceDaemonSnapshot(
             live=False,
             workspace_owned=False,
-            leased_by_machine_id="other-host",
+            leased_by_machine_id="2a0ec090-7599-4578-a726-fd760f76f7f8",
+            leased_by_host_name="other-host",
             runtime_active=False,
             runtime_stopping=False,
             manual_runs=(),
@@ -158,7 +159,8 @@ def test_workspace_control_state_derives_control_and_blocked_text():
         daemon_startup_in_progress=False,
     )
 
-    assert control.daemon_status.leased_by_machine_id == "other-host"
+    assert control.daemon_status.leased_by_machine_id == "2a0ec090-7599-4578-a726-fd760f76f7f8"
+    assert control.daemon_status.leased_by_host_name == "other-host"
     assert control.control_status_text == "other-host has control"
     assert control.blocked_status_text == "other-host currently has control of this workspace."
 
@@ -183,4 +185,3 @@ def test_workspace_control_state_reports_local_request_pending():
 
     assert control.local_request_pending is True
     assert control.control_status_text == "Control requested from other-host"
-

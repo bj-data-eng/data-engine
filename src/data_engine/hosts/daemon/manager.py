@@ -11,8 +11,9 @@ from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.app import DaemonClientError, daemon_request, is_daemon_live
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.platform.instrumentation import new_request_id, timed_operation
+from data_engine.platform.machine_identity import host_name_text, machine_id_text
 from data_engine.platform.processes import process_is_running as _pid_is_live
-from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
+from data_engine.platform.workspace_models import WorkspacePaths
 
 def _lease_pid_is_live(metadata: dict[str, object] | None) -> bool:
     """Return whether the recorded lease owner pid is still alive."""
@@ -50,6 +51,7 @@ class WorkspaceDaemonSnapshot:
     event_sequence: int = 0
     recent_events: tuple[dict[str, object], ...] = ()
     events_truncated: bool = False
+    leased_by_host_name: str | None = None
 
 
 class WorkspaceDaemonManager:
@@ -66,6 +68,8 @@ class WorkspaceDaemonManager:
         self.max_sync_misses = max(max_sync_misses, 1)
         self.shared_state_adapter = shared_state_adapter or DaemonSharedStateAdapter()
         self.workspace_configured = bool(getattr(paths, "workspace_configured", True))
+        self.machine_id = machine_id_text(app_root=paths.app_root)
+        self.host_name = host_name_text()
         self._daemon_live = False
         self._sync_misses = 0
         self._last_snapshot: WorkspaceDaemonSnapshot | None = None
@@ -128,6 +132,7 @@ class WorkspaceDaemonManager:
                         projection_version=self._last_snapshot.projection_version,
                         active_runs=self._last_snapshot.active_runs,
                         flow_activity=self._last_snapshot.flow_activity,
+                        leased_by_host_name=self._last_snapshot.leased_by_host_name,
                     )
                 snapshot = self._lease_snapshot()
                 self._last_snapshot = snapshot
@@ -162,6 +167,7 @@ class WorkspaceDaemonManager:
                         projection_version=self._last_snapshot.projection_version,
                         active_runs=self._last_snapshot.active_runs,
                         flow_activity=self._last_snapshot.flow_activity,
+                        leased_by_host_name=self._last_snapshot.leased_by_host_name,
                     )
                 snapshot = self._lease_snapshot()
                 self._last_snapshot = snapshot
@@ -213,7 +219,7 @@ class WorkspaceDaemonManager:
 
     def _lease_snapshot(self) -> WorkspaceDaemonSnapshot:
         metadata = self.shared_state_adapter.read_lease_metadata(self.paths)
-        local_machine_id = machine_id_text()
+        local_machine_id = self.machine_id
         if (
             isinstance(metadata, dict)
             and str(metadata.get("machine_id", "")).strip() == local_machine_id
@@ -228,6 +234,8 @@ class WorkspaceDaemonManager:
                 metadata = self.shared_state_adapter.read_lease_metadata(self.paths)
         owner = metadata.get("machine_id") if isinstance(metadata, dict) else None
         owner_text = str(owner).strip() if isinstance(owner, str) and owner.strip() else None
+        owner_host = metadata.get("host_name") if isinstance(metadata, dict) else None
+        owner_host_text = str(owner_host).strip() if isinstance(owner_host, str) and owner_host.strip() else None
         workspace_owned = metadata is None or owner_text == local_machine_id
         checkpoint = metadata.get("last_checkpoint_at_utc") if isinstance(metadata, dict) else None
         checkpoint_text = str(checkpoint) if isinstance(checkpoint, str) and checkpoint.strip() else None
@@ -249,6 +257,7 @@ class WorkspaceDaemonManager:
             projection_version=0,
             active_runs=(),
             flow_activity=(),
+            leased_by_host_name=None if workspace_owned else owner_host_text,
         )
 
     def _snapshot_from_status_dict(
@@ -294,6 +303,7 @@ class WorkspaceDaemonManager:
                 active_engine_flow_names=self._last_snapshot.active_engine_flow_names,
                 active_runs=self._last_snapshot.active_runs,
                 flow_activity=self._last_snapshot.flow_activity,
+                leased_by_host_name=self._last_snapshot.leased_by_host_name,
             )
             self._last_snapshot = snapshot
             return snapshot
@@ -303,6 +313,7 @@ class WorkspaceDaemonManager:
         flow_activity = _coerce_flow_activity(status.get("flow_activity"))
         manual_runs = tuple(name for name in status.get("manual_runs", []) if isinstance(name, str))
         leased_by = status.get("leased_by_machine_id")
+        leased_by_host = status.get("leased_by_host_name")
         checkpoint = status.get("last_checkpoint_at_utc")
         snapshot = WorkspaceDaemonSnapshot(
             live=assume_live,
@@ -323,6 +334,11 @@ class WorkspaceDaemonManager:
             events_truncated=bool(status.get("events_truncated", False)),
             active_runs=active_runs,
             flow_activity=flow_activity,
+            leased_by_host_name=(
+                str(leased_by_host)
+                if isinstance(leased_by_host, str) and leased_by_host.strip()
+                else None
+            ),
         )
         self._last_snapshot = snapshot
         return snapshot
@@ -355,7 +371,7 @@ class WorkspaceDaemonManager:
         return WorkspaceControlState.from_snapshot(
             snapshot,
             daemon_live=self.daemon_live,
-            local_machine_id=machine_id_text(),
+            local_machine_id=self.machine_id,
             control_request=self.shared_state_adapter.read_control_request(self.paths),
             daemon_startup_in_progress=daemon_startup_in_progress,
         )
@@ -374,7 +390,7 @@ class WorkspaceDaemonManager:
             if isinstance(metadata, dict) and isinstance(metadata.get("machine_id"), str)
             else ""
         )
-        local_machine_id = machine_id_text()
+        local_machine_id = self.machine_id
         if owner == local_machine_id and not self._daemon_live:
             if not _lease_pid_is_live(metadata):
                 recovered = self.shared_state_adapter.recover_stale_workspace(
@@ -388,7 +404,7 @@ class WorkspaceDaemonManager:
             self.paths,
             workspace_id=self.paths.workspace_id,
             requester_machine_id=local_machine_id,
-            requester_host_name=local_machine_id,
+            requester_host_name=self.host_name,
             requester_pid=os.getpid(),
             requester_client_kind="ui",
             requested_at_utc=datetime.now(UTC).isoformat(),

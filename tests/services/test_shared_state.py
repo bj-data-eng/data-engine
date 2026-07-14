@@ -69,6 +69,7 @@ def test_checkpoint_and_hydrate_workspace_state(tmp_path, monkeypatch):
         source_ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -80,6 +81,8 @@ def test_checkpoint_and_hydrate_workspace_state(tmp_path, monkeypatch):
     metadata = read_lease_metadata(paths)
     assert metadata is not None
     assert metadata["workspace_id"] == "default"
+    assert metadata["machine_id"] == "machine-a"
+    assert metadata["host_name"] == "test-host"
 
     target_ledger = RuntimeCacheLedger(app_root / "artifacts" / "workspaces" / "default" / "runtime_state" / "second.sqlite")
     hydrate_local_runtime_state(paths, target_ledger)
@@ -120,6 +123,7 @@ def test_shared_state_helpers_accept_protocol_shaped_snapshot_store(tmp_path, mo
         SnapshotStore(source_ledger),
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -158,6 +162,7 @@ def test_checkpoint_workspace_state_handles_late_string_values_after_many_nulls(
         ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -194,6 +199,7 @@ def test_checkpoint_workspace_state_writes_typed_parquet_when_optional_columns_a
         ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -238,6 +244,7 @@ def test_hydrate_local_runtime_state_ignores_mixed_snapshot_generations(tmp_path
         ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -283,6 +290,7 @@ def test_hydrate_local_runtime_state_retries_after_torn_snapshot_read(tmp_path, 
         ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -331,6 +339,7 @@ def test_hydrate_local_runtime_state_reassigns_local_log_ids(tmp_path, monkeypat
         ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -375,6 +384,7 @@ def test_hydrate_local_runtime_state_deduplicates_file_state_rows(tmp_path, monk
         ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -419,6 +429,7 @@ def test_recover_stale_workspace_quarantines_old_lease(tmp_path, monkeypatch):
         ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -449,6 +460,7 @@ def test_recover_stale_workspace_without_reclaim_restores_available_marker(tmp_p
         ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -476,7 +488,7 @@ def test_write_and_remove_control_request(tmp_path, monkeypatch):
         paths,
         workspace_id="default",
         requester_machine_id="machine-b",
-        requester_host_name="machine-b",
+        requester_host_name="host-b",
         requester_pid=202,
         requester_client_kind="ui",
         requested_at_utc="2026-03-30T00:00:00+00:00",
@@ -485,6 +497,7 @@ def test_write_and_remove_control_request(tmp_path, monkeypatch):
     metadata = read_control_request(paths)
     assert metadata is not None
     assert metadata["requester_machine_id"] == "machine-b"
+    assert metadata["requester_host_name"] == "host-b"
     assert metadata["requester_client_kind"] == "ui"
 
     remove_control_request(paths)
@@ -509,6 +522,7 @@ def test_hydrate_local_runtime_state_retries_until_snapshot_generations_match(tm
         source_ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -552,6 +566,7 @@ def test_read_lease_metadata_retries_after_transient_parquet_error(tmp_path, mon
         ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -606,6 +621,7 @@ def test_checkpoint_workspace_state_retries_atomic_replace_after_access_denied(t
         ledger,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",

@@ -28,7 +28,8 @@ from data_engine.hosts.daemon.client import (
 )
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot, _lease_pid_is_live
-from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR, machine_id_text
+from data_engine.platform.machine_identity import host_name_text, machine_id_text
+from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.runtime.shared_state import (
     checkpoint_workspace_state,
@@ -91,7 +92,8 @@ def test_workspace_daemon_manager_auto_recovers_dead_same_machine_lease(tmp_path
         paths,
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
-        machine_id=machine_id_text(),
+        machine_id=machine_id_text(app_root=paths.app_root),
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -122,7 +124,8 @@ def test_workspace_daemon_manager_treats_live_same_machine_lease_as_locally_owne
         paths,
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
-        machine_id=machine_id_text(),
+        machine_id=machine_id_text(app_root=paths.app_root),
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=os.getpid(),
         status="starting",
@@ -139,6 +142,42 @@ def test_workspace_daemon_manager_treats_live_same_machine_lease_as_locally_owne
     assert snapshot.workspace_owned is True
     assert snapshot.leased_by_machine_id is None
     assert snapshot.source == "lease"
+
+
+def test_same_hostname_with_different_installation_id_is_remote(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+    assert claim_workspace(paths) is True
+    remote_machine_id = machine_id_text(
+        settings_path=tmp_path / "cloned-installation" / "app_settings.sqlite"
+    )
+    assert remote_machine_id != machine_id_text(app_root=paths.app_root)
+    started = datetime.now(UTC).isoformat()
+    checkpoint_workspace_state(
+        paths,
+        RuntimeCacheLedger(paths.runtime_db_path),
+        workspace_id="default",
+        machine_id=remote_machine_id,
+        host_name=host_name_text(),
+        daemon_id="daemon-a",
+        pid=os.getpid(),
+        status="idle",
+        started_at_utc=started,
+        last_checkpoint_at_utc=started,
+        app_version="0.1.0",
+    )
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.is_daemon_live", lambda paths: False)
+
+    snapshot = WorkspaceDaemonManager(paths).sync()
+
+    assert snapshot.workspace_owned is False
+    assert snapshot.leased_by_machine_id == remote_machine_id
+    assert snapshot.leased_by_host_name == host_name_text()
+    assert daemon_client._same_machine_lease_pid(paths) is None
 
 
 def test_daemon_shared_state_adapter_caches_lease_metadata_reads_briefly(tmp_path, monkeypatch):
@@ -193,6 +232,7 @@ def test_daemon_shared_state_adapter_invalidates_lease_cache_after_write(tmp_pat
         paths,
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -593,7 +633,8 @@ def test_force_shutdown_daemon_process_kills_local_pid_and_cleans_up_lease(tmp_p
         paths,
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
-        machine_id=machine_id_text(),
+        machine_id=machine_id_text(app_root=paths.app_root),
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=321,
         status="running",
@@ -692,7 +733,8 @@ def test_spawn_daemon_process_waits_for_fresh_same_machine_startup(tmp_path, mon
         paths,
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
-        machine_id=machine_id_text(),
+        machine_id=machine_id_text(app_root=paths.app_root),
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="starting",
@@ -726,7 +768,8 @@ def test_spawn_daemon_process_does_not_recover_recent_same_machine_unreachable_l
         paths,
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
-        machine_id=machine_id_text(),
+        machine_id=machine_id_text(app_root=paths.app_root),
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",
@@ -761,7 +804,8 @@ def test_spawn_daemon_process_does_not_launch_duplicate_local_owner(tmp_path, mo
         paths,
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
-        machine_id=machine_id_text(),
+        machine_id=machine_id_text(app_root=paths.app_root),
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=99999,
         status="idle",
@@ -945,7 +989,10 @@ def test_daemon_authkey_refuses_recovery_while_local_workspace_lease_pid_is_live
     monkeypatch.setattr(
         daemon_client._SHARED_STATE_ADAPTER,
         "read_lease_metadata",
-        lambda paths: {"machine_id": machine_id_text(), "pid": 4321},
+        lambda paths: {
+            "machine_id": machine_id_text(app_root=paths.app_root),
+            "pid": 4321,
+        },
     )
 
     with pytest.raises(DaemonClientError, match="local daemon may still own"):
@@ -1067,7 +1114,8 @@ def test_daemon_service_refuses_same_machine_observer_mode(tmp_path, monkeypatch
         paths,
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
-        machine_id=machine_id_text(),
+        machine_id=machine_id_text(app_root=paths.app_root),
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",

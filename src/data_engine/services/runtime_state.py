@@ -36,6 +36,7 @@ class ControlSnapshot:
 
     state: ControlAvailability
     leased_by_machine_id: str | None = None
+    leased_by_host_name: str | None = None
     request_pending: bool = False
     control_status_text: str | None = None
     blocked_status_text: str = "Takeover available."
@@ -161,6 +162,7 @@ def runtime_session_from_workspace_snapshot(snapshot: WorkspaceSnapshot) -> Runt
     return RuntimeSessionState(
         workspace_owned=snapshot.control.state != "leased" or snapshot.control.leased_by_machine_id is None,
         leased_by_machine_id=snapshot.control.leased_by_machine_id,
+        leased_by_host_name=snapshot.control.leased_by_host_name,
         runtime_active=snapshot.engine.state in {"running", "stopping"},
         runtime_stopping=snapshot.engine.state == "stopping",
         active_runtime_flow_names=active_engine_flow_names,
@@ -343,6 +345,7 @@ class RuntimeStateService:
         return ControlSnapshot(
             state=state,
             leased_by_machine_id=runtime_session.leased_by_machine_id,
+            leased_by_host_name=runtime_session.leased_by_host_name,
             request_pending=control_state.local_request_pending,
             control_status_text=control_state.control_status_text,
             blocked_status_text=control_state.blocked_status_text,
@@ -689,6 +692,7 @@ class RuntimeStateService:
         control = ControlSnapshot(
             state=previous.control.state,
             leased_by_machine_id=daemon_status.leased_by_machine_id,
+            leased_by_host_name=daemon_status.leased_by_host_name,
             request_pending=previous.control.request_pending,
             control_status_text=previous.control.control_status_text,
             blocked_status_text=previous.control.blocked_status_text,

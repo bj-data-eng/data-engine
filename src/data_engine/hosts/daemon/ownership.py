@@ -24,8 +24,9 @@ def honor_control_request_if_needed(service: "DataEngineDaemonService") -> bool:
     requester = str(metadata.get("requester_machine_id", "")).strip()
     if not requester or requester == service.machine_id:
         return False
+    requester_host_name = str(metadata.get("requester_host_name", "")).strip() or None
     service._debug_log(f"control request received requester={requester}")
-    service._relinquish_workspace_for_control_request(requester)
+    service._relinquish_workspace_for_control_request(requester, requester_host_name)
     return True
 
 
@@ -50,7 +51,7 @@ def try_claim_requested_control(service: "DataEngineDaemonService") -> bool:
 
 def lease_error_text(service: "DataEngineDaemonService") -> str:
     with service._state_lock:
-        owner = service.host.leased_by_machine_id or "another machine"
+        owner = service.host.leased_by_host_name or service.host.leased_by_machine_id or "another machine"
     return f"Workspace {service.paths.workspace_id!r} is leased by {owner}."
 
 
@@ -64,8 +65,12 @@ def try_claim_released_workspace(service: "DataEngineDaemonService") -> bool:
     if metadata is not None:
         owner = metadata.get("machine_id")
         if isinstance(owner, str) and owner.strip():
+            owner_host = metadata.get("host_name")
             with service._state_lock:
-                service.host.leased_by_machine_id = owner
+                service.state.set_lease_owner(
+                    owner,
+                    str(owner_host).strip() if isinstance(owner_host, str) and owner_host.strip() else None,
+                )
             service._publish_runtime_event("workspace.lease_observed")
         return False
     try:
@@ -75,8 +80,12 @@ def try_claim_released_workspace(service: "DataEngineDaemonService") -> bool:
     if not claimed:
         metadata = shared_state.read_lease_metadata(service.paths)
         owner = metadata.get("machine_id") if isinstance(metadata, dict) else None
+        owner_host = metadata.get("host_name") if isinstance(metadata, dict) else None
         with service._state_lock:
-            service.host.leased_by_machine_id = str(owner) if isinstance(owner, str) and owner.strip() else None
+            service.state.set_lease_owner(
+                str(owner) if isinstance(owner, str) and owner.strip() else None,
+                str(owner_host) if isinstance(owner_host, str) and owner_host.strip() else None,
+            )
         service._publish_runtime_event("workspace.lease_observed")
         return False
     with service._state_lock:
@@ -99,6 +108,7 @@ def release_workspace_claim(
     service: "DataEngineDaemonService",
     *,
     leased_by_machine_id: str | None = None,
+    leased_by_host_name: str | None = None,
     status: str | None = None,
     update_state: bool = False,
 ) -> None:
@@ -115,7 +125,11 @@ def release_workspace_claim(
         except Exception:
             pass
     with service._state_lock:
-        service.state.release_workspace(leased_by_machine_id=leased_by_machine_id, status=status)
+        service.state.release_workspace(
+            leased_by_machine_id=leased_by_machine_id,
+            leased_by_host_name=leased_by_host_name,
+            status=status,
+        )
     service._publish_runtime_event("workspace.released")
     if update_state and status is not None:
         service._update_daemon_state(status=status)

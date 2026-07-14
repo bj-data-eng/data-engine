@@ -9,12 +9,13 @@ from data_engine.core.model import FlowValidationError
 from data_engine.domain import ClassifiedProcessInfo, DoctorCheck, ProcessInfo, WorkspaceLeaseDiagnostic
 from data_engine.domain.diagnostics import is_defunct_process_status
 from data_engine.platform.paths import path_display
+from data_engine.platform.machine_identity import machine_id_text
 from data_engine.platform.processes import (
     ProcessInspectionError,
     collapse_windows_launcher_processes,
     list_processes,
 )
-from data_engine.platform.workspace_models import authored_workspace_is_available, machine_id_text
+from data_engine.platform.workspace_models import authored_workspace_is_available
 
 
 def doctor(*, settings: Any, paths: Any) -> int:
@@ -76,8 +77,11 @@ def doctor_daemons(
     classify_process_kind_func: Callable[[str], str | None] = classify_process_kind,
     read_lease_metadata_func: Callable[[Any], dict[str, Any] | None],
     lease_is_stale_func: Callable[[Any, float], bool],
-    machine_id_text_func: Callable[[], str] = machine_id_text,
+    machine_id_text_func: Callable[[], str] | None = None,
 ) -> int:
+    machine_id_text_func = machine_id_text_func or (
+        lambda: machine_id_text(app_root=settings.app_root)
+    )
     rows = process_rows if process_rows is not None else process_listing_func()
     relevant = [
         ClassifiedProcessInfo(

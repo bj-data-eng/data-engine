@@ -29,13 +29,14 @@ from data_engine.hosts.daemon.constants import (
     STALE_AFTER_SECONDS,
 )
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
+from data_engine.platform.machine_identity import machine_id_text
 from data_engine.platform.processes import (
     ProcessInspectionError,
     force_kill_process_tree,
     process_is_running,
     windows_subprocess_creationflags,
 )
-from data_engine.platform.workspace_models import WorkspacePaths, machine_id_text
+from data_engine.platform.workspace_models import WorkspacePaths
 
 
 class DaemonClientError(RuntimeError):
@@ -180,7 +181,7 @@ def _authkey_recovery_is_safe(paths: WorkspacePaths) -> bool:
     owner = metadata.get("machine_id")
     if not isinstance(owner, str) or not owner.strip():
         return False
-    if owner.strip() != machine_id_text():
+    if owner.strip() != machine_id_text(app_root=paths.app_root):
         return True
     try:
         lease_pid = int(metadata.get("pid"))
@@ -469,7 +470,7 @@ def _same_machine_unreachable_lease_metadata(paths: WorkspacePaths) -> dict[str,
     if metadata is None:
         return None
     owner = metadata.get("machine_id")
-    if not isinstance(owner, str) or owner.strip() != machine_id_text():
+    if not isinstance(owner, str) or owner.strip() != machine_id_text(app_root=paths.app_root):
         return None
     if is_daemon_live(paths):
         return None
@@ -482,7 +483,7 @@ def _same_machine_live_lease_process(paths: WorkspacePaths) -> int | None:
     if metadata is None:
         return None
     owner = metadata.get("machine_id")
-    if not isinstance(owner, str) or owner.strip() != machine_id_text():
+    if not isinstance(owner, str) or owner.strip() != machine_id_text(app_root=paths.app_root):
         return None
     pid_value = metadata.get("pid")
     try:
@@ -500,7 +501,7 @@ def _same_machine_lease_pid(paths: WorkspacePaths) -> int | None:
     if metadata is None:
         return None
     owner = metadata.get("machine_id")
-    if not isinstance(owner, str) or owner.strip() != machine_id_text():
+    if not isinstance(owner, str) or owner.strip() != machine_id_text(app_root=paths.app_root):
         return None
     try:
         pid = int(metadata.get("pid"))
@@ -573,7 +574,7 @@ def _recover_broken_local_lease(paths: WorkspacePaths) -> bool:
     """Recover one unreachable same-machine lease after it becomes stale."""
     return _SHARED_STATE_ADAPTER.recover_stale_workspace(
         paths,
-        machine_id=machine_id_text(),
+        machine_id=machine_id_text(app_root=paths.app_root),
         stale_after_seconds=STALE_AFTER_SECONDS,
         reclaim=False,
     )

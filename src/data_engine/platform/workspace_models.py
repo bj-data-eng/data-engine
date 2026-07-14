@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
-import socket
 import sys
 from typing import Final
 
@@ -185,11 +184,6 @@ def authored_workspace_is_available(paths: WorkspacePaths) -> bool:
     return paths.workspace_configured and paths.workspace_root.is_dir() and paths.flow_modules_dir.is_dir()
 
 
-def machine_id_text() -> str:
-    """Return a stable local machine identifier for lease metadata."""
-    return socket.gethostname()
-
-
 __all__ = [
     "APP_INTERNAL_ID",
     "APP_ROOT_PATH",
@@ -225,7 +219,6 @@ __all__ = [
     "_stable_workspace_path",
     "authored_workspace_is_available",
     "local_workspace_namespace",
-    "machine_id_text",
     "normalized_path_text",
     "path_display",
     "toml_path_text",

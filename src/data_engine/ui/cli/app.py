@@ -12,11 +12,11 @@ from data_engine.platform.instrumentation import (
     DATA_ENGINE_DEV_INSTRUMENT_ENV_VAR,
     DATA_ENGINE_DEV_VIZTRACE_ENV_VAR,
 )
+from data_engine.platform.machine_identity import machine_id_text
 from data_engine.platform.workspace_models import (
     DATA_ENGINE_APP_ROOT_ENV_VAR,
     DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR,
     InvalidWorkspaceIdError,
-    machine_id_text,
 )
 from data_engine.ui.cli import commands_doctor as _commands_doctor
 from data_engine.ui.cli import commands_run as _commands_run
@@ -136,7 +136,7 @@ def _doctor_daemons(*, dependencies: CliDependencies) -> int:
             paths,
             stale_after_seconds=stale_after_seconds,
         ),
-        machine_id_text_func=machine_id_text,
+        machine_id_text_func=lambda: machine_id_text(app_root=settings.app_root),
     )
 
 

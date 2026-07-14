@@ -50,11 +50,13 @@ class DaemonStateSyncHandler:
             "workspace_id": service.paths.workspace_id,
             "workspace_root": str(service.paths.workspace_root),
             "machine_id": service.machine_id,
+            "host_name": service.host_name,
             "daemon_id": service.daemon_id,
             "pid": service.pid,
             "status": projection.status,
             "workspace_owned": projection.workspace_owned,
             "leased_by_machine_id": projection.leased_by_machine_id,
+            "leased_by_host_name": projection.leased_by_host_name,
             "engine_active": projection.runtime_active,
             "engine_stopping": projection.runtime_stopping,
             "engine_starting": projection.engine_starting,
@@ -94,11 +96,13 @@ class DaemonStateSyncHandler:
             "workspace_id": self.service.paths.workspace_id,
             "workspace_root": str(self.service.paths.workspace_root),
             "machine_id": self.service.machine_id,
+            "host_name": self.service.host_name,
             "daemon_id": self.service.daemon_id,
             "pid": self.service.pid,
             "status": projection.status,
             "workspace_owned": projection.workspace_owned,
             "leased_by_machine_id": projection.leased_by_machine_id,
+            "leased_by_host_name": projection.leased_by_host_name,
             "engine_active": projection.runtime_active,
             "engine_stopping": projection.runtime_stopping,
             "engine_starting": projection.engine_starting,
@@ -121,6 +125,7 @@ class DaemonStateSyncHandler:
             service.runtime_cache_ledger,
             workspace_id=service.paths.workspace_id,
             machine_id=service.machine_id,
+            host_name=service.host_name,
             daemon_id=service.daemon_id,
             pid=service.pid,
             status=status,
@@ -138,10 +143,17 @@ class DaemonStateSyncHandler:
         service.shared_state_adapter.hydrate_local_runtime(service.paths, service.runtime_cache_ledger)
         metadata = service.shared_state_adapter.read_lease_metadata(service.paths)
         with service._state_lock:
-            service.state.set_leased_by_machine_id(
-                str(metadata.get("machine_id"))
-                if metadata is not None and metadata.get("machine_id") is not None
-                else None
+            service.state.set_lease_owner(
+                (
+                    str(metadata.get("machine_id"))
+                    if metadata is not None and metadata.get("machine_id") is not None
+                    else None
+                ),
+                (
+                    str(metadata.get("host_name"))
+                    if metadata is not None and metadata.get("host_name") is not None
+                    else None
+                ),
             )
         service._publish_runtime_event("observer.refreshed")
         if metadata is None:

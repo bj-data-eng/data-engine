@@ -32,7 +32,8 @@ from data_engine.domain import (
 )
 from data_engine.platform.identity import APP_DISPLAY_NAME, APP_VERSION
 from data_engine.platform.local_settings import LocalSettingsStore
-from data_engine.platform.workspace_models import DiscoveredWorkspace, machine_id_text
+from data_engine.platform.machine_identity import machine_id_text
+from data_engine.platform.workspace_models import DiscoveredWorkspace
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger, utcnow_text
 from data_engine.runtime.execution.logging import RuntimeLogEmitter
@@ -2431,15 +2432,16 @@ def test_request_control_button_shows_requesting_while_request_is_pending(qapp, 
 
 
 def test_request_control_uses_shared_state_adapter_without_recovering_live_local_owner(monkeypatch):
+    paths = resolve_workspace_paths()
+
     class _FakeSharedStateAdapter:
         def __init__(self) -> None:
             self.recovered_calls: list[tuple[object, str, float]] = []
             self.written_requests: list[dict[str, object]] = []
 
         def read_lease_metadata(self, paths):
-            del paths
             return {
-                "machine_id": machine_id_text(),
+                "machine_id": machine_id_text(app_root=paths.app_root),
                 "pid": os.getpid(),
                 "last_checkpoint_at_utc": datetime.now(UTC).isoformat(),
             }
@@ -2457,7 +2459,7 @@ def test_request_control_uses_shared_state_adapter_without_recovering_live_local
             return None
 
     adapter = _FakeSharedStateAdapter()
-    manager = WorkspaceDaemonManager(resolve_workspace_paths(), shared_state_adapter=adapter)
+    manager = WorkspaceDaemonManager(paths, shared_state_adapter=adapter)
     recovered_calls: list[bool] = []
     monkeypatch.setattr(
         "data_engine.hosts.daemon.manager._lease_pid_is_live",
@@ -2470,6 +2472,9 @@ def test_request_control_uses_shared_state_adapter_without_recovering_live_local
     assert recovered_calls == [True]
     assert adapter.recovered_calls == []
     assert len(adapter.written_requests) == 1
+    assert adapter.written_requests[0]["requester_machine_id"] == manager.machine_id
+    assert adapter.written_requests[0]["requester_host_name"] == manager.host_name
+    assert manager.machine_id != manager.host_name
 
 
 def test_close_event_requests_stop_waits_for_workers_and_closes_ledger(qapp, monkeypatch):

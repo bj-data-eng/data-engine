@@ -31,12 +31,22 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
         ):
             metadata = shared_state.read_lease_metadata(service.paths)
             owner = str(metadata.get("machine_id")) if metadata is not None and metadata.get("machine_id") is not None else "another machine"
+            owner_host = (
+                str(metadata.get("host_name"))
+                if metadata is not None and metadata.get("host_name") is not None
+                else None
+            )
             if owner == service.machine_id:
                 service._debug_log("initialize refused: already leased locally")
                 from data_engine.hosts.daemon.client import WorkspaceLeaseError
 
                 raise WorkspaceLeaseError(f"Workspace {service.paths.workspace_id!r} is already leased locally.")
-            release_workspace_claim(service, leased_by_machine_id=owner, status="leased")
+            release_workspace_claim(
+                service,
+                leased_by_machine_id=owner,
+                leased_by_host_name=owner_host,
+                status="leased",
+            )
             shared_state.hydrate_local_runtime(service.paths, service.runtime_cache_ledger)
             service._update_daemon_state(status="leased")
             service._debug_log(f"initialize observer mode owner={owner}")
@@ -52,6 +62,7 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
         service.paths,
         workspace_id=service.paths.workspace_id,
         machine_id=service.machine_id,
+        host_name=service.host_name,
         daemon_id=service.daemon_id,
         pid=service.pid,
         status="starting",

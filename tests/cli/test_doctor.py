@@ -111,7 +111,7 @@ def test_cli_doctor_daemons_reports_filtered_process_and_lease_state(monkeypatch
             ProcessInfo(pid=444, ppid=1, status="S", command="python something_else.py"),
         ],
     )
-    monkeypatch.setattr("data_engine.ui.cli.app.machine_id_text", lambda: "test-host")
+    monkeypatch.setattr("data_engine.ui.cli.app.machine_id_text", lambda **_kwargs: "test-host")
 
     result = main(
         ["doctor", "daemons"],
@@ -390,4 +390,3 @@ def test_cli_main_accepts_injected_dependencies_for_doctor(capsys, tmp_path):
     assert result == 0
     output = capsys.readouterr().out
     assert f"app root: {str(app_root).replace('\\', '/')}" in output
-

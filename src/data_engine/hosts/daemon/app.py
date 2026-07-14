@@ -82,7 +82,7 @@ class DataEngineDaemonService:
     ) -> None:
         self.paths = paths
         dependencies = dependencies or DaemonHostDependencies.build_default(paths)
-        daemon_identity = identity or DaemonHostIdentity.current_process()
+        daemon_identity = identity or DaemonHostIdentity.current_process(app_root=paths.app_root)
         self.lifecycle_policy = DaemonLifecyclePolicy.coerce(lifecycle_policy)
         self.started_at_utc = utcnow_text()
         self.state = DaemonHostState.build(started_at_utc=self.started_at_utc)
@@ -99,6 +99,7 @@ class DataEngineDaemonService:
         self.runtime_execution_service = dependencies.runtime_execution_service
         self.shared_state_adapter = dependencies.shared_state_adapter
         self.machine_id = daemon_identity.machine_id
+        self.host_name = daemon_identity.host_name
         self.daemon_id = daemon_identity.daemon_id
         self.pid = daemon_identity.pid
         self._state_lock = threading.RLock()
@@ -172,6 +173,7 @@ class DataEngineDaemonService:
                 "status": self.state.status,
                 "workspace_owned": self.state.workspace_owned,
                 "leased_by_machine_id": self.state.leased_by_machine_id,
+                "leased_by_host_name": self.state.leased_by_host_name,
                 "runtime_active": self.state.runtime_active,
                 "runtime_stopping": self.state.runtime_stopping,
                 "engine_starting": self.state.engine_starting,
@@ -314,8 +316,12 @@ class DataEngineDaemonService:
     def _relinquish_workspace_after_checkpoint_failures(self) -> None:
         relinquish_workspace_after_checkpoint_failures(self)
 
-    def _relinquish_workspace_for_control_request(self, requester_machine_id: str) -> None:
-        relinquish_workspace_for_control_request(self, requester_machine_id)
+    def _relinquish_workspace_for_control_request(
+        self,
+        requester_machine_id: str,
+        requester_host_name: str | None,
+    ) -> None:
+        relinquish_workspace_for_control_request(self, requester_machine_id, requester_host_name)
 
     def _relinquish_workspace_for_missing_root(self) -> None:
         relinquish_workspace_for_missing_root(self)

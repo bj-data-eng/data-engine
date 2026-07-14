@@ -188,6 +188,7 @@ def test_observer_daemon_requests_shutdown_when_lease_disappears(tmp_path, monke
         RuntimeCacheLedger(paths.runtime_db_path),
         workspace_id="default",
         machine_id="machine-a",
+        host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
         status="idle",

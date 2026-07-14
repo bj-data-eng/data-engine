@@ -113,7 +113,11 @@ def relinquish_workspace_after_checkpoint_failures(service: "DataEngineDaemonSer
     shutdown_if_unowned_and_idle(service, reason="checkpoint failures")
 
 
-def relinquish_workspace_for_control_request(service: "DataEngineDaemonService", requester_machine_id: str) -> None:
+def relinquish_workspace_for_control_request(
+    service: "DataEngineDaemonService",
+    requester_machine_id: str,
+    requester_host_name: str | None,
+) -> None:
     """Stop active work, hand ownership off, and stop this daemon."""
     with service._state_lock:
         service.state.stop_runtime(status="stopping flow")
@@ -123,6 +127,7 @@ def relinquish_workspace_for_control_request(service: "DataEngineDaemonService",
     release_workspace_claim(
         service,
         leased_by_machine_id=requester_machine_id,
+        leased_by_host_name=requester_host_name,
         status="leased",
         update_state=True,
     )
