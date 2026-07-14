@@ -10,11 +10,13 @@ Revision notes:
 - P1-8 is resolved by a durable installation UUID with hostname retained only as display metadata. This is an intentional clean protocol cutover; no compatibility bridge for old daemons was added.
 - P1-7 is resolved by idempotent runtime-I/O leases that reject stale operations and let in-flight work drain before releasing the shared writer.
 - P2-9 is closed as intended product behavior: CLI workspace creation replaces the auto-provisioned VS Code settings file with the current Data Engine settings.
+- P1-1 is resolved by immutable token-owned workspace bundles. Every checkpoint, heartbeat, reset, recovery, and release is fenced to the exact current token; long exports renew their heartbeat without a standing poller.
+- Verified process-identity and process-tree containment primitives are committed, but P1-3 and P1-4 remain open until daemon launch metadata and force-shutdown call sites use them end to end.
 - All P2 and P3 findings are resolved. The accepted implementations avoid new background pollers, remove redundant layout and response-polling work, bound preview/materialization costs, and keep recovery-only checks off valid hot paths.
 
 Reviewed commit: `b6a01b70d37c7d6bb9885f132e1218eb07d46f62` (`main`)
 
-Resolution progress verified through commit `c6d5531`.
+Resolution progress verified through commit `3770d32`.
 
 Remote status at review baseline: the reviewed commit matched `origin/main` after `git fetch --prune`.
 
@@ -22,31 +24,39 @@ Scope: runtime, shared state, daemon lifecycle, platform behavior, CLI, GUI, aut
 
 ## Executive summary
 
-The repository has a strong clean baseline: all 1,031 current tests pass, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and the PEP 517 build and Twine metadata checks succeed. The review initially found 26 reproducible or deterministic issues. Twenty-three are now resolved or closed, leaving three P1 findings open:
+The repository has a strong clean baseline: all 1,133 current tests pass, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and the PEP 517 build and Twine metadata checks succeed. The review initially found 26 reproducible or deterministic issues. Twenty-four are now resolved or closed, leaving two P1 findings open:
 
 | Priority | Open | Meaning |
 |---|---:|---|
-| P1 | 3 | Safety and ownership risk; address before relying on the affected path in production. |
+| P1 | 2 | Safety and ownership risk; address before relying on the affected path in production. |
 | P2 | 0 | All material functional and platform-correctness findings are resolved. |
 | P3 | 0 | All lower-frequency edge cases are resolved. |
 
-The remaining risk cluster is daemon/workspace ownership. Lease mutation is not yet fenced, forced shutdown can target a reused PID, and POSIX force-stop does not terminate descendants. Worker draining, atomic snapshot publication, generation-aware hydration, and durable installation identity are now verified on the merged baseline.
+The remaining risk cluster is forced daemon shutdown. Lease mutation is now token-fenced, but the shutdown path can still target a reused PID and POSIX force-stop still does not terminate descendants. Verified process-identity, Linux pidfd process-group, POSIX process-group, and Windows Job Object primitives now exist; daemon nonce/schema/spawn integration and force-shutdown call-site wiring remain for P1-3 and P1-4.
 
 ## P1 findings
 
-### P1-1 — Lease checkpoint and release are unfenced, so a stale daemon can overwrite or release a newer owner's lease
+### P1-1 — Resolved: immutable lease tokens fence every shared-state mutation
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
-- `src/data_engine/hosts/daemon/ownership.py:98-119`
-- `src/data_engine/hosts/daemon/state_sync.py:116-134`
-- `src/data_engine/runtime/shared_state.py:177-185,232-263,316-321`
+- `src/data_engine/runtime/shared_state.py:547-643,733-924,1120-1475`
+- `src/data_engine/hosts/daemon/state_sync.py:117-148`
+- `src/data_engine/hosts/daemon/runtime_commands.py:370-414`
+- `tests/services/test_shared_state.py:1314-1410,1450-1608`
+- `tests/daemon/test_runtime_commands.py:1470-1708`
 
-`release_workspace_claim()` deletes lease metadata and renames the leased marker using only shared paths. Checkpointing likewise writes shared snapshots and metadata without proving that the calling `daemon_id` still owns the lease. In a deterministic two-owner reproduction, daemon A was paused until its lease became stale, daemon B recovered and claimed it, and resumed daemon A then deleted B's metadata and changed B's leased marker back to available. A can also checkpoint over B's shared snapshot.
+Before resolution, `release_workspace_claim()` deleted lease metadata and renamed the leased marker using only shared paths. Checkpointing likewise wrote shared snapshots and metadata without proving that the calling `daemon_id` still owned the lease. In a deterministic two-owner reproduction, daemon A was paused until its lease became stale, daemon B recovered and claimed it, and resumed daemon A then deleted B's metadata and changed B's leased marker back to available. A could also checkpoint over B's shared snapshot.
 
 Impact: split-brain execution, ownership clobbering, and shared-state corruption after a pause, sleep, network-share stall, or stale recovery.
 
 Recommendation: issue an immutable fencing token/generation at claim time. Require an atomic token match for every checkpoint, metadata update, and release. A stale daemon that observes a mismatch must stop without writing or releasing anything.
+
+Resolution: an available workspace is one movable bundle. Claiming it creates a cryptographically random 128-bit token and atomically renames the bundle to `leased/<workspace_id>__<token>`. The token is retained by the owning daemon and is required by every heartbeat, metadata update, snapshot publication, reset, recovery, and release. Hot writes check the exact immutable token path in O(1); ownership transitions and destructive maintenance additionally use a cross-process topology lock and revalidate the token.
+
+Checkpoint and flow-reset operations share one lock, with reset admission rechecked after waiting, so an older checkpoint cannot resurrect deleted state. A checkpoint that outlives the normal interval starts a scoped heartbeat thread only for the duration of its export; the normal path remains one blocking wait with no permanent poller, and the final timestamp records completion time. Snapshot generation cleanup is best effort after manifest commit while still propagating token loss or corrupt topology. Token-scoped temporary cleanup and fail-closed checks for redirected bundle, manifest, metadata, generation, and artifact paths prevent stale owners or filesystem redirects from mutating another owner's or external state. Deterministic stale-owner, recovery, reset/checkpoint, long-export, cleanup, redirect, and external-sentinel regressions verify the boundary.
 
 ### P1-2 — Resolved: stop/handoff retains ownership until every accepted worker has drained
 
@@ -417,7 +427,7 @@ Resolution: auth keys now require exactly 32 decoded bytes. Malformed files are 
 
 4. **Fakes can diverge from production contracts.** P2-2 originally passed because its fake supplied a nonexistent property; that test now uses the real ledger contract. Continue preferring protocol-conforming fakes plus at least one real-store integration test for service boundaries.
 
-5. **Lifecycle and coordination need adversarial tests.** Add deterministic tests for stale-owner resumption, lease fencing, non-cooperative workers, PID reuse, workspace switch during queued updates, checkpoint failure cascades, and multi-file snapshot interleavings.
+5. **Lifecycle and coordination require adversarial tests.** Deterministic coverage now exercises stale-owner resumption, lease fencing, non-cooperative workers, workspace switching, checkpoint/reset interleavings, and multi-file snapshot publication. PID-reuse and end-to-end process-containment regressions remain part of P1-3 and P1-4.
 
 6. **Platform checks need real hosts.** Add Windows coverage for named-pipe deadlines, reserved workspace names, launcher-process behavior, and daemon lifetime; add macOS/Linux coverage for AF_UNIX length and process-group termination.
 
@@ -425,10 +435,8 @@ The dependency-refresh package-tooling environment completed the PEP 517 build a
 
 ## Recommended repair order
 
-1. Introduce lease fencing and verified daemon/process identity (P1-1, P1-3, P1-8).
-2. Make stop/handoff wait for actual worker termination and implement safe POSIX tree termination (P1-2, P1-4).
-3. Add a committed shared-snapshot manifest and generation-aware cache invalidation (P1-5, P1-6).
-4. Add the CI, type-checking, concurrency, and real-host platform test gates described above after the P1 safety work is complete.
+1. Persist the verified daemon process identity and containment nonce, launch directly into containment, and wire force-shutdown through the verified tree-termination boundary (P1-3, P1-4).
+2. Add the CI, type-checking, concurrency, and real-host platform test gates described above after the remaining P1 safety work is complete.
 
 ## Review limitations
 

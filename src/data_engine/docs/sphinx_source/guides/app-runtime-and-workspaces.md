@@ -97,16 +97,24 @@ Every authored workspace can also contain a shared control and checkpoint folder
 ```text
 .workspace_state/
   available/
+    <workspace_id>/
   leased/
+    <workspace_id>__<lease_token>/
   stale/
-  leases/
   control_requests/
-  state/
-    runs/
-    step_runs/
-    logs/
-    file_state/
+
+<workspace-bundle>/
+  lease.parquet
+  snapshot_manifest.json
+  snapshots/
+    <generation_id>/
+      runs.parquet
+      step_runs.parquet
+      logs.parquet
+      file_state.parquet
 ```
+
+The available and leased locations are mutually exclusive views of one movable workspace bundle. An initial available bundle can be empty; committed snapshot files remain with the bundle as it moves between locations.
 
 This is the workspace-coordination layer.
 
@@ -120,23 +128,24 @@ It is used for:
 
 ### Available, leased, and stale
 
-The app and daemon use simple marker folders to represent workspace control:
+The app and daemon use token-owned bundle folders to represent workspace control:
 
-- `available/<workspace_id>` means nobody currently owns the workspace
-- `leased/<workspace_id>` means one machine currently owns it
-- `stale/...` is where stale leased markers are quarantined during recovery
+- `available/<workspace_id>` contains the workspace bundle when nobody owns it
+- `leased/<workspace_id>__<lease_token>` contains that same bundle while one daemon owns it
+- `stale/...` records completed stale-lease recoveries
 
-Only one workstation should actively own a workspace at a time.
+Only one bundle location and one active token are valid at a time. Every heartbeat, checkpoint, reset, recovery, and release must present the exact current token, so a stale daemon cannot mutate or release a successor's bundle.
 
 ### Lease metadata and heartbeat
 
 When a daemon owns a workspace, it writes lease metadata in:
 
-- `.workspace_state/leases/<workspace_id>.parquet`
+- `.workspace_state/leased/<workspace_id>__<lease_token>/lease.parquet`
 
 That metadata includes:
 
 - workspace id
+- lease token
 - machine id / host name
 - daemon id
 - PID
@@ -161,14 +170,15 @@ Those numbers come from the runtime domain model and define the control behavior
 
 ### Shared runtime snapshots
 
-The shared runtime snapshot is written into parquet files beneath:
+The shared runtime snapshot is committed inside the current workspace bundle:
 
-- `.workspace_state/state/runs/`
-- `.workspace_state/state/step_runs/`
-- `.workspace_state/state/logs/`
-- `.workspace_state/state/file_state/`
+- `snapshot_manifest.json` selects one committed generation
+- `snapshots/<generation_id>/runs.parquet`
+- `snapshots/<generation_id>/step_runs.parquet`
+- `snapshots/<generation_id>/logs.parquet`
+- `snapshots/<generation_id>/file_state.parquet`
 
-These files let one workstation publish the current runtime picture so another workstation can hydrate a local read model while observing the shared workspace.
+The writer publishes immutable generation files first and replaces the manifest last. Readers hydrate only the manifest-selected generation, so they never combine artifacts from different checkpoints. These files let one workstation publish the current runtime picture so another workstation can hydrate a local read model while observing the shared workspace.
 
 This lets the app show meaningful status while another machine owns the workspace daemon.
 
@@ -364,7 +374,7 @@ There are a few different log and history concepts that are easy to blur togethe
 
 ### Shared runtime logs
 
-The daemon publishes shared log snapshots into `.workspace_state/state/logs/`.
+The daemon publishes shared logs into `snapshots/<generation_id>/logs.parquet` inside the current workspace bundle. The bundle manifest selects the committed generation.
 
 Those snapshots are part of the shared runtime picture used by observing clients.
 
