@@ -18,17 +18,25 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
     service._debug_log("initialize starting")
     shared_state = service.shared_state_adapter
     shared_state.initialize_workspace(service.paths)
-    claimed = shared_state.claim_workspace(service.paths)
-    if not claimed:
+    lease_token = shared_state.claim_workspace(service.paths)
+    if lease_token is None:
+        recovered = False
         if _should_force_recover_local_lease(service.paths):
             service._debug_log("attempting local stale recovery before claim")
-            _recover_broken_local_lease(service.paths)
-            claimed = shared_state.claim_workspace(service.paths)
-        if not shared_state.recover_stale_workspace(
-            service.paths,
-            machine_id=service.machine_id,
-            stale_after_seconds=STALE_AFTER_SECONDS,
-        ):
+            recovered = _recover_broken_local_lease(service.paths)
+        else:
+            metadata = shared_state.read_lease_metadata(service.paths)
+            observed_token = metadata.get("lease_token") if isinstance(metadata, dict) else None
+            if isinstance(observed_token, str):
+                recovered = shared_state.recover_stale_workspace(
+                    service.paths,
+                    lease_token=observed_token,
+                    machine_id=service.machine_id,
+                    stale_after_seconds=STALE_AFTER_SECONDS,
+                )
+        if recovered:
+            lease_token = shared_state.claim_workspace(service.paths)
+        if lease_token is None:
             metadata = shared_state.read_lease_metadata(service.paths)
             owner = str(metadata.get("machine_id")) if metadata is not None and metadata.get("machine_id") is not None else "another machine"
             owner_host = (
@@ -51,15 +59,12 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
             service._update_daemon_state(status="leased")
             service._debug_log(f"initialize observer mode owner={owner}")
             return
-        claimed = True
     with service._state_lock:
-        if claimed:
-            service.state.claim_workspace()
-        else:
-            service.state.release_workspace()
-    service._publish_runtime_event("workspace.claimed" if claimed else "workspace.released")
+        service.state.claim_workspace(lease_token)
+    service._publish_runtime_event("workspace.claimed")
     shared_state.write_lease_metadata(
         service.paths,
+        lease_token=lease_token,
         workspace_id=service.paths.workspace_id,
         machine_id=service.machine_id,
         host_name=service.host_name,

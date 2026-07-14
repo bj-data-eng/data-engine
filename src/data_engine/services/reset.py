@@ -7,6 +7,7 @@ from pathlib import Path
 from data_engine.platform.workspace_models import WorkspacePaths
 from data_engine.services.runtime_ports import RuntimeCacheStore, RuntimeControlStore
 from data_engine.services.shared_state import SharedStateService
+from data_engine.runtime.shared_state import WorkspaceUnavailableForResetError
 
 
 def _clear_text_file_if_exists(path: Path | None) -> None:
@@ -33,10 +34,11 @@ class ResetService:
         runtime_cache_ledger: RuntimeCacheStore,
         flow_name: str,
     ) -> None:
-        """Delete one flow's persisted local and shared history/freshness state."""
-        if hasattr(runtime_cache_ledger, "reset_flow"):
-            runtime_cache_ledger.reset_flow(flow_name)
-        self.shared_state_service.reset_flow_state(paths, flow_name=flow_name)
+        """Reject direct flow reset so the owning daemon remains the sole publisher."""
+        del paths, runtime_cache_ledger, flow_name
+        raise WorkspaceUnavailableForResetError(
+            "Flow reset must be requested through the daemon that owns the workspace."
+        )
 
     def reset_workspace(
         self,
@@ -46,16 +48,21 @@ class ResetService:
         runtime_control_ledger: RuntimeControlStore,
     ) -> None:
         """Delete all persisted local and shared runtime state for one workspace."""
-        try:
-            if hasattr(runtime_cache_ledger, "reset_all"):
-                runtime_cache_ledger.reset_all()
-            if hasattr(runtime_control_ledger, "reset_workspace"):
-                runtime_control_ledger.reset_workspace(paths.workspace_id)
-        finally:
-            runtime_cache_ledger.close()
-            runtime_control_ledger.close()
-        self.shared_state_service.reset_workspace_state(paths)
-        _clear_text_file_if_exists(paths.daemon_log_path)
+        lease_token = self.shared_state_service.acquire_maintenance_lease(paths)
+        with self.shared_state_service.workspace_lease_operation(paths, lease_token=lease_token):
+            try:
+                try:
+                    if hasattr(runtime_cache_ledger, "reset_all"):
+                        runtime_cache_ledger.reset_all()
+                    if hasattr(runtime_control_ledger, "reset_workspace"):
+                        runtime_control_ledger.reset_workspace(paths.workspace_id)
+                finally:
+                    runtime_cache_ledger.close()
+                    runtime_control_ledger.close()
+                self.shared_state_service.reset_workspace_state(paths, lease_token=lease_token)
+                _clear_text_file_if_exists(paths.daemon_log_path)
+            finally:
+                self.shared_state_service.release_maintenance_lease(paths, lease_token=lease_token)
 
 
 __all__ = ["ResetService"]

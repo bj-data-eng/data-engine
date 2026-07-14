@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from data_engine.hosts.daemon.runtime_control import stop_active_work
+from data_engine.runtime.shared_state import WorkspaceLeaseLostError, WorkspaceStateCorruptError
+
 if TYPE_CHECKING:
     from data_engine.hosts.daemon.app import DataEngineDaemonService
 
@@ -54,13 +57,50 @@ def lease_error_text(service: "DataEngineDaemonService") -> str:
     return f"Workspace {service.paths.workspace_id!r} is leased by {owner}."
 
 
+def handle_workspace_lease_lost(service: "DataEngineDaemonService", *, reason: str) -> None:
+    """Close admission and stop this daemon without mutating a successor lease."""
+    with service._state_lock:
+        terminal_status = (
+            service.state.status
+            if service.state.status in {"failed", "workspace missing"}
+            else "lease lost"
+        )
+        service.state.begin_work_drain()
+        service.state.stop_runtime(status=terminal_status)
+        service.state.release_workspace(status=terminal_status)
+    stop_active_work(service)
+    with service._state_lock:
+        service.state.status = terminal_status
+    service._debug_log(f"workspace lease lost reason={reason}")
+    service._publish_runtime_event("workspace.lease_lost")
+    service.host.shutdown_event.set()
+    service._wake_listener()
+
+
+def ensure_workspace_lease_current(service: "DataEngineDaemonService") -> bool:
+    """Validate the retained token and drain immediately if it has been fenced."""
+    with service._state_lock:
+        if not service.state.workspace_owned or service.state.lease_token is None:
+            return False
+        lease_token = service.state.lease_token
+    try:
+        service.shared_state_adapter.assert_workspace_lease(
+            service.paths,
+            lease_token=lease_token,
+        )
+    except (WorkspaceLeaseLostError, WorkspaceStateCorruptError):
+        handle_workspace_lease_lost(service, reason="token no longer current")
+        return False
+    return True
+
+
 def try_claim_released_workspace(service: "DataEngineDaemonService") -> bool:
     """Try to reclaim an available workspace for this daemon."""
     with service._state_lock:
         if service.state.work_draining:
             return False
         if service.host.workspace_owned:
-            return True
+            return ensure_workspace_lease_current(service)
         shared_state = service.shared_state_adapter
         metadata = shared_state.read_lease_metadata(service.paths)
         if metadata is not None:
@@ -75,10 +115,10 @@ def try_claim_released_workspace(service: "DataEngineDaemonService") -> bool:
             service._publish_runtime_event("workspace.lease_observed")
             return False
         try:
-            claimed = shared_state.claim_workspace(service.paths)
+            lease_token = shared_state.claim_workspace(service.paths)
         except Exception:
             return False
-        if not claimed:
+        if lease_token is None:
             metadata = shared_state.read_lease_metadata(service.paths)
             owner = metadata.get("machine_id") if isinstance(metadata, dict) else None
             owner_host = metadata.get("host_name") if isinstance(metadata, dict) else None
@@ -90,7 +130,7 @@ def try_claim_released_workspace(service: "DataEngineDaemonService") -> bool:
             )
             service._publish_runtime_event("workspace.lease_observed")
             return False
-        service.state.claim_workspace()
+        service.state.claim_workspace(lease_token)
         service._publish_runtime_event("workspace.claimed")
         try:
             service._checkpoint_once(status="idle")
@@ -112,28 +152,37 @@ def release_workspace_claim(
     """Release shared ownership and mark the daemon as no longer owning the workspace."""
     with service._state_lock:
         workspace_owned = service.host.workspace_owned
-    if workspace_owned:
+        lease_token = service.state.lease_token
+    released_exact_lease = False
+    if workspace_owned and lease_token is not None:
         try:
-            service.shared_state_adapter.remove_lease_metadata(service.paths)
-        except Exception:
-            pass
-        try:
-            service.shared_state_adapter.release_workspace(service.paths)
-        except Exception:
-            pass
+            service.shared_state_adapter.release_workspace(
+                service.paths,
+                lease_token=lease_token,
+            )
+        except (WorkspaceLeaseLostError, WorkspaceStateCorruptError):
+            service._debug_log("workspace release skipped because lease token was fenced")
+            handle_workspace_lease_lost(service, reason="release token no longer current")
+            return
+        released_exact_lease = True
     with service._state_lock:
         service.state.release_workspace(
             leased_by_machine_id=leased_by_machine_id,
             leased_by_host_name=leased_by_host_name,
             status=status,
         )
-    service._publish_runtime_event("workspace.released")
+    if released_exact_lease:
+        service._publish_runtime_event("workspace.released")
+    elif leased_by_machine_id is not None or leased_by_host_name is not None:
+        service._publish_runtime_event("workspace.lease_observed")
     if update_state and status is not None:
         service._update_daemon_state(status=status)
 
 
 __all__ = [
     "control_request_metadata",
+    "ensure_workspace_lease_current",
+    "handle_workspace_lease_lost",
     "honor_control_request_if_needed",
     "lease_error_text",
     "release_workspace_claim",

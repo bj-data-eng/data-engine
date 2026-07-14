@@ -10,7 +10,13 @@ from typing import TYPE_CHECKING, Any
 from data_engine.core.model import FlowValidationError
 from data_engine.core.primitives import normalize_manual_inputs
 from data_engine.domain.time import utcnow_text
-from data_engine.hosts.daemon.ownership import lease_error_text, try_claim_released_workspace
+from data_engine.hosts.daemon.ownership import (
+    ensure_workspace_lease_current,
+    handle_workspace_lease_lost,
+    lease_error_text,
+    try_claim_released_workspace,
+)
+from data_engine.runtime.shared_state import WorkspaceLeaseLostError, WorkspaceStateCorruptError
 
 if TYPE_CHECKING:
     from data_engine.hosts.daemon.app import DataEngineDaemonService
@@ -50,6 +56,8 @@ class DaemonRuntimeCommandHandler:
                     if service.state.work_draining:
                         return {"ok": False, "error": "Runtime work is stopping."}
                     return {"ok": False, "error": lease_error_text(service)}
+                if not ensure_workspace_lease_current(service):
+                    return {"ok": False, "error": "Workspace lease was lost; runtime work is stopping."}
             cards_by_name = {card.name: card for card in service._load_flow_cards()}
             card = cards_by_name.get(name)
             if card is None or not card.valid:
@@ -215,6 +223,8 @@ class DaemonRuntimeCommandHandler:
                     if service.state.work_draining:
                         return {"ok": False, "error": "Runtime work is stopping."}
                     return {"ok": False, "error": lease_error_text(service)}
+                if not ensure_workspace_lease_current(service):
+                    return {"ok": False, "error": "Workspace lease was lost; runtime work is stopping."}
                 service.state.clear_shutdown_when_idle()
                 if not service.state.reserve_engine_start(thread=threading.current_thread()):
                     return {"ok": True}
@@ -326,7 +336,7 @@ class DaemonRuntimeCommandHandler:
             "stop_engine",
             fields={"request_id": request_id},
         ):
-            if not service.state.workspace_owned:
+            if not ensure_workspace_lease_current(service):
                 return {"ok": False, "error": lease_error_text(service)}
             with service._state_lock:
                 if shutdown_when_idle:
@@ -348,7 +358,7 @@ class DaemonRuntimeCommandHandler:
             "stop_flow",
             fields={"flow": name, "request_id": request_id},
         ):
-            if not service.state.workspace_owned:
+            if not ensure_workspace_lease_current(service):
                 return {"ok": False, "error": lease_error_text(service)}
             with service._state_lock:
                 stop_event = service.state.manual_runtime_stop_events.get(name)
@@ -357,6 +367,44 @@ class DaemonRuntimeCommandHandler:
             service._publish_runtime_event("manual.stop_requested", correlation_id=request_id, payload={"flow_name": name})
             stop_event.set()
             return {"ok": True}
+
+    def reset_flow(self, name: str, *, request_id: str | None = None) -> dict[str, Any]:
+        """Reset one flow in the owner ledger and publish it through the retained token."""
+        service = self.service
+        with service._state_lock:
+            if service.state.work_draining:
+                return {"ok": False, "error": "Runtime work is stopping."}
+            if not ensure_workspace_lease_current(service):
+                return {"ok": False, "error": lease_error_text(service)}
+            if service.state.has_inflight_runtime_work():
+                return {"ok": False, "error": "Stop active runtime work before resetting a flow."}
+            lease_token = service.state.lease_token
+        if lease_token is None:
+            return {"ok": False, "error": "Workspace lease was lost; runtime work is stopping."}
+        try:
+            with service._checkpoint_operation_lock:
+                with service._state_lock:
+                    if service.state.work_draining:
+                        return {"ok": False, "error": "Runtime work is stopping."}
+                    if not service.state.workspace_owned or service.state.lease_token != lease_token:
+                        return {"ok": False, "error": lease_error_text(service)}
+                    if service.state.has_inflight_runtime_work():
+                        return {"ok": False, "error": "Stop active runtime work before resetting a flow."}
+                    with service.shared_state_adapter.workspace_lease_operation(
+                        service.paths,
+                        lease_token=lease_token,
+                    ):
+                        service.runtime_cache_ledger.reset_flow(name)
+                        service._checkpoint_once(status="idle")
+        except (WorkspaceLeaseLostError, WorkspaceStateCorruptError):
+            handle_workspace_lease_lost(service, reason="reset token no longer current")
+            return {"ok": False, "error": "Workspace lease was lost; runtime work is stopping."}
+        service._publish_runtime_event(
+            "flow.reset",
+            correlation_id=request_id,
+            payload={"flow_name": name},
+        )
+        return {"ok": True}
 
 
 __all__ = ["DaemonRuntimeCommandHandler"]

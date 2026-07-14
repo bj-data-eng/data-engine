@@ -29,10 +29,6 @@ from data_engine.platform.workspace_models import (
     WORKSPACE_DATABASES_DIR_NAME,
     WORKSPACE_FLOW_MODULES_DIR_NAME,
     WORKSPACE_LEASED_MARKERS_DIR_NAME,
-    WORKSPACE_LEASE_METADATA_DIR_NAME,
-    WORKSPACE_SHARED_SNAPSHOT_GENERATIONS_DIR_NAME,
-    WORKSPACE_SHARED_SNAPSHOT_MANIFESTS_DIR_NAME,
-    WORKSPACE_SHARED_STATE_DIR_NAME,
     WORKSPACE_STALE_MARKERS_DIR_NAME,
     WORKSPACE_STATE_DIR_NAME,
     WorkspacePaths,
@@ -264,8 +260,6 @@ class RuntimeLayoutPolicy:
         )
         settings = self.app_state_policy.load_settings(app_root=resolved_app_root)
         workspace_state_dir = discovered.workspace_root / WORKSPACE_STATE_DIR_NAME
-        shared_state_dir = workspace_state_dir / WORKSPACE_SHARED_STATE_DIR_NAME
-        lease_metadata_dir = workspace_state_dir / WORKSPACE_LEASE_METADATA_DIR_NAME
         control_requests_dir = workspace_state_dir / WORKSPACE_CONTROL_REQUESTS_DIR_NAME
         local_namespace = self.local_workspace_namespace(discovered.workspace_root, discovered.workspace_id)
         artifacts_dir = settings.runtime_root
@@ -290,17 +284,8 @@ class RuntimeLayoutPolicy:
             available_markers_dir=workspace_state_dir / WORKSPACE_AVAILABLE_MARKERS_DIR_NAME,
             leased_markers_dir=workspace_state_dir / WORKSPACE_LEASED_MARKERS_DIR_NAME,
             stale_markers_dir=workspace_state_dir / WORKSPACE_STALE_MARKERS_DIR_NAME,
-            lease_metadata_dir=lease_metadata_dir,
-            lease_metadata_path=lease_metadata_dir / f"{discovered.workspace_id}.parquet",
             control_requests_dir=control_requests_dir,
             control_request_path=control_requests_dir / f"{discovered.workspace_id}.parquet",
-            shared_state_dir=shared_state_dir,
-            shared_snapshot_generations_dir=(
-                shared_state_dir / WORKSPACE_SHARED_SNAPSHOT_GENERATIONS_DIR_NAME / discovered.workspace_id
-            ),
-            shared_snapshot_manifest_path=(
-                shared_state_dir / WORKSPACE_SHARED_SNAPSHOT_MANIFESTS_DIR_NAME / f"{discovered.workspace_id}.json"
-            ),
             artifacts_dir=artifacts_dir,
             workspace_cache_dir=workspace_cache_dir,
             compiled_flow_modules_dir=workspace_cache_dir / "compiled_flow_modules",

@@ -45,7 +45,11 @@ from data_engine.platform.local_settings import DATA_ENGINE_STATE_ROOT_ENV_VAR
 from data_engine.platform.processes import force_kill_process_tree, list_processes, process_is_running
 from data_engine.platform.workspace_policy import AppStatePolicy, RuntimeLayoutPolicy, WorkspaceDiscoveryPolicy
 from data_engine.views.models import qt_flow_cards_from_entries
-from data_engine.runtime.shared_state import read_lease_metadata, recover_stale_workspace
+from data_engine.runtime.shared_state import (
+    read_lease_metadata,
+    recover_stale_workspace,
+    resolve_workspace_bundle,
+)
 from data_engine.services import FlowCatalogService
 
 
@@ -183,11 +187,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.recover_stale:
             print_section("Recover Stale")
             for paths in workspace_paths:
-                recovered = recover_stale_workspace(
-                    paths,
-                    machine_id=platform.node() or "unknown-machine",
-                    stale_after_seconds=CHECKPOINT_INTERVAL_SECONDS * 3,
-                    reclaim=False,
+                metadata = read_lease_metadata(paths)
+                lease_token = metadata.get("lease_token") if isinstance(metadata, dict) else None
+                recovered = (
+                    recover_stale_workspace(
+                        paths,
+                        lease_token=lease_token,
+                        machine_id=platform.node() or "unknown-machine",
+                        stale_after_seconds=CHECKPOINT_INTERVAL_SECONDS * 3,
+                    )
+                    if isinstance(lease_token, str)
+                    else False
                 )
                 print_kv(f"{paths.workspace_id}.recover_stale", recovered)
 
@@ -281,7 +291,12 @@ def main(argv: list[str] | None = None) -> int:
                     daemon_pids[paths.workspace_id] = int(metadata.get("pid"))
                 except (TypeError, ValueError):
                     failures.append(f"{paths.workspace_id}: lease metadata pid is invalid.")
-            record_check((paths.leased_markers_dir / paths.workspace_id).exists(), f"{paths.workspace_id}: leased marker exists", failures)
+            bundle = resolve_workspace_bundle(paths)
+            record_check(
+                bundle is not None and bundle.state == "leased",
+                f"{paths.workspace_id}: leased marker exists",
+                failures,
+            )
             record_check(not (paths.available_markers_dir / paths.workspace_id).exists(), f"{paths.workspace_id}: available marker hidden while leased", failures)
 
         if len(set(daemon_pids.values())) != len(daemon_pids):
@@ -314,7 +329,8 @@ def main(argv: list[str] | None = None) -> int:
             record_check(read_lease_metadata(paths) is None, f"{paths.workspace_id}: lease metadata removed after shutdown", failures)
             record_check((paths.available_markers_dir / paths.workspace_id).exists(), f"{paths.workspace_id}: available marker restored after shutdown", failures)
             record_check(not (paths.leased_markers_dir / paths.workspace_id).exists(), f"{paths.workspace_id}: leased marker removed after shutdown", failures)
-            manifest_exists = paths.shared_snapshot_manifest_path.is_file()
+            bundle = resolve_workspace_bundle(paths)
+            manifest_exists = bundle is not None and bundle.snapshot_manifest_path.is_file()
             record_check(manifest_exists, f"{paths.workspace_id}: shared snapshot manifest exists after shutdown", failures)
     finally:
         cleanup_temp_suite(workspace_paths)

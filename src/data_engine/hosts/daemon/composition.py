@@ -99,6 +99,7 @@ class DaemonHostState:
     status: str
     last_checkpoint_at_utc: str
     workspace_owned: bool
+    lease_token: str | None
     leased_by_machine_id: str | None
     leased_by_host_name: str | None
     runtime_active: bool
@@ -134,6 +135,7 @@ class DaemonHostState:
             status="starting",
             last_checkpoint_at_utc=started_at_utc,
             workspace_owned=False,
+            lease_token=None,
             leased_by_machine_id=None,
             leased_by_host_name=None,
             runtime_active=False,
@@ -163,9 +165,10 @@ class DaemonHostState:
             missing_clients_since_monotonic=None,
         )
 
-    def claim_workspace(self) -> None:
+    def claim_workspace(self, lease_token: str) -> None:
         """Mark the current daemon as owning the workspace."""
         self.workspace_owned = True
+        self.lease_token = lease_token
         self.leased_by_machine_id = None
         self.leased_by_host_name = None
         self.status = "idle"
@@ -179,6 +182,7 @@ class DaemonHostState:
     ) -> None:
         """Mark the current daemon as no longer owning the workspace."""
         self.workspace_owned = False
+        self.lease_token = None
         self.leased_by_machine_id = leased_by_machine_id
         self.leased_by_host_name = leased_by_host_name
         if status is not None:
@@ -230,6 +234,21 @@ class DaemonHostState:
     def reset_checkpoint_failures(self) -> None:
         """Reset the repeated-checkpoint failure counter."""
         self.consecutive_checkpoint_failures = 0
+
+    def has_inflight_runtime_work(self) -> bool:
+        """Return whether accepted, active, or finalizing runtime work is retained."""
+        return bool(
+            self.runtime_active
+            or self.runtime_stopping
+            or self.engine_starting
+            or self.engine_start_thread is not None
+            or self.engine_thread is not None
+            or self.finishing_engine_thread is not None
+            or self.pending_manual_run_names
+            or self.pending_manual_run_threads
+            or self.manual_run_threads
+            or self.finishing_manual_run_threads
+        )
 
     def set_engine_threads(
         self,
@@ -363,6 +382,10 @@ class DaemonHostFacade:
     @workspace_owned.setter
     def workspace_owned(self, value: bool) -> None:
         self.state.workspace_owned = value
+
+    @property
+    def lease_token(self) -> str | None:
+        return self.state.lease_token
 
     @property
     def leased_by_machine_id(self) -> str | None:

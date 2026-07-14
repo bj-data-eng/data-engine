@@ -280,6 +280,21 @@ def test_runtime_application_blocks_requests_when_workspace_root_is_missing(tmp_
     assert engine_result.error == "Workspace root is no longer available."
 
 
+def test_runtime_application_flow_reset_propagates_long_running_timeout(tmp_path: Path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    workspace_root = tmp_path / "workspace"
+    monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    daemon_service = _FakeDaemonService()
+
+    result = _runtime_app(daemon_service=daemon_service).reset_flow(paths, name="large_history")
+
+    assert result.ok is True
+    assert daemon_service.request_calls == [
+        (workspace_root, {"command": "reset_flow", "name": "large_history"}, 120.0)
+    ]
+
+
 def test_runtime_application_completes_manual_run_failure_without_manual_modal_for_automated_flow() -> None:
     completion = _runtime_app().complete_manual_run(
         runtime_session=_manual_session("Examples", "poller"),

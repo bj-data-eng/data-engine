@@ -9,6 +9,7 @@ import os
 from data_engine.domain import ActiveRunState, FlowActivityState, WorkspaceControlState
 from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.app import DaemonClientError, daemon_request, is_daemon_live
+from data_engine.hosts.daemon.constants import STALE_AFTER_SECONDS
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.platform.instrumentation import new_request_id, timed_operation
 from data_engine.platform.machine_identity import host_name_text, machine_id_text
@@ -220,18 +221,6 @@ class WorkspaceDaemonManager:
     def _lease_snapshot(self) -> WorkspaceDaemonSnapshot:
         metadata = self.shared_state_adapter.read_lease_metadata(self.paths)
         local_machine_id = self.machine_id
-        if (
-            isinstance(metadata, dict)
-            and str(metadata.get("machine_id", "")).strip() == local_machine_id
-            and not _lease_pid_is_live(metadata)
-        ):
-            recovered = self.shared_state_adapter.recover_stale_workspace(
-                self.paths,
-                machine_id=local_machine_id,
-                stale_after_seconds=0.0,
-            )
-            if recovered:
-                metadata = self.shared_state_adapter.read_lease_metadata(self.paths)
         owner = metadata.get("machine_id") if isinstance(metadata, dict) else None
         owner_text = str(owner).strip() if isinstance(owner, str) and owner.strip() else None
         owner_host = metadata.get("host_name") if isinstance(metadata, dict) else None
@@ -393,10 +382,16 @@ class WorkspaceDaemonManager:
         local_machine_id = self.machine_id
         if owner == local_machine_id and not self._daemon_live:
             if not _lease_pid_is_live(metadata):
-                recovered = self.shared_state_adapter.recover_stale_workspace(
-                    self.paths,
-                    machine_id=local_machine_id,
-                    stale_after_seconds=0.0,
+                lease_token = metadata.get("lease_token") if isinstance(metadata, dict) else None
+                recovered = (
+                    self.shared_state_adapter.recover_stale_workspace(
+                        self.paths,
+                        lease_token=lease_token,
+                        machine_id=local_machine_id,
+                        stale_after_seconds=STALE_AFTER_SECONDS,
+                    )
+                    if isinstance(lease_token, str)
+                    else False
                 )
                 if recovered:
                     return "Recovered local control."

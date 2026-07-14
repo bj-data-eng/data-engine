@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 from data_engine.domain import DaemonLifecyclePolicy
 from data_engine.hosts.daemon.ownership import (
+    ensure_workspace_lease_current,
+    handle_workspace_lease_lost,
     honor_control_request_if_needed,
     release_workspace_claim,
     try_claim_requested_control,
@@ -19,6 +21,7 @@ from data_engine.hosts.daemon.constants import (
     CONTROL_REQUEST_POLL_INTERVAL_SECONDS,
 )
 from data_engine.hosts.daemon.runtime_control import stop_active_work, wait_for_active_work
+from data_engine.runtime.shared_state import WorkspaceLeaseLostError, WorkspaceStateCorruptError
 
 if TYPE_CHECKING:
     from data_engine.hosts.daemon.app import DataEngineDaemonService
@@ -36,6 +39,9 @@ def checkpoint_loop(service: "DataEngineDaemonService") -> None:
             checkpoint_failure_relinquish_requested = (
                 service.state.checkpoint_failure_relinquish_requested
             )
+            workspace_owned = service.state.workspace_owned
+        if workspace_owned and not ensure_workspace_lease_current(service):
+            break
         if shutdown_requested and complete_requested_shutdown(service):
             break
         if shutdown_when_idle and shutdown_for_requested_idle_disconnect(
@@ -88,6 +94,9 @@ def checkpoint_loop(service: "DataEngineDaemonService") -> None:
             with service._state_lock:
                 service.state.consecutive_checkpoint_failures = 0
             next_checkpoint_at = time.monotonic() + CHECKPOINT_INTERVAL_SECONDS
+        except (WorkspaceLeaseLostError, WorkspaceStateCorruptError):
+            handle_workspace_lease_lost(service, reason="checkpoint publication was fenced")
+            break
         except Exception:
             service._debug_log("checkpoint failed")
             service._debug_log(traceback.format_exc().rstrip())
@@ -352,7 +361,11 @@ def shutdown(service: "DataEngineDaemonService") -> None:
             service._checkpoint_once(status="stopping")
         except Exception:
             pass
-    release_workspace_claim(service)
+    try:
+        release_workspace_claim(service)
+    except Exception:
+        service._debug_log("workspace release failed during shutdown")
+        service._debug_log(traceback.format_exc().rstrip())
     try:
         service.runtime_control_ledger.daemon_state.clear(service.paths.workspace_id)
     except Exception:

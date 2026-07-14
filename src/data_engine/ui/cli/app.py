@@ -132,8 +132,9 @@ def _doctor_daemons(*, dependencies: CliDependencies) -> int:
         process_listing_func=_run_process_listing,
         classify_process_kind_func=_classify_process_kind,
         read_lease_metadata_func=dependencies.shared_state_service.read_lease_metadata,
-        lease_is_stale_func=lambda paths, stale_after_seconds: dependencies.shared_state_service.lease_is_stale(
+        lease_is_stale_func=lambda paths, lease_token, stale_after_seconds: dependencies.shared_state_service.lease_is_stale(
             paths,
+            lease_token=lease_token,
             stale_after_seconds=stale_after_seconds,
         ),
         machine_id_text_func=lambda: machine_id_text(app_root=settings.app_root),

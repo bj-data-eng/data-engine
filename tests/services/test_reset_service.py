@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import pytest
+
 from data_engine.runtime.runtime_cache_store import RuntimeCacheLedger
 from data_engine.runtime.runtime_control_store import RuntimeControlLedger
 from data_engine.runtime.runtime_db import utcnow_text
-from data_engine.runtime.shared_state import checkpoint_workspace_state, hydrate_local_runtime_state, write_control_request
+from data_engine.runtime.shared_state import (
+    WorkspaceUnavailableForResetError,
+    checkpoint_workspace_state,
+    claim_workspace,
+    release_workspace,
+    resolve_workspace_bundle,
+    write_control_request,
+)
 from data_engine.services.reset import ResetService
 
 from tests.services.support import record_flow_state, resolve_workspace_paths
 
 
-def test_reset_service_resets_one_flow_history_and_poll_freshness(tmp_path):
+def test_reset_service_rejects_direct_flow_reset_without_partial_mutation(tmp_path):
     workspace_root = tmp_path / "workspace"
     (workspace_root / "flow_modules").mkdir(parents=True)
     paths = resolve_workspace_paths(workspace_root=workspace_root, workspace_id="workspace")
@@ -21,39 +30,17 @@ def test_reset_service_resets_one_flow_history_and_poll_freshness(tmp_path):
     ledger = RuntimeCacheLedger(paths.runtime_cache_db_path)
     record_flow_state(ledger, flow_name="alpha", source_path=alpha_source, run_id="run-alpha")
     record_flow_state(ledger, flow_name="beta", source_path=beta_source, run_id="run-beta")
-    checkpoint_workspace_state(
-        paths,
-        ledger,
-        workspace_id=paths.workspace_id,
-        machine_id="machine-a",
-        host_name="test-host",
-        daemon_id="daemon-a",
-        pid=100,
-        status="idle",
-        started_at_utc=utcnow_text(),
-        last_checkpoint_at_utc=utcnow_text(),
-        app_version="test",
-    )
+    with pytest.raises(WorkspaceUnavailableForResetError, match="daemon that owns"):
+        ResetService().reset_flow(paths=paths, runtime_cache_ledger=ledger, flow_name="alpha")
 
-    ResetService().reset_flow(paths=paths, runtime_cache_ledger=ledger, flow_name="alpha")
-
-    assert ledger.runs.list(flow_name="alpha") == ()
-    assert ledger.logs.list(flow_name="alpha") == ()
-    assert ledger.source_signatures.list_file_states(flow_name="alpha") == ()
+    assert len(ledger.runs.list(flow_name="alpha")) == 1
+    assert len(ledger.logs.list(flow_name="alpha")) == 1
+    assert len(ledger.source_signatures.list_file_states(flow_name="alpha")) == 1
     assert len(ledger.runs.list(flow_name="beta")) == 1
     assert len(ledger.logs.list(flow_name="beta")) == 1
     assert len(ledger.source_signatures.list_file_states(flow_name="beta")) == 1
 
-    hydrated = RuntimeCacheLedger(tmp_path / "hydrated.sqlite")
-    try:
-        hydrate_local_runtime_state(paths, hydrated)
-        assert hydrated.runs.list(flow_name="alpha") == ()
-        assert hydrated.logs.list(flow_name="alpha") == ()
-        assert hydrated.source_signatures.list_file_states(flow_name="alpha") == ()
-        assert len(hydrated.runs.list(flow_name="beta")) == 1
-    finally:
-        hydrated.close()
-        ledger.close()
+    ledger.close()
 
 
 def test_reset_service_resets_workspace_local_and_shared_state(tmp_path):
@@ -84,9 +71,12 @@ def test_reset_service_resets_workspace_local_and_shared_state(tmp_path):
         client_kind="ui",
         pid=999999,
     )
+    lease_token = claim_workspace(paths)
+    assert lease_token is not None
     checkpoint_workspace_state(
         paths,
         runtime_cache_ledger,
+        lease_token=lease_token,
         workspace_id=paths.workspace_id,
         machine_id="machine-a",
         host_name="test-host",
@@ -97,6 +87,7 @@ def test_reset_service_resets_workspace_local_and_shared_state(tmp_path):
         last_checkpoint_at_utc=utcnow_text(),
         app_version="test",
     )
+    release_workspace(paths, lease_token=lease_token)
     write_control_request(
         paths,
         workspace_id=paths.workspace_id,
@@ -130,8 +121,10 @@ def test_reset_service_resets_workspace_local_and_shared_state(tmp_path):
     finally:
         reset_runtime_cache_ledger.close()
         reset_runtime_control_ledger.close()
-    assert paths.shared_snapshot_manifest_path.exists() is False
-    assert paths.shared_snapshot_generations_dir.exists() is False
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.state == "available"
+    assert bundle.snapshot_manifest_path.exists() is False
+    assert bundle.snapshot_generations_dir.exists() is False
     assert paths.control_request_path.exists() is False
     assert (paths.available_markers_dir / paths.workspace_id).is_dir()
-    assert paths.lease_metadata_path.exists() is True
+    assert bundle.lease_metadata_path.exists() is False

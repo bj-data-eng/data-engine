@@ -8,13 +8,14 @@ from threading import RLock
 from typing import Any
 
 from data_engine.platform.workspace_models import WorkspacePaths
-from data_engine.runtime.runtime_db import parse_utc_text
 from data_engine.runtime.shared_state import (
     RuntimeSnapshotStore,
+    assert_workspace_lease,
     checkpoint_workspace_state as checkpoint_runtime_workspace_state,
     claim_workspace as claim_runtime_workspace,
     hydrate_local_runtime_state,
     initialize_workspace_state,
+    lease_is_stale,
     read_control_request,
     read_lease_metadata,
     read_runtime_snapshot_generation,
@@ -22,17 +23,19 @@ from data_engine.runtime.shared_state import (
     release_workspace,
     remove_control_request,
     remove_lease_metadata,
+    resolve_workspace_bundle,
     reset_flow_state,
     reset_workspace_state,
     write_control_request,
     write_lease_metadata,
+    workspace_lease_operation as runtime_workspace_lease_operation,
 )
 
 
 @dataclass(frozen=True)
 class _CachedRow:
     expires_at: datetime
-    file_signature: tuple[bool, int | None]
+    file_signature: object
     row: dict[str, Any] | None
 
 
@@ -41,7 +44,7 @@ class _HydrationState:
     last_hydrated_at: datetime
     ledger_incarnation: str
     snapshot_generation_id: str | None
-    manifest_signature: tuple[bool, int | None]
+    manifest_signature: object
 
 
 @dataclass(frozen=True)
@@ -80,11 +83,11 @@ class WorkspaceIoLayer:
         *,
         cache: dict[str, _CachedRow],
         cache_key: str,
-        path,
+        signature,
         reader,
     ) -> dict[str, Any] | None:
         now = datetime.now(UTC)
-        file_signature = self._file_signature(path)
+        file_signature = signature()
         with self._lock:
             cached = cache.get(cache_key)
             if cached is not None and cached.expires_at >= now and cached.file_signature == file_signature:
@@ -100,7 +103,7 @@ class WorkspaceIoLayer:
         return None if normalized is None else dict(normalized)
 
     def _invalidate_workspace(self, paths: WorkspacePaths, *, preserve_checkpoint: bool = False) -> None:
-        lease_key = str(paths.lease_metadata_path)
+        lease_key = str(paths.workspace_root)
         control_key = str(paths.control_request_path)
         workspace_key = str(paths.workspace_root)
         with self._lock:
@@ -113,29 +116,37 @@ class WorkspaceIoLayer:
     def initialize_workspace(self, paths: WorkspacePaths) -> None:
         initialize_workspace_state(paths)
 
-    def claim_workspace(self, paths: WorkspacePaths) -> bool:
-        claimed = claim_runtime_workspace(paths)
-        if claimed:
+    def claim_workspace(self, paths: WorkspacePaths) -> str | None:
+        lease_token = claim_runtime_workspace(paths)
+        if lease_token is not None:
             self._invalidate_workspace(paths)
-        return claimed
+        return lease_token
 
-    def release_workspace(self, paths: WorkspacePaths) -> None:
-        release_workspace(paths)
+    def release_workspace(self, paths: WorkspacePaths, *, lease_token: str) -> None:
+        release_workspace(paths, lease_token=lease_token)
         self._invalidate_workspace(paths)
+
+    def assert_workspace_lease(self, paths: WorkspacePaths, *, lease_token: str) -> None:
+        """Raise when one immutable lease token is no longer current."""
+        assert_workspace_lease(paths, lease_token)
+
+    def workspace_lease_operation(self, paths: WorkspacePaths, *, lease_token: str):
+        """Return an exclusive guard for one rare destructive owner operation."""
+        return runtime_workspace_lease_operation(paths, lease_token=lease_token)
 
     def recover_stale_workspace(
         self,
         paths: WorkspacePaths,
         *,
+        lease_token: str,
         machine_id: str,
         stale_after_seconds: float,
-        reclaim: bool = True,
     ) -> bool:
         recovered = recover_stale_workspace(
             paths,
+            lease_token=lease_token,
             machine_id=machine_id,
             stale_after_seconds=stale_after_seconds,
-            reclaim=reclaim,
         )
         if recovered:
             self._invalidate_workspace(paths)
@@ -145,7 +156,7 @@ class WorkspaceIoLayer:
         workspace_key = str(paths.workspace_root)
         now = datetime.now(UTC)
         ledger_incarnation = ledger.snapshot_incarnation()
-        manifest_signature = self._file_signature(paths.shared_snapshot_manifest_path)
+        manifest_signature = self._snapshot_manifest_signature(paths)
         snapshot_generation_id = read_runtime_snapshot_generation(paths)
         with self._lock:
             state = self._hydration_state.get(workspace_key)
@@ -172,6 +183,7 @@ class WorkspaceIoLayer:
         paths: WorkspacePaths,
         ledger: RuntimeSnapshotStore,
         *,
+        lease_token: str,
         workspace_id: str,
         machine_id: str,
         host_name: str,
@@ -181,10 +193,11 @@ class WorkspaceIoLayer:
         started_at_utc: str,
         last_checkpoint_at_utc: str,
         app_version: str | None,
+        heartbeat_interval_seconds: float | None = None,
     ) -> None:
         workspace_key = str(paths.workspace_root)
         change_token = ledger.snapshot_change_token()
-        committed_generation_id = read_runtime_snapshot_generation(paths)
+        committed_generation_id = read_runtime_snapshot_generation(paths, lease_token=lease_token)
         with self._lock:
             checkpoint_state = self._checkpoint_state.get(workspace_key)
         if (
@@ -194,6 +207,7 @@ class WorkspaceIoLayer:
         ):
             write_lease_metadata(
                 paths,
+                lease_token=lease_token,
                 workspace_id=workspace_id,
                 machine_id=machine_id,
                 host_name=host_name,
@@ -208,6 +222,7 @@ class WorkspaceIoLayer:
             committed_generation_id = checkpoint_runtime_workspace_state(
                 paths,
                 ledger,
+                lease_token=lease_token,
                 workspace_id=workspace_id,
                 machine_id=machine_id,
                 host_name=host_name,
@@ -217,6 +232,7 @@ class WorkspaceIoLayer:
                 started_at_utc=started_at_utc,
                 last_checkpoint_at_utc=last_checkpoint_at_utc,
                 app_version=app_version,
+                heartbeat_interval_seconds=heartbeat_interval_seconds,
             )
             with self._lock:
                 self._checkpoint_state[workspace_key] = _CheckpointState(
@@ -228,8 +244,8 @@ class WorkspaceIoLayer:
     def read_lease_metadata(self, paths: WorkspacePaths) -> dict[str, Any] | None:
         return self._cache_read(
             cache=self._lease_cache,
-            cache_key=str(paths.lease_metadata_path),
-            path=paths.lease_metadata_path,
+            cache_key=str(paths.workspace_root),
+            signature=lambda: self._lease_metadata_signature(paths),
             reader=lambda: read_lease_metadata(paths),
         )
 
@@ -237,6 +253,7 @@ class WorkspaceIoLayer:
         self,
         paths: WorkspacePaths,
         *,
+        lease_token: str,
         workspace_id: str,
         machine_id: str,
         host_name: str,
@@ -249,6 +266,7 @@ class WorkspaceIoLayer:
     ) -> None:
         write_lease_metadata(
             paths,
+            lease_token=lease_token,
             workspace_id=workspace_id,
             machine_id=machine_id,
             host_name=host_name,
@@ -261,24 +279,28 @@ class WorkspaceIoLayer:
         )
         self._invalidate_workspace(paths)
 
-    def remove_lease_metadata(self, paths: WorkspacePaths) -> None:
-        remove_lease_metadata(paths)
+    def remove_lease_metadata(self, paths: WorkspacePaths, *, lease_token: str) -> None:
+        remove_lease_metadata(paths, lease_token=lease_token)
         self._invalidate_workspace(paths)
 
-    def lease_is_stale(self, paths: WorkspacePaths, *, stale_after_seconds: float) -> bool:
-        metadata = self.read_lease_metadata(paths)
-        if metadata is None:
-            return True
-        parsed = parse_utc_text(str(metadata.get("last_checkpoint_at_utc")))
-        if parsed is None:
-            return True
-        return datetime.now(UTC) - parsed > timedelta(seconds=max(stale_after_seconds, 0.0))
+    def lease_is_stale(
+        self,
+        paths: WorkspacePaths,
+        *,
+        lease_token: str,
+        stale_after_seconds: float,
+    ) -> bool:
+        return lease_is_stale(
+            paths,
+            lease_token=lease_token,
+            stale_after_seconds=stale_after_seconds,
+        )
 
     def read_control_request(self, paths: WorkspacePaths) -> dict[str, Any] | None:
         return self._cache_read(
             cache=self._control_cache,
             cache_key=str(paths.control_request_path),
-            path=paths.control_request_path,
+            signature=lambda: self._file_signature(paths.control_request_path),
             reader=lambda: read_control_request(paths),
         )
 
@@ -308,13 +330,25 @@ class WorkspaceIoLayer:
         remove_control_request(paths)
         self._invalidate_workspace(paths)
 
-    def reset_flow_state(self, paths: WorkspacePaths, *, flow_name: str) -> None:
-        reset_flow_state(paths, flow_name=flow_name)
+    def reset_flow_state(self, paths: WorkspacePaths, *, lease_token: str, flow_name: str) -> None:
+        reset_flow_state(paths, lease_token=lease_token, flow_name=flow_name)
         self._invalidate_workspace(paths)
 
-    def reset_workspace_state(self, paths: WorkspacePaths) -> None:
-        reset_workspace_state(paths)
+    def reset_workspace_state(self, paths: WorkspacePaths, *, lease_token: str) -> None:
+        reset_workspace_state(paths, lease_token=lease_token)
         self._invalidate_workspace(paths)
+
+    def _lease_metadata_signature(self, paths: WorkspacePaths) -> object:
+        bundle = resolve_workspace_bundle(paths)
+        if bundle is None:
+            return None
+        return (*bundle.topology_signature, self._file_signature(bundle.lease_metadata_path))
+
+    def _snapshot_manifest_signature(self, paths: WorkspacePaths) -> object:
+        bundle = resolve_workspace_bundle(paths)
+        if bundle is None:
+            return None
+        return (*bundle.topology_signature, self._file_signature(bundle.snapshot_manifest_path))
 
 
 _DEFAULT_WORKSPACE_IO_LAYER = WorkspaceIoLayer()

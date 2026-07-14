@@ -534,10 +534,20 @@ def _cleanup_forced_shutdown(paths: WorkspacePaths) -> None:
         metadata = None
     if isinstance(metadata, dict):
         owner = metadata.get("machine_id")
+        lease_token = metadata.get("lease_token")
         local_machine_id = machine_id_text(app_root=paths.app_root)
-        if isinstance(owner, str) and owner.strip() == local_machine_id:
+        if (
+            isinstance(owner, str)
+            and owner.strip() == local_machine_id
+            and isinstance(lease_token, str)
+        ):
             try:
-                _SHARED_STATE_ADAPTER.remove_lease_metadata(paths)
+                _SHARED_STATE_ADAPTER.recover_stale_workspace(
+                    paths,
+                    lease_token=lease_token,
+                    machine_id=local_machine_id,
+                    stale_after_seconds=STALE_AFTER_SECONDS,
+                )
             except Exception:
                 pass
     try:
@@ -575,16 +585,27 @@ def _should_force_recover_local_lease(paths: WorkspacePaths) -> bool:
     metadata = _same_machine_unreachable_lease_metadata(paths)
     if metadata is None:
         return False
-    return _SHARED_STATE_ADAPTER.lease_is_stale(paths, stale_after_seconds=STALE_AFTER_SECONDS)
+    lease_token = metadata.get("lease_token")
+    if not isinstance(lease_token, str):
+        return False
+    return _SHARED_STATE_ADAPTER.lease_is_stale(
+        paths,
+        lease_token=lease_token,
+        stale_after_seconds=STALE_AFTER_SECONDS,
+    )
 
 
 def _recover_broken_local_lease(paths: WorkspacePaths) -> bool:
     """Recover one unreachable same-machine lease after it becomes stale."""
+    metadata = _same_machine_unreachable_lease_metadata(paths)
+    lease_token = metadata.get("lease_token") if isinstance(metadata, dict) else None
+    if not isinstance(lease_token, str):
+        return False
     return _SHARED_STATE_ADAPTER.recover_stale_workspace(
         paths,
+        lease_token=lease_token,
         machine_id=machine_id_text(app_root=paths.app_root),
         stale_after_seconds=STALE_AFTER_SECONDS,
-        reclaim=False,
     )
 
 

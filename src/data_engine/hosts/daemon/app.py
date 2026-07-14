@@ -103,6 +103,7 @@ class DataEngineDaemonService:
         self.daemon_id = daemon_identity.daemon_id
         self.pid = daemon_identity.pid
         self._state_lock = threading.RLock()
+        self._checkpoint_operation_lock = threading.RLock()
         self._cached_flow_cards: tuple[QtFlowCard, ...] | None = None
         self._timing_log_path = self.paths.runtime_state_dir / "daemon_timing.log"
         self.runtime_event_bus = DaemonRuntimeEventBus()

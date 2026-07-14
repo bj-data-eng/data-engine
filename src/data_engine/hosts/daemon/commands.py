@@ -97,6 +97,11 @@ class DaemonCommandHandler:
                 )
             if command == "stop_flow":
                 return self.runtime_commands.stop_flow(str(payload.get("name", "")), request_id=request_id)
+            if command == "reset_flow":
+                return self.runtime_commands.reset_flow(
+                    str(payload.get("name", "")),
+                    request_id=request_id,
+                )
             if command == "shutdown_daemon":
                 with self.service._state_lock:
                     self.service.state.request_shutdown()

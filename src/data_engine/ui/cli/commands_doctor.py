@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import Any, Callable
 
@@ -16,6 +17,14 @@ from data_engine.platform.processes import (
     list_processes,
 )
 from data_engine.platform.workspace_models import authored_workspace_is_available
+from data_engine.runtime.shared_state import (
+    WorkspaceLeaseLostError,
+    WorkspaceStateCorruptError,
+    WorkspaceTransitionInProgressError,
+)
+
+
+_LEASE_TOKEN_PATTERN = re.compile(r"[0-9a-f]{32}")
 
 
 def doctor(*, settings: Any, paths: Any) -> int:
@@ -76,7 +85,7 @@ def doctor_daemons(
     process_listing_func: Callable[[], list[ProcessInfo]] = run_process_listing,
     classify_process_kind_func: Callable[[str], str | None] = classify_process_kind,
     read_lease_metadata_func: Callable[[Any], dict[str, Any] | None],
-    lease_is_stale_func: Callable[[Any, float], bool],
+    lease_is_stale_func: Callable[..., bool],
     machine_id_text_func: Callable[[], str] | None = None,
 ) -> int:
     machine_id_text_func = machine_id_text_func or (
@@ -134,9 +143,20 @@ def doctor_daemons(
             workspace_root=item.workspace_root,
             workspace_collection_root=settings.workspace_collection_root,
         )
-        metadata = read_lease_metadata_func(paths)
+        try:
+            metadata = read_lease_metadata_func(paths)
+        except WorkspaceStateCorruptError:
+            print(f"  {item.workspace_id}: lease_pid=- state=corrupt")
+            continue
+        except WorkspaceTransitionInProgressError:
+            print(f"  {item.workspace_id}: lease_pid=- state=unknown")
+            continue
         if metadata is None:
             print(f"  {item.workspace_id}: no lease metadata")
+            continue
+        lease_token = metadata.get("lease_token")
+        if not isinstance(lease_token, str) or _LEASE_TOKEN_PATTERN.fullmatch(lease_token) is None:
+            print(f"  {item.workspace_id}: lease_pid=- state=corrupt token=invalid")
             continue
         pid_value = metadata.get("pid")
         try:
@@ -145,17 +165,31 @@ def doctor_daemons(
             pid = None
         matching = next((row for row in rows if row.pid == pid), None) if pid is not None else None
         owner = metadata.get("machine_id")
-        if matching is None:
+        if metadata.get("status") == "claiming":
+            status = "claiming"
+        elif matching is None:
             status = "missing"
         elif is_defunct_process_status(matching.status):
             status = "defunct"
         else:
             status = "live"
+        try:
+            stale = lease_is_stale_func(
+                paths,
+                lease_token=lease_token,
+                stale_after_seconds=30.0,
+            )
+        except WorkspaceStateCorruptError:
+            print(f"  {item.workspace_id}: lease_pid=- state=corrupt")
+            continue
+        except (WorkspaceLeaseLostError, WorkspaceTransitionInProgressError):
+            print(f"  {item.workspace_id}: lease_pid=- state=unknown")
+            continue
         lease_row = WorkspaceLeaseDiagnostic(
             workspace_id=item.workspace_id,
             lease_pid=pid,
             state=status,
-            stale=lease_is_stale_func(paths, stale_after_seconds=30.0),
+            stale=stale,
             local_owner=owner == machine_id_text_func(),
         )
         stale_text = " stale" if lease_row.stale else ""

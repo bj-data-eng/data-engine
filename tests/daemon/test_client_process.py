@@ -32,14 +32,30 @@ from data_engine.platform.machine_identity import host_name_text, machine_id_tex
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.runtime.shared_state import (
-    checkpoint_workspace_state,
-    claim_workspace,
+    checkpoint_workspace_state as _checkpoint_workspace_state,
+    claim_workspace as _claim_workspace,
     initialize_workspace_state,
     read_lease_metadata,
+    resolve_workspace_bundle,
 )
 from data_engine.services.workspace_io import WorkspaceIoLayer
 
 from .support import _write_demo_flow, resolve_workspace_paths
+
+
+def claim_workspace(paths) -> bool:
+    return _claim_workspace(paths) is not None
+
+
+def checkpoint_workspace_state(paths, ledger, **kwargs):
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.lease_token is not None
+    return _checkpoint_workspace_state(
+        paths,
+        ledger,
+        lease_token=bundle.lease_token,
+        **kwargs,
+    )
 
 
 def test_importing_daemon_client_does_not_create_fake_ctypes_windll():
@@ -109,6 +125,39 @@ def test_workspace_daemon_manager_auto_recovers_dead_same_machine_lease(tmp_path
 
     assert snapshot.workspace_owned is True
     assert snapshot.leased_by_machine_id is None
+
+
+def test_workspace_daemon_manager_does_not_recover_fresh_claiming_bundle(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+    lease_token = _claim_workspace(paths)
+    assert isinstance(lease_token, str)
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.is_daemon_live", lambda paths: False)
+    manager = WorkspaceDaemonManager(paths)
+    recovery_calls: list[tuple[str, str, float]] = []
+    monkeypatch.setattr(
+        manager.shared_state_adapter,
+        "recover_stale_workspace",
+        lambda _paths, *, lease_token, machine_id, stale_after_seconds: recovery_calls.append(
+            (lease_token, machine_id, stale_after_seconds)
+        )
+        or True,
+    )
+
+    snapshot = manager.sync()
+    message = manager.request_control()
+
+    assert snapshot.workspace_owned is False
+    assert snapshot.source == "lease"
+    assert snapshot.leased_by_machine_id is None
+    assert message == "Control request sent."
+    assert recovery_calls == []
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.lease_token == lease_token
 
 
 def test_workspace_daemon_manager_treats_live_same_machine_lease_as_locally_owned(tmp_path, monkeypatch):
@@ -230,6 +279,7 @@ def test_daemon_shared_state_adapter_invalidates_lease_cache_after_write(tmp_pat
     adapter.read_lease_metadata(paths)
     adapter.write_lease_metadata(
         paths,
+        lease_token="a" * 32,
         workspace_id="default",
         machine_id="machine-a",
         host_name="test-host",
@@ -620,7 +670,7 @@ def test_pid_is_live_uses_windows_helper_without_ps(monkeypatch):
     assert _pid_is_live(456) is False
 
 
-def test_force_shutdown_daemon_process_kills_local_pid_and_cleans_up_lease(tmp_path, monkeypatch):
+def test_force_shutdown_daemon_process_kills_local_pid_without_eager_lease_recovery(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -666,7 +716,7 @@ def test_force_shutdown_daemon_process_kills_local_pid_and_cleans_up_lease(tmp_p
     force_shutdown_daemon_process(paths)
 
     assert killed_pids == [321]
-    assert read_lease_metadata(paths) is None
+    assert read_lease_metadata(paths) is not None
     if paths.daemon_endpoint_kind == "unix":
         assert endpoint_path.exists() is False
 
@@ -757,7 +807,8 @@ def test_force_shutdown_preserves_different_installation_lease_with_same_hostnam
     assert metadata is not None
     assert metadata["machine_id"] == remote_machine_id
     assert metadata["host_name"] == host_name_text()
-    assert (paths.leased_markers_dir / paths.workspace_id).is_dir()
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.state == "leased"
     assert not (paths.available_markers_dir / paths.workspace_id).exists()
 
 

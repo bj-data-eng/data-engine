@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from data_engine.domain.time import utcnow_text
-from data_engine.hosts.daemon.constants import APP_VERSION
+from data_engine.hosts.daemon.constants import APP_VERSION, CHECKPOINT_INTERVAL_SECONDS
+from data_engine.runtime.shared_state import WorkspaceLeaseLostError
 from data_engine.views.models import QtFlowCard
 
 if TYPE_CHECKING:
@@ -119,22 +120,32 @@ class DaemonStateSyncHandler:
 
     def checkpoint_once(self, *, status: str) -> None:
         service = self.service
-        checkpoint_time = utcnow_text()
-        service.shared_state_adapter.checkpoint_workspace_state(
-            service.paths,
-            service.runtime_cache_ledger,
-            workspace_id=service.paths.workspace_id,
-            machine_id=service.machine_id,
-            host_name=service.host_name,
-            daemon_id=service.daemon_id,
-            pid=service.pid,
-            status=status,
-            started_at_utc=service.started_at_utc,
-            last_checkpoint_at_utc=checkpoint_time,
-            app_version=APP_VERSION,
-        )
-        with service._state_lock:
-            service.state.set_checkpoint_time(checkpoint_time)
+        with service._checkpoint_operation_lock:
+            checkpoint_time = utcnow_text()
+            with service._state_lock:
+                lease_token = service.state.lease_token
+            if lease_token is None:
+                raise WorkspaceLeaseLostError(
+                    f"Workspace {service.paths.workspace_id!r} has no retained lease token."
+                )
+            service.shared_state_adapter.checkpoint_workspace_state(
+                service.paths,
+                service.runtime_cache_ledger,
+                lease_token=lease_token,
+                workspace_id=service.paths.workspace_id,
+                machine_id=service.machine_id,
+                host_name=service.host_name,
+                daemon_id=service.daemon_id,
+                pid=service.pid,
+                status=status,
+                started_at_utc=service.started_at_utc,
+                last_checkpoint_at_utc=checkpoint_time,
+                app_version=APP_VERSION,
+                heartbeat_interval_seconds=CHECKPOINT_INTERVAL_SECONDS,
+            )
+            completed_at_utc = utcnow_text()
+            with service._state_lock:
+                service.state.set_checkpoint_time(completed_at_utc)
         service._publish_runtime_event("checkpoint.recorded")
         self.update_daemon_state(status=status)
 

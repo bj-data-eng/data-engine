@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import threading
 import time
 
 import pytest
 
+import data_engine.runtime.shared_state as shared_state_module
 from data_engine.authoring.flow import Flow
 from data_engine.core.primitives import DateRangeInputValue, ManualInputSpec
 from data_engine.domain import DaemonLifecyclePolicy
@@ -16,6 +18,7 @@ from data_engine.hosts.daemon.lifecycle import (
     shutdown_for_requested_idle_disconnect,
 )
 from data_engine.hosts.daemon.ownership import (
+    ensure_workspace_lease_current,
     honor_control_request_if_needed,
     release_workspace_claim,
     try_claim_released_workspace,
@@ -24,20 +27,51 @@ from data_engine.hosts.daemon.ownership import (
 from data_engine.hosts.daemon.runtime_control import stop_active_work
 from data_engine.platform.machine_identity import host_name_text, machine_id_text
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
-from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, parse_utc_text, utcnow_text
 from data_engine.runtime.shared_state import (
-    checkpoint_workspace_state,
-    claim_workspace,
+    checkpoint_workspace_state as _checkpoint_workspace_state,
+    claim_workspace as _claim_workspace,
+    hydrate_local_runtime_state,
     initialize_workspace_state,
     read_control_request,
     read_lease_metadata,
-    release_workspace,
-    remove_lease_metadata,
+    recover_stale_workspace,
+    release_workspace as _release_workspace,
+    remove_lease_metadata as _remove_lease_metadata,
+    resolve_workspace_bundle,
     write_control_request,
+    write_lease_metadata,
 )
 from data_engine.views.models import QtFlowCard
 
 from .support import _write_blocking_group_flows, _write_demo_flow, resolve_workspace_paths
+
+
+def claim_workspace(paths) -> bool:
+    return _claim_workspace(paths) is not None
+
+
+def checkpoint_workspace_state(paths, ledger, **kwargs):
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.lease_token is not None
+    return _checkpoint_workspace_state(
+        paths,
+        ledger,
+        lease_token=bundle.lease_token,
+        **kwargs,
+    )
+
+
+def release_workspace(paths) -> None:
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.lease_token is not None
+    _release_workspace(paths, lease_token=bundle.lease_token)
+
+
+def remove_lease_metadata(paths) -> None:
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.lease_token is not None
+    _remove_lease_metadata(paths, lease_token=bundle.lease_token)
 
 
 def _wait_until(predicate, *, timeout: float = 1.5) -> None:
@@ -1185,4 +1219,505 @@ def test_daemon_projection_tracks_engine_lifecycle(tmp_path, monkeypatch):
         assert "engine.start_reserved" in observed_events
     finally:
         release_engine.set()
+        service._shutdown()  # noqa: SLF001
+
+
+def test_runtime_command_drains_immediately_when_retained_token_is_replaced(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    lease_token_a = service.state.lease_token
+    assert lease_token_a is not None
+    old_time = "2000-01-01T00:00:00+00:00"
+    write_lease_metadata(
+        paths,
+        lease_token=lease_token_a,
+        workspace_id=paths.workspace_id,
+        machine_id=service.machine_id,
+        host_name=service.host_name,
+        daemon_id=service.daemon_id,
+        pid=service.pid,
+        status="idle",
+        started_at_utc=old_time,
+        last_checkpoint_at_utc=old_time,
+        app_version="test",
+    )
+    assert recover_stale_workspace(
+        paths,
+        lease_token=lease_token_a,
+        machine_id="machine-b",
+        stale_after_seconds=1.0,
+    ) is True
+    lease_token_b = _claim_workspace(paths)
+    assert isinstance(lease_token_b, str)
+    release_calls: list[str] = []
+    observed_events: list[str] = []
+    service.runtime_event_bus.subscribe(lambda event: observed_events.append(event.event_type))
+    monkeypatch.setattr(
+        service.shared_state_adapter,
+        "release_workspace",
+        lambda _paths, *, lease_token: release_calls.append(lease_token),
+    )
+    try:
+        response = service._handle_command({"command": "run_flow", "name": "demo", "wait": False})  # noqa: SLF001
+
+        assert response == {"ok": False, "error": "Workspace lease was lost; runtime work is stopping."}
+        assert service.state.work_draining is True
+        assert service.state.workspace_owned is False
+        assert service.state.lease_token is None
+        assert service.state.status == "lease lost"
+        assert service.host.shutdown_event.is_set() is True
+        assert "workspace.lease_lost" in observed_events
+        assert "workspace.released" not in observed_events
+        assert release_calls == []
+        bundle = resolve_workspace_bundle(paths)
+        assert bundle is not None and bundle.lease_token == lease_token_b
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
+def test_runtime_command_drains_immediately_on_corrupt_marker_topology(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    lease_token_a = service.state.lease_token
+    assert lease_token_a is not None
+    lease_token_b = "b" * 32 if lease_token_a != "b" * 32 else "c" * 32
+    conflicting_marker = paths.leased_markers_dir / f"{paths.workspace_id}__{lease_token_b}"
+    conflicting_marker.mkdir()
+    release_calls: list[str] = []
+    observed_events: list[str] = []
+    service.runtime_event_bus.subscribe(lambda event: observed_events.append(event.event_type))
+    monkeypatch.setattr(
+        service.shared_state_adapter,
+        "release_workspace",
+        lambda _paths, *, lease_token: release_calls.append(lease_token),
+    )
+    try:
+        response = service._handle_command({"command": "run_flow", "name": "demo", "wait": False})  # noqa: SLF001
+
+        assert response == {"ok": False, "error": "Workspace lease was lost; runtime work is stopping."}
+        assert service.state.work_draining is True
+        assert service.state.workspace_owned is False
+        assert service.state.lease_token is None
+        assert service.state.status == "lease lost"
+        assert service.host.shutdown_event.is_set() is True
+        assert "workspace.lease_lost" in observed_events
+        assert "workspace.released" not in observed_events
+        assert release_calls == []
+        assert (paths.leased_markers_dir / f"{paths.workspace_id}__{lease_token_a}").is_dir()
+        assert conflicting_marker.is_dir()
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
+def test_daemon_flow_reset_updates_owner_and_shared_runtime_state(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    hydrated_ledger = RuntimeCacheLedger(tmp_path / "hydrated.sqlite")
+    try:
+        started = utcnow_text()
+        for flow_name in ("alpha", "beta"):
+            service.runtime_cache_ledger.runs.record_started(
+                run_id=f"run-{flow_name}",
+                flow_name=flow_name,
+                group_name="Demo",
+                source_path=None,
+                started_at_utc=started,
+            )
+            service.runtime_cache_ledger.logs.append(
+                level="INFO",
+                message=flow_name,
+                created_at_utc=started,
+                run_id=f"run-{flow_name}",
+                flow_name=flow_name,
+            )
+        service._checkpoint_once(status="idle")  # noqa: SLF001
+
+        response = service._handle_command({"command": "reset_flow", "name": "alpha"})  # noqa: SLF001
+
+        assert response == {"ok": True}
+        assert [run.flow_name for run in service.runtime_cache_ledger.runs.list()] == ["beta"]
+        assert hydrate_local_runtime_state(paths, hydrated_ledger) is True
+        assert [run.flow_name for run in hydrated_ledger.runs.list()] == ["beta"]
+        assert [entry.flow_name for entry in hydrated_ledger.logs.list()] == ["beta"]
+    finally:
+        hydrated_ledger.close()
+        service._shutdown()  # noqa: SLF001
+
+
+def test_daemon_flow_reset_fences_recovery_until_fresh_checkpoint(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    lease_token = service.state.lease_token
+    assert lease_token is not None
+    old_time = "2000-01-01T00:00:00+00:00"
+    write_lease_metadata(
+        paths,
+        lease_token=lease_token,
+        workspace_id=paths.workspace_id,
+        machine_id=service.machine_id,
+        host_name=service.host_name,
+        daemon_id=service.daemon_id,
+        pid=service.pid,
+        status="idle",
+        started_at_utc=old_time,
+        last_checkpoint_at_utc=old_time,
+        app_version="test",
+    )
+    reset_entered = threading.Event()
+    allow_reset = threading.Event()
+    recovery_done = threading.Event()
+    command_result: dict[str, object] = {}
+    recovery_result: list[bool] = []
+    original_reset_flow = service.runtime_cache_ledger.reset_flow
+
+    def blocking_reset(flow_name):
+        reset_entered.set()
+        allow_reset.wait(timeout=2.0)
+        original_reset_flow(flow_name)
+
+    monkeypatch.setattr(service.runtime_cache_ledger, "reset_flow", blocking_reset)
+    command_thread = threading.Thread(
+        target=lambda: command_result.update(
+            service._handle_command({"command": "reset_flow", "name": "demo"})  # noqa: SLF001
+        ),
+        daemon=True,
+    )
+
+    def recover() -> None:
+        recovery_result.append(
+            recover_stale_workspace(
+                paths,
+                lease_token=lease_token,
+                machine_id="machine-b",
+                stale_after_seconds=1.0,
+            )
+        )
+        recovery_done.set()
+
+    recovery_thread = threading.Thread(target=recover, daemon=True)
+    command_thread.start()
+    try:
+        assert reset_entered.wait(timeout=1.0) is True
+        recovery_thread.start()
+        assert recovery_done.wait(timeout=0.1) is False
+        bundle = resolve_workspace_bundle(paths)
+        assert bundle is not None and bundle.lease_token == lease_token
+
+        allow_reset.set()
+        command_thread.join(timeout=2.0)
+        recovery_thread.join(timeout=2.0)
+
+        assert command_thread.is_alive() is False
+        assert recovery_thread.is_alive() is False
+        assert command_result == {"ok": True}
+        assert recovery_result == [False]
+        bundle = resolve_workspace_bundle(paths)
+        assert bundle is not None and bundle.lease_token == lease_token
+    finally:
+        allow_reset.set()
+        command_thread.join(timeout=2.0)
+        if recovery_thread.ident is not None:
+            recovery_thread.join(timeout=2.0)
+        service._shutdown()  # noqa: SLF001
+
+
+def test_flow_reset_serializes_behind_older_checkpoint_without_resurrection(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    hydrated_ledger = RuntimeCacheLedger(tmp_path / "hydrated.sqlite")
+    export_paused = threading.Event()
+    resume_export = threading.Event()
+    checkpoint_errors: list[BaseException] = []
+    reset_result: dict[str, object] = {}
+    started = utcnow_text()
+    service.runtime_cache_ledger.runs.record_started(
+        run_id="run-old",
+        flow_name="demo",
+        group_name="Demo",
+        source_path=None,
+        started_at_utc=started,
+    )
+    service._checkpoint_once(status="idle")  # noqa: SLF001
+    service.runtime_cache_ledger.logs.append(
+        level="INFO",
+        message="pre-reset change",
+        created_at_utc=started,
+        run_id="run-old",
+        flow_name="demo",
+    )
+    original_export = service.runtime_cache_ledger.snapshots.export
+
+    def pause_old_export():
+        exported = original_export()
+        if threading.current_thread().name == "periodic-checkpoint":
+            export_paused.set()
+            resume_export.wait(timeout=2.0)
+        return exported
+
+    monkeypatch.setattr(service.runtime_cache_ledger.snapshots, "export", pause_old_export)
+
+    def checkpoint() -> None:
+        try:
+            service._checkpoint_once(status="idle")  # noqa: SLF001
+        except BaseException as exc:  # pragma: no cover - asserted below
+            checkpoint_errors.append(exc)
+
+    checkpoint_thread = threading.Thread(target=checkpoint, name="periodic-checkpoint", daemon=True)
+    reset_thread = threading.Thread(
+        target=lambda: reset_result.update(
+            service._handle_command({"command": "reset_flow", "name": "demo"})  # noqa: SLF001
+        ),
+        daemon=True,
+    )
+    checkpoint_thread.start()
+    try:
+        assert export_paused.wait(timeout=1.0) is True
+        reset_thread.start()
+        reset_thread.join(timeout=0.1)
+        assert reset_thread.is_alive() is True
+        assert [run.run_id for run in service.runtime_cache_ledger.runs.list(flow_name="demo")] == ["run-old"]
+
+        resume_export.set()
+        checkpoint_thread.join(timeout=2.0)
+        reset_thread.join(timeout=2.0)
+
+        assert checkpoint_thread.is_alive() is False
+        assert reset_thread.is_alive() is False
+        assert checkpoint_errors == []
+        assert reset_result == {"ok": True}
+        assert service.runtime_cache_ledger.runs.list(flow_name="demo") == ()
+        assert hydrate_local_runtime_state(paths, hydrated_ledger) is True
+        assert hydrated_ledger.runs.list(flow_name="demo") == ()
+        assert hydrated_ledger.logs.list(flow_name="demo") == ()
+    finally:
+        resume_export.set()
+        checkpoint_thread.join(timeout=2.0)
+        if reset_thread.ident is not None:
+            reset_thread.join(timeout=2.0)
+        hydrated_ledger.close()
+        service._shutdown()  # noqa: SLF001
+
+
+def test_long_checkpoint_renews_lease_and_finishes_with_fresh_timestamp(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    monkeypatch.setattr("data_engine.hosts.daemon.state_sync.CHECKPOINT_INTERVAL_SECONDS", 0.01)
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    lease_token = service.state.lease_token
+    assert lease_token is not None
+    service.runtime_cache_ledger.logs.append(
+        level="INFO",
+        message="force changed checkpoint",
+        created_at_utc=utcnow_text(),
+    )
+    export_paused = threading.Event()
+    resume_export = threading.Event()
+    heartbeat_entered = threading.Event()
+    release_heartbeat = threading.Event()
+    heartbeat_written = threading.Event()
+    checkpoint_errors: list[BaseException] = []
+    original_export = service.runtime_cache_ledger.snapshots.export
+    original_write_metadata = shared_state_module._write_lease_metadata_owned  # noqa: SLF001
+    initial_clock = datetime.now(UTC)
+
+    class ControlledDateTime:
+        current = initial_clock
+
+        @classmethod
+        def now(cls, tz=None):
+            if threading.current_thread().name == "data-engine-lease-heartbeat":
+                heartbeat_entered.set()
+                assert release_heartbeat.wait(timeout=2.0) is True
+            return cls.current if tz is None else cls.current.astimezone(tz)
+
+        @staticmethod
+        def fromtimestamp(timestamp, tz=None):
+            return datetime.fromtimestamp(timestamp, tz=tz)
+
+    def pause_export():
+        exported = original_export()
+        export_paused.set()
+        resume_export.wait(timeout=2.0)
+        return exported
+
+    def observe_heartbeat_write(*args, **kwargs):
+        is_heartbeat = threading.current_thread().name == "data-engine-lease-heartbeat"
+        result = original_write_metadata(*args, **kwargs)
+        if is_heartbeat:
+            heartbeat_written.set()
+        return result
+
+    monkeypatch.setattr(service.runtime_cache_ledger.snapshots, "export", pause_export)
+    monkeypatch.setattr(shared_state_module, "datetime", ControlledDateTime)
+    monkeypatch.setattr(shared_state_module, "_write_lease_metadata_owned", observe_heartbeat_write)
+
+    def checkpoint() -> None:
+        try:
+            service._checkpoint_once(status="idle")  # noqa: SLF001
+        except BaseException as exc:  # pragma: no cover - asserted below
+            checkpoint_errors.append(exc)
+
+    checkpoint_thread = threading.Thread(target=checkpoint, daemon=True)
+    checkpoint_thread.start()
+    try:
+        assert export_paused.wait(timeout=1.0) is True
+        assert heartbeat_entered.wait(timeout=1.0) is True
+        ControlledDateTime.current = initial_clock + timedelta(seconds=30)
+        release_heartbeat.set()
+        assert heartbeat_written.wait(timeout=1.0) is True
+        heartbeat_metadata = read_lease_metadata(paths)
+        assert heartbeat_metadata is not None
+        heartbeat_at = parse_utc_text(str(heartbeat_metadata["last_checkpoint_at_utc"]))
+        assert heartbeat_at == ControlledDateTime.current
+        assert recover_stale_workspace(
+            paths,
+            lease_token=lease_token,
+            machine_id="machine-b",
+            stale_after_seconds=10.0,
+        ) is False
+        assert checkpoint_thread.is_alive() is True
+
+        resume_export.set()
+        checkpoint_thread.join(timeout=2.0)
+
+        assert checkpoint_thread.is_alive() is False
+        assert checkpoint_errors == []
+        completed_metadata = read_lease_metadata(paths)
+        assert completed_metadata is not None
+        completed_at = parse_utc_text(str(completed_metadata["last_checkpoint_at_utc"]))
+        state_completed_at = parse_utc_text(service.state.last_checkpoint_at_utc)
+        assert completed_at is not None and completed_at >= heartbeat_at
+        assert state_completed_at is not None
+    finally:
+        release_heartbeat.set()
+        resume_export.set()
+        checkpoint_thread.join(timeout=2.0)
+        service._shutdown()  # noqa: SLF001
+
+
+def test_flow_reset_rechecks_admission_after_waiting_for_checkpoint_lock(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    started = utcnow_text()
+    service.runtime_cache_ledger.runs.record_started(
+        run_id="run-old",
+        flow_name="demo",
+        group_name="Demo",
+        source_path=None,
+        started_at_utc=started,
+    )
+    reset_validated = threading.Event()
+    runtime_started = threading.Event()
+    release_runtime = threading.Event()
+    reset_result: dict[str, object] = {}
+    original_ensure = ensure_workspace_lease_current
+
+    def observe_initial_validation(candidate_service):
+        if threading.current_thread().name == "reset-command":
+            reset_validated.set()
+        return original_ensure(candidate_service)
+
+    def run_manual(flow, *, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None):
+        del flow, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id
+        runtime_started.set()
+        release_runtime.wait(timeout=2.0)
+
+    monkeypatch.setattr(
+        "data_engine.hosts.daemon.runtime_commands.ensure_workspace_lease_current",
+        observe_initial_validation,
+    )
+    monkeypatch.setattr(service.runtime_execution_service, "run_manual", run_manual)
+    service._checkpoint_operation_lock.acquire()  # noqa: SLF001 - hold reset between its two admission checks
+    reset_thread = threading.Thread(
+        target=lambda: reset_result.update(
+            service._handle_command({"command": "reset_flow", "name": "demo"})  # noqa: SLF001
+        ),
+        name="reset-command",
+        daemon=True,
+    )
+    reset_thread.start()
+    lock_held = True
+    try:
+        assert reset_validated.wait(timeout=1.0) is True
+        run_response = service._handle_command({"command": "run_flow", "name": "demo", "wait": False})  # noqa: SLF001
+        assert run_response == {"ok": True}
+        assert runtime_started.wait(timeout=1.0) is True
+
+        service._checkpoint_operation_lock.release()  # noqa: SLF001
+        lock_held = False
+        reset_thread.join(timeout=2.0)
+
+        assert reset_thread.is_alive() is False
+        assert reset_result == {"ok": False, "error": "Stop active runtime work before resetting a flow."}
+        assert [run.run_id for run in service.runtime_cache_ledger.runs.list(flow_name="demo")] == ["run-old"]
+    finally:
+        if lock_held:
+            service._checkpoint_operation_lock.release()  # noqa: SLF001
+        release_runtime.set()
+        reset_thread.join(timeout=2.0)
+        service._shutdown()  # noqa: SLF001
+
+
+def test_flow_reset_rejects_live_finishing_worker_without_deleting(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    service.runtime_cache_ledger.runs.record_started(
+        run_id="run-old",
+        flow_name="demo",
+        group_name="Demo",
+        source_path=None,
+        started_at_utc=utcnow_text(),
+    )
+    release_worker = threading.Event()
+    worker = threading.Thread(target=release_worker.wait, daemon=True)
+    worker.start()
+    with service._state_lock:  # noqa: SLF001 - model the retained finalization window
+        service.state.finishing_manual_run_threads["demo"] = worker
+    try:
+        response = service._handle_command({"command": "reset_flow", "name": "demo"})  # noqa: SLF001
+
+        assert response == {"ok": False, "error": "Stop active runtime work before resetting a flow."}
+        assert [run.run_id for run in service.runtime_cache_ledger.runs.list(flow_name="demo")] == ["run-old"]
+    finally:
+        release_worker.set()
+        worker.join(timeout=1.0)
         service._shutdown()  # noqa: SLF001

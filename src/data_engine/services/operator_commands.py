@@ -213,15 +213,15 @@ class OperatorCommandService:
         flow_name: str,
     ) -> ResetFlowCommandResult:
         """Delete persisted history for one flow."""
-        try:
-            self.reset_service.reset_flow(
-                paths=paths,
-                runtime_cache_ledger=runtime_cache_ledger,
-                flow_name=flow_name,
-            )
-        except Exception as exc:
-            return ResetFlowCommandResult(flow_name=flow_name, error_text=str(exc))
-        return ResetFlowCommandResult(flow_name=flow_name, error_text=None)
+        result = self.runtime_application.reset_flow(paths, name=flow_name)
+        if result.ok:
+            refresh_external_state = getattr(runtime_cache_ledger, "refresh_external_state", None)
+            if callable(refresh_external_state):
+                refresh_external_state()
+        return ResetFlowCommandResult(
+            flow_name=flow_name,
+            error_text=None if result.ok else result.error,
+        )
 
 
 __all__ = [

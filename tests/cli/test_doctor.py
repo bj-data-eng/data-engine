@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 
+import pytest
+
 from data_engine.domain import ProcessInfo
 from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_models import (
@@ -96,10 +98,15 @@ def test_cli_doctor_daemons_reports_filtered_process_and_lease_state(monkeypatch
     class _SharedStateService:
         def read_lease_metadata(self, paths):
             del paths
-            return {"machine_id": "test-host", "pid": 111, "last_checkpoint_at_utc": "2999-01-01T00:00:00+00:00"}
+            return {
+                "machine_id": "test-host",
+                "lease_token": "a" * 32,
+                "pid": 111,
+                "last_checkpoint_at_utc": "2999-01-01T00:00:00+00:00",
+            }
 
-        def lease_is_stale(self, paths, *, stale_after_seconds):
-            del paths, stale_after_seconds
+        def lease_is_stale(self, paths, *, lease_token, stale_after_seconds):
+            del paths, lease_token, stale_after_seconds
             return False
 
     monkeypatch.setattr(
@@ -130,6 +137,68 @@ def test_cli_doctor_daemons_reports_filtered_process_and_lease_state(monkeypatch
     assert f"Defunct daemons: {expected_defunct}" in output
     assert "Related UI processes: 1" in output
     assert "docs: lease_pid=111 state=live local" in output
+
+
+@pytest.mark.parametrize(
+    ("lease_token", "expected_row", "expected_stale_calls"),
+    (
+        ("a" * 32, "docs: lease_pid=- state=claiming", ["a" * 32]),
+        ("bad-token", "docs: lease_pid=- state=corrupt token=invalid", []),
+    ),
+)
+def test_cli_doctor_daemons_handles_claiming_and_invalid_token_metadata(
+    tmp_path,
+    capsys,
+    lease_token,
+    expected_row,
+    expected_stale_calls,
+):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared_workspaces" / "docs"
+    workspace_root.mkdir(parents=True)
+    settings = type(
+        "_Settings",
+        (),
+        {
+            "app_root": app_root,
+            "workspace_collection_root": workspace_root.parent,
+        },
+    )()
+
+    class _WorkspaceService:
+        def discover(self, **kwargs):
+            del kwargs
+            return (type("DW", (), {"workspace_id": "docs", "workspace_root": workspace_root})(),)
+
+        def resolve_paths(self, **kwargs):
+            del kwargs
+            return RuntimeLayoutPolicy().resolve_paths(workspace_root=workspace_root, workspace_id="docs")
+
+    stale_calls: list[str] = []
+
+    def lease_is_stale(paths, *, lease_token, stale_after_seconds):
+        del paths, stale_after_seconds
+        stale_calls.append(lease_token)
+        return False
+
+    result = commands_doctor.doctor_daemons(
+        settings=settings,
+        workspace_service=_WorkspaceService(),
+        process_rows=[],
+        read_lease_metadata_func=lambda paths: {
+            "workspace_id": paths.workspace_id,
+            "lease_token": lease_token,
+            "status": "claiming",
+        },
+        lease_is_stale_func=lease_is_stale,
+        machine_id_text_func=lambda: "machine-a",
+    )
+
+    assert result == 0
+    assert stale_calls == expected_stale_calls
+    output = capsys.readouterr().out
+    assert expected_row in output
+    assert "no lease metadata" not in output
 
 
 def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
@@ -217,10 +286,15 @@ def test_cli_doctor_daemons_treats_windows_status_as_non_defunct(monkeypatch, tm
     class _SharedStateService:
         def read_lease_metadata(self, paths):
             del paths
-            return {"machine_id": "test-host", "pid": 111, "last_checkpoint_at_utc": "2999-01-01T00:00:00+00:00"}
+            return {
+                "machine_id": "test-host",
+                "lease_token": "a" * 32,
+                "pid": 111,
+                "last_checkpoint_at_utc": "2999-01-01T00:00:00+00:00",
+            }
 
-        def lease_is_stale(self, paths, *, stale_after_seconds):
-            del paths, stale_after_seconds
+        def lease_is_stale(self, paths, *, lease_token, stale_after_seconds):
+            del paths, lease_token, stale_after_seconds
             return False
 
     monkeypatch.setattr("data_engine.domain.diagnostics.os.name", "nt")
@@ -279,10 +353,15 @@ def test_cli_doctor_daemons_collapses_windows_launcher_parent_processes(monkeypa
     class _SharedStateService:
         def read_lease_metadata(self, paths):
             del paths
-            return {"machine_id": "test-host", "pid": 320, "last_checkpoint_at_utc": "2999-01-01T00:00:00+00:00"}
+            return {
+                "machine_id": "test-host",
+                "lease_token": "a" * 32,
+                "pid": 320,
+                "last_checkpoint_at_utc": "2999-01-01T00:00:00+00:00",
+            }
 
-        def lease_is_stale(self, paths, *, stale_after_seconds):
-            del paths, stale_after_seconds
+        def lease_is_stale(self, paths, *, lease_token, stale_after_seconds):
+            del paths, lease_token, stale_after_seconds
             return False
 
     monkeypatch.setattr("data_engine.platform.processes.os.name", "nt")
@@ -374,8 +453,8 @@ def test_cli_main_accepts_injected_dependencies_for_doctor(capsys, tmp_path):
             del paths
             return None
 
-        def lease_is_stale(self, paths, *, stale_after_seconds):
-            del paths, stale_after_seconds
+        def lease_is_stale(self, paths, *, lease_token, stale_after_seconds):
+            del paths, lease_token, stale_after_seconds
             return False
 
     result = main(

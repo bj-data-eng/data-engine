@@ -24,6 +24,9 @@ from data_engine.platform.workspace_models import WorkspacePaths, authored_works
 from data_engine.services import DaemonService, DaemonStateService, SharedStateService
 
 
+_FLOW_RESET_TIMEOUT_SECONDS = 120.0
+
+
 @dataclass(frozen=True)
 class DaemonCommandResult:
     """Normalized outcome of one daemon command request."""
@@ -277,6 +280,16 @@ class RuntimeApplication:
     def stop_flow(self, paths: WorkspacePaths, *, name: str, timeout: float = 2.0) -> DaemonCommandResult:
         """Request one manual flow stop through the daemon."""
         return self._request(paths, {"command": "stop_flow", "name": name}, timeout=timeout)
+
+    def reset_flow(
+        self,
+        paths: WorkspacePaths,
+        *,
+        name: str,
+        timeout: float = _FLOW_RESET_TIMEOUT_SECONDS,
+    ) -> DaemonCommandResult:
+        """Reset one flow through the daemon that owns shared snapshot publication."""
+        return self._request(paths, {"command": "reset_flow", "name": name}, timeout=timeout)
 
     def daemon_status(self, paths: WorkspacePaths, *, timeout: float = 0.0) -> DaemonCommandResult:
         """Request raw daemon status for host/CLI inspection."""

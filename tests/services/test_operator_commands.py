@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services.operator_commands import OperatorCommandService
+from data_engine.services.runtime_io import RuntimeIoLayer
 
 from tests.services.support import resolve_workspace_paths
 
@@ -55,13 +57,14 @@ def test_operator_command_service_normalizes_reset_and_provision_errors(tmp_path
             del kwargs
             raise RuntimeError("reset boom")
 
-        def reset_flow(self, **kwargs):
-            del kwargs
-            raise RuntimeError("flow boom")
+    class _RuntimeApplication:
+        def reset_flow(self, *args, **kwargs):
+            del args, kwargs
+            return type("Result", (), {"ok": False, "error": "flow boom"})()
 
     service = OperatorCommandService(
         control_application=object(),
-        runtime_application=object(),
+        runtime_application=_RuntimeApplication(),
         reset_service=_ResetService(),
         workspace_provisioning_service=None,
     )
@@ -84,3 +87,48 @@ def test_operator_command_service_normalizes_reset_and_provision_errors(tmp_path
     assert flow_reset.error_text == "flow boom"
     assert provision.error_text == "Workspace provisioning is not available for this surface."
 
+
+def test_successful_daemon_flow_reset_invalidates_cached_external_history(tmp_path, monkeypatch):
+    paths = resolve_workspace_paths(workspace_root=tmp_path / "workspace")
+    db_path = paths.runtime_cache_db_path
+    external_ledger = RuntimeCacheLedger(db_path)
+    started = utcnow_text()
+    external_ledger.runs.record_started(
+        run_id="run-1",
+        flow_name="docs_poll",
+        group_name="Docs",
+        source_path=None,
+        started_at_utc=started,
+    )
+    runtime_cache_ledger = RuntimeIoLayer(cache_ttl_seconds=60.0).open_cache_store(db_path)
+    monkeypatch.setattr(
+        runtime_cache_ledger._handle,  # noqa: SLF001 - hold the external signature stable to exercise explicit invalidation
+        "_sqlite_signature",
+        lambda: ((True, 1, 1), (False, None, None)),
+    )
+    assert [run.run_id for run in runtime_cache_ledger.runs.list(flow_name="docs_poll")] == ["run-1"]
+
+    class _RuntimeApplication:
+        def reset_flow(self, paths_arg, *, name):
+            assert paths_arg == paths
+            external_ledger.reset_flow(name)
+            return type("Result", (), {"ok": True, "error": None})()
+
+    service = OperatorCommandService(
+        control_application=object(),
+        runtime_application=_RuntimeApplication(),
+        reset_service=object(),
+        workspace_provisioning_service=None,
+    )
+    try:
+        result = service.reset_flow(
+            paths=paths,
+            runtime_cache_ledger=runtime_cache_ledger,
+            flow_name="docs_poll",
+        )
+
+        assert result.error_text is None
+        assert runtime_cache_ledger.runs.list(flow_name="docs_poll") == ()
+    finally:
+        runtime_cache_ledger.close()
+        external_ledger.close()

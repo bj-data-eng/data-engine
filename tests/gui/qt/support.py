@@ -527,6 +527,8 @@ def _command_service_for_test(
     workspace_provisioning_service=None,
     force_shutdown_func=None,
 ):
+    reset_service = reset_service or _FakeResetService()
+
     class _RuntimeApplicationForCommands:
         def force_shutdown_daemon(self, paths, timeout=0.5):
             try:
@@ -536,10 +538,14 @@ def _command_service_for_test(
             except Exception as exc:  # pragma: no cover - defensive test hook
                 return type("_Result", (), {"ok": False, "error": str(exc)})()
 
+        def reset_flow(self, paths, *, name):
+            reset_service.reset_flow(paths=paths, runtime_cache_ledger=None, flow_name=name)
+            return type("_Result", (), {"ok": True, "error": None})()
+
     return OperatorCommandService(
         control_application=control_application or _FakeControlApplication(),
         runtime_application=_RuntimeApplicationForCommands(),
-        reset_service=reset_service or _FakeResetService(),
+        reset_service=reset_service,
         workspace_provisioning_service=workspace_provisioning_service,
     )
 
@@ -2442,12 +2448,13 @@ def test_request_control_uses_shared_state_adapter_without_recovering_live_local
         def read_lease_metadata(self, paths):
             return {
                 "machine_id": machine_id_text(app_root=paths.app_root),
+                "lease_token": "a" * 32,
                 "pid": os.getpid(),
                 "last_checkpoint_at_utc": datetime.now(UTC).isoformat(),
             }
 
-        def recover_stale_workspace(self, paths, *, machine_id, stale_after_seconds, reclaim=True):
-            del reclaim
+        def recover_stale_workspace(self, paths, *, lease_token, machine_id, stale_after_seconds):
+            del lease_token
             self.recovered_calls.append((paths, machine_id, stale_after_seconds))
             return False
 

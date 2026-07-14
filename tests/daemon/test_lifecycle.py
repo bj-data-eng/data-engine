@@ -18,16 +18,44 @@ from data_engine.hosts.daemon.lifecycle import (
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.runtime.shared_state import (
-    checkpoint_workspace_state,
-    claim_workspace,
+    checkpoint_workspace_state as _checkpoint_workspace_state,
+    claim_workspace as _claim_workspace,
     initialize_workspace_state,
     read_lease_metadata,
     read_runtime_snapshot_generation,
-    release_workspace,
-    remove_lease_metadata,
+    release_workspace as _release_workspace,
+    remove_lease_metadata as _remove_lease_metadata,
+    resolve_workspace_bundle,
 )
 
 from .support import _write_demo_flow, resolve_workspace_paths
+
+
+def claim_workspace(paths) -> bool:
+    return _claim_workspace(paths) is not None
+
+
+def checkpoint_workspace_state(paths, ledger, **kwargs):
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.lease_token is not None
+    return _checkpoint_workspace_state(
+        paths,
+        ledger,
+        lease_token=bundle.lease_token,
+        **kwargs,
+    )
+
+
+def release_workspace(paths) -> None:
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.lease_token is not None
+    _release_workspace(paths, lease_token=bundle.lease_token)
+
+
+def remove_lease_metadata(paths) -> None:
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.lease_token is not None
+    _remove_lease_metadata(paths, lease_token=bundle.lease_token)
 
 def test_shutdown_releases_workspace_even_if_final_checkpoint_fails(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
@@ -234,8 +262,10 @@ def test_shutdown_creates_runtime_snapshot_parquets(tmp_path, monkeypatch):
         response = service._handle_command({"command": "run_flow", "name": "demo", "wait": True})  # noqa: SLF001
         assert response["ok"] is True
 
-        shutil.rmtree(paths.shared_snapshot_generations_dir, ignore_errors=True)
-        paths.shared_snapshot_manifest_path.unlink(missing_ok=True)
+        bundle = resolve_workspace_bundle(paths)
+        assert bundle is not None
+        shutil.rmtree(bundle.snapshot_generations_dir, ignore_errors=True)
+        bundle.snapshot_manifest_path.unlink(missing_ok=True)
 
         assert read_runtime_snapshot_generation(paths) is None
 
@@ -243,7 +273,9 @@ def test_shutdown_creates_runtime_snapshot_parquets(tmp_path, monkeypatch):
 
         generation_id = read_runtime_snapshot_generation(paths)
         assert generation_id is not None
-        generation_dir = paths.shared_snapshot_generations_dir / generation_id
+        bundle = resolve_workspace_bundle(paths)
+        assert bundle is not None
+        generation_dir = bundle.snapshot_generations_dir / generation_id
         assert (generation_dir / "runs.parquet").is_file()
         assert (generation_dir / "step_runs.parquet").is_file()
         assert (generation_dir / "logs.parquet").is_file()
@@ -505,7 +537,7 @@ def test_daemon_requests_shutdown_when_workspace_root_is_moved(tmp_path, monkeyp
     assert service.host.shutdown_event.is_set() is True
     assert service.host.workspace_owned is False
     assert service.host.runtime_active is False
-    assert service.host.status == "workspace missing"
+    assert service.host.status == "lease lost"
 
     service._shutdown()  # noqa: SLF001
 

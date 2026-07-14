@@ -29,13 +29,30 @@ from data_engine.platform.machine_identity import host_name_text, machine_id_tex
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger, utcnow_text
 from data_engine.runtime.shared_state import (
-    checkpoint_workspace_state,
-    claim_workspace,
+    checkpoint_workspace_state as _checkpoint_workspace_state,
+    claim_workspace as _claim_workspace,
     initialize_workspace_state,
     read_lease_metadata,
+    resolve_workspace_bundle,
+    write_lease_metadata,
 )
 
 from .support import _write_demo_flow, resolve_workspace_paths
+
+
+def claim_workspace(paths) -> bool:
+    return _claim_workspace(paths) is not None
+
+
+def checkpoint_workspace_state(paths, ledger, **kwargs):
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.lease_token is not None
+    return _checkpoint_workspace_state(
+        paths,
+        ledger,
+        lease_token=bundle.lease_token,
+        **kwargs,
+    )
 
 def test_daemon_service_initializes_and_serves_commands(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
@@ -247,7 +264,7 @@ def test_daemon_host_state_transitions_cover_core_mutators():
     assert state.runtime_stopping is False
     assert state.listener is None
 
-    state.claim_workspace()
+    state.claim_workspace("a" * 32)
     assert state.workspace_owned is True
     assert state.leased_by_machine_id is None
     assert state.status == "idle"
@@ -370,6 +387,10 @@ def test_initialize_service_enters_observer_mode_for_other_machine_lease(tmp_pat
         assert service.host.workspace_owned is False
         assert service.host.leased_by_machine_id == "machine-a"
         assert service.host.status == "leased"
+        events, _ = service.runtime_projector.events_since(0)
+        event_types = tuple(event["event_type"] for event in events)
+        assert "workspace.lease_observed" in event_types
+        assert "workspace.released" not in event_types
     finally:
         service._shutdown()  # noqa: SLF001
 
@@ -1243,6 +1264,21 @@ def test_daemon_service_reclaims_unreachable_same_machine_lease(tmp_path, monkey
     checkpoint_workspace_state(
         paths,
         RuntimeCacheLedger(paths.runtime_db_path),
+        workspace_id="default",
+        machine_id=machine_id_text(app_root=paths.app_root),
+        host_name="test-host",
+        daemon_id="daemon-a",
+        pid=101,
+        status="idle",
+        started_at_utc=started,
+        last_checkpoint_at_utc=started,
+        app_version="0.1.0",
+    )
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None and bundle.lease_token is not None
+    write_lease_metadata(
+        paths,
+        lease_token=bundle.lease_token,
         workspace_id="default",
         machine_id=machine_id_text(app_root=paths.app_root),
         host_name="test-host",

@@ -43,11 +43,7 @@ WORKSPACE_STATE_DIR_NAME: str = ".workspace_state"
 WORKSPACE_AVAILABLE_MARKERS_DIR_NAME: str = "available"
 WORKSPACE_LEASED_MARKERS_DIR_NAME: str = "leased"
 WORKSPACE_STALE_MARKERS_DIR_NAME: str = "stale"
-WORKSPACE_LEASE_METADATA_DIR_NAME: str = "leases"
 WORKSPACE_CONTROL_REQUESTS_DIR_NAME: str = "control_requests"
-WORKSPACE_SHARED_STATE_DIR_NAME: str = "state"
-WORKSPACE_SHARED_SNAPSHOT_GENERATIONS_DIR_NAME: str = "snapshots"
-WORKSPACE_SHARED_SNAPSHOT_MANIFESTS_DIR_NAME: str = "snapshot_manifests"
 MAX_WORKSPACE_ID_UTF8_BYTES: Final[int] = 64
 _LOCAL_WORKSPACE_NAMESPACE_DIGEST_HEX_CHARS: Final[int] = 12
 _WINDOWS_RESERVED_WORKSPACE_CHARACTERS: Final[frozenset[str]] = frozenset('<>:"/\\|?*')
@@ -146,13 +142,8 @@ class WorkspacePaths:
     available_markers_dir: Path
     leased_markers_dir: Path
     stale_markers_dir: Path
-    lease_metadata_dir: Path
-    lease_metadata_path: Path
     control_requests_dir: Path
     control_request_path: Path
-    shared_state_dir: Path
-    shared_snapshot_generations_dir: Path
-    shared_snapshot_manifest_path: Path
     artifacts_dir: Path
     workspace_cache_dir: Path
     compiled_flow_modules_dir: Path
@@ -201,10 +192,6 @@ __all__ = [
     "WORKSPACE_FLOW_HELPERS_DIR_NAME",
     "WORKSPACE_FLOW_MODULES_DIR_NAME",
     "WORKSPACE_LEASED_MARKERS_DIR_NAME",
-    "WORKSPACE_LEASE_METADATA_DIR_NAME",
-    "WORKSPACE_SHARED_SNAPSHOT_GENERATIONS_DIR_NAME",
-    "WORKSPACE_SHARED_SNAPSHOT_MANIFESTS_DIR_NAME",
-    "WORKSPACE_SHARED_STATE_DIR_NAME",
     "WORKSPACE_STALE_MARKERS_DIR_NAME",
     "WORKSPACE_STATE_DIR_NAME",
     "WORKSPACE_TEMPLATES_DIR_NAME",
