@@ -527,11 +527,19 @@ def _reachable_daemon_pid(paths: WorkspacePaths) -> int | None:
 
 
 def _cleanup_forced_shutdown(paths: WorkspacePaths) -> None:
-    """Best-effort cleanup after a forced daemon termination."""
+    """Best-effort cleanup without mutating another installation's lease."""
     try:
-        _SHARED_STATE_ADAPTER.remove_lease_metadata(paths)
+        metadata = _SHARED_STATE_ADAPTER.read_lease_metadata(paths)
     except Exception:
-        pass
+        metadata = None
+    if isinstance(metadata, dict):
+        owner = metadata.get("machine_id")
+        local_machine_id = machine_id_text(app_root=paths.app_root)
+        if isinstance(owner, str) and owner.strip() == local_machine_id:
+            try:
+                _SHARED_STATE_ADAPTER.remove_lease_metadata(paths)
+            except Exception:
+                pass
     try:
         _remove_stale_unix_endpoint(paths)
     except Exception:

@@ -720,6 +720,47 @@ def test_force_shutdown_daemon_process_returns_when_nothing_is_running(tmp_path,
     force_shutdown_daemon_process(paths)
 
 
+def test_force_shutdown_preserves_different_installation_lease_with_same_hostname(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+    assert claim_workspace(paths) is True
+    local_machine_id = machine_id_text(app_root=paths.app_root)
+    remote_machine_id = (
+        "2a0ec090-7599-4578-a726-fd760f76f7f8"
+        if local_machine_id != "2a0ec090-7599-4578-a726-fd760f76f7f8"
+        else "ac066dc8-4491-44e5-932d-f0ce1a701c26"
+    )
+    started = utcnow_text()
+    checkpoint_workspace_state(
+        paths,
+        RuntimeCacheLedger(paths.runtime_db_path),
+        workspace_id="default",
+        machine_id=remote_machine_id,
+        host_name=host_name_text(),
+        daemon_id="remote-daemon",
+        pid=9876,
+        status="running",
+        started_at_utc=started,
+        last_checkpoint_at_utc=started,
+        app_version="0.1.0",
+    )
+    monkeypatch.setattr("data_engine.hosts.daemon.client._reachable_daemon_pid", lambda paths: None)
+    monkeypatch.setattr("data_engine.hosts.daemon.client.is_daemon_live", lambda paths: False)
+
+    force_shutdown_daemon_process(paths)
+
+    metadata = read_lease_metadata(paths)
+    assert metadata is not None
+    assert metadata["machine_id"] == remote_machine_id
+    assert metadata["host_name"] == host_name_text()
+    assert (paths.leased_markers_dir / paths.workspace_id).is_dir()
+    assert not (paths.available_markers_dir / paths.workspace_id).exists()
+
+
 def test_spawn_daemon_process_waits_for_fresh_same_machine_startup(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
