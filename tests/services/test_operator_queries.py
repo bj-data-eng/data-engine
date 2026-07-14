@@ -5,6 +5,8 @@ import pytest
 from data_engine.authoring.flow import Flow
 from data_engine.core.model import FlowValidationError
 from data_engine.domain import FlowCatalogEntry
+from data_engine.runtime.ledger_models import PersistedStepRun
+from data_engine.runtime.runtime_cache_store import RuntimeCacheLedger
 from data_engine.services.flow_catalog import FlowCatalogService, flow_catalog_entry_from_flow
 from data_engine.services.logs import LogService
 from data_engine.services.operator_queries import CatalogQueryService, HistoryQueryService
@@ -56,17 +58,18 @@ def test_catalog_query_service_returns_catalog_items_and_preview_rows(tmp_path):
 def test_history_query_service_returns_group_summaries_step_details_and_logs():
     created_at = "2026-04-16T12:00:00+00:00"
     step_rows = (
-        type(
-            "_StepRun",
-            (),
-            {
-                "step_label": "Read Excel",
-                "status": "success",
-                "elapsed_seconds": 1.5,
-                "output_path": "C:/tmp/out.parquet",
-                "error_text": None,
-            },
-        )(),
+        PersistedStepRun(
+            id=1,
+            run_id="run-1",
+            flow_name="docs_poll",
+            step_label="Read Excel",
+            status="success",
+            started_at_utc=created_at,
+            finished_at_utc="2026-04-16T12:00:01.500000+00:00",
+            elapsed_ms=1500,
+            output_path="C:/tmp/out.parquet",
+            error_text=None,
+        ),
     )
     log_entries = (
         type(
@@ -122,12 +125,46 @@ def test_history_query_service_returns_group_summaries_step_details_and_logs():
     assert len(steps) == 1
     assert steps[0].step_name == "Read Excel"
     assert steps[0].state == "success"
+    assert steps[0].elapsed_seconds == 1.5
     assert steps[0].output_path == "C:/tmp/out.parquet"
 
     logs = history.get_run_logs(store, run_id="run-1", flow_name="docs_poll")
 
     assert [entry.run_id for entry in logs] == ["run-1", "run-1", "run-1"]
     assert logs[-1].text.endswith("success  in.xlsx")
+
+
+def test_history_query_service_returns_step_elapsed_seconds_from_real_ledger(tmp_path):
+    ledger = RuntimeCacheLedger(tmp_path / "runtime-cache.sqlite")
+    started_at = "2026-04-16T12:00:00+00:00"
+    try:
+        ledger.runs.record_started(
+            run_id="run-1",
+            flow_name="docs_poll",
+            group_name="Docs",
+            source_path=None,
+            started_at_utc=started_at,
+        )
+        step_run_id = ledger.step_outputs.record_started(
+            run_id="run-1",
+            flow_name="docs_poll",
+            step_label="Read Excel",
+            started_at_utc=started_at,
+        )
+        ledger.step_outputs.record_finished(
+            step_run_id=step_run_id,
+            status="success",
+            finished_at_utc="2026-04-16T12:00:01.500000+00:00",
+            elapsed_ms=1500,
+            output_path="output.parquet",
+        )
+
+        steps = HistoryQueryService(log_service=LogService()).get_run_steps(ledger, run_id="run-1")
+    finally:
+        ledger.close()
+
+    assert len(steps) == 1
+    assert steps[0].elapsed_seconds == 1.5
 
 
 def test_flow_catalog_entry_from_flow_builds_expected_metadata():
@@ -180,4 +217,3 @@ def test_flow_catalog_service_loads_and_sorts_entries_and_marks_invalid(tmp_path
     empty_service = FlowCatalogService(discover_definitions_func=lambda **kwargs: ())
     with pytest.raises(FlowValidationError, match="No flow modules discovered"):
         empty_service.load_entries(workspace_root=tmp_path)
-

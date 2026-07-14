@@ -374,7 +374,7 @@ class HistoryQueryService:
                 run_id=run_id,
                 step_name=step_run.step_label,
                 state=step_run.status if step_run.status in {"started", "success", "failed", "stopped"} else "started",
-                elapsed_seconds=step_run.elapsed_seconds,
+                elapsed_seconds=None if step_run.elapsed_ms is None else step_run.elapsed_ms / 1000.0,
                 output_path=str(step_run.output_path) if step_run.output_path else None,
                 error_text=step_run.error_text,
             )
