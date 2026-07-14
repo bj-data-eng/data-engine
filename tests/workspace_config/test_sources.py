@@ -15,8 +15,10 @@ from data_engine.platform.workspace_models import (
     DATA_ENGINE_WORKSPACE_ID_ENV_VAR,
     DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR,
     InvalidWorkspaceIdError,
+    MAX_WORKSPACE_ID_UTF8_BYTES,
     local_workspace_namespace,
     path_display,
+    validate_workspace_id,
     WorkspaceSettings,
 )
 from data_engine.platform.local_settings import DATA_ENGINE_STATE_ROOT_ENV_VAR, LocalSettingsStore
@@ -275,7 +277,46 @@ def test_same_named_workspaces_get_distinct_local_runtime_namespaces(tmp_path, m
     assert resolved_a.daemon_endpoint_path != resolved_b.daemon_endpoint_path
 
 
-@pytest.mark.parametrize("workspace_id", ["../escape", "foo/bar", r"foo\bar", ".", "..", ""])
+@pytest.mark.parametrize(
+    "workspace_id",
+    [
+        "../escape",
+        "foo/bar",
+        r"foo\bar",
+        ".",
+        "..",
+        "",
+        " leading-space",
+        "white-space ",
+        "\tleading-tab",
+        "trailing-tab\t",
+        "trailing.",
+        "contains:colon",
+        "contains*star",
+        "contains?question",
+        'contains"quote',
+        "contains<less",
+        "contains>greater",
+        "contains|pipe",
+        "contains\x00nul",
+        "contains\x1fcontrol",
+        "contains\x7fdelete",
+        "\ud800",
+        "CON",
+        "con",
+        "Con.txt",
+        "CON .txt",
+        "CONIN$",
+        "conout$.log",
+        "nul.tar.gz",
+        "COM1",
+        "com9.log",
+        "LPT1",
+        "lPt9.anything",
+        "COM¹.txt",
+        "lpt³.log",
+    ],
+)
 def test_resolve_workspace_paths_rejects_unsafe_workspace_ids(tmp_path, monkeypatch, workspace_id):
     app_root = tmp_path / "data_engine"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -284,7 +325,112 @@ def test_resolve_workspace_paths_rejects_unsafe_workspace_ids(tmp_path, monkeypa
         resolve_workspace_paths(workspace_root=tmp_path / "workspace", workspace_id=workspace_id)
 
 
-@pytest.mark.parametrize("workspace_id", ["../escape", "foo/bar", r"foo\bar", ".", "..", ""])
+@pytest.mark.parametrize(
+    "workspace_id",
+    [
+        "../escape",
+        "foo/bar",
+        r"foo\bar",
+        ".",
+        "..",
+        "",
+        "AUX",
+        "PRN.json",
+        "bad|id",
+        "bad.",
+    ],
+)
 def test_local_workspace_namespace_rejects_unsafe_workspace_ids(tmp_path, workspace_id):
     with pytest.raises(InvalidWorkspaceIdError):
         local_workspace_namespace(tmp_path / "workspace", workspace_id)
+
+
+@pytest.mark.parametrize(
+    "workspace_id",
+    [
+        "a",
+        "analytics-2026.07",
+        "workspace with spaces",
+        "internal\u00a0space",
+        "数据工作区",
+        "CONE",
+        "COM0",
+        "COM10",
+        "NUL-file",
+        ".hidden",
+        "x" * MAX_WORKSPACE_ID_UTF8_BYTES,
+        "é" * (MAX_WORKSPACE_ID_UTF8_BYTES // 2),
+    ],
+)
+def test_validate_workspace_id_accepts_portable_components_at_boundaries(workspace_id):
+    assert validate_workspace_id(workspace_id) == workspace_id
+
+
+@pytest.mark.parametrize(
+    "workspace_id",
+    [
+        "x" * (MAX_WORKSPACE_ID_UTF8_BYTES + 1),
+        ("é" * (MAX_WORKSPACE_ID_UTF8_BYTES // 2)) + "x",
+    ],
+)
+def test_validate_workspace_id_rejects_ids_over_utf8_byte_limit(workspace_id):
+    with pytest.raises(InvalidWorkspaceIdError, match="64 UTF-8 bytes"):
+        validate_workspace_id(workspace_id)
+
+
+def test_local_workspace_namespace_is_bounded_and_preserves_existing_shape(tmp_path):
+    workspace_id = "x" * MAX_WORKSPACE_ID_UTF8_BYTES
+
+    namespace = local_workspace_namespace(tmp_path / "workspace", workspace_id)
+
+    assert namespace.startswith(f"{workspace_id}_")
+    assert len(namespace.encode("utf-8")) == MAX_WORKSPACE_ID_UTF8_BYTES + 13
+
+
+def test_daemon_endpoint_is_short_stable_and_does_not_embed_workspace_id(tmp_path):
+    workspace_id = "long-workspace-id-" + ("x" * 40)
+    runtime_state_dir = tmp_path / "runtime" / local_workspace_namespace(tmp_path / "workspace", workspace_id)
+
+    first = RuntimeLayoutPolicy.daemon_endpoint(
+        runtime_state_dir=runtime_state_dir,
+        workspace_root=tmp_path / "workspace",
+        workspace_id=workspace_id,
+    )
+    second = RuntimeLayoutPolicy.daemon_endpoint(
+        runtime_state_dir=runtime_state_dir,
+        workspace_root=tmp_path / "workspace",
+        workspace_id=workspace_id,
+    )
+
+    assert first == second
+    assert workspace_id not in first[1]
+    assert len(first[1].encode("utf-8")) <= 64
+    if os.name == "nt":
+        assert first[0] == "pipe"
+        assert first[1].startswith(r"\\.\pipe\data_engine_")
+        digest = first[1].removeprefix(r"\\.\pipe\data_engine_")
+    else:
+        assert first[0] == "unix"
+        assert first[1].startswith("/tmp/data_engine_")
+        assert first[1].endswith(".sock")
+        digest = first[1].removeprefix("/tmp/data_engine_").removesuffix(".sock")
+    assert len(digest) == 32
+    assert set(digest) <= set("0123456789abcdef")
+
+
+def test_daemon_endpoint_distinguishes_workspace_root_and_explicit_alias(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "folder-name"
+    other_root = tmp_path / "elsewhere" / "folder-name"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+
+    primary = resolve_workspace_paths(workspace_root=workspace_root, workspace_id="alias-one")
+    other_alias = resolve_workspace_paths(workspace_root=workspace_root, workspace_id="alias-two")
+    other_workspace = resolve_workspace_paths(workspace_root=other_root, workspace_id="alias-one")
+
+    endpoints = {primary.daemon_endpoint_path, other_alias.daemon_endpoint_path, other_workspace.daemon_endpoint_path}
+
+    assert len(endpoints) == 3
+    assert primary.workspace_root == other_alias.workspace_root
+    assert primary.workspace_id != other_alias.workspace_id
+    assert primary.runtime_state_dir != other_alias.runtime_state_dir

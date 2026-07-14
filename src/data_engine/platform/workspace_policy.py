@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+from typing import Final
 
 from data_engine.platform.identity import (
     APP_ARTIFACTS_DIR_NAME,
@@ -13,7 +14,7 @@ from data_engine.platform.identity import (
     WORKSPACE_CACHE_DIR_NAME,
 )
 from data_engine.platform.local_settings import LocalSettingsStore, default_settings_db_path, default_state_root
-from data_engine.platform.paths import normalized_path_text
+from data_engine.platform.paths import normalized_path_text, stable_path_identity_text
 from data_engine.platform.workspace_models import (
     APP_ROOT_PATH,
     DATA_ENGINE_APP_ROOT_ENV_VAR,
@@ -42,6 +43,9 @@ from data_engine.platform.workspace_models import (
     local_workspace_namespace as workspace_local_namespace,
     validate_workspace_id,
 )
+
+
+_DAEMON_ENDPOINT_DIGEST_BYTES: Final[int] = 16
 
 
 class AppStatePolicy:
@@ -112,10 +116,10 @@ class WorkspaceDiscoveryPolicy:
         self.app_state_policy = app_state_policy or AppStatePolicy()
 
     def _normalize_workspace_id(self, candidate: str, *, fallback: str | None = None) -> str:
-        value = str(candidate).strip()
+        value = str(candidate)
         if value == self.PLACEHOLDER_WORKSPACE_ROOT_NAME:
             value = self.PLACEHOLDER_WORKSPACE_ID
-        if not value and fallback is not None:
+        if not value.strip() and fallback is not None:
             value = fallback
         return validate_workspace_id(value)
 
@@ -273,6 +277,7 @@ class RuntimeLayoutPolicy:
         runtime_control_db_path = runtime_state_dir / "runtime_control.sqlite"
         daemon_endpoint_kind, daemon_endpoint_path = self.daemon_endpoint(
             runtime_state_dir=runtime_state_dir,
+            workspace_root=discovered.workspace_root,
             workspace_id=discovered.workspace_id,
         )
         return WorkspacePaths(
@@ -317,13 +322,22 @@ class RuntimeLayoutPolicy:
         return workspace_local_namespace(workspace_root, workspace_id)
 
     @staticmethod
-    def daemon_endpoint(*, runtime_state_dir: Path, workspace_id: str) -> tuple[str, str]:
-        """Return the cross-platform local IPC endpoint."""
+    def daemon_endpoint(*, runtime_state_dir: Path, workspace_root: Path, workspace_id: str) -> tuple[str, str]:
+        """Return a short, stable local IPC endpoint for one workspace identity."""
         workspace_id = validate_workspace_id(workspace_id)
-        digest = hashlib.sha1(normalized_path_text(runtime_state_dir).encode("utf-8")).hexdigest()[:12]
+        workspace_id_identity = workspace_id.casefold() if os.name == "nt" else workspace_id
+        endpoint_identity = "\0".join(
+            (
+                stable_path_identity_text(workspace_root),
+                stable_path_identity_text(runtime_state_dir),
+                workspace_id_identity,
+            )
+        )
+        digest = hashlib.blake2s(endpoint_identity.encode("utf-8"), digest_size=_DAEMON_ENDPOINT_DIGEST_BYTES).hexdigest()
+        endpoint_name = f"{APP_RUNTIME_NAMESPACE}_{digest}"
         if os.name == "nt":
-            return "pipe", rf"\\.\pipe\{APP_RUNTIME_NAMESPACE}_{workspace_id}_{digest}"
-        return "unix", normalized_path_text(Path("/tmp") / f"{APP_RUNTIME_NAMESPACE}_{workspace_id}_{digest}.sock")
+            return "pipe", rf"\\.\pipe\{endpoint_name}"
+        return "unix", normalized_path_text(Path("/tmp") / f"{endpoint_name}.sock")
 
 
 __all__ = [

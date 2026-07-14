@@ -34,6 +34,20 @@ The authored workspace is the folder that contains the authoring surface for one
 
 That authored workspace is what the app binds to when you select a workspace in the UI.
 
+### Workspace ids
+
+A workspace id is a single portable path component. It must be non-empty, at
+most 64 bytes when encoded as UTF-8, and cannot contain Windows-reserved
+characters or ASCII control characters. A workspace id cannot begin or end in
+whitespace, end in a dot, or use a Windows device basename such as `CON`, `NUL`,
+`COM1`, or `LPT1`; device names remain reserved when their case changes or an
+extension is added.
+
+These rules apply on every operating system because workspace ids become shared
+marker and Parquet filenames. Machine-local daemon endpoints use a fixed prefix
+and a digest of the workspace identity, which keeps Unix socket paths and
+Windows pipe names short even at the workspace-id limit.
+
 ## How the app is structured
 
 The GUI is a single-window operator surface that binds to one authored workspace at a time.

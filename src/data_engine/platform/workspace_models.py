@@ -7,6 +7,7 @@ import hashlib
 from pathlib import Path
 import socket
 import sys
+from typing import Final
 
 from data_engine.platform.identity import APP_INTERNAL_ID, env_var
 from data_engine.platform.paths import (
@@ -50,6 +51,23 @@ WORKSPACE_SHARED_RUNS_DIR_NAME: str = "runs"
 WORKSPACE_SHARED_STEP_RUNS_DIR_NAME: str = "step_runs"
 WORKSPACE_SHARED_LOGS_DIR_NAME: str = "logs"
 WORKSPACE_SHARED_FILE_STATE_DIR_NAME: str = "file_state"
+MAX_WORKSPACE_ID_UTF8_BYTES: Final[int] = 64
+_LOCAL_WORKSPACE_NAMESPACE_DIGEST_HEX_CHARS: Final[int] = 12
+_WINDOWS_RESERVED_WORKSPACE_CHARACTERS: Final[frozenset[str]] = frozenset('<>:"/\\|?*')
+_WINDOWS_RESERVED_WORKSPACE_BASENAMES: Final[frozenset[str]] = frozenset(
+    {
+        "aux",
+        "con",
+        "conin$",
+        "conout$",
+        "nul",
+        "prn",
+        *(f"com{index}" for index in range(1, 10)),
+        *(f"lpt{index}" for index in range(1, 10)),
+        *(f"com{index}" for index in "¹²³"),
+        *(f"lpt{index}" for index in "¹²³"),
+    }
+)
 
 
 class InvalidWorkspaceIdError(ValueError):
@@ -57,23 +75,42 @@ class InvalidWorkspaceIdError(ValueError):
 
 
 def validate_workspace_id(workspace_id: str) -> str:
-    """Return a workspace id that is safe to use in path components."""
+    """Return a portable, bounded workspace path component.
+
+    Workspace ids may contain Unicode text but must fit within 64 UTF-8 bytes.
+    Windows-reserved characters, ASCII control characters, boundary
+    whitespace, trailing dots, and reserved device basenames are rejected on
+    every platform.
+    Device basenames are matched case-insensitively, including when followed
+    by one or more filename extensions.
+    """
     candidate = str(workspace_id)
     if not candidate.strip():
         raise InvalidWorkspaceIdError("Workspace id cannot be empty.")
+    if candidate != candidate.strip():
+        raise InvalidWorkspaceIdError("Workspace id cannot begin or end with whitespace.")
     if candidate in {".", ".."}:
         raise InvalidWorkspaceIdError(f"Workspace id {candidate!r} is not allowed.")
-    if "\x00" in candidate:
-        raise InvalidWorkspaceIdError("Workspace id cannot contain NUL bytes.")
-    if "/" in candidate or "\\" in candidate:
-        raise InvalidWorkspaceIdError(f"Workspace id {candidate!r} must not contain path separators.")
+    try:
+        encoded_length = len(candidate.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise InvalidWorkspaceIdError("Workspace id must be valid UTF-8 text.") from exc
+    if encoded_length > MAX_WORKSPACE_ID_UTF8_BYTES:
+        raise InvalidWorkspaceIdError(f"Workspace id must not exceed {MAX_WORKSPACE_ID_UTF8_BYTES} UTF-8 bytes; got {encoded_length}.")
+    if candidate.endswith("."):
+        raise InvalidWorkspaceIdError("Workspace id cannot end with a dot.")
+    if any(ord(character) < 32 or ord(character) == 127 or character in _WINDOWS_RESERVED_WORKSPACE_CHARACTERS for character in candidate):
+        raise InvalidWorkspaceIdError(f"Workspace id {candidate!r} contains a Windows-reserved character.")
+    device_basename = candidate.partition(".")[0].rstrip(" .").casefold()
+    if device_basename in _WINDOWS_RESERVED_WORKSPACE_BASENAMES:
+        raise InvalidWorkspaceIdError(f"Workspace id {candidate!r} uses a Windows-reserved device basename.")
     return candidate
 
 
 def local_workspace_namespace(workspace_root: Path | str, workspace_id: str) -> str:
-    """Return the machine-local namespace for one workspace root."""
+    """Return the bounded machine-local namespace for one workspace root."""
     workspace_id = validate_workspace_id(workspace_id)
-    digest = hashlib.sha1(_stable_workspace_identity_text(workspace_root).encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1(_stable_workspace_identity_text(workspace_root).encode("utf-8")).hexdigest()[:_LOCAL_WORKSPACE_NAMESPACE_DIGEST_HEX_CHARS]
     return f"{workspace_id}_{digest}"
 
 
@@ -166,6 +203,7 @@ __all__ = [
     "DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR",
     "DiscoveredWorkspace",
     "InvalidWorkspaceIdError",
+    "MAX_WORKSPACE_ID_UTF8_BYTES",
     "WORKSPACE_AVAILABLE_MARKERS_DIR_NAME",
     "WORKSPACE_CONFIG_DIR_NAME",
     "WORKSPACE_CONTROL_REQUESTS_DIR_NAME",
