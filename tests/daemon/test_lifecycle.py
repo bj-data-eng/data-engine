@@ -73,7 +73,7 @@ def test_control_handoff_keeps_ownership_until_noncooperative_manual_worker_exit
         assert worker_started.wait(timeout=1.0) is True
         manual_thread = service.state.manual_run_threads["demo"]
 
-        assert relinquish_workspace_for_control_request(service, "machine-b") is False
+        assert relinquish_workspace_for_control_request(service, "machine-b", "host-b") is False
 
         assert service.host.workspace_owned is True
         assert service.host.shutdown_event.is_set() is False
@@ -91,7 +91,7 @@ def test_control_handoff_keeps_ownership_until_noncooperative_manual_worker_exit
         release_worker.set()
         manual_thread.join(timeout=1.0)
         assert manual_thread.is_alive() is False
-        assert relinquish_workspace_for_control_request(service, "machine-b") is True
+        assert relinquish_workspace_for_control_request(service, "machine-b", "host-b") is True
 
         assert service.host.workspace_owned is False
         assert service.host.shutdown_event.is_set() is True
