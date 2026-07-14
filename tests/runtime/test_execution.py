@@ -334,8 +334,56 @@ def test_flow_run_executor_logs_failure_before_publishing_run_finished_state() -
 
     log_index = next(index for index, call in enumerate(calls) if call[0] == "log_flow_event" and call[1]["status"] == "stopped")
     finish_index = next(index for index, call in enumerate(calls) if call[0] == "record_run_finished")
+    step_finishes = [call for call in calls if call[0] == "record_step_finished"]
 
-    assert log_index < finish_index
+    assert len(step_finishes) == 1
+    step_finish_index = calls.index(step_finishes[0])
+    assert step_finish_index < log_index < finish_index
+    assert step_finishes[0][1]["status"] == "stopped"
+    assert step_finishes[0][1]["finished_at_utc"] is not None
+    assert isinstance(step_finishes[0][1]["elapsed_ms"], int)
+
+
+def test_flow_run_executor_persists_stopped_active_step_in_real_ledger(tmp_path) -> None:
+    calls: list[tuple[str, object]] = []
+    ledger = RuntimeCacheLedger(tmp_path / "runtime_state" / "runtime_cache.sqlite")
+    executor = FlowRunExecutor(
+        FlowRunExecutionPorts(
+            context_builder=_ContextBuilder(),
+            polling=_Polling(),
+            state_writer=ledger.execution_state,
+            log_emitter=_LogEmitter(calls),
+            stop_controller=_StopController(),
+        )
+    )
+
+    def _stop(context):
+        del context
+        raise FlowStoppedError("stop requested")
+
+    flow = _Flow(name="docs_summary", group="Docs", steps=(_Step("Emit", _stop),))
+    try:
+        try:
+            executor.run_one(flow, None)
+        except FlowStoppedError:
+            pass
+        else:
+            raise AssertionError("expected FlowStoppedError")
+
+        step_runs = ledger.step_outputs.list_for_run("run-1")
+        run = ledger.runs.get("run-1")
+
+        assert len(step_runs) == 1
+        assert step_runs[0].status == "stopped"
+        assert step_runs[0].finished_at_utc is not None
+        assert isinstance(step_runs[0].elapsed_ms, int)
+        assert step_runs[0].elapsed_ms >= 0
+        assert step_runs[0].error_text == "stop requested"
+        assert ledger.step_outputs.list_active(run_id="run-1") == ()
+        assert run is not None
+        assert run.status == "stopped"
+    finally:
+        ledger.close()
 
 
 class _DelayedStateWriter(_StateWriter):

@@ -329,15 +329,23 @@ class FlowRunExecutor:
                 )
                 try:
                     result = step.fn(context)
-                except FlowStoppedError:
+                except FlowStoppedError as exc:
+                    step_elapsed_ms = max(int((monotonic() - step_started) * 1000), 0)
                     self._mark_timing(
                         "step_fn_stopped",
                         run_id=run_id,
                         flow_name=context.flow_name,
                         step_label=step.label,
                         source_path=source_path,
-                        elapsed_ms=(monotonic() - step_started) * 1000.0,
+                        elapsed_ms=step_elapsed_ms,
                         extra_fields={"step_run_id": step_run_id},
+                    )
+                    self.ports.state_writer.record_step_finished(
+                        step_run_id=step_run_id,
+                        status="stopped",
+                        finished_at_utc=utcnow_text(),
+                        elapsed_ms=step_elapsed_ms,
+                        error_text=str(exc),
                     )
                     raise
                 except Exception as exc:
