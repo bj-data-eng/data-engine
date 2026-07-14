@@ -7,8 +7,11 @@ import ctypes.util
 from dataclasses import dataclass
 import errno
 import json
+import math
 import os
 from pathlib import Path
+import re
+import secrets
 import signal
 import subprocess
 import sys
@@ -26,12 +29,24 @@ _WINDOWS_STILL_ACTIVE = 259
 _WINDOWS_WAIT_OBJECT_0 = 0
 _WINDOWS_WAIT_TIMEOUT = 258
 _WINDOWS_WAIT_FAILED = 0xFFFFFFFF
+_WINDOWS_INFINITE = 0xFFFFFFFF
+_WINDOWS_MAX_FINITE_TIMEOUT_MILLISECONDS = _WINDOWS_INFINITE - 1
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _CREATE_NO_WINDOW = 0x08000000
 _DETACHED_PROCESS = 0x00000008
+_WINDOWS_ERROR_FILE_NOT_FOUND = 2
+_WINDOWS_ERROR_ALREADY_EXISTS = 183
 _WINDOWS_ERROR_INVALID_PARAMETER = 87
 _WINDOWS_ERROR_NOT_FOUND = 1168
 _WINDOWS_PROCESS_PATH_BUFFER_SIZE = 32_768
+_WINDOWS_JOB_OBJECT_ASSIGN_PROCESS = 0x0001
+_WINDOWS_JOB_OBJECT_QUERY = 0x0004
+_WINDOWS_JOB_OBJECT_TERMINATE = 0x0008
+_WINDOWS_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_WINDOWS_JOB_NAME_PREFIX = "Local\\DataEngineDaemonJob-"
+_WINDOWS_JOB_NONCE_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+_PIDFD_SIGNAL_PROCESS_GROUP = 1 << 2
 _DARWIN_PROC_PIDTBSDINFO = 3
 _DARWIN_PROC_PIDPATHINFO_MAXSIZE = 4096
 
@@ -107,6 +122,115 @@ class _WindowsFileTime(ctypes.Structure):
     ]
 
 
+class _WindowsIoCounters(ctypes.Structure):
+    _fields_ = [
+        ("read_operation_count", ctypes.c_uint64),
+        ("write_operation_count", ctypes.c_uint64),
+        ("other_operation_count", ctypes.c_uint64),
+        ("read_transfer_count", ctypes.c_uint64),
+        ("write_transfer_count", ctypes.c_uint64),
+        ("other_transfer_count", ctypes.c_uint64),
+    ]
+
+
+class _WindowsJobBasicLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("per_process_user_time_limit", ctypes.c_int64),
+        ("per_job_user_time_limit", ctypes.c_int64),
+        ("limit_flags", ctypes.c_uint32),
+        ("minimum_working_set_size", ctypes.c_size_t),
+        ("maximum_working_set_size", ctypes.c_size_t),
+        ("active_process_limit", ctypes.c_uint32),
+        ("affinity", ctypes.c_size_t),
+        ("priority_class", ctypes.c_uint32),
+        ("scheduling_class", ctypes.c_uint32),
+    ]
+
+
+class _WindowsJobExtendedLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("basic_limit_information", _WindowsJobBasicLimitInformation),
+        ("io_info", _WindowsIoCounters),
+        ("process_memory_limit", ctypes.c_size_t),
+        ("job_memory_limit", ctypes.c_size_t),
+        ("peak_process_memory_used", ctypes.c_size_t),
+        ("peak_job_memory_used", ctypes.c_size_t),
+    ]
+
+
+class WindowsKillOnCloseJob:
+    """Own one native Windows Job configured to terminate all members on close.
+
+    Use :func:`create_windows_kill_on_close_job` or
+    :func:`open_windows_kill_on_close_job` to construct an instance. Call
+    :meth:`close` when the owning component no longer needs the native handle.
+    """
+
+    __slots__ = ("_handle", "name", "nonce")
+
+    def __init__(self, *, nonce: str, name: str, handle: object) -> None:
+        canonical_name = windows_job_name_for_nonce(nonce)
+        if name != canonical_name:
+            raise ValueError("A Windows Job name must match its containment nonce.")
+        if not handle:
+            raise ValueError("A Windows Job wrapper requires an open native handle.")
+        self.nonce = nonce
+        self.name = name
+        self._handle: object | None = handle
+
+    @property
+    def closed(self) -> bool:
+        """Return whether this wrapper has released its native Job handle."""
+        return self._handle is None
+
+    def close(self) -> None:
+        """Release this wrapper's native Job handle exactly once."""
+        handle = self._handle
+        if handle is None:
+            return
+        self._handle = None
+        _close_windows_handle(handle)
+
+    def terminate(self, *, timeout_seconds: float = 2.0, exit_code: int = 1) -> None:
+        """Terminate every process in the Job and wait until it is empty.
+
+        Args:
+            timeout_seconds: Maximum time to wait for the Job to become empty.
+            exit_code: Unsigned process exit code applied by Windows.
+
+        Raises:
+            ProcessInspectionError: If termination or waiting fails.
+            ValueError: If the timeout or exit code is invalid.
+        """
+        if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+            raise ValueError("A Windows Job exit code must be an integer.")
+        if not 0 <= exit_code <= 0xFFFFFFFF:
+            raise ValueError("A Windows Job exit code must fit an unsigned 32-bit value.")
+        _finite_windows_timeout_milliseconds(timeout_seconds)
+        handle = self._native_handle()
+        _terminate_windows_job(handle, name=self.name, exit_code=exit_code)
+        _wait_for_windows_job_empty(
+            handle,
+            name=self.name,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def __enter__(self) -> WindowsKillOnCloseJob:
+        """Return this open Job wrapper for context-manager use."""
+        if self._handle is None:
+            raise ProcessInspectionError("The Windows Job handle is closed.")
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        """Release the native Job handle when leaving a context."""
+        self.close()
+
+    def _native_handle(self) -> object:
+        if self._handle is None:
+            raise ProcessInspectionError("The Windows Job handle is closed.")
+        return self._handle
+
+
 def inspect_process_identity(pid: int) -> ProcessIdentity | None:
     """Return a stable identity for one live process, or ``None`` when absent.
 
@@ -127,6 +251,28 @@ def inspect_process_identity(pid: int) -> ProcessIdentity | None:
     )
 
 
+def new_process_containment_nonce() -> str:
+    """Return a new 256-bit nonce for an operating-system containment object."""
+    return secrets.token_hex(32)
+
+
+def windows_job_name_for_nonce(nonce: str) -> str:
+    """Return the canonical local Windows Job name for a containment nonce.
+
+    Args:
+        nonce: Exactly 64 lowercase hexadecimal characters produced by
+            :func:`new_process_containment_nonce`.
+
+    Raises:
+        ValueError: If ``nonce`` is not the canonical 256-bit representation.
+    """
+    if not isinstance(nonce, str) or _WINDOWS_JOB_NONCE_PATTERN.fullmatch(nonce) is None:
+        raise ValueError(
+            "A process-containment nonce must be exactly 64 lowercase hexadecimal characters."
+        )
+    return f"{_WINDOWS_JOB_NAME_PREFIX}{nonce}"
+
+
 def force_kill_verified_process_tree(expected: ProcessIdentity) -> None:
     """Force-kill a process tree only when its complete identity still matches.
 
@@ -139,9 +285,135 @@ def force_kill_verified_process_tree(expected: ProcessIdentity) -> None:
             absent or changed, or the platform cannot safely target its tree.
     """
     if os.name == "nt":
-        _force_kill_verified_windows_process_tree(expected)
+        raise ProcessInspectionError(
+            "Verified Windows tree termination requires a nonce-named Job object."
+        )
+    _force_kill_verified_posix_process_group(expected)
+
+
+def force_kill_verified_contained_process_tree(
+    expected: ProcessIdentity,
+    *,
+    windows_job_nonce: str | None = None,
+    timeout_seconds: float = 2.0,
+) -> None:
+    """Force-kill one identity-verified, operating-system-contained process tree.
+
+    Linux targets a pidfd-bound process group when the running kernel supports
+    it. Other POSIX hosts perform an exact identity reinspection immediately
+    before signaling an isolated process group. Windows verifies membership in
+    the nonce-named Job before terminating that Job.
+
+    Args:
+        expected: Previously captured process identity for the containment leader.
+        windows_job_nonce: Persisted 256-bit containment nonce. Required on Windows
+            and ignored on POSIX hosts.
+        timeout_seconds: Maximum time to wait for a terminated Windows Job to empty.
+
+    Raises:
+        ProcessInspectionError: If containment or identity verification fails, the
+            target disappears or changes, or termination cannot be confirmed.
+        ValueError: If a Windows nonce or timeout is invalid.
+    """
+    if os.name == "nt":
+        if windows_job_nonce is None:
+            raise ProcessInspectionError(
+                "Verified Windows tree termination requires a containment nonce."
+            )
+        _force_kill_verified_windows_job(
+            expected,
+            nonce=windows_job_nonce,
+            timeout_seconds=timeout_seconds,
+        )
+        return
+    _force_kill_verified_posix_process_group(expected)
+
+
+def _force_kill_verified_posix_process_group(expected: ProcessIdentity) -> None:
+    if sys.platform.startswith("linux"):
+        _force_kill_verified_linux_process_group(expected)
+        return
+    _killpg_after_exact_reinspection(expected)
+
+
+def _force_kill_verified_linux_process_group(expected: ProcessIdentity) -> None:
+    pidfd_open = getattr(os, "pidfd_open", None)
+    pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
+    if not callable(pidfd_open) or not callable(pidfd_send_signal):
+        _killpg_after_exact_reinspection(expected)
         return
 
+    try:
+        pidfd = pidfd_open(expected.pid, 0)
+    except ProcessLookupError as exc:
+        raise ProcessInspectionError(
+            f"Local process {expected.pid} is no longer running."
+        ) from exc
+    except OSError as exc:
+        if exc.errno in {errno.ENOSYS, errno.EOPNOTSUPP}:
+            _killpg_after_exact_reinspection(expected)
+            return
+        raise ProcessInspectionError(
+            f"Unable to open a pidfd for local process {expected.pid}."
+        ) from exc
+
+    try:
+        caller_pid, caller_group_id = _posix_caller_identity()
+        _inspect_verified_isolated_process_group(
+            expected,
+            caller_pid=caller_pid,
+            caller_group_id=caller_group_id,
+        )
+        try:
+            pidfd_send_signal(
+                pidfd,
+                signal.SIGKILL,
+                None,
+                _PIDFD_SIGNAL_PROCESS_GROUP,
+            )
+        except OSError as exc:
+            if exc.errno not in {errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP}:
+                raise ProcessInspectionError(
+                    f"Failed to terminate verified local process group {expected.pid}."
+                ) from exc
+            _killpg_after_exact_reinspection(expected)
+    finally:
+        try:
+            os.close(pidfd)
+        except OSError:
+            pass
+
+
+def _killpg_after_exact_reinspection(expected: ProcessIdentity) -> None:
+    caller_pid, caller_group_id = _posix_caller_identity()
+    actual = _inspect_verified_isolated_process_group(
+        expected,
+        caller_pid=caller_pid,
+        caller_group_id=caller_group_id,
+    )
+    try:
+        os.killpg(actual.pid, signal.SIGKILL)
+    except OSError as exc:
+        raise ProcessInspectionError(
+            f"Failed to terminate verified local process group {actual.pid}."
+        ) from exc
+
+
+def _posix_caller_identity() -> tuple[int, int]:
+    try:
+        return os.getpid(), os.getpgrp()
+    except OSError as exc:
+        raise ProcessInspectionError(
+            "Unable to inspect the caller process group."
+        ) from exc
+
+
+def _inspect_verified_isolated_process_group(
+    expected: ProcessIdentity,
+    *,
+    caller_pid: int,
+    caller_group_id: int,
+) -> ProcessIdentity:
     actual = inspect_process_identity(expected.pid)
     if actual is None:
         raise ProcessInspectionError(
@@ -156,22 +428,11 @@ def force_kill_verified_process_tree(expected: ProcessIdentity) -> None:
         raise ProcessInspectionError(
             f"Local process {pid} is not the isolated leader of its process group and session."
         )
-    try:
-        caller_group_id = os.getpgrp()
-    except OSError as exc:
-        raise ProcessInspectionError(
-            "Unable to inspect the caller process group."
-        ) from exc
-    if actual.process_group_id == caller_group_id:
+    if pid == caller_pid or actual.process_group_id == caller_group_id:
         raise ProcessInspectionError(
             f"Refusing to terminate the caller's process group {caller_group_id}."
         )
-    try:
-        os.killpg(pid, signal.SIGKILL)
-    except OSError as exc:
-        raise ProcessInspectionError(
-            f"Failed to terminate verified local process group {pid}."
-        ) from exc
+    return actual
 
 
 def _inspect_linux_process_identity(pid: int) -> ProcessIdentity | None:
@@ -686,6 +947,10 @@ def _windows_process_handle_is_active(handle, *, pid: int) -> bool:
 
 
 def _close_windows_process(handle) -> None:
+    _close_windows_handle(handle)
+
+
+def _close_windows_handle(handle) -> None:
     kernel32 = _windows_kernel32()
     close_handle = kernel32.CloseHandle
     close_handle.argtypes = [ctypes.c_void_p]
@@ -693,39 +958,277 @@ def _close_windows_process(handle) -> None:
     close_handle(handle)
 
 
-def _force_kill_verified_windows_process_tree(expected: ProcessIdentity) -> None:
-    handle = _open_windows_process(expected.pid)
-    if handle is None:
+def create_windows_kill_on_close_job(nonce: str) -> WindowsKillOnCloseJob:
+    """Create one new nonce-named Windows Job with kill-on-close enabled.
+
+    Args:
+        nonce: Exactly 64 lowercase hexadecimal containment characters.
+
+    Returns:
+        An owned native Job wrapper. The caller must keep it open for the
+        required containment lifetime and close it when finished.
+
+    Raises:
+        ProcessInspectionError: If Windows Job APIs are unavailable, the name
+            already exists, or the Job cannot be configured.
+        ValueError: If ``nonce`` is not canonical.
+    """
+    if os.name != "nt":
+        raise ProcessInspectionError("Windows Job objects require Windows.")
+    name = windows_job_name_for_nonce(nonce)
+    kernel32 = _windows_kernel32()
+    create_job = kernel32.CreateJobObjectW
+    create_job.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+    create_job.restype = ctypes.c_void_p
+    _set_windows_last_error(0)
+    handle = create_job(None, name)
+    error_number = _windows_last_error()
+    if not handle:
         raise ProcessInspectionError(
-            f"Local process {expected.pid} is no longer running."
+            f"Unable to create Windows Job {name!r}: {_windows_error_detail(error_number)}."
+        )
+    if error_number == _WINDOWS_ERROR_ALREADY_EXISTS:
+        _close_windows_handle(handle)
+        raise ProcessInspectionError(
+            f"Refusing to reuse existing Windows Job {name!r}."
         )
     try:
-        actual = _inspect_windows_process_identity_from_handle(expected.pid, handle)
-        if actual is None:
+        _configure_windows_job_kill_on_close(handle, name=name)
+    except BaseException:
+        _close_windows_handle(handle)
+        raise
+    return WindowsKillOnCloseJob(nonce=nonce, name=name, handle=handle)
+
+
+def open_windows_kill_on_close_job(nonce: str) -> WindowsKillOnCloseJob | None:
+    """Open and verify an existing nonce-named Windows kill-on-close Job.
+
+    Args:
+        nonce: Exactly 64 lowercase hexadecimal containment characters.
+
+    Returns:
+        An owned native Job wrapper, or ``None`` when the named Job is absent.
+
+    Raises:
+        ProcessInspectionError: If Windows Job APIs are unavailable, opening or
+            inspecting the Job fails, or kill-on-close is not configured.
+        ValueError: If ``nonce`` is not canonical.
+    """
+    if os.name != "nt":
+        raise ProcessInspectionError("Windows Job objects require Windows.")
+    name = windows_job_name_for_nonce(nonce)
+    kernel32 = _windows_kernel32()
+    open_job = kernel32.OpenJobObjectW
+    open_job.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_wchar_p]
+    open_job.restype = ctypes.c_void_p
+    handle = open_job(
+        _WINDOWS_JOB_OBJECT_ASSIGN_PROCESS
+        | _WINDOWS_JOB_OBJECT_QUERY
+        | _WINDOWS_JOB_OBJECT_TERMINATE
+        | _WINDOWS_SYNCHRONIZE,
+        False,
+        name,
+    )
+    if not handle:
+        error_number = _windows_last_error()
+        if error_number == _WINDOWS_ERROR_FILE_NOT_FOUND:
+            return None
+        raise ProcessInspectionError(
+            f"Unable to open Windows Job {name!r}: {_windows_error_detail(error_number)}."
+        )
+    try:
+        _require_windows_job_kill_on_close(handle, name=name)
+    except BaseException:
+        _close_windows_handle(handle)
+        raise
+    return WindowsKillOnCloseJob(nonce=nonce, name=name, handle=handle)
+
+
+def _configure_windows_job_kill_on_close(handle, *, name: str) -> None:
+    kernel32 = _windows_kernel32()
+    set_job_information = kernel32.SetInformationJobObject
+    set_job_information.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+    ]
+    set_job_information.restype = ctypes.c_int
+    information = _WindowsJobExtendedLimitInformation()
+    information.basic_limit_information.limit_flags = (
+        _WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    )
+    if not set_job_information(
+        handle,
+        _WINDOWS_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+        ctypes.byref(information),
+        ctypes.sizeof(information),
+    ):
+        error_number = _windows_last_error()
+        raise ProcessInspectionError(
+            f"Unable to configure Windows Job {name!r}: {_windows_error_detail(error_number)}."
+        )
+
+
+def _require_windows_job_kill_on_close(handle, *, name: str) -> None:
+    kernel32 = _windows_kernel32()
+    query_job_information = kernel32.QueryInformationJobObject
+    query_job_information.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.POINTER(ctypes.c_uint32),
+    ]
+    query_job_information.restype = ctypes.c_int
+    information = _WindowsJobExtendedLimitInformation()
+    return_length = ctypes.c_uint32()
+    if not query_job_information(
+        handle,
+        _WINDOWS_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+        ctypes.byref(information),
+        ctypes.sizeof(information),
+        ctypes.byref(return_length),
+    ):
+        error_number = _windows_last_error()
+        raise ProcessInspectionError(
+            f"Unable to inspect Windows Job {name!r}: {_windows_error_detail(error_number)}."
+        )
+    if not (
+        information.basic_limit_information.limit_flags
+        & _WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    ):
+        raise ProcessInspectionError(
+            f"Windows Job {name!r} is not configured for kill-on-close containment."
+        )
+
+
+def _windows_process_is_in_job(process_handle, job_handle, *, pid: int) -> bool:
+    kernel32 = _windows_kernel32()
+    is_process_in_job = kernel32.IsProcessInJob
+    is_process_in_job.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_int),
+    ]
+    is_process_in_job.restype = ctypes.c_int
+    result = ctypes.c_int()
+    if not is_process_in_job(process_handle, job_handle, ctypes.byref(result)):
+        error_number = _windows_last_error()
+        raise ProcessInspectionError(
+            f"Unable to inspect Job membership for local process {pid}: "
+            f"{_windows_error_detail(error_number)}."
+        )
+    return bool(result.value)
+
+
+def _terminate_windows_job(job_handle, *, name: str, exit_code: int = 1) -> None:
+    kernel32 = _windows_kernel32()
+    terminate_job = kernel32.TerminateJobObject
+    terminate_job.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    terminate_job.restype = ctypes.c_int
+    if not terminate_job(job_handle, exit_code):
+        error_number = _windows_last_error()
+        raise ProcessInspectionError(
+            f"Unable to terminate Windows Job {name!r}: {_windows_error_detail(error_number)}."
+        )
+
+
+def _wait_for_windows_job_empty(
+    job_handle,
+    *,
+    name: str,
+    timeout_seconds: float,
+) -> None:
+    timeout_milliseconds = _finite_windows_timeout_milliseconds(timeout_seconds)
+    kernel32 = _windows_kernel32()
+    wait_for_single_object = kernel32.WaitForSingleObject
+    wait_for_single_object.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    wait_for_single_object.restype = ctypes.c_uint32
+    wait_result = int(wait_for_single_object(job_handle, timeout_milliseconds))
+    if wait_result == _WINDOWS_WAIT_OBJECT_0:
+        return
+    if wait_result == _WINDOWS_WAIT_TIMEOUT:
+        raise ProcessInspectionError(
+            f"Timed out waiting for Windows Job {name!r} to terminate."
+        )
+    if wait_result == _WINDOWS_WAIT_FAILED:
+        error_number = _windows_last_error()
+        raise ProcessInspectionError(
+            f"Unable to wait for Windows Job {name!r}: {_windows_error_detail(error_number)}."
+        )
+    raise ProcessInspectionError(
+        f"Unable to wait for Windows Job {name!r}: unexpected wait result {wait_result}."
+    )
+
+
+def _finite_windows_timeout_milliseconds(timeout_seconds: float) -> int:
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int | float):
+        raise ValueError("A Windows Job timeout must be a finite nonnegative number.")
+    numeric_timeout = float(timeout_seconds)
+    if not math.isfinite(numeric_timeout) or numeric_timeout < 0:
+        raise ValueError("A Windows Job timeout must be a finite nonnegative number.")
+    milliseconds = math.ceil(numeric_timeout * 1000)
+    if milliseconds > _WINDOWS_MAX_FINITE_TIMEOUT_MILLISECONDS:
+        raise ValueError("A Windows Job timeout is too large.")
+    return milliseconds
+
+
+def _force_kill_verified_windows_job(
+    expected: ProcessIdentity,
+    *,
+    nonce: str,
+    timeout_seconds: float,
+) -> None:
+    job = open_windows_kill_on_close_job(nonce)
+    if job is None:
+        raise ProcessInspectionError(
+            f"The containment Job for local process {expected.pid} no longer exists."
+        )
+    with job:
+        process_handle = _open_windows_process(expected.pid)
+        if process_handle is None:
             raise ProcessInspectionError(
                 f"Local process {expected.pid} is no longer running."
             )
-        if actual != expected:
-            raise ProcessInspectionError(
-                f"Local process {expected.pid} no longer matches its recorded identity."
+        try:
+            actual = _inspect_windows_process_identity_from_handle(
+                expected.pid,
+                process_handle,
             )
-        result = subprocess.run(
-            ["taskkill", "/PID", str(actual.pid), "/T", "/F"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            detail = (
-                result.stderr.strip()
-                or result.stdout.strip()
-                or f"taskkill returned {result.returncode}"
-            )
-            raise ProcessInspectionError(
-                f"Failed to terminate verified local process {actual.pid}: {detail}"
-            )
-    finally:
-        _close_windows_process(handle)
+            if actual is None:
+                raise ProcessInspectionError(
+                    f"Local process {expected.pid} is no longer running."
+                )
+            if actual != expected:
+                raise ProcessInspectionError(
+                    f"Local process {expected.pid} no longer matches its recorded identity."
+                )
+            job_handle = job._native_handle()
+            if not _windows_process_is_in_job(
+                process_handle,
+                job_handle,
+                pid=actual.pid,
+            ):
+                raise ProcessInspectionError(
+                    f"Local process {actual.pid} is not a member of its recorded containment Job."
+                )
+            job.terminate(timeout_seconds=timeout_seconds)
+        finally:
+            _close_windows_process(process_handle)
+
+
+def _set_windows_last_error(error_number: int) -> None:
+    set_last_error = getattr(ctypes, "set_last_error", None)
+    if set_last_error is not None:
+        set_last_error(error_number)
+
+
+def _windows_error_detail(error_number: int) -> str:
+    format_error = getattr(ctypes, "FormatError", None)
+    if error_number and format_error is not None:
+        return str(format_error(error_number)).strip()
+    return f"Windows error {error_number}" if error_number else "unknown error"
 
 
 def _normalize_executable_path(value: str, *, case_insensitive: bool = False) -> str:
@@ -947,12 +1450,18 @@ def force_kill_process_tree(pid: int) -> None:
 __all__ = [
     "ProcessIdentity",
     "ProcessInspectionError",
+    "WindowsKillOnCloseJob",
     "collapse_windows_launcher_processes",
     "force_kill_process_tree",
+    "force_kill_verified_contained_process_tree",
     "force_kill_verified_process_tree",
+    "create_windows_kill_on_close_job",
     "inspect_process_identity",
     "list_processes",
+    "new_process_containment_nonce",
+    "open_windows_kill_on_close_job",
     "process_is_running",
     "process_status",
+    "windows_job_name_for_nonce",
     "windows_subprocess_creationflags",
 ]

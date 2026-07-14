@@ -438,6 +438,7 @@ def test_verified_kill_blocks_every_identity_field_mismatch(monkeypatch, field, 
     actual = replace(expected, **{field: value})
     signaled = []
     monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes.sys, "platform", "darwin")
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: actual)
     monkeypatch.setattr(
         processes.os,
@@ -455,6 +456,7 @@ def test_verified_kill_blocks_every_identity_field_mismatch(monkeypatch, field, 
 def test_verified_posix_kill_requires_isolated_session_leader(monkeypatch):
     expected = _identity(process_session_id=999)
     monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes.sys, "platform", "darwin")
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: expected)
     monkeypatch.setattr(
         processes.os,
@@ -471,6 +473,7 @@ def test_verified_posix_kill_signals_matching_isolated_group(monkeypatch):
     expected = _identity()
     signaled = []
     monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes.sys, "platform", "darwin")
     monkeypatch.setattr(processes.signal, "SIGKILL", 9, raising=False)
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: expected)
     monkeypatch.setattr(processes.os, "getpgrp", lambda: 111, raising=False)
@@ -486,61 +489,17 @@ def test_verified_posix_kill_signals_matching_isolated_group(monkeypatch):
     assert signaled == [(321, 9)]
 
 
-def test_verified_windows_kill_does_not_invoke_taskkill_on_mismatch(monkeypatch):
+def test_verified_windows_kill_requires_containment_job(monkeypatch):
     expected = _identity(process_group_id=None, process_session_id=7)
-    handle = object()
-    closed = []
     monkeypatch.setattr(processes.os, "name", "nt")
-    monkeypatch.setattr(processes, "_open_windows_process", lambda pid: handle)
-    monkeypatch.setattr(
-        processes,
-        "_inspect_windows_process_identity_from_handle",
-        lambda pid, seen_handle: replace(
-            expected, executable_path="c:/different/python.exe"
-        ),
-    )
-    monkeypatch.setattr(processes, "_close_windows_process", closed.append)
     monkeypatch.setattr(
         processes.subprocess,
         "run",
         lambda *args, **kwargs: pytest.fail("taskkill must not be invoked"),
     )
 
-    with pytest.raises(ProcessInspectionError, match="no longer matches"):
+    with pytest.raises(ProcessInspectionError, match="nonce-named Job"):
         force_kill_verified_process_tree(expected)
-
-    assert closed == [handle]
-
-
-def test_verified_windows_kill_invokes_taskkill_after_exact_match(monkeypatch):
-    expected = _identity(process_group_id=None, process_session_id=7)
-    handle = object()
-    calls = []
-    closed = []
-    result = subprocess.CompletedProcess([], 0, "", "")
-    monkeypatch.setattr(processes.os, "name", "nt")
-    monkeypatch.setattr(processes, "_open_windows_process", lambda pid: handle)
-    monkeypatch.setattr(
-        processes,
-        "_inspect_windows_process_identity_from_handle",
-        lambda pid, seen_handle: expected,
-    )
-    monkeypatch.setattr(processes, "_close_windows_process", closed.append)
-    monkeypatch.setattr(
-        processes.subprocess,
-        "run",
-        lambda command, **kwargs: calls.append((command, kwargs)) or result,
-    )
-
-    force_kill_verified_process_tree(expected)
-
-    assert calls == [
-        (
-            ["taskkill", "/PID", "321", "/T", "/F"],
-            {"capture_output": True, "text": True, "check": False},
-        )
-    ]
-    assert closed == [handle]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups are required")
