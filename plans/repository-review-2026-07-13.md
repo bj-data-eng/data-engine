@@ -4,19 +4,18 @@ Date: 2026-07-13
 
 Revision notes:
 
-- Updated after removal of the retired operator interface; findings and scope specific to it have been removed.
 - P1-2 is resolved by retaining every accepted runtime worker through finalization and refusing to release ownership or close storage until the workers and checkpoint thread have drained.
 - P1-5 and P1-6 are resolved by manifest-committed immutable snapshot generations, transactional exports, preserved row IDs, and generation-aware cache invalidation.
 - P1-8 is resolved by a durable installation UUID with hostname retained only as display metadata. This is an intentional clean protocol cutover; no compatibility bridge for old daemons was added.
 - P1-7 is resolved by idempotent runtime-I/O leases that reject stale operations and let in-flight work drain before releasing the shared writer.
 - P2-9 is closed as intended product behavior: CLI workspace creation replaces the auto-provisioned VS Code settings file with the current Data Engine settings.
 - P1-1 is resolved by immutable token-owned workspace bundles. Every checkpoint, heartbeat, reset, recovery, and release is fenced to the exact current token; long exports renew their heartbeat without a standing poller.
-- Verified process-identity and process-tree containment primitives are committed, but P1-3 and P1-4 remain open until daemon launch metadata and force-shutdown call sites use them end to end.
-- All P2 and P3 findings are resolved. The accepted implementations avoid new background pollers, remove redundant layout and response-polling work, bound preview/materialization costs, and keep recovery-only checks off valid hot paths.
+- P1-3 and P1-4 are resolved by end-to-end process identity, gated containment-first launch, nonce-authenticated POSIX watchdogs, atomic Windows Job assignment, and exact verified shutdown.
+- All P1, P2, and P3 findings are resolved or closed. The accepted implementations avoid new steady-state pollers, bound IPC and preview/materialization costs, remove redundant layout and response-polling work, and keep recovery-only checks off valid hot paths.
 
 Reviewed commit: `b6a01b70d37c7d6bb9885f132e1218eb07d46f62` (`main`)
 
-Resolution progress verified through commit `3770d32`.
+Resolution progress verified through implementation commit `ebea02f`.
 
 Remote status at review baseline: the reviewed commit matched `origin/main` after `git fetch --prune`.
 
@@ -24,15 +23,15 @@ Scope: runtime, shared state, daemon lifecycle, platform behavior, CLI, GUI, aut
 
 ## Executive summary
 
-The repository has a strong clean baseline: all 1,133 current tests pass, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and the PEP 517 build and Twine metadata checks succeed. The review initially found 26 reproducible or deterministic issues. Twenty-four are now resolved or closed, leaving two P1 findings open:
+The repository has a strong clean baseline: all 1,253 current tests pass with 2 platform skips, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and the PEP 517 build and Twine metadata checks succeed. The review found 26 reproducible or deterministic issues; all 26 are now resolved or closed:
 
 | Priority | Open | Meaning |
 |---|---:|---|
-| P1 | 2 | Safety and ownership risk; address before relying on the affected path in production. |
+| P1 | 0 | All safety and ownership findings are resolved. |
 | P2 | 0 | All material functional and platform-correctness findings are resolved. |
 | P3 | 0 | All lower-frequency edge cases are resolved. |
 
-The remaining risk cluster is forced daemon shutdown. Lease mutation is now token-fenced, but the shutdown path can still target a reused PID and POSIX force-stop still does not terminate descendants. Verified process-identity, Linux pidfd process-group, POSIX process-group, and Windows Job Object primitives now exist; daemon nonce/schema/spawn integration and force-shutdown call-site wiring remain for P1-3 and P1-4.
+Forced daemon shutdown now verifies one complete process incarnation and its nonce-bound containment object before termination. POSIX uses a direct-child watchdog that pins the isolated process group and performs authenticated group termination; Windows assigns the suspended daemon to a kill-on-close Job before it can execute application code. Startup, persistence, recovery, and shutdown are fenced to the same identity generation, with no compatibility bridge for legacy PID-only daemon state.
 
 ## P1 findings
 
@@ -73,30 +72,52 @@ Impact: old work can keep writing after ownership moves to another machine, or a
 
 Resolution: startup, runtime, and finalization threads remain tracked until completion. Stop and handoff enter a shared drain-admission state, reject late work and lease reclaims, perform a bounded initial wait, and retry completion through the existing checkpoint lifecycle without adding a poller. Fatal teardown signals shutdown, closes accepted IPC connections, joins command and checkpoint threads, and only then releases ownership and closes ledgers. Deterministic late-claim, non-cooperative-worker, fatal-listener, and silent-client regressions cover the boundary.
 
-### P1-3 — Forced shutdown can kill an unrelated process after PID reuse
+### P1-3 — Resolved: forced shutdown targets only the exact recorded process incarnation
+
+Status: resolved on 2026-07-14.
 
 Evidence:
 
-- `src/data_engine/hosts/daemon/client.py:215-227,473-503`
+- `src/data_engine/hosts/daemon/client.py`
+- `src/data_engine/runtime/runtime_control_store.py`
+- `src/data_engine/runtime/ledger_models.py`
+- `src/data_engine/runtime/shared_state.py`
+- `tests/daemon/test_client_process.py`
+- `tests/services/test_runtime_db.py`
+- `tests/test_process_identity.py`
 
 When the daemon is unreachable, `force_shutdown_daemon_process()` accepts any positive PID from same-host lease metadata. It does not verify process start time, executable, command, endpoint identity, or daemon token. A reproduction placed the audit process's PID in stale metadata; the code selected that PID and reached the kill path.
 
 Impact: destructive termination of an unrelated local process when stale metadata outlives the original daemon and the OS reuses its PID.
 
-Recommendation: persist process start identity and a daemon token, inspect the live process, and require all identity fields to match before escalating. If identity cannot be verified, clean or quarantine stale metadata without sending a signal.
+Resolution: daemon control state, shared lease metadata, status payloads, and launch handshakes now carry the PID, boot-scoped start key, normalized executable path, process group, session, and a 256-bit containment nonce. A provisional launch record is installed with compare-and-swap semantics before the daemon is released to initialize, and the daemon replaces it only after independently verifying its current identity and containment.
 
-### P1-4 — POSIX force-stop kills only the daemon parent, not its process tree
+Force shutdown reloads and corroborates the exact local control and lease records, re-inspects the live process immediately before signaling, and refuses to terminate on any mismatch, missing identity field, unverifiable containment object, remote owner, or reused PID. Cleanup releases only the exact verified lease generation after the process tree has drained. Legacy PID-only control rows are deleted during migration as an intentional clean cutover because no old daemon compatibility bridge is required. Deterministic PID-reuse, mismatched-executable, changed-start-key, partial-record, remote-owner, lease-race, and exact-cleanup regressions cover the boundary.
+
+### P1-4 — Resolved: daemon launch and force-stop use OS-backed process-tree containment
+
+Status: resolved on 2026-07-14.
 
 Evidence:
 
-- `src/data_engine/platform/processes.py:194-207`
-- `src/data_engine/hosts/daemon/client.py:443-465`
+- `src/data_engine/daemon_bootstrap.py`
+- `src/data_engine/platform/posix_watchdog.py`
+- `src/data_engine/platform/processes.py`
+- `src/data_engine/platform/windows_spawn.py`
+- `src/data_engine/hosts/daemon/client.py`
+- `src/data_engine/hosts/daemon/server.py`
+- `tests/daemon/test_daemon_bootstrap.py`
+- `tests/platform/test_posix_watchdog.py`
+- `tests/platform/test_windows_spawn.py`
+- `tests/test_process_containment.py`
 
 Windows uses `taskkill /T`, but the POSIX branch sends `SIGKILL` only to the supplied PID despite the helper's process-tree contract. A live reproduction started a daemon-like process with a child: the parent died and the child remained alive. Daemons are deliberately started with `start_new_session=True`, so a known process group is available.
 
 Impact: authored-flow subprocesses can survive force-stop, retain locks, keep writing outputs, or continue consuming resources after the daemon appears stopped.
 
-Recommendation: terminate the verified daemon process group or enumerate descendants safely. Couple this with the process-identity protections in P1-3.
+Resolution: the absolute first-stage bootstrap enters an isolated POSIX session, arms a direct-child watchdog, publishes its stable identity through a gated pipe, waits for durable identity persistence, and then `exec`s the normal `-P -m data_engine.daemon_bootstrap` stage. The watchdog remains inside and pins the process group, monitors parent death with pidfd on Linux or kqueue on macOS, accepts only the nonce-authenticated local datagram command, and kills its complete group on forced termination or unexpected parent exit. The server re-verifies containment before resolving paths, opening SQLite, or claiming shared state.
+
+Windows creation is atomic: the process is created suspended, assigned to a nonce-named kill-on-close Job, identity-checked, and only then resumed. The launcher retains the Job until the daemon has opened and verified its own handle. Forced shutdown opens the same verified Job and terminates all members. Startup locks serialize all post-lock lease and ownership decisions, and native macOS lifecycle coverage verifies launch, authentication, shutdown, descendant cleanup, watchdog cleanup, and repeated operation without residue. Deterministic Windows boundary tests cover suspended creation, assignment failure, resume failure, Job membership, and complete cleanup; live Windows execution remains a host-matrix follow-up rather than an open repository finding.
 
 ### P1-5 — Resolved: shared snapshots publish as one manifest-committed generation
 
@@ -323,7 +344,7 @@ Evidence:
 
 The requested timeout starts only after `multiprocessing.connection.Client()` returns. On Python 3.14, the Windows `PipeClient` connection path has its own much longer wait for a busy named pipe, so `is_daemon_live()` with a nominal one-second timeout can block for roughly 20 seconds.
 
-Resolution: positive AF_PIPE timeouts now use one absolute deadline across bounded `CreateFile`/`WaitNamedPipe` connection attempts, standard multiprocessing authentication reads, and response waiting. Windows imports remain lazy, no helper thread or background poller is created, and response waiting uses one blocking poll instead of repeated 50 ms polls. AF_UNIX retains its response-only timeout behavior. Platform-neutral tests cover unavailable and busy pipes, authentication cleanup, and remaining-deadline propagation.
+Resolution: positive AF_PIPE and AF_UNIX timeouts now use one absolute deadline across connection establishment, both directions of multiprocessing authentication, complete framed request writes, and complete framed response reads. Native Unix framing uses nonblocking descriptors with `poll`, bounded 64 KiB chunks, and exact framing compatibility. Windows uses overlapped reads and writes, cancels pending operations on deadline, and retires each overlapped operation before returning. Requests are capped at 1 MiB, responses at 64 MiB, and the server admits at most 32 concurrent connection workers so incomplete or hostile clients cannot create unbounded threads or memory use. Windows imports remain lazy and no helper poller is added. Deterministic tests cover unavailable and busy pipes, partial headers and bodies, blocked writes, pending-operation cancellation, oversized frames, authentication cleanup, high-numbered descriptors, worker saturation, and remaining-deadline propagation.
 
 ### P2-13 — Resolved: workspace IDs and daemon endpoints are portable and bounded
 
@@ -408,12 +429,12 @@ Resolution: auth keys now require exactly 32 decoded bytes. Malformed files are 
 ### What is working well
 
 - The repository was clean and synchronized with `origin/main` before this report was added.
-- The full suite passes after the P2/P3 repair batch: `1002 passed in 35.17s` on Python 3.14.6.
+- The final full suite passes after all repairs: `1253 passed, 2 skipped in 36.04s` on Python 3.14.6.
 - Ruff passes with no configured violations.
 - pydoclint reports no violations under `src/data_engine`.
 - `pip check` reports no broken requirements.
 - The review-baseline full-suite statement coverage was 83% (`19,162` statements, `3,211` missed); coverage was not re-measured after the repair batch.
-- A PEP 517 wheel build from the post-removal working tree succeeded: `py_data_engine-0.3.12-py3-none-any.whl`.
+- A clean PEP 517 sdist and wheel build succeeded, including the containment bootstrap and POSIX watchdog modules: `py_data_engine-0.3.12.tar.gz` and `py_data_engine-0.3.12-py3-none-any.whl`; `twine check` passed for both.
 - The hash-locked Windows CPython 3.14 runtime requirements resolved and downloaded successfully with `--require-hashes`.
 - Focused runtime, daemon/CLI/platform, and UI/authoring suites also passed during the audit.
 
@@ -427,20 +448,22 @@ Resolution: auth keys now require exactly 32 decoded bytes. Malformed files are 
 
 4. **Fakes can diverge from production contracts.** P2-2 originally passed because its fake supplied a nonexistent property; that test now uses the real ledger contract. Continue preferring protocol-conforming fakes plus at least one real-store integration test for service boundaries.
 
-5. **Lifecycle and coordination require adversarial tests.** Deterministic coverage now exercises stale-owner resumption, lease fencing, non-cooperative workers, workspace switching, checkpoint/reset interleavings, and multi-file snapshot publication. PID-reuse and end-to-end process-containment regressions remain part of P1-3 and P1-4.
-
-6. **Platform checks need real hosts.** Add Windows coverage for named-pipe deadlines, reserved workspace names, launcher-process behavior, and daemon lifetime; add macOS/Linux coverage for AF_UNIX length and process-group termination.
+5. **Platform checks still need a real-host matrix.** Native macOS launch, authentication, graceful shutdown, forced containment, and cleanup passed during resolution. Add continuous Windows coverage for overlapped named-pipe deadlines, suspended Job assignment, launcher-process behavior, and daemon lifetime, plus Linux coverage for pidfd watchdog behavior.
 
 The dependency-refresh package-tooling environment completed the PEP 517 build and `twine check` successfully.
 
-## Recommended repair order
+## Recommended follow-up order
 
-1. Persist the verified daemon process identity and containment nonce, launch directly into containment, and wire force-shutdown through the verified tree-termination boundary (P1-3, P1-4).
-2. Add the CI, type-checking, concurrency, and real-host platform test gates described above after the remaining P1 safety work is complete.
+All review findings are closed. The remaining work is preventive quality infrastructure:
+
+1. Add push and pull-request CI for the full test suite, Ruff, pydoclint, dependency validation, and PEP 517/Twine packaging checks.
+2. Add a real Windows and Linux host matrix for named-pipe deadlines, Windows Job containment, pidfd watchdog behavior, daemon lifecycle, and packaging entry points.
+3. Add a static type-checking gate and retain deterministic fault, race, and process-lifecycle regressions alongside the real-host tests.
 
 ## Review limitations
 
 - No live multi-machine network share was available; fencing failures were reproduced deterministically with two logical owners over the same temporary shared state.
-- Windows-specific named-pipe timing and filesystem failures were established from the Python 3.14 implementation and path rules but were not executed on a Windows host in this review.
+- Windows-specific named-pipe timing, overlapped I/O cancellation, Job assignment, and filesystem failures were verified at deterministic native-boundary tests but were not executed on a Windows host in this review.
+- The complete contained lifecycle was executed repeatedly on macOS; Linux pidfd behavior was covered deterministically but not on a live Linux host.
 - No long-running GUI visual exploration was performed; GUI behavior was covered by the existing Qt suite and targeted launcher reproduction.
 - This was a correctness and quality review, not a dedicated security audit or performance benchmark.
