@@ -7,8 +7,11 @@ Revision notes:
 - Updated after removal of the retired operator interface; findings and scope specific to it have been removed.
 - P1-7 is resolved by idempotent runtime-I/O leases that reject stale operations and let in-flight work drain before releasing the shared writer.
 - P2-9 is closed as intended product behavior: CLI workspace creation replaces the auto-provisioned VS Code settings file with the current Data Engine settings.
+- All P2 and P3 findings are resolved. The accepted implementations avoid new background pollers, remove redundant layout and response-polling work, bound preview/materialization costs, and keep recovery-only checks off valid hot paths.
 
 Reviewed commit: `b6a01b70d37c7d6bb9885f132e1218eb07d46f62` (`main`)
+
+Resolution progress verified through commit `76b3f5d`.
 
 Remote status at review baseline: the reviewed commit matched `origin/main` after `git fetch --prune`.
 
@@ -16,13 +19,13 @@ Scope: runtime, shared state, daemon lifecycle, platform behavior, CLI, GUI, aut
 
 ## Executive summary
 
-The repository has a strong clean baseline: all 921 current tests pass, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and the PEP 517 build and Twine metadata checks succeed. The review initially found 26 reproducible or deterministic issues. After one implementation fix and one clarified product decision, 24 remain open:
+The repository has a strong clean baseline: all 1,002 current tests pass, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and the PEP 517 build and Twine metadata checks succeed. The review initially found 26 reproducible or deterministic issues. Nineteen are now resolved or closed, leaving the seven P1 findings below open:
 
 | Priority | Open | Meaning |
 |---|---:|---|
 | P1 | 7 | Safety, ownership, data-consistency, cross-workspace, or indefinite-hang risk; address before relying on the affected path in production. |
-| P2 | 15 | Material functional or platform-correctness defect; schedule promptly. |
-| P3 | 2 | Lower-frequency edge case. |
+| P2 | 0 | All material functional and platform-correctness findings are resolved. |
+| P3 | 0 | All lower-frequency edge cases are resolved. |
 
 The highest-risk cluster is daemon/workspace ownership. Lease mutation is not fenced, forced shutdown can target a reused PID, stop/handoff can release ownership while worker threads are still alive, and POSIX force-stop does not terminate descendants. The next cluster is runtime projection consistency: a reader can accept a torn shared snapshot, and hydration can invalidate incremental cursors indefinitely.
 
@@ -140,7 +143,9 @@ Recommendation: persist a random installation UUID as machine identity and store
 
 ## P2 findings
 
-### P2-1 — Explicit workspace IDs are not propagated consistently into daemon paths
+### P2-1 — Resolved: explicit workspace IDs are propagated consistently into daemon paths
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -150,9 +155,11 @@ Evidence:
 
 Daemon dependency construction ignores the already-resolved `paths.runtime_control_db_path` and re-resolves from `workspace_root`, deriving the root folder name instead of an explicit alias. Daemon spawning also omits the supported `--workspace-id` argument. With root `folder` and ID `alias`, the parent and child use different control databases and IPC endpoints; the parent times out while the child remains running elsewhere.
 
-Recommendation: open the supplied control-ledger path directly and always pass `--workspace-id paths.workspace_id`; assert parent/child endpoint identity in an integration test.
+Resolution: daemon construction now opens the already-resolved control-ledger path, and process spawning always passes the resolved workspace ID. Alias coverage proves that a root folder and a differing explicit ID produce identical parent/child control databases and IPC endpoints. This also removes redundant settings and layout resolution during binding construction.
 
-### P2-2 — Real run-step detail queries raise `AttributeError`
+### P2-2 — Resolved: real run-step detail queries use the persisted duration contract
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -162,9 +169,11 @@ Evidence:
 
 `HistoryQueryService.get_run_steps()` reads `step_run.elapsed_seconds`, but `PersistedStepRun` exposes only `elapsed_ms`. A real-ledger reproduction raised `AttributeError: 'PersistedStepRun' object has no attribute 'elapsed_seconds'`. The unit test uses a fake row that invents the missing property and masks the contract mismatch.
 
-Recommendation: derive seconds from `elapsed_ms` or add one canonical model property, then exercise the service with `RuntimeCacheLedger` rather than a shape-divergent fake.
+Resolution: the query derives seconds from canonical `elapsed_ms`, and ledger-backed coverage replaces the shape-divergent fake that masked the error.
 
-### P2-3 — Continuous batch polling drops all but one coalesced change signature
+### P2-3 — Resolved: continuous batch polling retains every coalesced change signature
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -175,9 +184,11 @@ For a batch watcher, the loop computes the first drained path's signature, enque
 
 Impact: a batch may process all files but persist freshness for only one, leaving other processed inputs stale or untracked.
 
-Recommendation: collect every drained signature before enqueueing, or compute the complete set of stale batch signatures atomically.
+Resolution: batch polling now collects every drained signature before enqueueing one batch job. Two-file coverage verifies that no drained change is silently discarded.
 
-### P2-4 — Stopping inside a step leaves the step permanently `started`
+### P2-4 — Resolved: stopping inside a step records a terminal step state
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -185,9 +196,11 @@ Evidence:
 
 The step-level `FlowStoppedError` handler re-raises without recording a terminal step state. The outer handler finishes only the run. A ledger-backed reproduction produced run status `stopped` and step status `started` with no finish timestamp.
 
-Recommendation: record the active step as stopped with finish time and elapsed duration before re-raising, and add a persisted-state stop test.
+Resolution: the stop path records the active step as stopped with its finish time and elapsed duration before propagating the flow stop. Persisted-state coverage verifies both run and step terminal states.
 
-### P2-5 — Author-facing `settle` seconds are implemented as a count of poll calls
+### P2-5 — Resolved: author-facing `settle` uses elapsed monotonic seconds
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -197,9 +210,11 @@ Evidence:
 
 The API and guide define `settle` in seconds, but the watcher increments an integer on each unchanged `drain_events()` call. `settle=2` emitted after three immediate calls in 0.00019 seconds; at a 30-second polling interval it instead waits about 60 seconds.
 
-Recommendation: track a monotonic first-stable time and compare elapsed seconds. If poll-count behavior is intended, rename and redocument the public option consistently.
+Resolution: the watcher tracks when each unchanged signature was first observed and compares monotonic elapsed time to `settle`. Deterministic clock coverage verifies behavior independently of polling frequency.
 
-### P2-6 — “Latest run” summaries select the oldest retained run
+### P2-6 — Resolved: “latest run” summaries select the newest retained run
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -208,9 +223,11 @@ Evidence:
 
 The repository returns runs newest-first, but `_latest_run_times_for_flow()` selects `persisted_runs[-1]`. A two-run reproduction returned the older run's timestamps and error.
 
-Recommendation: select index 0 or expose a dedicated repository query whose ordering contract is explicit.
+Resolution: the summary selects the first row from the repository's explicit newest-first ordering, with multi-run coverage for timestamps and errors.
 
-### P2-7 — JSON debug artifacts are saved successfully but never listed in-app
+### P2-7 — Resolved: JSON debug artifacts round-trip through the in-app viewer
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -219,9 +236,11 @@ Evidence:
 
 `FlowDebugContext.save_json()` writes a standalone JSON artifact with embedded debug metadata, explicitly for in-app viewing. The listing service skips every `.json` file under the assumption that JSON files are metadata sidecars. A round-trip reproduction created the artifact and returned an empty listing.
 
-Recommendation: distinguish embedded JSON artifacts from sidecars by payload metadata or an unambiguous sidecar naming convention, then add save/list/view round-trip coverage.
+Resolution: listing pre-indexes linked sidecars and recognizes only generated standalone JSON artifacts whose embedded debug metadata declares `artifact_kind="json"`. Malformed and unrelated JSON remains ignored, and selection renders a bounded tabular preview. Save/list/view coverage exercises the complete round trip.
 
-### P2-8 — GUI workspace switching leaves a live client-session row in each old workspace
+### P2-8 — Resolved: GUI workspace switching detaches the old client session
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -234,7 +253,7 @@ The GUI registers the new binding and closes the old binding without removing th
 
 Impact: old workspace daemons remain alive and automated work can continue after the UI has detached.
 
-Recommendation: remove the old binding's session before closing it, without directly forcing daemon shutdown; allow the daemon's normal no-client policy to decide what to stop.
+Resolution: rebinding removes the old workspace's client session before closing its binding and registering the new session. The daemon's existing no-client lifecycle policy remains responsible for stopping work and exiting.
 
 ### P2-9 — Closed: CLI workspace creation intentionally replaces auto-provisioned VS Code settings
 
@@ -249,7 +268,9 @@ Creating an empty child workspace forces `overwrite=True` for the parent collect
 
 Verification: CLI coverage now starts with unrelated existing content, creates a workspace, and asserts that the replacement exactly matches the current generated collection settings.
 
-### P2-10 — Excel template composition crashes on worksheets containing merged cells
+### P2-10 — Resolved: Excel template composition handles merged cells
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -257,9 +278,11 @@ Evidence:
 
 `_clear_worksheet_data()` assigns `None` to every iterated cell, including openpyxl `MergedCell` placeholders whose value is read-only. A minimal template containing merged `A1:B1` reproduced `AttributeError: 'MergedCell' object attribute 'value' is read-only`.
 
-Recommendation: define the intended merged-range policy and either unmerge affected ranges before clearing or recreate the replaced worksheet. Add merged-template coverage.
+Resolution: composition unmerges only ranges that overlap the replacement output, preserves unrelated merges and formatting, and skips read-only `MergedCell` placeholders while clearing. Clearing now walks openpyxl's populated-cell store instead of materializing a sparse sheet's full bounding rectangle.
 
-### P2-11 — The checkpoint error handler can throw and permanently terminate the checkpoint thread
+### P2-11 — Resolved: checkpoint recovery survives state-publication failures
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -267,9 +290,11 @@ Evidence:
 
 After the second checkpoint failure, the exception handler calls `_update_daemon_state(status='degraded')` outside a nested guard. If the control ledger is the failing dependency, that call raises the same exception out of the loop, so the third-failure relinquish path is never reached. A failure-injection reproduction stopped at count 2.
 
-Recommendation: isolate degraded-state publication from checkpoint recovery and add an outer lifecycle boundary that either continues retrying or safely relinquishes ownership.
+Resolution: degraded and failed event/state publication are isolated as best-effort operations. The third-failure relinquish path still runs when the control ledger fails, and an incomplete relinquish remains on the existing retry cadence rather than terminating the checkpoint thread. The normal checkpoint path adds no work.
 
-### P2-12 — Windows daemon request timeouts do not bound named-pipe connection time
+### P2-12 — Resolved: Windows daemon request timeouts bound named-pipe connection time
+
+Status: resolved on 2026-07-13 with deterministic Win32-boundary tests; live Windows verification remains pending.
 
 Evidence:
 
@@ -277,9 +302,11 @@ Evidence:
 
 The requested timeout starts only after `multiprocessing.connection.Client()` returns. On Python 3.14, the Windows `PipeClient` connection path has its own much longer wait for a busy named pipe, so `is_daemon_live()` with a nominal one-second timeout can block for roughly 20 seconds.
 
-Recommendation: implement a genuinely deadline-bounded Windows connection path and test unavailable and busy pipes on Windows.
+Resolution: positive AF_PIPE timeouts now use one absolute deadline across bounded `CreateFile`/`WaitNamedPipe` connection attempts, standard multiprocessing authentication reads, and response waiting. Windows imports remain lazy, no helper thread or background poller is created, and response waiting uses one blocking poll instead of repeated 50 ms polls. AF_UNIX retains its response-only timeout behavior. Platform-neutral tests cover unavailable and busy pipes, authentication cleanup, and remaining-deadline propagation.
 
-### P2-13 — Workspace IDs are neither portable Windows components nor bounded for Unix socket paths
+### P2-13 — Resolved: workspace IDs and daemon endpoints are portable and bounded
+
+Status: resolved on 2026-07-13. The endpoint scheme is an intentional clean cutover; no legacy-daemon compatibility bridge is required.
 
 Evidence:
 
@@ -288,9 +315,11 @@ Evidence:
 
 Validation accepts Windows-reserved names (`CON`, `NUL`), reserved characters (`: * ? |`), and trailing dots/spaces. Those values become marker and Parquet filenames. It also permits long IDs in AF_UNIX endpoint names; a valid 90-character ID produced a 125-byte socket path and failed on macOS with `OSError: AF_UNIX path too long`.
 
-Recommendation: enforce a portable, bounded workspace-component grammar including Windows device-name rules, and construct IPC endpoints from a short fixed prefix plus a digest rather than the full ID.
+Resolution: workspace IDs are limited to 64 UTF-8 bytes and reject boundary whitespace, trailing dots, control characters, Windows-reserved characters, invalid UTF-8 text, and case-insensitive device basenames through extensions. Existing local cache namespaces retain their readable shape and are bounded to 77 bytes. Daemon endpoints now use a fixed prefix plus a BLAKE2s-128 digest over the full root/runtime/alias identity, yielding a 54-byte Unix socket path and 53-character Windows pipe name while preserving distinct roots and explicit aliases.
 
-### P2-14 — Persisted settings override the explicit collection-root environment variable
+### P2-14 — Resolved: the explicit collection-root environment variable is authoritative
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -298,9 +327,11 @@ Evidence:
 
 When `DATA_ENGINE_WORKSPACE_COLLECTION_ROOT` is set, `load_settings()` initially resolves it and then overwrites it with a stored collection root if one exists. A reproduction with differing paths returned the stored value.
 
-Recommendation: make the explicit environment value authoritative, consistent with the runtime-root and app-root behavior, and test differing stored/environment values.
+Resolution: settings loading returns the explicit collection root without overwriting it from persisted state, with differing environment/stored-root coverage.
 
-### P2-15 — Catalog-load failure can leave `engine_starting=True` indefinitely
+### P2-15 — Resolved: failed engine starts always clear their reservation
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -308,9 +339,11 @@ Evidence:
 
 `start_engine()` reserves engine startup before calling `automated_flow_names(force=True)`. That call occurs outside the cleanup `try`. If catalog loading raises, the reservation is never cleared and later start requests coalesce as though startup were still in progress.
 
-Recommendation: wrap every operation after reservation in a `try/finally` that clears the reservation unless startup commits successfully.
+Resolution: every operation after reserving startup is inside a failure-only `finally`; only committed runtime state suppresses cleanup. Fault-injection coverage proves a catalog failure clears `engine_starting` and a subsequent start succeeds without duplicate successful-path work.
 
-### P2-16 — Daemon manager reports a dead snapshot while retaining `daemon_live=True`
+### P2-16 — Resolved: daemon-manager liveness agrees with failed status requests
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -320,11 +353,13 @@ If the initial ping succeeds but the following status request fails, `sync()` re
 
 Impact: callers can gate commands using contradictory liveness values.
 
-Recommendation: set liveness false on status failure, or avoid the race by using one status request as the liveness probe.
+Resolution: status-request failure clears the manager's retained liveness before returning the dead snapshot, with race-focused coverage for the ping/status disagreement.
 
 ## P3 findings
 
-### P3-1 — Public GUI launcher always enters the Qt event loop, even when the caller owns it
+### P3-1 — Resolved: the public GUI launcher respects caller-owned Qt applications
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -333,9 +368,11 @@ Evidence:
 
 After choosing an existing `QApplication` or creating one, `QApplication.instance() is app` is necessarily true. A fake-existing-app reproduction recorded an unwanted `exec()` call. Embedded Qt callers can therefore attempt a nested event loop, and the locally scoped window is not returned or retained.
 
-Recommendation: capture ownership before construction, call `exec()` only when this function creates the app, and return or retain the window for embedded use.
+Resolution: launch ownership is captured before application construction. The launcher enters the event loop only for an application it creates and returns the window so embedded callers can retain it. Stubbed owned/existing-application tests cover both paths with no added steady-state work.
 
-### P3-2 — A malformed daemon auth-key file permanently wedges communication
+### P3-2 — Resolved: malformed daemon auth keys recover safely
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -343,18 +380,18 @@ Evidence:
 
 Non-hex auth-key text raises raw `ValueError`, which is not converted to `DaemonClientError`, and the bad file remains in place. Every later request repeats the same failure until manual deletion.
 
-Recommendation: validate exact decoded length, quarantine malformed files atomically, regenerate a key when safe, and report a domain-specific error when an active daemon could still own the original key.
+Resolution: auth keys now require exactly 32 decoded bytes. Malformed files are atomically quarantined and regenerated under a cross-process repair lock only after local daemon ownership checks make replacement safe; credible live or uncertain local ownership raises `DaemonClientError`. Remote leases and stale Unix socket files do not block machine-local recovery. Valid-key requests retain one read/decode operation and do not open SQLite, inspect leases, or take the repair lock.
 
 ## Quality assessment
 
 ### What is working well
 
 - The repository was clean and synchronized with `origin/main` before this report was added.
-- The full suite passes: `921 passed in 33.18s` on Python 3.14.6.
+- The full suite passes after the P2/P3 repair batch: `1002 passed in 35.17s` on Python 3.14.6.
 - Ruff passes with no configured violations.
 - pydoclint reports no violations under `src/data_engine`.
 - `pip check` reports no broken requirements.
-- Full-suite statement coverage is 83% (`19,162` statements, `3,211` missed).
+- The review-baseline full-suite statement coverage was 83% (`19,162` statements, `3,211` missed); coverage was not re-measured after the repair batch.
 - A PEP 517 wheel build from the post-removal working tree succeeded: `py_data_engine-0.3.12-py3-none-any.whl`.
 - The hash-locked Windows CPython 3.14 runtime requirements resolved and downloaded successfully with `--require-hashes`.
 - Focused runtime, daemon/CLI/platform, and UI/authoring suites also passed during the audit.
@@ -363,11 +400,11 @@ Recommendation: validate exact decoded length, quarantine malformed files atomic
 
 1. **No validation CI for ordinary changes.** `.github/workflows/` contains only a manually dispatched PyPI build/publish workflow. There is no push/pull-request job for tests, Ruff, pydoclint, dependency checks, or packaging validation.
 
-2. **No static type-checking gate.** The real/fake `PersistedStepRun` mismatch in P2-2 is the kind of protocol drift a configured Pyright or mypy check should catch.
+2. **No static type-checking gate.** The now-resolved real/fake `PersistedStepRun` mismatch in P2-2 is the kind of protocol drift a configured Pyright or mypy check should catch before runtime.
 
-3. **Coverage is weakest in orchestration boundaries where several findings live.** Examples from the full coverage run include GUI launcher 0%, platform process helpers 68%, continuous execution 73%, daemon ownership 73%, runtime commands 78%, and daemon manager 79%. Overall percentage is healthy, but branch/fault/interleaving behavior matters more than line execution for these modules.
+3. **Coverage was weakest in orchestration boundaries where several findings lived.** Baseline examples included GUI launcher 0%, platform process helpers 68%, continuous execution 73%, daemon ownership 73%, runtime commands 78%, and daemon manager 79%. Targeted tests now cover the repaired branches, but branch/fault/interleaving behavior matters more than aggregate line coverage for these modules.
 
-4. **Fakes sometimes diverge from production contracts.** P2-2 passes because the fake supplies a nonexistent property. Prefer protocol-conforming fakes plus at least one real-ledger integration test for service boundaries.
+4. **Fakes can diverge from production contracts.** P2-2 originally passed because its fake supplied a nonexistent property; that test now uses the real ledger contract. Continue preferring protocol-conforming fakes plus at least one real-store integration test for service boundaries.
 
 5. **Lifecycle and coordination need adversarial tests.** Add deterministic tests for stale-owner resumption, lease fencing, non-cooperative workers, PID reuse, workspace switch during queued updates, checkpoint failure cascades, and multi-file snapshot interleavings.
 
@@ -380,9 +417,7 @@ The dependency-refresh package-tooling environment completed the PEP 517 build a
 1. Introduce lease fencing and verified daemon/process identity (P1-1, P1-3, P1-8).
 2. Make stop/handoff wait for actual worker termination and implement safe POSIX tree termination (P1-2, P1-4).
 3. Add a committed shared-snapshot manifest and generation-aware cache invalidation (P1-5, P1-6).
-4. Clean old GUI client sessions during workspace switching (P2-8).
-5. Repair explicit workspace-ID propagation and platform-safe naming (P2-1, P2-13).
-6. Address the remaining deterministic runtime/API defects, then add the CI, type-checking, concurrency, and platform test gates described above.
+4. Add the CI, type-checking, concurrency, and real-host platform test gates described above after the P1 safety work is complete.
 
 ## Review limitations
 
