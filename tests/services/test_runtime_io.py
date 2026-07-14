@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
+
+import pytest
 
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services.ledger import RuntimeControlLedgerService
@@ -55,6 +58,147 @@ def test_runtime_io_layer_serializes_execution_and_log_writes(tmp_path: Path) ->
     assert store.step_outputs.list_for_run("run-1")[0].elapsed_ms == 123
     assert store.logs.list(run_id="run-1")[0].message.endswith("status=success")
     store.close()
+
+
+def test_runtime_io_store_close_is_idempotent_and_preserves_other_clients(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime_state" / "runtime_cache.sqlite"
+    layer = RuntimeIoLayer(cache_ttl_seconds=1.0)
+    closing_store = layer.open_cache_store(db_path)
+    surviving_store = layer.open_cache_store(db_path)
+    stale_snapshots = closing_store.snapshots
+
+    close_threads = tuple(threading.Thread(target=closing_store.close) for _ in range(4))
+    for thread in close_threads:
+        thread.start()
+    for thread in close_threads:
+        thread.join(timeout=1.0)
+
+    assert all(not thread.is_alive() for thread in close_threads)
+    closing_store.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        closing_store.runs.list()
+    with pytest.raises(RuntimeError, match="closed"):
+        stale_snapshots.replace(runs=(), step_runs=(), logs=(), file_states=())
+    assert surviving_store._handle._writer.is_alive()  # type: ignore[attr-defined]
+
+    try:
+        surviving_store.execution_state.record_run_started(
+            run_id="run-1",
+            flow_name="docs_manual",
+            group_name="Docs",
+            source_path="docs.xlsx",
+            started_at_utc=utcnow_text(),
+        )
+        assert surviving_store.runs.get("run-1") is not None
+    finally:
+        surviving_store.close()
+
+
+def test_runtime_io_snapshot_replace_is_serialized_and_invalidates_reads(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime_state" / "runtime_cache.sqlite"
+    store = RuntimeIoLayer(cache_ttl_seconds=60.0).open_cache_store(db_path)
+    store.execution_state.record_run_started(
+        run_id="run-1",
+        flow_name="docs_manual",
+        group_name="Docs",
+        source_path="docs.xlsx",
+        started_at_utc=utcnow_text(),
+    )
+    assert store.runs.list(flow_name="docs_manual")
+
+    store.snapshots.replace(runs=(), step_runs=(), logs=(), file_states=())
+
+    assert store.runs.list(flow_name="docs_manual") == ()
+    store.close()
+
+
+def test_runtime_io_does_not_cache_a_read_that_overlaps_invalidation(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "runtime_state" / "runtime_cache.sqlite"
+    store = RuntimeIoLayer(cache_ttl_seconds=60.0).open_cache_store(db_path)
+    store.execution_state.record_run_started(
+        run_id="run-1",
+        flow_name="docs_manual",
+        group_name="Docs",
+        source_path="docs.xlsx",
+        started_at_utc=utcnow_text(),
+    )
+    delegate = store.runs._delegate  # type: ignore[attr-defined]
+    original_list = delegate.list
+    stale_rows_loaded = threading.Event()
+    resume_reader = threading.Event()
+
+    def paused_list(*, flow_name: str | None = None):
+        rows = original_list(flow_name=flow_name)
+        if not stale_rows_loaded.is_set():
+            stale_rows_loaded.set()
+            assert resume_reader.wait(timeout=1.0)
+        return rows
+
+    monkeypatch.setattr(delegate, "list", paused_list)
+    read_results = []
+    errors: list[BaseException] = []
+
+    def read_runs() -> None:
+        try:
+            read_results.append(store.runs.list(flow_name="docs_manual"))
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    reader = threading.Thread(target=read_runs)
+    reader.start()
+    try:
+        assert stale_rows_loaded.wait(timeout=1.0)
+        store.snapshots.replace(runs=(), step_runs=(), logs=(), file_states=())
+    finally:
+        resume_reader.set()
+    reader.join(timeout=1.0)
+
+    assert not reader.is_alive()
+    assert errors == []
+    assert read_results[0][0].run_id == "run-1"
+    assert store.runs.list(flow_name="docs_manual") == ()
+    store.close()
+
+
+def test_runtime_io_open_retries_when_final_close_wins_acquire_race(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "runtime_state" / "runtime_cache.sqlite"
+    layer = RuntimeIoLayer(cache_ttl_seconds=1.0)
+    closing_store = layer.open_cache_store(db_path)
+    closing_handle = closing_store._handle  # type: ignore[attr-defined]
+    original_acquire = closing_handle.acquire
+    acquire_started = threading.Event()
+    resume_acquire = threading.Event()
+
+    def paused_acquire() -> None:
+        acquire_started.set()
+        assert resume_acquire.wait(timeout=1.0)
+        original_acquire()
+
+    monkeypatch.setattr(closing_handle, "acquire", paused_acquire)
+    opened_stores = []
+    errors: list[BaseException] = []
+
+    def open_store() -> None:
+        try:
+            opened_stores.append(layer.open_cache_store(db_path))
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    opener = threading.Thread(target=open_store)
+    opener.start()
+    try:
+        assert acquire_started.wait(timeout=1.0)
+        closing_store.close()
+    finally:
+        resume_acquire.set()
+    opener.join(timeout=1.0)
+
+    assert not opener.is_alive()
+    assert errors == []
+    assert len(opened_stores) == 1
+    replacement_store = opened_stores[0]
+    assert replacement_store._handle is not closing_handle  # type: ignore[attr-defined]
+    replacement_store.close()
 
 
 def test_runtime_io_layer_caches_reads_until_local_write_invalidates(tmp_path: Path, monkeypatch) -> None:
@@ -173,4 +317,3 @@ def test_runtime_io_read_cache_prunes_expired_entries_and_caps_size(tmp_path: Pa
     finally:
         store.close()
         ledger.close()
-

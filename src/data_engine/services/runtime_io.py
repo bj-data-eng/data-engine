@@ -17,6 +17,10 @@ from data_engine.services.runtime_ports import RuntimeCacheStore
 _T = TypeVar("_T")
 
 
+class _RuntimeHandleClosedError(RuntimeError):
+    """Signal that lease acquisition lost a race with final handle closure."""
+
+
 @dataclass
 class _QueuedWrite(Generic[_T]):
     action: str
@@ -59,7 +63,7 @@ class _RuntimeCacheHandle:
     def acquire(self) -> None:
         with self._lock:
             if self._closed:
-                raise RuntimeError("Runtime IO handle is already closed.")
+                raise _RuntimeHandleClosedError("Runtime IO handle is already closed.")
             self._refcount += 1
 
     def release(self) -> None:
@@ -122,6 +126,15 @@ class _RuntimeCacheHandle:
             self._ledger.logs.append_many(payload["rows"])
             self._invalidate_caches()
             return None
+        if action == "snapshot_replace":
+            self._ledger.snapshots.replace(
+                runs=payload["runs"],
+                step_runs=payload["step_runs"],
+                logs=payload["logs"],
+                file_states=payload["file_states"],
+            )
+            self._invalidate_caches()
+            return None
         raise ValueError(f"Unknown runtime IO write action: {action}")
 
     def _invalidate_caches(self) -> None:
@@ -132,14 +145,17 @@ class _RuntimeCacheHandle:
     def submit_write(self, action: str, /, **payload: object) -> object:
         completed = threading.Event()
         result_box: list[object | Exception] = []
-        self._write_queue.put(
-            _QueuedWrite(
-                action=action,
-                payload=dict(payload),
-                completed=completed,
-                result=result_box,
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Runtime IO handle is already closed.")
+            self._write_queue.put(
+                _QueuedWrite(
+                    action=action,
+                    payload=dict(payload),
+                    completed=completed,
+                    result=result_box,
+                )
             )
-        )
         completed.wait()
         result = result_box[0] if result_box else None
         if isinstance(result, Exception):
@@ -179,10 +195,12 @@ class _RuntimeCacheHandle:
         value = loader()
         signature = current_signature or self._sqlite_signature()
         with self._lock:
+            if self._write_generation != generation:
+                return value
             self._read_cache[key] = _ReadCacheEntry(
                 value=value,
                 cached_at_monotonic=now,
-                generation=self._write_generation,
+                generation=generation,
                 sqlite_signature=signature,
             )
             self._prune_read_cache_locked(now)
@@ -207,8 +225,76 @@ class _RuntimeCacheHandle:
             self._read_cache.pop(cache_key, None)
 
 
-class _RuntimeRunsProxy:
+class _RuntimeCacheLease:
+    """Own one idempotently releasable reference to a shared runtime cache handle."""
+
     def __init__(self, handle: _RuntimeCacheHandle) -> None:
+        self._handle = handle
+        self._condition = threading.Condition()
+        self._active_operations = 0
+        self._closed = False
+        self._released = False
+        self._handle.acquire()
+
+    @property
+    def ledger(self) -> RuntimeCacheLedger:
+        with self._condition:
+            if self._closed:
+                raise RuntimeError("Runtime IO cache store is closed.")
+            return self._handle.ledger
+
+    def call(self, operation: Callable[[_RuntimeCacheHandle], _T]) -> _T:
+        with self._condition:
+            if self._closed:
+                raise RuntimeError("Runtime IO cache store is closed.")
+            self._active_operations += 1
+        try:
+            return operation(self._handle)
+        finally:
+            with self._condition:
+                self._active_operations -= 1
+                if self._active_operations == 0:
+                    self._condition.notify_all()
+
+    def read_cached(self, key: tuple[object, ...], loader: Callable[[], object]) -> object:
+        return self.call(lambda handle: handle.read_cached(key, loader))
+
+    def submit_write(self, action: str, /, **payload: object) -> object:
+        return self.call(lambda handle: handle.submit_write(action, **payload))
+
+    def invalidate_caches(self) -> None:
+        self.call(lambda handle: handle._invalidate_caches())
+
+    def close(self) -> None:
+        with self._condition:
+            if self._closed:
+                while not self._released:
+                    self._condition.wait()
+                return
+            self._closed = True
+            while self._active_operations:
+                self._condition.wait()
+        try:
+            self._handle.release()
+        finally:
+            with self._condition:
+                self._released = True
+                self._condition.notify_all()
+
+
+def _guarded_delegate_attribute(lease: _RuntimeCacheLease, delegate: object, name: str) -> object:
+    attribute = lease.call(lambda _handle: getattr(delegate, name))
+    if not callable(attribute):
+        return attribute
+
+    def guarded(*args: object, **kwargs: object) -> object:
+        return lease.call(lambda _handle: attribute(*args, **kwargs))
+
+    return guarded
+
+
+class _RuntimeRunsProxy:
+    def __init__(self, handle: _RuntimeCacheLease) -> None:
         self._handle = handle
         self._delegate = handle.ledger.runs
 
@@ -231,11 +317,11 @@ class _RuntimeRunsProxy:
         self._handle.submit_write("run_finished", **kwargs)
 
     def __getattr__(self, name: str):
-        return getattr(self._delegate, name)
+        return _guarded_delegate_attribute(self._handle, self._delegate, name)
 
 
 class _RuntimeStepOutputsProxy:
-    def __init__(self, handle: _RuntimeCacheHandle) -> None:
+    def __init__(self, handle: _RuntimeCacheLease) -> None:
         self._handle = handle
         self._delegate = handle.ledger.step_outputs
 
@@ -275,11 +361,11 @@ class _RuntimeStepOutputsProxy:
         self._handle.submit_write("step_finished", **kwargs)
 
     def __getattr__(self, name: str):
-        return getattr(self._delegate, name)
+        return _guarded_delegate_attribute(self._handle, self._delegate, name)
 
 
 class _RuntimeLogsProxy:
-    def __init__(self, handle: _RuntimeCacheHandle) -> None:
+    def __init__(self, handle: _RuntimeCacheLease) -> None:
         self._handle = handle
         self._delegate = handle.ledger.logs
 
@@ -303,26 +389,29 @@ class _RuntimeLogsProxy:
         self._handle.submit_write("logs_append_many", rows=rows)
 
     def __getattr__(self, name: str):
-        return getattr(self._delegate, name)
+        return _guarded_delegate_attribute(self._handle, self._delegate, name)
 
 
 class _RuntimeSourceSignaturesProxy:
-    def __init__(self, handle: _RuntimeCacheHandle) -> None:
+    def __init__(self, handle: _RuntimeCacheLease) -> None:
         self._handle = handle
         self._delegate = handle.ledger.source_signatures
 
     def normalize_path(self, source_path: Path | str) -> str:
-        return self._delegate.normalize_path(source_path)
+        return self._handle.call(lambda _handle: self._delegate.normalize_path(source_path))
 
     def signature_for_path(self, source_path: Path) -> SourceSignature | None:
-        return self._delegate.signature_for_path(source_path)
+        return self._handle.call(lambda _handle: self._delegate.signature_for_path(source_path))
 
     def is_stale(self, flow_name: str, signature: SourceSignature | None) -> bool:
-        return self._delegate.is_stale(flow_name, signature)
+        return self._handle.call(lambda _handle: self._delegate.is_stale(flow_name, signature))
 
     def prune_missing(self, *, flow_name: str, current_source_paths: set[str]) -> None:
-        self._delegate.prune_missing(flow_name=flow_name, current_source_paths=current_source_paths)
-        self._handle._invalidate_caches()
+        def prune(handle: _RuntimeCacheHandle) -> None:
+            self._delegate.prune_missing(flow_name=flow_name, current_source_paths=current_source_paths)
+            handle._invalidate_caches()
+
+        self._handle.call(prune)
 
     def list_file_states(self, *, flow_name: str | None = None) -> tuple[PersistedFileState, ...]:
         return self._handle.read_cached(
@@ -351,11 +440,32 @@ class _RuntimeSourceSignaturesProxy:
         )
 
     def __getattr__(self, name: str):
-        return getattr(self._delegate, name)
+        return _guarded_delegate_attribute(self._handle, self._delegate, name)
+
+
+class _RuntimeSnapshotsProxy:
+    def __init__(self, handle: _RuntimeCacheLease) -> None:
+        self._handle = handle
+
+    def replace(
+        self,
+        *,
+        runs: tuple[PersistedRun, ...],
+        step_runs: tuple[PersistedStepRun, ...],
+        logs: tuple[PersistedLogEntry, ...],
+        file_states: tuple[PersistedFileState, ...],
+    ) -> None:
+        self._handle.submit_write(
+            "snapshot_replace",
+            runs=runs,
+            step_runs=step_runs,
+            logs=logs,
+            file_states=file_states,
+        )
 
 
 class _RuntimeExecutionStateProxy:
-    def __init__(self, handle: _RuntimeCacheHandle) -> None:
+    def __init__(self, handle: _RuntimeCacheLease) -> None:
         self._handle = handle
 
     def record_run_started(
@@ -456,27 +566,34 @@ class RuntimeIoCacheStore(RuntimeCacheStore):
 
     def __init__(self, handle: _RuntimeCacheHandle) -> None:
         self._handle = handle
-        self._handle.acquire()
-        self.runs = _RuntimeRunsProxy(handle)
-        self.step_outputs = _RuntimeStepOutputsProxy(handle)
-        self.logs = _RuntimeLogsProxy(handle)
-        self.source_signatures = _RuntimeSourceSignaturesProxy(handle)
-        self.execution_state = _RuntimeExecutionStateProxy(handle)
+        self._lease = _RuntimeCacheLease(handle)
+        self.runs = _RuntimeRunsProxy(self._lease)
+        self.step_outputs = _RuntimeStepOutputsProxy(self._lease)
+        self.logs = _RuntimeLogsProxy(self._lease)
+        self.source_signatures = _RuntimeSourceSignaturesProxy(self._lease)
+        self.snapshots = _RuntimeSnapshotsProxy(self._lease)
+        self.execution_state = _RuntimeExecutionStateProxy(self._lease)
 
     def close(self) -> None:
-        self._handle.release()
+        self._lease.close()
 
     def refresh_external_state(self) -> None:
         """Drop cached reads so the next query reflects external daemon writes immediately."""
-        self._handle._invalidate_caches()
+        self._lease.invalidate_caches()
 
     def reset_flow(self, flow_name: str) -> None:
-        self._handle.ledger.reset_flow(flow_name)
-        self._handle._invalidate_caches()
+        def reset(handle: _RuntimeCacheHandle) -> None:
+            handle.ledger.reset_flow(flow_name)
+            handle._invalidate_caches()
+
+        self._lease.call(reset)
 
     def reset_all(self) -> None:
-        self._handle.ledger.reset_all()
-        self._handle._invalidate_caches()
+        def reset(handle: _RuntimeCacheHandle) -> None:
+            handle.ledger.reset_all()
+            handle._invalidate_caches()
+
+        self._lease.call(reset)
 
     def reconcile_orphaned_activity(
         self,
@@ -485,16 +602,19 @@ class RuntimeIoCacheStore(RuntimeCacheStore):
         status: str = "stopped",
         error_text: str | None = None,
     ) -> tuple[int, int]:
-        result = self._handle.ledger.reconcile_orphaned_activity(
-            finished_at_utc=finished_at_utc,
-            status=status,
-            error_text=error_text,
-        )
-        self._handle._invalidate_caches()
-        return result
+        def reconcile(handle: _RuntimeCacheHandle) -> tuple[int, int]:
+            result = handle.ledger.reconcile_orphaned_activity(
+                finished_at_utc=finished_at_utc,
+                status=status,
+                error_text=error_text,
+            )
+            handle._invalidate_caches()
+            return result
+
+        return self._lease.call(reconcile)
 
     def __getattr__(self, name: str):
-        return getattr(self._handle.ledger, name)
+        return _guarded_delegate_attribute(self._lease, self._handle.ledger, name)
 
 
 class RuntimeIoLayer:
@@ -508,16 +628,21 @@ class RuntimeIoLayer:
 
     def open_cache_store(self, db_path: Path) -> RuntimeIoCacheStore:
         normalized = Path(db_path).expanduser().resolve()
-        with self._lock:
-            handle = self._handles.get(normalized)
-            if handle is None or handle._closed:
-                handle = _RuntimeCacheHandle(
-                    normalized,
-                    cache_ttl_seconds=self.cache_ttl_seconds,
-                    max_read_cache_entries=self.max_read_cache_entries,
-                )
-                self._handles[normalized] = handle
-            return RuntimeIoCacheStore(handle)
+        while True:
+            with self._lock:
+                handle = self._handles.get(normalized)
+                if handle is None or handle._closed:
+                    handle = _RuntimeCacheHandle(
+                        normalized,
+                        cache_ttl_seconds=self.cache_ttl_seconds,
+                        max_read_cache_entries=self.max_read_cache_entries,
+                    )
+                    self._handles[normalized] = handle
+                try:
+                    return RuntimeIoCacheStore(handle)
+                except _RuntimeHandleClosedError:
+                    if self._handles.get(normalized) is handle:
+                        self._handles.pop(normalized)
 
 
 _DEFAULT_RUNTIME_IO_LAYER: RuntimeIoLayer | None = None

@@ -2,7 +2,11 @@
 
 Date: 2026-07-13
 
-Revision note: updated after removal of the retired operator interface; findings and scope specific to it have been removed.
+Revision notes:
+
+- Updated after removal of the retired operator interface; findings and scope specific to it have been removed.
+- P1-7 is resolved by idempotent runtime-I/O leases that reject stale operations and let in-flight work drain before releasing the shared writer.
+- P2-9 is closed as intended product behavior: CLI workspace creation replaces the auto-provisioned VS Code settings file with the current Data Engine settings.
 
 Reviewed commit: `b6a01b70d37c7d6bb9885f132e1218eb07d46f62` (`main`)
 
@@ -12,15 +16,15 @@ Scope: runtime, shared state, daemon lifecycle, platform behavior, CLI, GUI, aut
 
 ## Executive summary
 
-The repository has a strong clean baseline: all 916 post-removal tests pass, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and a PEP 517 wheel build succeeds. The review nevertheless found 26 reproducible or deterministic defects that are not covered by the current suite:
+The repository has a strong clean baseline: all 921 current tests pass, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and the PEP 517 build and Twine metadata checks succeed. The review initially found 26 reproducible or deterministic issues. After one implementation fix and one clarified product decision, 24 remain open:
 
-| Priority | Count | Meaning |
+| Priority | Open | Meaning |
 |---|---:|---|
-| P1 | 8 | Safety, ownership, data-consistency, cross-workspace, or indefinite-hang risk; address before relying on the affected path in production. |
-| P2 | 16 | Material functional or platform-correctness defect; schedule promptly. |
+| P1 | 7 | Safety, ownership, data-consistency, cross-workspace, or indefinite-hang risk; address before relying on the affected path in production. |
+| P2 | 15 | Material functional or platform-correctness defect; schedule promptly. |
 | P3 | 2 | Lower-frequency edge case. |
 
-The highest-risk cluster is daemon/workspace ownership. Lease mutation is not fenced, forced shutdown can target a reused PID, stop/handoff can release ownership while worker threads are still alive, and POSIX force-stop does not terminate descendants. The next cluster is runtime projection consistency: a reader can accept a torn shared snapshot, hydration can invalidate incremental cursors indefinitely, and a double-close can shut down a shared writer and hang another client forever.
+The highest-risk cluster is daemon/workspace ownership. Lease mutation is not fenced, forced shutdown can target a reused PID, stop/handoff can release ownership while worker threads are still alive, and POSIX force-stop does not terminate descendants. The next cluster is runtime projection consistency: a reader can accept a torn shared snapshot, and hydration can invalidate incremental cursors indefinitely.
 
 ## P1 findings
 
@@ -106,7 +110,9 @@ Impact: observers can remain permanently stale after hydration or ownership chan
 
 Recommendation: preserve incoming IDs during full replacement, or make hydration generation-aware and explicitly reset every log, step-output, and runtime-I/O cursor/cache.
 
-### P1-7 — Double-closing one runtime-I/O proxy can shut down a shared writer and hang another client forever
+### P1-7 — Resolved: runtime-I/O proxy closure is idempotent and cannot strand another client
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -116,7 +122,7 @@ Evidence:
 
 Impact: an ordinary duplicate cleanup path can permanently hang another window, binding, or service using the same runtime database.
 
-Recommendation: make each proxy close idempotent; reject submissions atomically once shutdown starts; complete pending requests with an error; and add double-close, stale-proxy, and concurrent-close tests.
+Resolution: each proxy now owns an idempotent lease. Closing a lease waits without polling for its own in-flight operations, releases the shared handle exactly once, and rejects later use. Handle shutdown and write admission share one lock, so no write can be queued behind the shutdown sentinel. Snapshot replacement is serialized through the same writer, and a read overlapping invalidation is never cached under the newer generation. Concurrent-close, final-close/open, stale-snapshot, overlapping-read, and surviving-client coverage verifies the lifecycle boundary.
 
 ### P1-8 — Hostname-only machine identity can collapse distinct workstations into one owner
 
@@ -230,16 +236,18 @@ Impact: old workspace daemons remain alive and automated work can continue after
 
 Recommendation: remove the old binding's session before closing it, without directly forcing daemon shutdown; allow the daemon's normal no-client policy to decide what to stop.
 
-### P2-9 — `data-engine create workspace` overwrites collection-level VS Code settings
+### P2-9 — Closed: CLI workspace creation intentionally replaces auto-provisioned VS Code settings
+
+Status: closed as expected product behavior on 2026-07-13.
 
 Evidence:
 
 - `src/data_engine/ui/cli/commands_workspace.py:32-51,78-87`
 - `src/data_engine/services/workspace_provisioning.py:137-161,181-205`
 
-Creating an empty child workspace forces `overwrite=True` for the parent collection's `.vscode/settings.json`, replacing the entire document. The normal provisioning service deliberately preserves that file. A reproduction with an unrelated parent setting lost the original content.
+Creating an empty child workspace forces `overwrite=True` for the parent collection's `.vscode/settings.json`, replacing the entire document. This is the intended CLI provisioning contract: the file is generated and owned by Data Engine so its interpreter and environment settings stay synchronized with the active installation and workspace collection.
 
-Recommendation: preserve or merge by default, write only Data Engine-owned keys, and require an explicit force option for whole-file replacement.
+Verification: CLI coverage now starts with unrelated existing content, creates a workspace, and asserts that the replacement exactly matches the current generated collection settings.
 
 ### P2-10 — Excel template composition crashes on worksheets containing merged cells
 
@@ -342,7 +350,7 @@ Recommendation: validate exact decoded length, quarantine malformed files atomic
 ### What is working well
 
 - The repository was clean and synchronized with `origin/main` before this report was added.
-- The full suite passes: `916 passed in 40.05s` on Python 3.14.6.
+- The full suite passes: `921 passed in 33.18s` on Python 3.14.6.
 - Ruff passes with no configured violations.
 - pydoclint reports no violations under `src/data_engine`.
 - `pip check` reports no broken requirements.
@@ -361,21 +369,20 @@ Recommendation: validate exact decoded length, quarantine malformed files atomic
 
 4. **Fakes sometimes diverge from production contracts.** P2-2 passes because the fake supplies a nonexistent property. Prefer protocol-conforming fakes plus at least one real-ledger integration test for service boundaries.
 
-5. **Lifecycle and coordination need adversarial tests.** Add deterministic tests for stale-owner resumption, lease fencing, non-cooperative workers, PID reuse, duplicate close, workspace switch during queued updates, checkpoint failure cascades, and multi-file snapshot interleavings.
+5. **Lifecycle and coordination need adversarial tests.** Add deterministic tests for stale-owner resumption, lease fencing, non-cooperative workers, PID reuse, workspace switch during queued updates, checkpoint failure cascades, and multi-file snapshot interleavings.
 
 6. **Platform checks need real hosts.** Add Windows coverage for named-pipe deadlines, reserved workspace names, launcher-process behavior, and daemon lifetime; add macOS/Linux coverage for AF_UNIX length and process-group termination.
 
-The documented `python -m build` and `twine check` commands were not run directly because the current virtual environment does not contain the optional `build` and `twine` modules. The isolated backend wheel build succeeded, but release validation should still run in the package-tooling environment.
+The dependency-refresh package-tooling environment completed the PEP 517 build and `twine check` successfully.
 
 ## Recommended repair order
 
 1. Introduce lease fencing and verified daemon/process identity (P1-1, P1-3, P1-8).
 2. Make stop/handoff wait for actual worker termination and implement safe POSIX tree termination (P1-2, P1-4).
 3. Add a committed shared-snapshot manifest and generation-aware cache invalidation (P1-5, P1-6).
-4. Make runtime-I/O ownership idempotent and fail closed instead of hanging (P1-7).
-5. Clean old GUI client sessions during workspace switching (P2-8).
-6. Repair explicit workspace-ID propagation and platform-safe naming (P2-1, P2-13).
-7. Address the remaining deterministic runtime/API defects, then add the CI, type-checking, concurrency, and platform test gates described above.
+4. Clean old GUI client sessions during workspace switching (P2-8).
+5. Repair explicit workspace-ID propagation and platform-safe naming (P2-1, P2-13).
+6. Address the remaining deterministic runtime/API defects, then add the CI, type-checking, concurrency, and platform test gates described above.
 
 ## Review limitations
 

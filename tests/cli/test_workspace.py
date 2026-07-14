@@ -9,7 +9,10 @@ from data_engine.platform.workspace_models import (
     WORKSPACE_TEMPLATES_DIR_NAME,
 )
 from data_engine.ui.cli.app import main
-from data_engine.ui.cli.commands_workspace import workspace_vscode_settings as _workspace_vscode_settings
+from data_engine.ui.cli.commands_workspace import (
+    collection_vscode_settings as _collection_vscode_settings,
+    workspace_vscode_settings as _workspace_vscode_settings,
+)
 
 from tests.cli.support import expected_vscode_interpreter_path
 
@@ -60,6 +63,24 @@ def test_cli_create_workspace_rejects_non_empty_target(monkeypatch, tmp_path, ca
     assert "non-empty directory" in capsys.readouterr().err
 
 
+def test_cli_create_workspace_replaces_collection_vscode_settings(monkeypatch, tmp_path):
+    app_root = tmp_path / "data_engine"
+    (app_root / "config").mkdir(parents=True)
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    collection_root = tmp_path / "shared_workspaces"
+    settings_path = collection_root / ".vscode" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text('{"editor.fontSize": 18}\n', encoding="utf-8")
+
+    result = main(["create", "workspace", str(collection_root / "docs")])
+
+    assert result == 0
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == _collection_vscode_settings(
+        collection_root,
+        app_root=app_root,
+    )
+
+
 def test_workspace_vscode_settings_only_adds_checkout_specific_entries_when_present(tmp_path, monkeypatch):
     app_root = tmp_path / "installed_app"
     workspace_root = tmp_path / "workspaces" / "docs"
@@ -71,4 +92,3 @@ def test_workspace_vscode_settings_only_adds_checkout_specific_entries_when_pres
     assert "python.analysis.extraPaths" not in settings
     assert "python.testing.pytestEnabled" not in settings
     assert "python.testing.pytestArgs" not in settings
-
