@@ -44,7 +44,12 @@ from data_engine.runtime.shared_state import (
 )
 from data_engine.views.models import QtFlowCard
 
-from .support import _write_blocking_group_flows, _write_demo_flow, resolve_workspace_paths
+from .support import (
+    _owner_process_kwargs,
+    _write_blocking_group_flows,
+    _write_demo_flow,
+    resolve_workspace_paths,
+)
 
 
 def claim_workspace(paths) -> bool:
@@ -54,6 +59,7 @@ def claim_workspace(paths) -> bool:
 def checkpoint_workspace_state(paths, ledger, **kwargs):
     bundle = resolve_workspace_bundle(paths)
     assert bundle is not None and bundle.lease_token is not None
+    kwargs = {**_owner_process_kwargs(int(kwargs["pid"])), **kwargs}
     return _checkpoint_workspace_state(
         paths,
         ledger,
@@ -108,8 +114,11 @@ def test_runtime_command_does_not_reclaim_when_drain_begins_at_claim_boundary(
         filesystem_claim_calls: list[object] = []
         monkeypatch.setattr(
             service.shared_state_adapter,
-            "claim_workspace",
-            lambda candidate_paths: filesystem_claim_calls.append(candidate_paths) or True,
+            "claim_daemon_workspace",
+            lambda candidate_paths, **kwargs: filesystem_claim_calls.append(
+                candidate_paths
+            )
+            or True,
         )
 
         def _begin_drain_before_claim(candidate_service):
@@ -146,12 +155,12 @@ def test_released_workspace_claim_holds_admission_lock_through_filesystem_commit
     drain_attempted = threading.Event()
     drain_finished = threading.Event()
     claim_results: list[bool] = []
-    original_claim = service.shared_state_adapter.claim_workspace
+    original_claim = service.shared_state_adapter.claim_daemon_workspace
 
-    def _blocking_claim(candidate_paths):
+    def _blocking_claim(candidate_paths, **kwargs):
         filesystem_claim_entered.set()
         allow_filesystem_claim.wait()
-        return original_claim(candidate_paths)
+        return original_claim(candidate_paths, **kwargs)
 
     def _claim() -> None:
         claim_results.append(try_claim_released_workspace(service))
@@ -162,7 +171,11 @@ def test_released_workspace_claim_holds_admission_lock_through_filesystem_commit
         drain_finished.set()
 
     release_workspace_claim(service)
-    monkeypatch.setattr(service.shared_state_adapter, "claim_workspace", _blocking_claim)
+    monkeypatch.setattr(
+        service.shared_state_adapter,
+        "claim_daemon_workspace",
+        _blocking_claim,
+    )
     claim_thread = threading.Thread(target=_claim, daemon=True)
     drain_thread = threading.Thread(target=_drain, daemon=True)
     claim_thread.start()
@@ -1241,6 +1254,8 @@ def test_runtime_command_drains_immediately_when_retained_token_is_replaced(tmp_
         host_name=service.host_name,
         daemon_id=service.daemon_id,
         pid=service.pid,
+        process_identity=service.process_identity,
+        containment_nonce=service.containment_nonce,
         status="idle",
         started_at_utc=old_time,
         last_checkpoint_at_utc=old_time,
@@ -1378,6 +1393,8 @@ def test_daemon_flow_reset_fences_recovery_until_fresh_checkpoint(tmp_path, monk
         host_name=service.host_name,
         daemon_id=service.daemon_id,
         pid=service.pid,
+        process_identity=service.process_identity,
+        containment_nonce=service.containment_nonce,
         status="idle",
         started_at_utc=old_time,
         last_checkpoint_at_utc=old_time,

@@ -309,10 +309,13 @@ def main(argv: list[str] | None = None) -> int:
                 record_check(bool(response.get("ok")), f"{paths.workspace_id}: shutdown acknowledged", failures)
             except Exception as exc:
                 failures.append(f"{paths.workspace_id}: shutdown request failed: {exc}")
-            stopped = wait_for_daemon_stop(paths, timeout=args.shutdown_timeout)
+            stopped = wait_for_daemon_stop(
+                paths,
+                expected_pid=daemon_pids.get(paths.workspace_id),
+                timeout=args.shutdown_timeout,
+            )
             record_check(stopped, f"{paths.workspace_id}: daemon stopped", failures)
 
-        time.sleep(1.0)
         processes = list_daemon_processes()
         for paths in workspace_paths:
             matching = [item for item in processes if item.workspace_root == paths.workspace_root.resolve()]
@@ -328,7 +331,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
             record_check(read_lease_metadata(paths) is None, f"{paths.workspace_id}: lease metadata removed after shutdown", failures)
             record_check((paths.available_markers_dir / paths.workspace_id).exists(), f"{paths.workspace_id}: available marker restored after shutdown", failures)
-            record_check(not (paths.leased_markers_dir / paths.workspace_id).exists(), f"{paths.workspace_id}: leased marker removed after shutdown", failures)
+            record_check(
+                not any(paths.leased_markers_dir.iterdir()),
+                f"{paths.workspace_id}: leased marker removed after shutdown",
+                failures,
+            )
             bundle = resolve_workspace_bundle(paths)
             manifest_exists = bundle is not None and bundle.snapshot_manifest_path.is_file()
             record_check(manifest_exists, f"{paths.workspace_id}: shared snapshot manifest exists after shutdown", failures)
@@ -410,13 +417,31 @@ def wait_for_daemon_start(paths, *, timeout: float) -> bool:
     return is_daemon_live(paths)
 
 
-def wait_for_daemon_stop(paths, *, timeout: float) -> bool:
+def wait_for_daemon_stop(paths, *, expected_pid: int | None, timeout: float) -> bool:
+    def _stopped() -> bool:
+        process_alive = (
+            _is_pid_alive(expected_pid)
+            if expected_pid is not None
+            else any(
+                process.workspace_root == paths.workspace_root.resolve()
+                for process in list_daemon_processes()
+            )
+        )
+        bundle = resolve_workspace_bundle(paths)
+        return (
+            not is_daemon_live(paths)
+            and not process_alive
+            and read_lease_metadata(paths) is None
+            and bundle is not None
+            and bundle.state == "available"
+        )
+
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not is_daemon_live(paths):
+        if _stopped():
             return True
         time.sleep(0.1)
-    return not is_daemon_live(paths)
+    return _stopped()
 
 
 def wait_for_engine_state(paths, *, active: bool, timeout: float) -> bool:
@@ -437,7 +462,10 @@ def wait_for_engine_state(paths, *, active: bool, timeout: float) -> bool:
 def list_daemon_processes() -> list[DaemonProcess]:
     processes: list[DaemonProcess] = []
     for row in list_processes():
-        if "data_engine.hosts.daemon.app" not in row.command:
+        if (
+            "daemon_bootstrap.py" not in row.command
+            and "data_engine.daemon_bootstrap" not in row.command
+        ):
             continue
         workspace_root = _extract_workspace_root_from_command(row.command)
         processes.append(DaemonProcess(pid=row.pid, workspace_root=workspace_root, command=row.command))

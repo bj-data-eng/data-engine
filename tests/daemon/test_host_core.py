@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import os
@@ -7,6 +8,7 @@ import threading
 
 import pytest
 
+import data_engine.hosts.daemon.server as daemon_server
 from data_engine.domain import DaemonLifecyclePolicy
 from data_engine.hosts.daemon.app import (
     DAEMON_LOG_RETENTION_DAYS,
@@ -26,6 +28,7 @@ from data_engine.hosts.daemon.client import (
 from data_engine.hosts.daemon.runtime_control import stop_active_work
 from data_engine.hosts.daemon.server import serve_forever, serve_workspace_daemon
 from data_engine.platform.machine_identity import host_name_text, machine_id_text
+from data_engine.platform.processes import ProcessInspectionError
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger, utcnow_text
 from data_engine.runtime.shared_state import (
@@ -37,7 +40,13 @@ from data_engine.runtime.shared_state import (
     write_lease_metadata,
 )
 
-from .support import _write_demo_flow, resolve_workspace_paths
+from .support import (
+    _TEST_CONTAINMENT_NONCE,
+    _owner_process_kwargs,
+    _test_process_identity,
+    _write_demo_flow,
+    resolve_workspace_paths,
+)
 
 
 def claim_workspace(paths) -> bool:
@@ -47,12 +56,26 @@ def claim_workspace(paths) -> bool:
 def checkpoint_workspace_state(paths, ledger, **kwargs):
     bundle = resolve_workspace_bundle(paths)
     assert bundle is not None and bundle.lease_token is not None
+    kwargs = {**_owner_process_kwargs(int(kwargs["pid"])), **kwargs}
     return _checkpoint_workspace_state(
         paths,
         ledger,
         lease_token=bundle.lease_token,
         **kwargs,
     )
+
+
+@pytest.fixture
+def verified_server_containment(monkeypatch):
+    """Keep listener-loop tests focused on server behavior after containment."""
+    monkeypatch.setattr(
+        daemon_server,
+        "_require_current_process_containment",
+        lambda containment_nonce, *, expected_process_identity=None: (
+            expected_process_identity
+        ),
+    )
+
 
 def test_daemon_service_initializes_and_serves_commands(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
@@ -69,6 +92,18 @@ def test_daemon_service_initializes_and_serves_commands(tmp_path, monkeypatch):
         assert status["status"]["workspace_id"] == "default"
         assert status["status"]["machine_id"] == machine_id_text(app_root=paths.app_root)
         assert status["status"]["host_name"] == host_name_text()
+        assert status["status"]["pid"] == service.process_identity.pid
+        assert status["status"]["process_start_key"] == service.process_identity.start_key
+        assert (
+            status["status"]["process_executable_path"]
+            == service.process_identity.executable_path
+        )
+        assert status["status"]["process_group_id"] == service.process_identity.process_group_id
+        assert (
+            status["status"]["process_session_id"]
+            == service.process_identity.process_session_id
+        )
+        assert status["status"]["containment_nonce"] == service.containment_nonce
 
         flows = service._handle_command({"command": "list_flows"})  # noqa: SLF001 - direct daemon contract test
         assert flows["ok"] is True
@@ -692,13 +727,24 @@ def test_initialize_service_reconciles_orphaned_active_runtime_rows(tmp_path, mo
         service._shutdown()  # noqa: SLF001
 
 
-def test_serve_workspace_daemon_passes_lifecycle_policy_to_service_type(tmp_path):
+def test_serve_workspace_daemon_passes_lifecycle_policy_to_service_type(
+    tmp_path,
+    verified_server_containment,
+):
+    del verified_server_containment
     workspace_root = tmp_path / "shared" / "default"
 
     calls: list[tuple[Path, DaemonLifecyclePolicy]] = []
 
     class _Service:
-        def __init__(self, paths, *, lifecycle_policy: DaemonLifecyclePolicy) -> None:
+        def __init__(
+            self,
+            paths,
+            *,
+            containment_nonce: str,
+            lifecycle_policy: DaemonLifecyclePolicy,
+        ) -> None:
+            assert containment_nonce == _TEST_CONTAINMENT_NONCE
             calls.append((paths.workspace_root, lifecycle_policy))
 
         def serve_forever(self) -> None:
@@ -707,6 +753,7 @@ def test_serve_workspace_daemon_passes_lifecycle_policy_to_service_type(tmp_path
     result = serve_workspace_daemon(
         _Service,
         workspace_root=workspace_root,
+        containment_nonce=_TEST_CONTAINMENT_NONCE,
         lifecycle_policy=DaemonLifecyclePolicy.EPHEMERAL,
     )
 
@@ -714,7 +761,11 @@ def test_serve_workspace_daemon_passes_lifecycle_policy_to_service_type(tmp_path
     assert calls[0] == (workspace_root.resolve(), DaemonLifecyclePolicy.EPHEMERAL)
 
 
-def test_serve_workspace_daemon_uses_injected_workspace_service(tmp_path):
+def test_serve_workspace_daemon_uses_injected_workspace_service(
+    tmp_path,
+    verified_server_containment,
+):
+    del verified_server_containment
     workspace_root = tmp_path / "shared" / "default"
     calls: list[Path | None] = []
 
@@ -725,7 +776,14 @@ def test_serve_workspace_daemon_uses_injected_workspace_service(tmp_path):
             return resolve_workspace_paths(workspace_root=workspace_root)
 
     class _Service:
-        def __init__(self, paths, *, lifecycle_policy: DaemonLifecyclePolicy) -> None:
+        def __init__(
+            self,
+            paths,
+            *,
+            containment_nonce: str,
+            lifecycle_policy: DaemonLifecyclePolicy,
+        ) -> None:
+            assert containment_nonce == _TEST_CONTAINMENT_NONCE
             assert lifecycle_policy is DaemonLifecyclePolicy.EPHEMERAL
             self.paths = paths
 
@@ -735,6 +793,7 @@ def test_serve_workspace_daemon_uses_injected_workspace_service(tmp_path):
     result = serve_workspace_daemon(
         _Service,
         workspace_root=workspace_root,
+        containment_nonce=_TEST_CONTAINMENT_NONCE,
         lifecycle_policy=DaemonLifecyclePolicy.EPHEMERAL,
         workspace_service=_WorkspaceService(),
     )
@@ -743,13 +802,24 @@ def test_serve_workspace_daemon_uses_injected_workspace_service(tmp_path):
     assert calls == [workspace_root]
 
 
-def test_serve_workspace_daemon_uses_injected_resolve_paths_func(tmp_path):
+def test_serve_workspace_daemon_uses_injected_resolve_paths_func(
+    tmp_path,
+    verified_server_containment,
+):
+    del verified_server_containment
     workspace_root = tmp_path / "shared" / "default"
     calls: list[tuple[Path | None, str | None]] = []
     resolved = resolve_workspace_paths(workspace_root=workspace_root)
 
     class _Service:
-        def __init__(self, paths, *, lifecycle_policy: DaemonLifecyclePolicy) -> None:
+        def __init__(
+            self,
+            paths,
+            *,
+            containment_nonce: str,
+            lifecycle_policy: DaemonLifecyclePolicy,
+        ) -> None:
+            assert containment_nonce == _TEST_CONTAINMENT_NONCE
             assert lifecycle_policy is DaemonLifecyclePolicy.EPHEMERAL
             self.paths = paths
 
@@ -760,6 +830,7 @@ def test_serve_workspace_daemon_uses_injected_resolve_paths_func(tmp_path):
         _Service,
         workspace_root=workspace_root,
         workspace_id="default",
+        containment_nonce=_TEST_CONTAINMENT_NONCE,
         lifecycle_policy=DaemonLifecyclePolicy.EPHEMERAL,
         resolve_paths_func=lambda *, workspace_root=None, workspace_id=None: calls.append((workspace_root, workspace_id)) or resolved,
     )
@@ -768,7 +839,12 @@ def test_serve_workspace_daemon_uses_injected_resolve_paths_func(tmp_path):
     assert calls == [(workspace_root, "default")]
 
 
-def test_serve_workspace_daemon_preserves_explicit_workspace_identity(tmp_path, monkeypatch):
+def test_serve_workspace_daemon_preserves_explicit_workspace_identity(
+    tmp_path,
+    monkeypatch,
+    verified_server_containment,
+):
+    del verified_server_containment
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "folder-name"
     workspace_id = "explicit-id"
@@ -777,7 +853,14 @@ def test_serve_workspace_daemon_preserves_explicit_workspace_identity(tmp_path, 
     child_paths = []
 
     class _Service:
-        def __init__(self, paths, *, lifecycle_policy: DaemonLifecyclePolicy) -> None:
+        def __init__(
+            self,
+            paths,
+            *,
+            containment_nonce: str,
+            lifecycle_policy: DaemonLifecyclePolicy,
+        ) -> None:
+            assert containment_nonce == _TEST_CONTAINMENT_NONCE
             assert lifecycle_policy is DaemonLifecyclePolicy.EPHEMERAL
             child_paths.append(paths)
 
@@ -788,6 +871,7 @@ def test_serve_workspace_daemon_preserves_explicit_workspace_identity(tmp_path, 
         _Service,
         workspace_root=workspace_root,
         workspace_id=workspace_id,
+        containment_nonce=_TEST_CONTAINMENT_NONCE,
         lifecycle_policy=DaemonLifecyclePolicy.EPHEMERAL,
     )
 
@@ -803,14 +887,17 @@ def test_daemon_main_uses_injected_resolve_paths_func(monkeypatch, tmp_path):
     workspace_root = tmp_path / "shared" / "folder-name"
     resolved = resolve_workspace_paths(workspace_root=workspace_root, workspace_id="explicit-id")
     resolve_calls: list[tuple[Path | None, str | None]] = []
-    serve_calls: list[tuple[Path, str, str]] = []
+    serve_calls: list[tuple[Path, str, str, str]] = []
+    startup_order: list[str] = []
 
     monkeypatch.setattr(
         "data_engine.hosts.daemon.app.serve_workspace_daemon",
-        lambda **kwargs: serve_calls.append(
+        lambda **kwargs: startup_order.append("serve")
+        or serve_calls.append(
             (
                 kwargs["workspace_root"],
                 kwargs["workspace_id"],
+                kwargs["containment_nonce"],
                 kwargs["lifecycle_policy"],
             )
         )
@@ -823,34 +910,241 @@ def test_daemon_main_uses_injected_resolve_paths_func(monkeypatch, tmp_path):
             str(workspace_root),
             "--workspace-id",
             "explicit-id",
+            "--containment-nonce",
+            _TEST_CONTAINMENT_NONCE,
             "--lifecycle-policy",
             "ephemeral",
         ],
-        resolve_paths_func=lambda *, workspace_root=None, workspace_id=None: resolve_calls.append((workspace_root, workspace_id)) or resolved,
+        resolve_paths_func=lambda *, workspace_root=None, workspace_id=None: startup_order.append("resolve")
+        or resolve_calls.append((workspace_root, workspace_id))
+        or resolved,
+        arm_process_group_watchdog_func=lambda **kwargs: startup_order.append(
+            f"watchdog:{kwargs['containment_nonce']}"
+        ),
     )
 
     assert result == 0
+    assert startup_order == [
+        f"watchdog:{_TEST_CONTAINMENT_NONCE}",
+        "resolve",
+        "serve",
+    ]
     assert resolve_calls == [(workspace_root.resolve(), "explicit-id")]
-    assert serve_calls == [(resolved.workspace_root, resolved.workspace_id, "ephemeral")]
+    assert serve_calls == [
+        (
+            resolved.workspace_root,
+            resolved.workspace_id,
+            _TEST_CONTAINMENT_NONCE,
+            "ephemeral",
+        )
+    ]
 
 
-def test_serve_forever_processes_one_command_then_shuts_down(tmp_path, monkeypatch):
+def test_containment_guard_refuses_a_mismatched_current_process(monkeypatch):
+    expected = _test_process_identity(321)
+    replacement = replace(expected, start_key="replacement-process")
+    monkeypatch.setattr(daemon_server.os, "getpid", lambda: expected.pid)
+    monkeypatch.setattr(
+        daemon_server,
+        "inspect_process_identity",
+        lambda pid: replacement,
+    )
+    monkeypatch.setattr(
+        daemon_server,
+        "arm_posix_process_group_watchdog",
+        lambda **kwargs: pytest.fail("identity mismatch must fail before containment"),
+    )
+
+    with pytest.raises(ProcessInspectionError, match="does not match its recorded identity"):
+        daemon_server._require_current_process_containment(
+            _TEST_CONTAINMENT_NONCE,
+            expected_process_identity=expected,
+        )
+
+
+def test_daemon_main_fails_closed_before_path_resolution_without_containment(
+    monkeypatch,
+    tmp_path,
+):
+    workspace_root = tmp_path / "shared" / "default"
+    events = []
+
+    def _refuse_uncontained_entrypoint(containment_nonce: str):
+        events.append(("containment", containment_nonce))
+        raise ProcessInspectionError("current process is not contained")
+
+    monkeypatch.setattr(
+        "data_engine.hosts.daemon.entrypoints._require_current_process_containment",
+        _refuse_uncontained_entrypoint,
+    )
+
+    with pytest.raises(ProcessInspectionError, match="not contained"):
+        daemon_main(
+            [
+                "--workspace",
+                str(workspace_root),
+                "--containment-nonce",
+                _TEST_CONTAINMENT_NONCE,
+            ],
+            resolve_paths_func=lambda **kwargs: pytest.fail(
+                f"uncontained entrypoint must not resolve paths: {kwargs!r}"
+            ),
+        )
+
+    assert events == [("containment", _TEST_CONTAINMENT_NONCE)]
+
+
+def test_serve_workspace_daemon_fails_closed_before_path_resolution_without_containment(
+    monkeypatch,
+    tmp_path,
+):
+    workspace_root = tmp_path / "shared" / "default"
+    events = []
+
+    def _refuse_uncontained_server(containment_nonce: str):
+        events.append(("containment", containment_nonce))
+        raise ProcessInspectionError("current process is not contained")
+
+    monkeypatch.setattr(
+        daemon_server,
+        "_require_current_process_containment",
+        _refuse_uncontained_server,
+    )
+
+    with pytest.raises(ProcessInspectionError, match="not contained"):
+        serve_workspace_daemon(
+            object,
+            workspace_root=workspace_root,
+            containment_nonce=_TEST_CONTAINMENT_NONCE,
+            resolve_paths_func=lambda **kwargs: pytest.fail(
+                f"uncontained server must not resolve paths: {kwargs!r}"
+            ),
+        )
+
+    assert events == [("containment", _TEST_CONTAINMENT_NONCE)]
+
+
+def test_serve_forever_fails_closed_before_initialize_when_watchdog_is_unarmed(
+    monkeypatch,
+):
+    expected = _test_process_identity(321)
+    initialize_calls = []
+
+    class _Service:
+        process_identity = expected
+        containment_nonce = _TEST_CONTAINMENT_NONCE
+
+        def initialize(self) -> None:
+            initialize_calls.append(True)
+
+    monkeypatch.setattr(daemon_server.os, "name", "posix")
+    monkeypatch.setattr(daemon_server.os, "getpid", lambda: expected.pid)
+    monkeypatch.setattr(
+        daemon_server,
+        "inspect_process_identity",
+        lambda pid: expected,
+    )
+    monkeypatch.setattr(
+        daemon_server,
+        "arm_posix_process_group_watchdog",
+        lambda **kwargs: (_ for _ in ()).throw(
+            RuntimeError("watchdog is not armed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="watchdog is not armed"):
+        serve_forever(_Service())
+
+    assert initialize_calls == []
+
+
+def test_containment_guard_verifies_and_closes_the_current_windows_job(monkeypatch):
+    expected = replace(
+        _test_process_identity(321),
+        process_group_id=None,
+        process_session_id=7,
+    )
+    events = []
+
+    class _Job:
+        def close(self) -> None:
+            events.append("close")
+
+    monkeypatch.setattr(daemon_server.os, "name", "nt")
+    monkeypatch.setattr(daemon_server.os, "getpid", lambda: expected.pid)
+    monkeypatch.setattr(
+        daemon_server,
+        "inspect_process_identity",
+        lambda pid: events.append(("inspect", pid)) or expected,
+    )
+    monkeypatch.setattr(
+        daemon_server,
+        "open_verified_windows_kill_on_close_job",
+        lambda identity, *, nonce: events.append(("job", identity, nonce)) or _Job(),
+    )
+
+    actual = daemon_server._require_current_process_containment(
+        _TEST_CONTAINMENT_NONCE,
+        expected_process_identity=expected,
+    )
+
+    assert actual == expected
+    assert events == [
+        ("inspect", expected.pid),
+        ("job", expected, _TEST_CONTAINMENT_NONCE),
+        "close",
+    ]
+
+
+def test_serve_forever_processes_one_command_then_shuts_down(
+    tmp_path,
+    monkeypatch,
+    verified_server_containment,
+):
+    del verified_server_containment
+    monkeypatch.setattr(daemon_server, "deliver_challenge", lambda *_args: None)
+    monkeypatch.setattr(daemon_server, "answer_challenge", lambda *_args: None)
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     _write_demo_flow(workspace_root)
     paths = resolve_workspace_paths(workspace_root=workspace_root)
+    second_accept_started = threading.Event()
+    wake_requested = threading.Event()
+    wake_connection_closed = threading.Event()
+    wake_connection_read = threading.Event()
+    response_shutdown_states: list[bool] = []
 
     class _Connection:
         def __init__(self) -> None:
             self.sent_payloads: list[bytes] = []
 
-        def recv_bytes(self) -> bytes:
-            return _encode_message({"command": "daemon_ping"})
+        def recv_bytes(self, maxlength=None) -> bytes:
+            assert maxlength == daemon_server._MAX_DAEMON_REQUEST_BYTES  # noqa: SLF001
+            return _encode_message({"command": "shutdown_daemon"})
 
         def send_bytes(self, payload: bytes) -> None:
             self.sent_payloads.append(payload)
-            service.host.shutdown_event.set()
+            assert second_accept_started.wait(timeout=1.0) is True
+            response_shutdown_states.append(service.host.shutdown_event.is_set())
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _WakeConnection:
+        def close(self) -> None:
+            wake_connection_closed.set()
+
+        def recv_bytes(self, maxlength=None) -> bytes:
+            del maxlength
+            wake_connection_read.set()
+            raise AssertionError("shutdown wake connection reached a command worker")
+
+        def send_bytes(self, payload: bytes) -> None:
+            del payload
 
         def __enter__(self):
             return self
@@ -860,10 +1154,19 @@ def test_serve_forever_processes_one_command_then_shuts_down(tmp_path, monkeypat
 
     class _Listener:
         def __init__(self, *args, **kwargs) -> None:
+            assert "authkey" not in kwargs
             self.connection = _Connection()
+            self.wake_connection = _WakeConnection()
+            self.accept_count = 0
 
         def accept(self):
-            return self.connection
+            self.accept_count += 1
+            if self.accept_count == 1:
+                return self.connection
+            second_accept_started.set()
+            assert wake_requested.wait(timeout=1.0) is True
+            assert service.host.shutdown_event.is_set() is True
+            return self.wake_connection
 
         def close(self):
             return None
@@ -871,6 +1174,8 @@ def test_serve_forever_processes_one_command_then_shuts_down(tmp_path, monkeypat
     class _Service:
         def __init__(self, paths) -> None:
             self.paths = paths
+            self.process_identity = _test_process_identity(os.getpid())
+            self.containment_nonce = _TEST_CONTAINMENT_NONCE
             self._state_lock = threading.RLock()
             self.initialize_calls = 0
             self.handle_calls: list[dict[str, object]] = []
@@ -893,7 +1198,10 @@ def test_serve_forever_processes_one_command_then_shuts_down(tmp_path, monkeypat
 
         def _handle_command(self, payload):
             self.handle_calls.append(payload)
-            return {"ok": True, "command": payload.get("command")}
+            return {"ok": True, "draining": False}
+
+        def _wake_listener(self) -> None:
+            wake_requested.set()
 
         def _shutdown(self) -> None:
             self.shutdown_calls += 1
@@ -907,11 +1215,75 @@ def test_serve_forever_processes_one_command_then_shuts_down(tmp_path, monkeypat
     serve_forever(service)  # noqa: SLF001 - direct server loop test
 
     assert service.initialize_calls == 1
-    assert service.handle_calls == [{"command": "daemon_ping"}]
+    assert service.handle_calls == [{"command": "shutdown_daemon"}]
     assert service.shutdown_calls == 1
+    assert response_shutdown_states == [False]
+    assert service.host.listener.connection.sent_payloads == [
+        _encode_message({"ok": True, "draining": False})
+    ]
+    assert wake_connection_closed.is_set() is True
+    assert wake_connection_read.is_set() is False
 
 
-def test_serve_forever_handles_second_request_while_first_is_still_running(tmp_path, monkeypatch):
+def test_accepted_shutdown_proceeds_when_response_delivery_fails():
+    wake_requested = threading.Event()
+    debug_messages: list[str] = []
+
+    class _Connection:
+        def recv_bytes(self, maxlength=None) -> bytes:
+            assert maxlength == daemon_server._MAX_DAEMON_REQUEST_BYTES  # noqa: SLF001
+            return _encode_message({"command": "shutdown_daemon"})
+
+        def send_bytes(self, payload: bytes) -> None:
+            assert payload == _encode_message({"ok": True, "draining": False})
+            raise BrokenPipeError("requester disconnected")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Service:
+        def __init__(self) -> None:
+            self.host = type(
+                "_Host",
+                (),
+                {"shutdown_event": threading.Event()},
+            )()
+
+        def _handle_command(self, payload):
+            assert payload == {"command": "shutdown_daemon"}
+            return {"ok": True, "draining": False}
+
+        def _debug_log(self, message: str) -> None:
+            debug_messages.append(message)
+
+        def _wake_listener(self) -> None:
+            wake_requested.set()
+
+    service = _Service()
+
+    daemon_server._serve_connection(  # noqa: SLF001 - direct transport boundary regression
+        service,
+        _Connection(),
+        family="AF_UNIX",
+    )
+
+    assert service.host.shutdown_event.is_set() is True
+    assert wake_requested.wait(timeout=1.0) is True
+    assert len(debug_messages) == 1
+    assert "requester disconnected" in debug_messages[0]
+
+
+def test_serve_forever_handles_second_request_while_first_is_still_running(
+    tmp_path,
+    monkeypatch,
+    verified_server_containment,
+):
+    del verified_server_containment
+    monkeypatch.setattr(daemon_server, "deliver_challenge", lambda *_args: None)
+    monkeypatch.setattr(daemon_server, "answer_challenge", lambda *_args: None)
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -927,7 +1299,8 @@ def test_serve_forever_handles_second_request_while_first_is_still_running(tmp_p
             self.command = command
             self.sent_payloads: list[bytes] = []
 
-        def recv_bytes(self) -> bytes:
+        def recv_bytes(self, maxlength=None) -> bytes:
+            assert maxlength == daemon_server._MAX_DAEMON_REQUEST_BYTES  # noqa: SLF001
             return _encode_message({"command": self.command})
 
         def send_bytes(self, payload: bytes) -> None:
@@ -956,6 +1329,8 @@ def test_serve_forever_handles_second_request_while_first_is_still_running(tmp_p
     class _Service:
         def __init__(self, paths) -> None:
             self.paths = paths
+            self.process_identity = _test_process_identity(os.getpid())
+            self.containment_nonce = _TEST_CONTAINMENT_NONCE
             self._state_lock = threading.RLock()
             self.initialize_calls = 0
             self.shutdown_calls = 0
@@ -1010,7 +1385,111 @@ def test_serve_forever_handles_second_request_while_first_is_still_running(tmp_p
     assert service.shutdown_calls == 1
 
 
-def test_serve_forever_closes_idle_connection_before_storage_shutdown(tmp_path, monkeypatch):
+def test_serve_forever_rejects_connections_above_worker_limit(
+    tmp_path,
+    monkeypatch,
+    verified_server_containment,
+):
+    del verified_server_containment
+    monkeypatch.setattr(daemon_server, "deliver_challenge", lambda *_args: None)
+    monkeypatch.setattr(daemon_server, "answer_challenge", lambda *_args: None)
+    monkeypatch.setattr(daemon_server, "_MAX_CONNECTION_WORKERS", 1)
+    workspace_root = tmp_path / "shared" / "default"
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    release_first = threading.Event()
+    second_closed = threading.Event()
+
+    class _Connection:
+        def __init__(self, *, rejected: bool = False) -> None:
+            self.rejected = rejected
+
+        def close(self) -> None:
+            if self.rejected:
+                second_closed.set()
+                release_first.set()
+                service.host.shutdown_event.set()
+
+        def recv_bytes(self, maxlength=None) -> bytes:
+            assert maxlength == daemon_server._MAX_DAEMON_REQUEST_BYTES  # noqa: SLF001
+            release_first.wait(timeout=1.0)
+            return _encode_message({"command": "daemon_ping"})
+
+        def send_bytes(self, _payload: bytes) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    first_connection = _Connection()
+    second_connection = _Connection(rejected=True)
+
+    class _Listener:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            self.connections = [first_connection, second_connection]
+
+        def accept(self):
+            if self.connections:
+                return self.connections.pop(0)
+            service.host.shutdown_event.wait(timeout=1.0)
+            raise OSError("listener closed")
+
+        def close(self) -> None:
+            return None
+
+    class _Service:
+        def __init__(self) -> None:
+            self.paths = paths
+            self.process_identity = _test_process_identity(os.getpid())
+            self.containment_nonce = _TEST_CONTAINMENT_NONCE
+            self._state_lock = threading.RLock()
+            self.state = DaemonHostState.build(
+                started_at_utc="2026-04-06T00:00:00+00:00"
+            )
+            self.host = type(
+                "_Host",
+                (),
+                {"shutdown_event": threading.Event(), "listener": None},
+            )()
+
+        def initialize(self) -> None:
+            return None
+
+        def _checkpoint_loop(self) -> None:
+            return None
+
+        def _debug_log(self, _message: str) -> None:
+            return None
+
+        def _handle_command(self, payload):
+            return {"ok": True, "command": payload["command"]}
+
+        def _publish_runtime_event(self, _event_type: str) -> None:
+            return None
+
+        def _shutdown(self) -> None:
+            return None
+
+    service = _Service()
+    monkeypatch.setattr(daemon_server, "Listener", _Listener)
+
+    serve_forever(service)
+
+    assert second_closed.is_set() is True
+
+
+def test_serve_forever_closes_idle_connection_before_storage_shutdown(
+    tmp_path,
+    monkeypatch,
+    verified_server_containment,
+):
+    del verified_server_containment
+    monkeypatch.setattr(daemon_server, "deliver_challenge", lambda *_args: None)
+    monkeypatch.setattr(daemon_server, "answer_challenge", lambda *_args: None)
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -1022,7 +1501,8 @@ def test_serve_forever_closes_idle_connection_before_storage_shutdown(tmp_path, 
     storage_shutdown = threading.Event()
 
     class _IdleConnection:
-        def recv_bytes(self) -> bytes:
+        def recv_bytes(self, maxlength=None) -> bytes:
+            assert maxlength == daemon_server._MAX_DAEMON_REQUEST_BYTES  # noqa: SLF001
             receive_started.set()
             connection_closed.wait()
             raise EOFError("connection closed")
@@ -1062,6 +1542,8 @@ def test_serve_forever_closes_idle_connection_before_storage_shutdown(tmp_path, 
     class _Service:
         def __init__(self) -> None:
             self.paths = paths
+            self.process_identity = _test_process_identity(os.getpid())
+            self.containment_nonce = _TEST_CONTAINMENT_NONCE
             self._state_lock = threading.RLock()
             self.state = DaemonHostState.build(started_at_utc="2026-04-06T00:00:00+00:00")
             self.host = type(
@@ -1108,7 +1590,12 @@ def test_serve_forever_closes_idle_connection_before_storage_shutdown(tmp_path, 
         server_thread.join(timeout=1.0)
 
 
-def test_fatal_listener_exit_joins_checkpoint_before_closing_ledgers(tmp_path, monkeypatch):
+def test_fatal_listener_exit_joins_checkpoint_before_closing_ledgers(
+    tmp_path,
+    monkeypatch,
+    verified_server_containment,
+):
+    del verified_server_containment
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -1284,6 +1771,7 @@ def test_daemon_service_reclaims_unreachable_same_machine_lease(tmp_path, monkey
         host_name="test-host",
         daemon_id="daemon-a",
         pid=101,
+        **_owner_process_kwargs(101),
         status="idle",
         started_at_utc=started,
         last_checkpoint_at_utc=started,

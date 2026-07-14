@@ -1,11 +1,32 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+from data_engine.platform.processes import ProcessIdentity
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 
 
 resolve_workspace_paths = RuntimeLayoutPolicy().resolve_paths
+
+_TEST_CONTAINMENT_NONCE = "a" * 64
+
+
+def _test_process_identity(pid: int) -> ProcessIdentity:
+    return ProcessIdentity(
+        pid=pid,
+        start_key=f"test-start-{pid}",
+        executable_path="/test/python",
+        process_group_id=None if os.name == "nt" else pid,
+        process_session_id=pid,
+    )
+
+
+def _owner_process_kwargs(pid: int) -> dict[str, object]:
+    return {
+        "process_identity": _test_process_identity(pid),
+        "containment_nonce": _TEST_CONTAINMENT_NONCE,
+    }
 
 
 def _write_demo_flow(workspace_root: Path) -> None:

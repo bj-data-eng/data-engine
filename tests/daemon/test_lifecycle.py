@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import os
+import shutil
 import threading
 from types import SimpleNamespace
-import shutil
-
 
 import data_engine.hosts.daemon.client as daemon_client
 from data_engine.domain import DaemonLifecyclePolicy
@@ -16,7 +16,11 @@ from data_engine.hosts.daemon.lifecycle import (
     relinquish_workspace_for_control_request,
 )
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
-from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
+from data_engine.runtime.runtime_db import (
+    RuntimeCacheLedger,
+    RuntimeControlLedger,
+    utcnow_text,
+)
 from data_engine.runtime.shared_state import (
     checkpoint_workspace_state as _checkpoint_workspace_state,
     claim_workspace as _claim_workspace,
@@ -28,7 +32,7 @@ from data_engine.runtime.shared_state import (
     resolve_workspace_bundle,
 )
 
-from .support import _write_demo_flow, resolve_workspace_paths
+from .support import _owner_process_kwargs, _write_demo_flow, resolve_workspace_paths
 
 
 def claim_workspace(paths) -> bool:
@@ -38,6 +42,7 @@ def claim_workspace(paths) -> bool:
 def checkpoint_workspace_state(paths, ledger, **kwargs):
     bundle = resolve_workspace_bundle(paths)
     assert bundle is not None and bundle.lease_token is not None
+    kwargs = {**_owner_process_kwargs(int(kwargs["pid"])), **kwargs}
     return _checkpoint_workspace_state(
         paths,
         ledger,
@@ -57,6 +62,7 @@ def remove_lease_metadata(paths) -> None:
     assert bundle is not None and bundle.lease_token is not None
     _remove_lease_metadata(paths, lease_token=bundle.lease_token)
 
+
 def test_shutdown_releases_workspace_even_if_final_checkpoint_fails(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
@@ -73,6 +79,16 @@ def test_shutdown_releases_workspace_even_if_final_checkpoint_fails(tmp_path, mo
     assert read_lease_metadata(paths) is None
     assert (paths.available_markers_dir / paths.workspace_id).exists() is True
     assert (paths.leased_markers_dir / paths.workspace_id).exists() is False
+    tombstone_ledger = RuntimeControlLedger(paths.runtime_control_db_path)
+    try:
+        tombstone = tombstone_ledger.daemon_state.get(paths.workspace_id)
+    finally:
+        tombstone_ledger.close()
+    assert tombstone is not None
+    assert tombstone.daemon_id == service.daemon_id
+    assert tombstone.pid == service.process_identity.pid
+    assert tombstone.process_start_key == service.process_identity.start_key
+    assert tombstone.containment_nonce == service.containment_nonce
 
 
 def test_control_handoff_keeps_ownership_until_noncooperative_manual_worker_exits(tmp_path, monkeypatch):
@@ -126,8 +142,10 @@ def test_control_handoff_keeps_ownership_until_noncooperative_manual_worker_exit
         assert read_lease_metadata(paths) is None
         monkeypatch.setattr(
             service.shared_state_adapter,
-            "claim_workspace",
-            lambda _paths: (_ for _ in ()).throw(AssertionError("draining daemon must not reclaim")),
+            "claim_daemon_workspace",
+            lambda _paths, **kwargs: (_ for _ in ()).throw(
+                AssertionError("draining daemon must not reclaim")
+            ),
         )
         assert service._handle_command({"command": "run_flow", "name": "demo", "wait": False}) == {  # noqa: SLF001
             "ok": False,
@@ -283,7 +301,7 @@ def test_shutdown_creates_runtime_snapshot_parquets(tmp_path, monkeypatch):
         service._shutdown()  # noqa: SLF001
 
 
-def test_shutdown_request_wakes_listener_to_exit_accept_loop(tmp_path, monkeypatch):
+def test_immediate_shutdown_request_defers_listener_wake_to_transport(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -295,25 +313,12 @@ def test_shutdown_request_wakes_listener_to_exit_accept_loop(tmp_path, monkeypat
     try:
         wake_calls: list[str] = []
         monkeypatch.setattr(service, "_wake_listener", lambda: wake_calls.append("wake"))
-        started_threads: list[object] = []
-
-        class _InlineThread:
-            def __init__(self, *, target, daemon):
-                self._target = target
-                self.daemon = daemon
-
-            def start(self):
-                started_threads.append(self)
-                self._target()
-
-        monkeypatch.setattr("data_engine.hosts.daemon.commands.threading.Thread", _InlineThread)
 
         response = service._handle_command({"command": "shutdown_daemon"})  # noqa: SLF001
 
-        assert response["ok"] is True
-        assert service.host.shutdown_event.is_set() is True
-        assert len(started_threads) == 1
-        assert wake_calls == ["wake"]
+        assert response == {"ok": True, "draining": False}
+        assert service.host.shutdown_event.is_set() is False
+        assert wake_calls == []
     finally:
         service._shutdown()  # noqa: SLF001
 
@@ -732,7 +737,11 @@ def test_spawn_daemon_process_waits_on_existing_startup_lock(tmp_path, monkeypat
     paths = resolve_workspace_paths(workspace_root=workspace_root)
     monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "posix")
     paths.runtime_state_dir.mkdir(parents=True, exist_ok=True)
-    (paths.runtime_state_dir / ".daemon-start.lock").write_text("123", encoding="utf-8")
+    lock_path = paths.runtime_state_dir / ".daemon-start.lock"
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    import fcntl
+
+    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     live_checks = iter([False, False, True])
     monkeypatch.setattr("data_engine.hosts.daemon.client.is_daemon_live", lambda paths: next(live_checks))
@@ -743,7 +752,11 @@ def test_spawn_daemon_process_waits_on_existing_startup_lock(tmp_path, monkeypat
 
     monkeypatch.setattr("data_engine.hosts.daemon.client.subprocess.Popen", _fail_popen)
 
-    assert spawn_daemon_process(paths) == 0
+    try:
+        assert spawn_daemon_process(paths) == 0
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
 
 
 def test_windows_startup_lock_uses_named_mutex_without_lock_file(tmp_path, monkeypatch):

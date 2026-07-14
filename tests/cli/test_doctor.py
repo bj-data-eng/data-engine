@@ -17,6 +17,17 @@ from data_engine.ui.cli import commands_doctor
 from data_engine.ui.cli.app import CliDependencies, main
 
 
+@pytest.mark.parametrize(
+    "command",
+    (
+        "python -I -S /opt/data_engine/daemon_bootstrap.py --workspace /tmp/docs",
+        "python -m data_engine.daemon_bootstrap --workspace /tmp/docs",
+    ),
+)
+def test_doctor_classifies_both_daemon_bootstrap_stages(command):
+    assert commands_doctor.classify_process_kind(command) == "daemon"
+
+
 def test_cli_doctor_reports_workspace_health(monkeypatch, tmp_path, capsys):
     app_root = tmp_path / "data_engine"
     (app_root / "config").mkdir(parents=True)
@@ -112,9 +123,9 @@ def test_cli_doctor_daemons_reports_filtered_process_and_lease_state(monkeypatch
     monkeypatch.setattr(
         "data_engine.ui.cli.app._run_process_listing",
         lambda: [
-            ProcessInfo(pid=111, ppid=1, status="Ss", command="python -m data_engine.hosts.daemon.app --workspace /tmp/shared/docs"),
+            ProcessInfo(pid=111, ppid=1, status="Ss", command="python -I -S /opt/data_engine/daemon_bootstrap.py --workspace /tmp/shared/docs"),
             ProcessInfo(pid=222, ppid=111, status="S+", command="python -m data_engine.ui.gui.launcher"),
-            ProcessInfo(pid=333, ppid=222, status="Z", command="python -m data_engine.hosts.daemon.app --workspace /tmp/shared/docs"),
+            ProcessInfo(pid=333, ppid=222, status="Z", command="python -I -S /opt/data_engine/daemon_bootstrap.py --workspace /tmp/shared/docs"),
             ProcessInfo(pid=444, ppid=1, status="S", command="python something_else.py"),
         ],
     )
@@ -211,7 +222,7 @@ def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
                 {
                     "ProcessId": 111,
                     "ParentProcessId": 1,
-                    "CommandLine": "python -m data_engine.hosts.daemon.app --workspace C:\\shared\\docs",
+                    "CommandLine": "python -I -S C:\\app\\data_engine\\daemon_bootstrap.py --workspace C:\\shared\\docs",
                 },
                 {
                     "ProcessId": 222,
@@ -241,7 +252,7 @@ def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
             pid=111,
             ppid=1,
             status="Running",
-            command="python -m data_engine.hosts.daemon.app --workspace C:\\shared\\docs",
+            command="python -I -S C:\\app\\data_engine\\daemon_bootstrap.py --workspace C:\\shared\\docs",
         ),
         ProcessInfo(
             pid=222,
@@ -307,7 +318,7 @@ def test_cli_doctor_daemons_treats_windows_status_as_non_defunct(monkeypatch, tm
                 pid=111,
                 ppid=1,
                 status="Z",
-                command="python -m data_engine.hosts.daemon.app --workspace C:\\shared\\docs",
+                command="python -I -S C:\\app\\data_engine\\daemon_bootstrap.py --workspace C:\\shared\\docs",
             ),
             ProcessInfo(pid=222, ppid=111, status="Running", command="python -m data_engine.ui.gui.launcher"),
         ],
@@ -375,13 +386,13 @@ def test_cli_doctor_daemons_collapses_windows_launcher_parent_processes(monkeypa
                 pid=20280,
                 ppid=22240,
                 status="Running",
-                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -m data_engine.hosts.daemon.app --workspace C:\\repo\\workspaces\\docs",
+                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -I -S C:\\app\\data_engine\\daemon_bootstrap.py --workspace C:\\repo\\workspaces\\docs",
             ),
             ProcessInfo(
                 pid=320,
                 ppid=20280,
                 status="Running",
-                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -m data_engine.hosts.daemon.app --workspace C:\\repo\\workspaces\\docs",
+                command="C:\\repo\\.venv\\Scripts\\pythonw.exe -I -S C:\\app\\data_engine\\daemon_bootstrap.py --workspace C:\\repo\\workspaces\\docs",
             ),
             ProcessInfo(
                 pid=20288,

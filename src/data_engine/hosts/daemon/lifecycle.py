@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import threading
 import time
 import traceback
@@ -366,17 +365,11 @@ def shutdown(service: "DataEngineDaemonService") -> None:
     except Exception:
         service._debug_log("workspace release failed during shutdown")
         service._debug_log(traceback.format_exc().rstrip())
-    try:
-        service.runtime_control_ledger.daemon_state.clear(service.paths.workspace_id)
-    except Exception:
-        pass
+    # Retain the last exact process identity until a later daemon overwrites it.
+    # The current process cannot safely delete its own shutdown tombstone after
+    # it exits, and force-shutdown callers need the record during that final gap.
     service.runtime_cache_ledger.close()
     service.runtime_control_ledger.close()
-    if service.paths.daemon_endpoint_kind == "unix":
-        try:
-            Path(service.paths.daemon_endpoint_path).unlink()
-        except FileNotFoundError:
-            pass
     service._debug_log("shutdown complete")
 
 

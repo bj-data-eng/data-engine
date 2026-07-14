@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Callable
 
 from data_engine.domain import DaemonLifecyclePolicy
-from data_engine.hosts.daemon.server import serve_workspace_daemon as serve_daemon_process
+from data_engine.hosts.daemon.server import (
+    _require_current_process_containment,
+    serve_workspace_daemon as serve_daemon_process,
+)
+from data_engine.platform.paths import stable_absolute_path
 from data_engine.platform.workspace_models import (
     DATA_ENGINE_APP_ROOT_ENV_VAR,
     DATA_ENGINE_WORKSPACE_ID_ENV_VAR,
@@ -27,6 +31,7 @@ def serve_workspace_daemon(
     *,
     workspace_root: Path | None = None,
     workspace_id: str | None = None,
+    containment_nonce: str,
     lifecycle_policy: DaemonLifecyclePolicy = DaemonLifecyclePolicy.PERSISTENT,
     workspace_service: WorkspaceService | None = None,
     resolve_paths_func=None,
@@ -36,6 +41,7 @@ def serve_workspace_daemon(
         service_type,
         workspace_root=workspace_root,
         workspace_id=workspace_id,
+        containment_nonce=containment_nonce,
         lifecycle_policy=lifecycle_policy,
         workspace_service=workspace_service,
         resolve_paths_func=resolve_paths_func,
@@ -48,6 +54,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workspace", type=Path, required=True, help="Authored workspace root to host.")
     parser.add_argument("--app-root", type=Path, default=None, help="Data Engine app root used for local artifacts.")
     parser.add_argument("--workspace-id", default=None, help="Explicit workspace id override.")
+    parser.add_argument(
+        "--containment-nonce",
+        required=True,
+        help="Internal process-containment identity supplied by the daemon launcher.",
+    )
     parser.add_argument(
         "--lifecycle-policy",
         choices=tuple(policy.value for policy in DaemonLifecyclePolicy),
@@ -65,24 +76,36 @@ def main(
     workspace_service_factory: Callable[[], WorkspaceService] | None = None,
     resolve_paths_func=None,
     serve_workspace_daemon_func=None,
+    arm_process_group_watchdog_func: Callable[..., object] | None = None,
 ) -> int:
     """Run the daemon module entrypoint for one concrete daemon service type."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    if arm_process_group_watchdog_func is None:
+        _require_current_process_containment(args.containment_nonce)
+    else:
+        arm_process_group_watchdog_func(containment_nonce=args.containment_nonce)
+    workspace_root = stable_absolute_path(args.workspace.expanduser())
     if args.app_root is not None:
-        os.environ[DATA_ENGINE_APP_ROOT_ENV_VAR] = str(args.app_root.expanduser().resolve())
-    os.environ[DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR] = str(args.workspace.expanduser().resolve())
+        os.environ[DATA_ENGINE_APP_ROOT_ENV_VAR] = str(
+            stable_absolute_path(args.app_root.expanduser())
+        )
+    os.environ[DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR] = str(workspace_root)
     if args.workspace_id:
         os.environ[DATA_ENGINE_WORKSPACE_ID_ENV_VAR] = args.workspace_id
     if resolve_paths_func is None:
         workspace_service = workspace_service or (workspace_service_factory or default_workspace_service_factory)()
         resolve_paths_func = workspace_service.resolve_paths
-    paths = resolve_paths_func(workspace_root=args.workspace, workspace_id=args.workspace_id)
+    paths = resolve_paths_func(
+        workspace_root=workspace_root,
+        workspace_id=args.workspace_id,
+    )
     serve_workspace_daemon_func = serve_workspace_daemon_func or serve_workspace_daemon
     return serve_workspace_daemon_func(
         service_type,
         workspace_root=paths.workspace_root,
         workspace_id=paths.workspace_id,
+        containment_nonce=args.containment_nonce,
         lifecycle_policy=args.lifecycle_policy,
         workspace_service=workspace_service,
         resolve_paths_func=resolve_paths_func,

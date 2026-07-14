@@ -13,6 +13,7 @@ from data_engine.runtime.shared_state import (
     RuntimeSnapshotStore,
     assert_workspace_lease,
     checkpoint_workspace_state as checkpoint_runtime_workspace_state,
+    claim_daemon_workspace as claim_runtime_daemon_workspace,
     claim_workspace as claim_runtime_workspace,
     hydrate_local_runtime_state,
     initialize_workspace_state,
@@ -119,6 +120,41 @@ class WorkspaceIoLayer:
 
     def claim_workspace(self, paths: WorkspacePaths) -> str | None:
         lease_token = claim_runtime_workspace(paths)
+        if lease_token is not None:
+            self._invalidate_workspace(paths)
+        return lease_token
+
+    def claim_daemon_workspace(
+        self,
+        paths: WorkspacePaths,
+        *,
+        workspace_id: str,
+        machine_id: str,
+        host_name: str,
+        daemon_id: str,
+        pid: int,
+        process_identity: ProcessIdentity,
+        containment_nonce: str,
+        status: str,
+        started_at_utc: str,
+        last_checkpoint_at_utc: str,
+        app_version: str | None,
+    ) -> str | None:
+        """Atomically claim with the complete daemon containment identity."""
+        lease_token = claim_runtime_daemon_workspace(
+            paths,
+            workspace_id=workspace_id,
+            machine_id=machine_id,
+            host_name=host_name,
+            daemon_id=daemon_id,
+            pid=pid,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
+            status=status,
+            started_at_utc=started_at_utc,
+            last_checkpoint_at_utc=last_checkpoint_at_utc,
+            app_version=app_version,
+        )
         if lease_token is not None:
             self._invalidate_workspace(paths)
         return lease_token

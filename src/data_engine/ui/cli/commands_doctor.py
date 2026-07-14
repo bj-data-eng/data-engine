@@ -70,7 +70,10 @@ def run_process_listing() -> list[ProcessInfo]:
 
 
 def classify_process_kind(command: str) -> str | None:
-    if "data_engine.hosts.daemon.app" in command:
+    if (
+        "daemon_bootstrap.py" in command
+        or "data_engine.daemon_bootstrap" in command
+    ):
         return "daemon"
     if "data_engine.ui.gui.launcher" in command:
         return "gui"

@@ -3,12 +3,21 @@ from __future__ import annotations
 import ctypes
 import os
 import subprocess
+import sys
+import time
 from types import SimpleNamespace
 
 import pytest
 
 from data_engine.platform import windows_spawn
-from data_engine.platform.processes import ProcessIdentity, ProcessInspectionError
+from data_engine.platform.processes import (
+    ProcessIdentity,
+    ProcessInspectionError,
+    ensure_windows_containment_job_stopped,
+    force_kill_verified_contained_process_tree,
+    inspect_process_identity,
+    new_process_containment_nonce,
+)
 
 
 _NONCE = "ab" * 32
@@ -69,7 +78,8 @@ def _install_windows_boundary(
     monkeypatch,
     *,
     create_process_result=1,
-    assign_result=1,
+    job_attribute_result=1,
+    membership_result=True,
     resume_result=1,
     duplicate_result=1,
     wait_results=(),
@@ -134,9 +144,14 @@ def _install_windows_boundary(
             value_pointer,
             ctypes.POINTER(ctypes.c_void_p * count),
         ).contents
+        event_name = (
+            "job_list"
+            if attribute == windows_spawn._PROC_THREAD_ATTRIBUTE_JOB_LIST
+            else "handle_list"
+        )
         events.append(
             (
-                "handle_list",
+                event_name,
                 flags,
                 attribute,
                 tuple(values),
@@ -144,7 +159,7 @@ def _install_windows_boundary(
                 return_size,
             )
         )
-        return 1
+        return job_attribute_result if event_name == "job_list" else 1
 
     def _create_process(
         application_name,
@@ -194,10 +209,6 @@ def _install_windows_boundary(
             process_information.thread_id = 304
         return create_process_result
 
-    def _assign(job_handle, process_handle):
-        events.append(("assign", job_handle, process_handle))
-        return assign_result
-
     def _resume(thread_handle):
         events.append(("resume", thread_handle))
         return resume_result
@@ -241,7 +252,6 @@ def _install_windows_boundary(
         lambda attribute_list: events.append(("delete_attributes",))
     )
     kernel32.CreateProcessW = _FakeWindowsFunction(_create_process)
-    kernel32.AssignProcessToJobObject = _FakeWindowsFunction(_assign)
     kernel32.ResumeThread = _FakeWindowsFunction(_resume)
     kernel32.GetCurrentProcess = _FakeWindowsFunction(lambda: -1)
     kernel32.DuplicateHandle = _FakeWindowsFunction(_duplicate)
@@ -277,6 +287,14 @@ def _install_windows_boundary(
         "_inspect_windows_process_identity_from_handle",
         _inspect,
     )
+    monkeypatch.setattr(
+        windows_spawn.processes,
+        "_windows_process_is_in_job",
+        lambda process_handle, job_handle, *, pid: events.append(
+            ("verify_job", process_handle, job_handle, pid)
+        )
+        or membership_result,
+    )
     return events
 
 
@@ -305,7 +323,7 @@ def test_spawn_quotes_command_and_transfers_noninheritable_job_after_resume(
     events = _install_windows_boundary(monkeypatch)
     arguments = (
         "-m",
-        "data_engine.hosts.daemon.app",
+        "data_engine.daemon_bootstrap",
         "--workspace",
         r"C:\Shared Data\work",
         'quote"value',
@@ -320,6 +338,9 @@ def test_spawn_quotes_command_and_transfers_noninheritable_job_after_resume(
         containment_nonce=_NONCE,
         cwd=r"C:\Shared Data\work",
         env=env,
+        before_resume=lambda identity: events.append(
+            ("before_resume", identity)
+        ),
     )
 
     assert result.process_identity == _identity()
@@ -330,6 +351,9 @@ def test_spawn_quotes_command_and_transfers_noninheritable_job_after_resume(
     assert command[2] == subprocess.list2cmdline([_EXECUTABLE, *arguments])
     assert command[5] is True
     assert command[6] == windows_spawn._PROCESS_CREATION_FLAGS
+    assert _event_names(events).index("inspect") < _event_names(events).index(
+        "before_resume"
+    ) < _event_names(events).index("resume")
     assert command[7].startswith("A=space value\0Path=C:\\Program Files\\Python\0\0")
     assert command[8] == r"C:\Shared Data\work"
     assert command[9] == ctypes.sizeof(windows_spawn._WindowsStartupInfoEx)
@@ -338,6 +362,9 @@ def test_spawn_quotes_command_and_transfers_noninheritable_job_after_resume(
     handle_list = next(event for event in events if event[0] == "handle_list")
     assert handle_list[2] == windows_spawn._PROC_THREAD_ATTRIBUTE_HANDLE_LIST
     assert handle_list[3] == (101, 102)
+    job_list = next(event for event in events if event[0] == "job_list")
+    assert job_list[2] == windows_spawn._PROC_THREAD_ATTRIBUTE_JOB_LIST
+    assert job_list[3] == (700,)
     assert [event[4] for event in events if event[0] == "create_file"] == [1, 1]
     duplicate = next(event for event in events if event[0] == "duplicate")
     assert duplicate == (
@@ -351,8 +378,9 @@ def test_spawn_quotes_command_and_transfers_noninheritable_job_after_resume(
     )
 
     names = _event_names(events)
-    assert names.index("create_process") < names.index("assign")
-    assert names.index("assign") < names.index("inspect")
+    assert names.index("job_list") < names.index("create_process")
+    assert names.index("create_process") < names.index("verify_job")
+    assert names.index("verify_job") < names.index("inspect")
     assert names.index("inspect") < names.index("resume")
     assert names.index("resume") < names.index("duplicate")
     assert names.index("duplicate") < names.index("job_close")
@@ -366,6 +394,27 @@ def test_spawn_quotes_command_and_transfers_noninheritable_job_after_resume(
     ]
 
 
+def test_before_resume_failure_terminates_suspended_contained_child(monkeypatch):
+    events = _install_windows_boundary(monkeypatch)
+
+    def _reject_identity(identity):
+        events.append(("before_resume", identity))
+        raise RuntimeError("persistence failed")
+
+    with pytest.raises(RuntimeError, match="persistence failed"):
+        windows_spawn.spawn_windows_contained_process(
+            _EXECUTABLE,
+            (),
+            containment_nonce=_NONCE,
+            before_resume=_reject_identity,
+        )
+
+    names = _event_names(events)
+    assert names.index("inspect") < names.index("before_resume")
+    assert "resume" not in names
+    assert names.index("before_resume") < names.index("job_terminate")
+
+
 def test_create_process_failure_closes_all_launcher_resources(monkeypatch):
     events = _install_windows_boundary(monkeypatch, create_process_result=0)
 
@@ -377,7 +426,7 @@ def test_create_process_failure_closes_all_launcher_resources(monkeypatch):
         )
 
     names = _event_names(events)
-    assert "assign" not in names
+    assert "verify_job" not in names
     assert "resume" not in names
     assert "duplicate" not in names
     assert "terminate_process" not in names
@@ -385,14 +434,14 @@ def test_create_process_failure_closes_all_launcher_resources(monkeypatch):
     assert names[-1] == "job_close"
 
 
-def test_assignment_failure_terminates_and_waits_exact_created_process(monkeypatch):
+def test_job_membership_failure_terminates_atomic_job(monkeypatch):
     events = _install_windows_boundary(
         monkeypatch,
-        assign_result=0,
-        wait_results=(windows_spawn._WAIT_TIMEOUT, windows_spawn._WAIT_OBJECT_0),
+        membership_result=False,
+        wait_results=(windows_spawn._WAIT_OBJECT_0,),
     )
 
-    with pytest.raises(ProcessInspectionError, match="contain created process"):
+    with pytest.raises(ProcessInspectionError, match="outside its required Job"):
         windows_spawn.spawn_windows_contained_process(
             _EXECUTABLE,
             (),
@@ -400,15 +449,32 @@ def test_assignment_failure_terminates_and_waits_exact_created_process(monkeypat
         )
 
     names = _event_names(events)
-    assert "job_terminate" not in names
     assert "resume" not in names
     assert "duplicate" not in names
-    assert names.index("assign") < names.index("terminate_process")
-    assert names.index("terminate_process") < names.index("job_close")
+    assert names.index("verify_job") < names.index("job_terminate")
+    assert names.index("job_terminate") < names.index("job_close")
+    assert "terminate_process" not in names
     assert [event for event in events if event[0] == "wait"] == [
-        ("wait", 201, 0, windows_spawn._WAIT_TIMEOUT),
-        ("wait", 201, 5_000, windows_spawn._WAIT_OBJECT_0),
+        ("wait", 201, 0, windows_spawn._WAIT_OBJECT_0),
     ]
+
+
+def test_job_attribute_failure_prevents_process_creation(monkeypatch):
+    events = _install_windows_boundary(monkeypatch, job_attribute_result=0)
+
+    with pytest.raises(ProcessInspectionError, match="attach the process Job"):
+        windows_spawn.spawn_windows_contained_process(
+            _EXECUTABLE,
+            (),
+            containment_nonce=_NONCE,
+        )
+
+    names = _event_names(events)
+    assert "create_process" not in names
+    assert "verify_job" not in names
+    assert "resume" not in names
+    assert names.index("job_list") < names.index("delete_attributes")
+    assert names[-1] == "job_close"
 
 
 def test_identity_failure_terminates_job_and_confirms_exact_process_exit(monkeypatch):
@@ -423,13 +489,15 @@ def test_identity_failure_terminates_job_and_confirms_exact_process_exit(monkeyp
             _EXECUTABLE,
             (),
             containment_nonce=_NONCE,
+            after_verified_cleanup=lambda: events.append(("cleanup_callback",)),
         )
 
     names = _event_names(events)
-    assert names.index("assign") < names.index("inspect")
+    assert names.index("verify_job") < names.index("inspect")
     assert names.index("inspect") < names.index("job_terminate")
     assert names.index("job_terminate") < names.index("wait")
-    assert names.index("wait") < names.index("job_close")
+    assert names.index("wait") < names.index("cleanup_callback")
+    assert names.index("cleanup_callback") < names.index("job_close")
     assert "resume" not in names
     assert "duplicate" not in names
     assert "terminate_process" not in names
@@ -537,3 +605,77 @@ def test_invalid_launch_inputs_fail_before_job_creation(
             cwd=cwd,
             env=env,
         )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Requires the real Windows process API.")
+def test_real_windows_job_spawn_supports_verified_tree_termination(tmp_path):
+    nonce = new_process_containment_nonce()
+    child_pid_path = tmp_path / "contained-child.pid"
+    parent_source = (
+        "from pathlib import Path; import subprocess, sys, time; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii'); "
+        "time.sleep(60)"
+    )
+    launched = windows_spawn.spawn_windows_contained_process(
+        sys.executable,
+        ("-c", parent_source, str(child_pid_path)),
+        containment_nonce=nonce,
+    )
+
+    try:
+        assert inspect_process_identity(launched.pid) == launched.process_identity
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not child_pid_path.is_file():
+            time.sleep(0.01)
+        child_pid = int(child_pid_path.read_text(encoding="ascii"))
+        child_identity = inspect_process_identity(child_pid)
+        assert child_identity is not None
+        force_kill_verified_contained_process_tree(
+            launched.process_identity,
+            containment_nonce=nonce,
+        )
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if inspect_process_identity(launched.pid) != launched.process_identity:
+                break
+            time.sleep(0.01)
+        assert inspect_process_identity(launched.pid) != launched.process_identity
+        assert inspect_process_identity(child_pid) != child_identity
+    finally:
+        ensure_windows_containment_job_stopped(nonce, timeout_seconds=5.0)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Requires the real Windows process API.")
+def test_real_windows_job_kills_descendant_when_leader_exits(tmp_path):
+    nonce = new_process_containment_nonce()
+    child_pid_path = tmp_path / "contained-child.pid"
+    parent_source = (
+        "from pathlib import Path; import subprocess, sys; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')"
+    )
+    launched = windows_spawn.spawn_windows_contained_process(
+        sys.executable,
+        ("-c", parent_source, str(child_pid_path)),
+        containment_nonce=nonce,
+    )
+
+    try:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not child_pid_path.is_file():
+            time.sleep(0.01)
+        child_pid = int(child_pid_path.read_text(encoding="ascii"))
+        child_identity = inspect_process_identity(child_pid)
+        assert child_identity is not None
+        while time.monotonic() < deadline:
+            if (
+                inspect_process_identity(launched.pid) != launched.process_identity
+                and inspect_process_identity(child_pid) != child_identity
+            ):
+                break
+            time.sleep(0.01)
+        assert inspect_process_identity(launched.pid) != launched.process_identity
+        assert inspect_process_identity(child_pid) != child_identity
+    finally:
+        ensure_windows_containment_job_stopped(nonce, timeout_seconds=5.0)

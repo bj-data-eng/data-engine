@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-import threading
 from typing import TYPE_CHECKING, Any
 
 from data_engine.hosts.daemon.runtime_commands import DaemonRuntimeCommandHandler
@@ -119,8 +118,6 @@ class DaemonCommandHandler:
                     }
                 with self.service._state_lock:
                     self.service.state.clear_shutdown_request()
-                self.service.host.shutdown_event.set()
-                threading.Thread(target=self.service._wake_listener, daemon=True).start()
                 return {"ok": True, "draining": False}
             return {"ok": False, "error": f"Unknown command: {command}"}
 

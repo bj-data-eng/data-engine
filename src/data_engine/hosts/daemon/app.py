@@ -61,6 +61,7 @@ from data_engine.platform.instrumentation import (
     maybe_start_viztracer,
     timed_operation,
 )
+from data_engine.runtime.shared_state import daemon_process_lease_metadata
 from data_engine.views.models import QtFlowCard, load_qt_flow_cards
 
 if TYPE_CHECKING:
@@ -68,6 +69,7 @@ if TYPE_CHECKING:
 
 
 DAEMON_LOG_RETENTION_DAYS = 30
+
 
 class DataEngineDaemonService:
     """Own one workspace daemon instance and its runtime state."""
@@ -78,11 +80,20 @@ class DataEngineDaemonService:
         *,
         dependencies: DaemonHostDependencies | None = None,
         identity: DaemonHostIdentity | None = None,
+        containment_nonce: str | None = None,
         lifecycle_policy: DaemonLifecyclePolicy = DaemonLifecyclePolicy.PERSISTENT,
     ) -> None:
         self.paths = paths
         dependencies = dependencies or DaemonHostDependencies.build_default(paths)
-        daemon_identity = identity or DaemonHostIdentity.current_process(app_root=paths.app_root)
+        daemon_identity = identity or DaemonHostIdentity.current_process(
+            app_root=paths.app_root,
+            containment_nonce=containment_nonce,
+        )
+        if (
+            containment_nonce is not None
+            and daemon_identity.containment_nonce != containment_nonce
+        ):
+            raise ValueError("The daemon identity does not match its launch containment nonce.")
         self.lifecycle_policy = DaemonLifecyclePolicy.coerce(lifecycle_policy)
         self.started_at_utc = utcnow_text()
         self.state = DaemonHostState.build(started_at_utc=self.started_at_utc)
@@ -102,6 +113,12 @@ class DataEngineDaemonService:
         self.host_name = daemon_identity.host_name
         self.daemon_id = daemon_identity.daemon_id
         self.pid = daemon_identity.pid
+        self.process_identity = daemon_identity.process_identity
+        self.containment_nonce = daemon_identity.containment_nonce
+        self.daemon_process_metadata = daemon_process_lease_metadata(
+            self.process_identity,
+            self.containment_nonce,
+        )
         self._state_lock = threading.RLock()
         self._checkpoint_operation_lock = threading.RLock()
         self._cached_flow_cards: tuple[QtFlowCard, ...] | None = None
@@ -345,12 +362,15 @@ class DataEngineDaemonService:
 
     def _shutdown(self) -> None:
         shutdown(self)
+
+
 def main(
     argv: list[str] | None = None,
     *,
     workspace_service=None,
     workspace_service_factory=None,
     resolve_paths_func=None,
+    arm_process_group_watchdog_func=None,
 ) -> int:
     """Module entrypoint for launching one workspace daemon process."""
     return run_daemon_module(
@@ -360,6 +380,7 @@ def main(
         workspace_service_factory=workspace_service_factory,
         resolve_paths_func=resolve_paths_func,
         serve_workspace_daemon_func=lambda service_type, **kwargs: serve_workspace_daemon(**kwargs),
+        arm_process_group_watchdog_func=arm_process_group_watchdog_func,
     )
 
 
@@ -367,6 +388,7 @@ def serve_workspace_daemon(
     *,
     workspace_root=None,
     workspace_id=None,
+    containment_nonce: str,
     lifecycle_policy: DaemonLifecyclePolicy = DaemonLifecyclePolicy.PERSISTENT,
     workspace_service=None,
     resolve_paths_func=None,
@@ -375,6 +397,7 @@ def serve_workspace_daemon(
         DataEngineDaemonService,
         workspace_root=workspace_root,
         workspace_id=workspace_id,
+        containment_nonce=containment_nonce,
         lifecycle_policy=lifecycle_policy,
         workspace_service=workspace_service,
         resolve_paths_func=resolve_paths_func,
@@ -398,4 +421,7 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(
+        "Launch the daemon through data_engine.daemon_bootstrap so containment "
+        "is armed before daemon imports."
+    )

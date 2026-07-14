@@ -1,10 +1,82 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+import sqlite3
+import threading
 
 import data_engine.runtime.runtime_control_store as runtime_control_store_module
+from data_engine.platform.processes import ProcessIdentity
 from data_engine.runtime.ledger_models import PersistedFileState, PersistedLogEntry, PersistedRun, PersistedStepRun
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger, utcnow_text
+
+
+def _daemon_identity(pid: int) -> ProcessIdentity:
+    return ProcessIdentity(
+        pid=pid,
+        start_key=f"test-start-{pid}",
+        executable_path="/test/python",
+        process_group_id=pid,
+        process_session_id=pid,
+    )
+
+
+def _install_provisional(
+    ledger: RuntimeControlLedger,
+    *,
+    identity: ProcessIdentity,
+    containment_nonce: str,
+    predecessor_daemon_id: str | None = None,
+    predecessor_identity: ProcessIdentity | None = None,
+    predecessor_nonce: str | None = None,
+) -> bool:
+    now = utcnow_text()
+    return ledger.daemon_state.install_provisional(
+        workspace_id="default",
+        daemon_id=f"launch-{containment_nonce}",
+        process_identity=identity,
+        containment_nonce=containment_nonce,
+        endpoint_kind="unix",
+        endpoint_path="/tmp/data-engine.sock",
+        started_at_utc=now,
+        last_checkpoint_at_utc=now,
+        status="launching",
+        app_root="/test/app",
+        workspace_root="/test/workspace",
+        version_text="0.1.0",
+        expected_predecessor_daemon_id=predecessor_daemon_id,
+        expected_predecessor_identity=predecessor_identity,
+        expected_predecessor_containment_nonce=predecessor_nonce,
+    )
+
+
+def _upsert_daemon_generation(
+    ledger: RuntimeControlLedger,
+    *,
+    daemon_id: str,
+    identity: ProcessIdentity,
+    containment_nonce: str,
+    status: str = "running",
+) -> None:
+    now = utcnow_text()
+    ledger.daemon_state.upsert(
+        workspace_id="default",
+        daemon_id=daemon_id,
+        pid=identity.pid,
+        process_start_key=identity.start_key,
+        process_executable_path=identity.executable_path,
+        process_group_id=identity.process_group_id,
+        process_session_id=identity.process_session_id,
+        containment_nonce=containment_nonce,
+        endpoint_kind="unix",
+        endpoint_path="/tmp/data-engine.sock",
+        started_at_utc=now,
+        last_checkpoint_at_utc=now,
+        status=status,
+        app_root="/test/app",
+        workspace_root="/test/workspace",
+        version_text="0.1.0",
+    )
 
 
 def test_runtime_ledger_initializes_schema_and_workspace_path(tmp_path):
@@ -84,7 +156,13 @@ def test_runtime_control_store_exposes_explicit_repositories(tmp_path, monkeypat
 
     ledger.daemon_state.upsert(
         workspace_id="default",
+        daemon_id="daemon-a",
         pid=123,
+        process_start_key="test-start-123",
+        process_executable_path="/test/python",
+        process_group_id=123,
+        process_session_id=123,
+        containment_nonce="a" * 64,
         endpoint_kind="tcp",
         endpoint_path="127.0.0.1:0",
         started_at_utc=now,
@@ -97,6 +175,134 @@ def test_runtime_control_store_exposes_explicit_repositories(tmp_path, monkeypat
 
     assert ledger.daemon_state.get("default") is not None
     assert ledger.client_sessions.count_live("default") == 1
+
+
+def test_provisional_daemon_cas_inserts_into_empty_generation(tmp_path):
+    ledger = RuntimeControlLedger(tmp_path / "runtime_control.sqlite")
+    identity = _daemon_identity(101)
+    nonce = "a" * 64
+
+    assert _install_provisional(
+        ledger,
+        identity=identity,
+        containment_nonce=nonce,
+    )
+
+    state = ledger.daemon_state.get("default")
+    assert state is not None
+    assert state.daemon_id == f"launch-{nonce}"
+    assert state.pid == identity.pid
+    assert state.containment_nonce == nonce
+
+
+def test_provisional_daemon_cas_replaces_only_exact_predecessor(tmp_path):
+    ledger = RuntimeControlLedger(tmp_path / "runtime_control.sqlite")
+    predecessor = _daemon_identity(101)
+    replacement = _daemon_identity(202)
+    predecessor_nonce = "a" * 64
+    replacement_nonce = "b" * 64
+    _upsert_daemon_generation(
+        ledger,
+        daemon_id="daemon-old",
+        identity=predecessor,
+        containment_nonce=predecessor_nonce,
+    )
+
+    assert _install_provisional(
+        ledger,
+        identity=replacement,
+        containment_nonce=replacement_nonce,
+        predecessor_daemon_id="daemon-old",
+        predecessor_identity=predecessor,
+        predecessor_nonce=predecessor_nonce,
+    )
+
+    state = ledger.daemon_state.get("default")
+    assert state is not None
+    assert state.pid == replacement.pid
+    assert state.containment_nonce == replacement_nonce
+
+
+def test_provisional_daemon_cas_rejects_changed_generation_without_writing(
+    tmp_path,
+):
+    ledger = RuntimeControlLedger(tmp_path / "runtime_control.sqlite")
+    winner = _daemon_identity(303)
+    attempted = _daemon_identity(404)
+    winner_nonce = "c" * 64
+    _upsert_daemon_generation(
+        ledger,
+        daemon_id="daemon-winner",
+        identity=winner,
+        containment_nonce=winner_nonce,
+    )
+
+    assert not _install_provisional(
+        ledger,
+        identity=attempted,
+        containment_nonce="d" * 64,
+    )
+
+    state = ledger.daemon_state.get("default")
+    assert state is not None
+    assert state.daemon_id == "daemon-winner"
+    assert state.pid == winner.pid
+    assert state.containment_nonce == winner_nonce
+
+
+def test_provisional_daemon_cas_preserves_same_nonce_daemon_published_row(
+    tmp_path,
+):
+    ledger = RuntimeControlLedger(tmp_path / "runtime_control.sqlite")
+    launcher_identity = _daemon_identity(505)
+    daemon_identity = _daemon_identity(506)
+    nonce = "e" * 64
+    _upsert_daemon_generation(
+        ledger,
+        daemon_id="daemon-real",
+        identity=daemon_identity,
+        containment_nonce=nonce,
+    )
+
+    assert _install_provisional(
+        ledger,
+        identity=launcher_identity,
+        containment_nonce=nonce,
+    )
+
+    state = ledger.daemon_state.get("default")
+    assert state is not None
+    assert state.daemon_id == "daemon-real"
+    assert state.pid == daemon_identity.pid
+    assert state.status == "running"
+
+
+def test_concurrent_provisional_daemon_cas_has_one_winner(tmp_path):
+    db_path = tmp_path / "runtime_control.sqlite"
+    RuntimeControlLedger(db_path).close()
+    barrier = threading.Barrier(2)
+
+    def _compete(pid: int, nonce: str) -> bool:
+        ledger = RuntimeControlLedger(db_path)
+        try:
+            barrier.wait()
+            return _install_provisional(
+                ledger,
+                identity=_daemon_identity(pid),
+                containment_nonce=nonce,
+            )
+        finally:
+            ledger.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = tuple(
+            executor.map(
+                lambda values: _compete(*values),
+                ((601, "f" * 64), (602, "1" * 64)),
+            )
+        )
+
+    assert sorted(results) == [False, True]
 
 
 def test_runtime_ledger_open_default_ignores_blank_env_override(tmp_path, monkeypatch):
@@ -338,7 +544,13 @@ def test_runtime_ledger_persists_daemon_state(tmp_path):
 
     ledger.daemon_state.upsert(
         workspace_id="default",
+        daemon_id="daemon-a",
         pid=123,
+        process_start_key="test-start-123",
+        process_executable_path="/test/python",
+        process_group_id=123,
+        process_session_id=123,
+        containment_nonce="a" * 64,
         endpoint_kind="unix",
         endpoint_path="/tmp/data_engine.sock",
         started_at_utc=utcnow_text(),
@@ -353,8 +565,149 @@ def test_runtime_ledger_persists_daemon_state(tmp_path):
 
     assert state is not None
     assert state.workspace_id == "default"
+    assert state.daemon_id == "daemon-a"
     assert state.pid == 123
+    assert state.process_start_key == "test-start-123"
+    assert state.process_executable_path == "/test/python"
+    assert state.process_group_id == 123
+    assert state.process_session_id == 123
+    assert state.containment_nonce == "a" * 64
     assert state.status == "idle"
+
+
+def test_runtime_control_ledger_discards_pid_only_daemon_rows_on_clean_cutover(
+    tmp_path,
+):
+    db_path = tmp_path / "runtime_state" / "runtime_control.sqlite"
+    db_path.parent.mkdir(parents=True)
+    now = utcnow_text()
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE daemon_state (
+                workspace_id TEXT PRIMARY KEY,
+                pid INTEGER NOT NULL,
+                endpoint_kind TEXT NOT NULL,
+                endpoint_path TEXT NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                last_checkpoint_at_utc TEXT NOT NULL,
+                status TEXT NOT NULL,
+                app_root TEXT NOT NULL,
+                workspace_root TEXT NOT NULL,
+                version_text TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO daemon_state(
+                workspace_id, pid, endpoint_kind, endpoint_path,
+                started_at_utc, last_checkpoint_at_utc, status,
+                app_root, workspace_root, version_text
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "default",
+                123,
+                "unix",
+                "/tmp/data-engine.sock",
+                now,
+                now,
+                "idle",
+                "/tmp/app",
+                "/tmp/workspace/default",
+                "0.1.0",
+            ),
+        )
+
+    ledger = RuntimeControlLedger(db_path)
+    state = ledger.daemon_state.get("default")
+
+    assert state is None
+    assert ledger._connection().execute(  # noqa: SLF001 - clean-cutover verification
+        "SELECT COUNT(*) FROM daemon_state"
+    ).fetchone()[0] == 0
+
+
+def test_runtime_control_ledger_serializes_concurrent_schema_migration(tmp_path):
+    db_path = tmp_path / "runtime_state" / "runtime_control.sqlite"
+    db_path.parent.mkdir(parents=True)
+    now = utcnow_text()
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE daemon_state (
+                workspace_id TEXT PRIMARY KEY,
+                pid INTEGER NOT NULL,
+                endpoint_kind TEXT NOT NULL,
+                endpoint_path TEXT NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                last_checkpoint_at_utc TEXT NOT NULL,
+                status TEXT NOT NULL,
+                app_root TEXT NOT NULL,
+                workspace_root TEXT NOT NULL,
+                version_text TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO daemon_state(
+                workspace_id, pid, endpoint_kind, endpoint_path,
+                started_at_utc, last_checkpoint_at_utc, status,
+                app_root, workspace_root, version_text
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "default",
+                123,
+                "unix",
+                "/tmp/data-engine.sock",
+                now,
+                now,
+                "idle",
+                "/tmp/app",
+                "/tmp/workspace/default",
+                "0.1.0",
+            ),
+        )
+
+    start = threading.Barrier(2)
+
+    def _open_migrated_store() -> tuple[set[str], int]:
+        start.wait(timeout=5.0)
+        ledger = RuntimeControlLedger(db_path)
+        try:
+            columns = {
+                str(row["name"])
+                for row in ledger._connection().execute(  # noqa: SLF001 - migration verification
+                    "PRAGMA table_info(daemon_state)"
+                )
+            }
+            row_count = ledger._connection().execute(  # noqa: SLF001 - migration verification
+                "SELECT COUNT(*) FROM daemon_state"
+            ).fetchone()[0]
+            return columns, int(row_count)
+        finally:
+            ledger.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        migrated_columns = tuple(executor.map(lambda _: _open_migrated_store(), range(2)))
+
+    required_columns = {
+        "daemon_id",
+        "process_start_key",
+        "process_executable_path",
+        "process_group_id",
+        "process_session_id",
+        "containment_nonce",
+    }
+    assert required_columns <= migrated_columns[0][0]
+    assert required_columns <= migrated_columns[1][0]
+    assert migrated_columns[0][1] == 0
+    assert migrated_columns[1][1] == 0
 
 
 def test_runtime_control_ledger_counts_live_windows_client_sessions(tmp_path, monkeypatch):

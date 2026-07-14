@@ -17,6 +17,7 @@ from data_engine.runtime.shared_state import (
     WorkspaceLeaseLostError,
     WorkspaceStateCorruptError,
     checkpoint_workspace_state as _runtime_checkpoint_workspace_state,
+    claim_daemon_workspace,
     claim_workspace,
     daemon_process_lease_identity,
     daemon_process_lease_metadata,
@@ -129,6 +130,25 @@ def _claim_workspace_result(paths) -> str | None:
     return claim_workspace(paths)
 
 
+def _claim_daemon(paths, *, containment_nonce: str = _TEST_CONTAINMENT_NONCE):
+    started = utcnow_text()
+    identity = _test_process_identity(123)
+    return claim_daemon_workspace(
+        paths,
+        workspace_id=paths.workspace_id,
+        machine_id="machine-a",
+        host_name="host-a",
+        daemon_id="daemon-a",
+        pid=identity.pid,
+        process_identity=identity,
+        containment_nonce=containment_nonce,
+        status="starting",
+        started_at_utc=started,
+        last_checkpoint_at_utc=started,
+        app_version="0.1.0",
+    )
+
+
 def test_initialize_claim_and_release_workspace_markers(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
@@ -147,6 +167,62 @@ def test_initialize_claim_and_release_workspace_markers(tmp_path, monkeypatch):
     release_workspace(paths, lease_token=lease_token)
     assert (paths.available_markers_dir / "default").exists()
     assert not (paths.leased_markers_dir / f"default__{lease_token}").exists()
+
+
+def test_daemon_claim_is_visible_with_complete_identity_at_first_lease_read(
+    tmp_path,
+    monkeypatch,
+):
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(tmp_path / "data_engine"))
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+
+    lease_token = _claim_daemon(paths)
+
+    assert isinstance(lease_token, str)
+    metadata = read_lease_metadata(paths)
+    assert metadata is not None
+    assert metadata["lease_token"] == lease_token
+    assert metadata["machine_id"] == "machine-a"
+    assert metadata["daemon_id"] == "daemon-a"
+    assert metadata["containment_nonce"] == _TEST_CONTAINMENT_NONCE
+    assert daemon_process_lease_identity(metadata).process_identity == _test_process_identity(
+        123
+    )
+
+
+def test_daemon_claim_crash_before_rename_leaves_workspace_available(
+    tmp_path,
+    monkeypatch,
+):
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(tmp_path / "data_engine"))
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    initialize_workspace_state(paths)
+    available_root = paths.available_markers_dir / paths.workspace_id
+    original_rename = Path.rename
+
+    def _fail_available_rename(path, target):
+        if path == available_root:
+            raise OSError("simulated crash before lease rename")
+        return original_rename(path, target)
+
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(Path, "rename", _fail_available_rename)
+        with pytest.raises(OSError, match="simulated crash"):
+            _claim_daemon(paths)
+
+    bundle = resolve_workspace_bundle(paths)
+    assert bundle is not None
+    assert bundle.state == "available"
+    assert read_lease_metadata(paths) is None
+
+    lease_token = _claim_daemon(paths, containment_nonce="b" * 64)
+    assert isinstance(lease_token, str)
+    metadata = read_lease_metadata(paths)
+    assert metadata is not None
+    assert metadata["containment_nonce"] == "b" * 64
 
 
 def test_checkpoint_and_hydrate_workspace_state(tmp_path, monkeypatch):

@@ -149,6 +149,9 @@ That metadata includes:
 - machine id / host name
 - daemon id
 - PID
+- boot-scoped process start identity and executable path
+- process-group and process-session ids when the host exposes them
+- a random nonce identifying the daemon's POSIX watchdog or Windows Job containment
 - status
 - started time
 - last checkpoint time
@@ -409,8 +412,11 @@ It works at the daemon-process level:
 
 1. asks the daemon to shut down normally
 2. waits briefly for a graceful exit
-3. force-kills the daemon process if it is still alive
-4. performs best-effort cleanup of local daemon/lease state
+3. verifies that the live process still has the recorded start, executable, group, and session identity
+4. force-kills the isolated POSIX process group or nonce-named Windows Job if that exact daemon is still alive
+5. releases the exact matching workspace lease by its fencing token after containment drains
+
+If the complete process identity or containment boundary cannot be verified, the emergency path fails closed and sends no fallback PID-only signal.
 
 That is the right emergency tool when a flow is stuck inside a blocking native call or an uninterruptible external library path.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from data_engine.hosts.daemon.constants import APP_VERSION
 from data_engine.hosts.daemon.runtime_control import stop_active_work
 from data_engine.runtime.shared_state import WorkspaceLeaseLostError, WorkspaceStateCorruptError
 
@@ -115,7 +116,20 @@ def try_claim_released_workspace(service: "DataEngineDaemonService") -> bool:
             service._publish_runtime_event("workspace.lease_observed")
             return False
         try:
-            lease_token = shared_state.claim_workspace(service.paths)
+            lease_token = shared_state.claim_daemon_workspace(
+                service.paths,
+                workspace_id=service.paths.workspace_id,
+                machine_id=service.machine_id,
+                host_name=service.host_name,
+                daemon_id=service.daemon_id,
+                pid=service.pid,
+                process_identity=service.process_identity,
+                containment_nonce=service.containment_nonce,
+                status="idle",
+                started_at_utc=service.started_at_utc,
+                last_checkpoint_at_utc=service.state.last_checkpoint_at_utc,
+                app_version=APP_VERSION,
+            )
         except Exception:
             return False
         if lease_token is None:

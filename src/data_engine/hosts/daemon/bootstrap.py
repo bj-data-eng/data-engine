@@ -13,12 +13,33 @@ if TYPE_CHECKING:
     from data_engine.hosts.daemon.app import DataEngineDaemonService
 
 
+def _claim_daemon_workspace(
+    service: "DataEngineDaemonService",
+    *,
+    status: str,
+) -> str | None:
+    return service.shared_state_adapter.claim_daemon_workspace(
+        service.paths,
+        workspace_id=service.paths.workspace_id,
+        machine_id=service.machine_id,
+        host_name=service.host_name,
+        daemon_id=service.daemon_id,
+        pid=service.pid,
+        process_identity=service.process_identity,
+        containment_nonce=service.containment_nonce,
+        status=status,
+        started_at_utc=service.started_at_utc,
+        last_checkpoint_at_utc=service.state.last_checkpoint_at_utc,
+        app_version=APP_VERSION,
+    )
+
+
 def initialize_service(service: "DataEngineDaemonService") -> None:
     """Claim the workspace when possible and hydrate local state."""
     service._debug_log("initialize starting")
     shared_state = service.shared_state_adapter
     shared_state.initialize_workspace(service.paths)
-    lease_token = shared_state.claim_workspace(service.paths)
+    lease_token = _claim_daemon_workspace(service, status="starting")
     if lease_token is None:
         recovered = False
         if _should_force_recover_local_lease(service.paths):
@@ -35,7 +56,7 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
                     stale_after_seconds=STALE_AFTER_SECONDS,
                 )
         if recovered:
-            lease_token = shared_state.claim_workspace(service.paths)
+            lease_token = _claim_daemon_workspace(service, status="starting")
         if lease_token is None:
             metadata = shared_state.read_lease_metadata(service.paths)
             owner = str(metadata.get("machine_id")) if metadata is not None and metadata.get("machine_id") is not None else "another machine"
@@ -62,19 +83,6 @@ def initialize_service(service: "DataEngineDaemonService") -> None:
     with service._state_lock:
         service.state.claim_workspace(lease_token)
     service._publish_runtime_event("workspace.claimed")
-    shared_state.write_lease_metadata(
-        service.paths,
-        lease_token=lease_token,
-        workspace_id=service.paths.workspace_id,
-        machine_id=service.machine_id,
-        host_name=service.host_name,
-        daemon_id=service.daemon_id,
-        pid=service.pid,
-        status="starting",
-        started_at_utc=service.started_at_utc,
-        last_checkpoint_at_utc=service.state.last_checkpoint_at_utc,
-        app_version=APP_VERSION,
-    )
     shared_state.hydrate_local_runtime(service.paths, service.runtime_cache_ledger)
     orphaned_run_count, orphaned_step_count = service.runtime_cache_ledger.reconcile_orphaned_activity(
         status="stopped",

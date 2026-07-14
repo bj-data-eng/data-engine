@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from data_engine.platform.processes import ProcessIdentity
 from data_engine.runtime.runtime_cache_store import RuntimeCacheLedger
 from data_engine.runtime.runtime_control_store import RuntimeControlLedger
 from data_engine.runtime.runtime_db import utcnow_text
@@ -52,10 +53,23 @@ def test_reset_service_resets_workspace_local_and_shared_state(tmp_path):
 
     runtime_cache_ledger = RuntimeCacheLedger(paths.runtime_cache_db_path)
     runtime_control_ledger = RuntimeControlLedger(paths.runtime_control_db_path)
+    process_identity = ProcessIdentity(
+        pid=100,
+        start_key="test-start-100",
+        executable_path="/test/python",
+        process_group_id=100,
+        process_session_id=100,
+    )
     record_flow_state(runtime_cache_ledger, flow_name="alpha", source_path=source_path, run_id="run-alpha")
     runtime_control_ledger.daemon_state.upsert(
         workspace_id=paths.workspace_id,
+        daemon_id="daemon-a",
         pid=100,
+        process_start_key=process_identity.start_key,
+        process_executable_path=process_identity.executable_path,
+        process_group_id=process_identity.process_group_id,
+        process_session_id=process_identity.process_session_id,
+        containment_nonce="a" * 64,
         endpoint_kind="tcp",
         endpoint_path="127.0.0.1:1234",
         started_at_utc=utcnow_text(),
@@ -82,6 +96,8 @@ def test_reset_service_resets_workspace_local_and_shared_state(tmp_path):
         host_name="test-host",
         daemon_id="daemon-a",
         pid=100,
+        process_identity=process_identity,
+        containment_nonce="a" * 64,
         status="idle",
         started_at_utc=utcnow_text(),
         last_checkpoint_at_utc=utcnow_text(),
@@ -116,7 +132,13 @@ def test_reset_service_resets_workspace_local_and_shared_state(tmp_path):
         assert reset_runtime_cache_ledger.runs.list() == ()
         assert reset_runtime_cache_ledger.logs.list() == ()
         assert reset_runtime_cache_ledger.source_signatures.list_file_states() == ()
-        assert reset_runtime_control_ledger.daemon_state.get(paths.workspace_id) is None
+        daemon_tombstone = reset_runtime_control_ledger.daemon_state.get(
+            paths.workspace_id
+        )
+        assert daemon_tombstone is not None
+        assert daemon_tombstone.daemon_id == "daemon-a"
+        assert daemon_tombstone.process_start_key == process_identity.start_key
+        assert daemon_tombstone.containment_nonce == "a" * 64
         assert reset_runtime_control_ledger.client_sessions.count_live(paths.workspace_id) == 0
     finally:
         reset_runtime_cache_ledger.close()

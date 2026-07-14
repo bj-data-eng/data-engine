@@ -83,6 +83,12 @@ class PersistedDaemonState:
 
     workspace_id: str
     pid: int
+    daemon_id: str | None
+    process_start_key: str | None
+    process_executable_path: str | None
+    process_group_id: int | None
+    process_session_id: int | None
+    containment_nonce: str | None
     endpoint_kind: str
     endpoint_path: str
     started_at_utc: str

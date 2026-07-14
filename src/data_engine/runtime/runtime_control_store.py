@@ -7,11 +7,62 @@ from pathlib import Path
 from typing import Self
 
 from data_engine.domain.time import utcnow_text
-from data_engine.platform.processes import process_is_running
+from data_engine.platform.paths import normalized_path_text, stable_path_identity_text
+from data_engine.platform.processes import ProcessIdentity, process_is_running
 from data_engine.platform.workspace_models import DATA_ENGINE_RUNTIME_CONTROL_DB_PATH_ENV_VAR
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.ledger_models import PersistedDaemonState
 from data_engine.runtime.sqlite_store import _RuntimeSqliteStore
+
+
+def _binding_path_matches(actual: str, expected: str) -> bool:
+    return stable_path_identity_text(actual) == stable_path_identity_text(expected)
+
+
+def _endpoint_matches(kind: str, actual: str, expected: str) -> bool:
+    if kind == "pipe":
+        return normalized_path_text(actual).casefold() == normalized_path_text(
+            expected
+        ).casefold()
+    return _binding_path_matches(actual, expected)
+
+
+def _daemon_state_binding_matches(
+    state: PersistedDaemonState | None,
+    *,
+    workspace_id: str,
+    endpoint_kind: str,
+    endpoint_path: str,
+    app_root: str,
+    workspace_root: str,
+) -> bool:
+    return bool(
+        state is not None
+        and state.workspace_id == workspace_id
+        and state.endpoint_kind == endpoint_kind
+        and _endpoint_matches(endpoint_kind, state.endpoint_path, endpoint_path)
+        and _binding_path_matches(state.app_root, app_root)
+        and _binding_path_matches(state.workspace_root, workspace_root)
+    )
+
+
+def _daemon_state_generation_matches(
+    state: PersistedDaemonState | None,
+    *,
+    process_identity: ProcessIdentity | None,
+    containment_nonce: str | None,
+) -> bool:
+    return bool(
+        state is not None
+        and process_identity is not None
+        and containment_nonce is not None
+        and state.pid == process_identity.pid
+        and state.process_start_key == process_identity.start_key
+        and state.process_executable_path == process_identity.executable_path
+        and state.process_group_id == process_identity.process_group_id
+        and state.process_session_id == process_identity.process_session_id
+        and state.containment_nonce == containment_nonce
+    )
 
 
 class DaemonStateRepository:
@@ -24,7 +75,13 @@ class DaemonStateRepository:
         self,
         *,
         workspace_id: str,
+        daemon_id: str,
         pid: int,
+        process_start_key: str,
+        process_executable_path: str,
+        process_group_id: int | None,
+        process_session_id: int | None,
+        containment_nonce: str,
         endpoint_kind: str,
         endpoint_path: str,
         started_at_utc: str,
@@ -38,7 +95,13 @@ class DaemonStateRepository:
             """
             INSERT INTO daemon_state(
                 workspace_id,
+                daemon_id,
                 pid,
+                process_start_key,
+                process_executable_path,
+                process_group_id,
+                process_session_id,
+                containment_nonce,
                 endpoint_kind,
                 endpoint_path,
                 started_at_utc,
@@ -48,9 +111,15 @@ class DaemonStateRepository:
                 workspace_root,
                 version_text
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(workspace_id) DO UPDATE SET
+                daemon_id = excluded.daemon_id,
                 pid = excluded.pid,
+                process_start_key = excluded.process_start_key,
+                process_executable_path = excluded.process_executable_path,
+                process_group_id = excluded.process_group_id,
+                process_session_id = excluded.process_session_id,
+                containment_nonce = excluded.containment_nonce,
                 endpoint_kind = excluded.endpoint_kind,
                 endpoint_path = excluded.endpoint_path,
                 started_at_utc = excluded.started_at_utc,
@@ -62,7 +131,13 @@ class DaemonStateRepository:
             """,
             (
                 workspace_id,
+                daemon_id,
                 pid,
+                process_start_key,
+                process_executable_path,
+                process_group_id,
+                process_session_id,
+                containment_nonce,
                 endpoint_kind,
                 endpoint_path,
                 started_at_utc,
@@ -74,10 +149,117 @@ class DaemonStateRepository:
             ),
         )
 
+    def install_provisional(
+        self,
+        *,
+        workspace_id: str,
+        daemon_id: str,
+        process_identity: ProcessIdentity,
+        containment_nonce: str,
+        endpoint_kind: str,
+        endpoint_path: str,
+        started_at_utc: str,
+        last_checkpoint_at_utc: str,
+        status: str,
+        app_root: str,
+        workspace_root: str,
+        version_text: str | None,
+        expected_predecessor_daemon_id: str | None,
+        expected_predecessor_identity: ProcessIdentity | None,
+        expected_predecessor_containment_nonce: str | None,
+    ) -> bool:
+        """Install a launch record only against the observed ownership generation.
+
+        The transaction accepts a daemon-published row for the new generation
+        without overwriting it. Otherwise it inserts into an empty slot or
+        replaces exactly the predecessor drained by the launcher. Any different
+        generation is a concurrent-launch conflict.
+        """
+        predecessor_values = (
+            expected_predecessor_daemon_id,
+            expected_predecessor_identity,
+            expected_predecessor_containment_nonce,
+        )
+        if any(value is None for value in predecessor_values) and any(
+            value is not None for value in predecessor_values
+        ):
+            raise ValueError(
+                "A provisional daemon predecessor must be complete or absent."
+            )
+        connection = self._store._connection()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            current = self.get(workspace_id)
+            binding_matches = _daemon_state_binding_matches(
+                current,
+                workspace_id=workspace_id,
+                endpoint_kind=endpoint_kind,
+                endpoint_path=endpoint_path,
+                app_root=app_root,
+                workspace_root=workspace_root,
+            )
+            if binding_matches and (
+                _daemon_state_generation_matches(
+                    current,
+                    process_identity=process_identity,
+                    containment_nonce=containment_nonce,
+                )
+                or (
+                    current is not None
+                    and current.containment_nonce == containment_nonce
+                    and current.daemon_id != daemon_id
+                )
+            ):
+                connection.commit()
+                return True
+            predecessor_matches = (
+                current is not None
+                and binding_matches
+                and current.daemon_id == expected_predecessor_daemon_id
+                and _daemon_state_generation_matches(
+                    current,
+                    process_identity=expected_predecessor_identity,
+                    containment_nonce=expected_predecessor_containment_nonce,
+                )
+            )
+            if not (
+                (current is None and expected_predecessor_identity is None)
+                or predecessor_matches
+            ):
+                connection.rollback()
+                return False
+            self.upsert(
+                workspace_id=workspace_id,
+                daemon_id=daemon_id,
+                pid=process_identity.pid,
+                process_start_key=process_identity.start_key,
+                process_executable_path=process_identity.executable_path,
+                process_group_id=process_identity.process_group_id,
+                process_session_id=process_identity.process_session_id,
+                containment_nonce=containment_nonce,
+                endpoint_kind=endpoint_kind,
+                endpoint_path=endpoint_path,
+                started_at_utc=started_at_utc,
+                last_checkpoint_at_utc=last_checkpoint_at_utc,
+                status=status,
+                app_root=app_root,
+                workspace_root=workspace_root,
+                version_text=version_text,
+            )
+        except BaseException:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+            return True
+
     def get(self, workspace_id: str) -> PersistedDaemonState | None:
         row = self._store._connection().execute(
             """
-            SELECT workspace_id, pid, endpoint_kind, endpoint_path, started_at_utc, last_checkpoint_at_utc, status, app_root, workspace_root, version_text
+            SELECT workspace_id, daemon_id, pid, process_start_key, process_executable_path,
+                   process_group_id, process_session_id, containment_nonce, endpoint_kind,
+                   endpoint_path, started_at_utc, last_checkpoint_at_utc, status,
+                   app_root, workspace_root, version_text
             FROM daemon_state
             WHERE workspace_id = ?
             """,
@@ -88,6 +270,32 @@ class DaemonStateRepository:
         return PersistedDaemonState(
             workspace_id=str(row["workspace_id"]),
             pid=int(row["pid"]),
+            daemon_id=(str(row["daemon_id"]) if row["daemon_id"] is not None else None),
+            process_start_key=(
+                str(row["process_start_key"])
+                if row["process_start_key"] is not None
+                else None
+            ),
+            process_executable_path=(
+                str(row["process_executable_path"])
+                if row["process_executable_path"] is not None
+                else None
+            ),
+            process_group_id=(
+                int(row["process_group_id"])
+                if row["process_group_id"] is not None
+                else None
+            ),
+            process_session_id=(
+                int(row["process_session_id"])
+                if row["process_session_id"] is not None
+                else None
+            ),
+            containment_nonce=(
+                str(row["containment_nonce"])
+                if row["containment_nonce"] is not None
+                else None
+            ),
             endpoint_kind=str(row["endpoint_kind"]),
             endpoint_path=str(row["endpoint_path"]),
             started_at_utc=str(row["started_at_utc"]),
@@ -203,44 +411,99 @@ class RuntimeControlLedger(_RuntimeSqliteStore):
 
     def _initialize_schema(self) -> None:
         connection = self._connection()
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS daemon_state (
-                workspace_id TEXT PRIMARY KEY,
-                pid INTEGER NOT NULL,
-                endpoint_kind TEXT NOT NULL,
-                endpoint_path TEXT NOT NULL,
-                started_at_utc TEXT NOT NULL,
-                last_checkpoint_at_utc TEXT NOT NULL,
-                status TEXT NOT NULL,
-                app_root TEXT NOT NULL,
-                workspace_root TEXT NOT NULL,
-                version_text TEXT
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS daemon_state (
+                    workspace_id TEXT PRIMARY KEY,
+                    daemon_id TEXT NOT NULL,
+                    pid INTEGER NOT NULL,
+                    process_start_key TEXT NOT NULL,
+                    process_executable_path TEXT NOT NULL,
+                    process_group_id INTEGER,
+                    process_session_id INTEGER,
+                    containment_nonce TEXT NOT NULL,
+                    endpoint_kind TEXT NOT NULL,
+                    endpoint_path TEXT NOT NULL,
+                    started_at_utc TEXT NOT NULL,
+                    last_checkpoint_at_utc TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    app_root TEXT NOT NULL,
+                    workspace_root TEXT NOT NULL,
+                    version_text TEXT
+                )
+                """
             )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS client_sessions (
-                client_id TEXT PRIMARY KEY,
-                workspace_id TEXT NOT NULL,
-                client_kind TEXT NOT NULL,
-                pid INTEGER NOT NULL,
-                started_at_utc TEXT NOT NULL,
-                updated_at_utc TEXT NOT NULL
+            daemon_state_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(daemon_state)").fetchall()
+            }
+            for column_name, migration in (
+                ("daemon_id", "ALTER TABLE daemon_state ADD COLUMN daemon_id TEXT"),
+                (
+                    "process_start_key",
+                    "ALTER TABLE daemon_state ADD COLUMN process_start_key TEXT",
+                ),
+                (
+                    "process_executable_path",
+                    "ALTER TABLE daemon_state ADD COLUMN process_executable_path TEXT",
+                ),
+                (
+                    "process_group_id",
+                    "ALTER TABLE daemon_state ADD COLUMN process_group_id INTEGER",
+                ),
+                (
+                    "process_session_id",
+                    "ALTER TABLE daemon_state ADD COLUMN process_session_id INTEGER",
+                ),
+                (
+                    "containment_nonce",
+                    "ALTER TABLE daemon_state ADD COLUMN containment_nonce TEXT",
+                ),
+            ):
+                if column_name not in daemon_state_columns:
+                    connection.execute(migration)
+            connection.execute(
+                """
+                DELETE FROM daemon_state
+                WHERE daemon_id IS NULL
+                   OR process_start_key IS NULL
+                   OR process_executable_path IS NULL
+                   OR containment_nonce IS NULL
+                """
             )
-            """
-        )
-        connection.execute("CREATE INDEX IF NOT EXISTS idx_client_sessions_workspace ON client_sessions(workspace_id, updated_at_utc DESC)")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS client_sessions (
+                    client_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    client_kind TEXT NOT NULL,
+                    pid INTEGER NOT NULL,
+                    started_at_utc TEXT NOT NULL,
+                    updated_at_utc TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_client_sessions_workspace
+                ON client_sessions(workspace_id, updated_at_utc DESC)
+                """
+            )
+        except Exception:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
         self._checkpoint_wal(passive=True)
 
     def reset_workspace(self, workspace_id: str) -> None:
-        """Delete daemon-state and client-session rows for one workspace."""
+        """Delete client sessions while retaining the daemon identity tombstone."""
         connection = self._connection()
         connection.execute("BEGIN IMMEDIATE")
         try:
             self.client_sessions.clear_workspace(workspace_id)
-            self.daemon_state.clear(workspace_id)
         except Exception:
             connection.rollback()
             raise

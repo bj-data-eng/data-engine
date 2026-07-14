@@ -11,6 +11,13 @@ from typing import Callable
 
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.platform.machine_identity import host_name_text, machine_id_text
+from data_engine.platform.processes import (
+    ProcessIdentity,
+    ProcessInspectionError,
+    inspect_process_identity,
+    new_process_containment_nonce,
+    windows_job_name_for_nonce,
+)
 from data_engine.platform.workspace_models import WorkspacePaths
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger
 from data_engine.services.flow_catalog import FlowCatalogService
@@ -79,16 +86,36 @@ class DaemonHostIdentity:
     machine_id: str
     host_name: str
     daemon_id: str
-    pid: int
+    process_identity: ProcessIdentity
+    containment_nonce: str
+
+    @property
+    def pid(self) -> int:
+        """Return the PID bound to the verified process identity."""
+        return self.process_identity.pid
 
     @classmethod
-    def current_process(cls, *, app_root: Path | None = None) -> "DaemonHostIdentity":
+    def current_process(
+        cls,
+        *,
+        app_root: Path | None = None,
+        containment_nonce: str | None = None,
+    ) -> "DaemonHostIdentity":
         """Build the current-process identity for one daemon host."""
+        pid = os.getpid()
+        process_identity = inspect_process_identity(pid)
+        if process_identity is None:
+            raise ProcessInspectionError(
+                f"Unable to capture the current daemon process identity for PID {pid}."
+            )
+        nonce = containment_nonce or new_process_containment_nonce()
+        windows_job_name_for_nonce(nonce)
         return cls(
             machine_id=machine_id_text(app_root=app_root),
             host_name=host_name_text(),
             daemon_id=uuid4().hex,
-            pid=os.getpid(),
+            process_identity=process_identity,
+            containment_nonce=nonce,
         )
 
 

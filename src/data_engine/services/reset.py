@@ -47,7 +47,7 @@ class ResetService:
         runtime_cache_ledger: RuntimeCacheStore,
         runtime_control_ledger: RuntimeControlStore,
     ) -> None:
-        """Delete all persisted local and shared runtime state for one workspace."""
+        """Reset runtime state while retaining the exact daemon identity tombstone."""
         lease_token = self.shared_state_service.acquire_maintenance_lease(paths)
         with self.shared_state_service.workspace_lease_operation(paths, lease_token=lease_token):
             try:

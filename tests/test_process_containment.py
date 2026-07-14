@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ctypes
 from dataclasses import replace
-import errno
 import os
 
 import pytest
@@ -50,12 +49,6 @@ def _identity(**overrides) -> ProcessIdentity:
     return ProcessIdentity(**values)
 
 
-def _select_linux(monkeypatch) -> None:
-    monkeypatch.setattr(processes.os, "name", "posix")
-    monkeypatch.setattr(processes.sys, "platform", "linux")
-    monkeypatch.setattr(processes.signal, "SIGKILL", 9, raising=False)
-
-
 def _select_windows(monkeypatch) -> None:
     monkeypatch.setattr(processes.os, "name", "nt")
 
@@ -69,6 +62,41 @@ def test_containment_nonce_is_canonical_256_bit_lowercase_hex():
     assert windows_job_name_for_nonce(nonce).startswith(
         "Local\\DataEngineDaemonJob-"
     )
+
+
+def test_wait_for_posix_process_group_exit_returns_when_group_is_absent(monkeypatch):
+    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(
+        processes.os,
+        "killpg",
+        lambda group_id, selected_signal: (_ for _ in ()).throw(ProcessLookupError()),
+    )
+
+    assert processes.wait_for_posix_process_group_exit(321, timeout_seconds=0.0) is True
+
+
+def test_wait_for_posix_process_group_exit_reports_live_group_at_deadline(monkeypatch):
+    monkeypatch.setattr(processes.os, "name", "posix")
+    calls = []
+    monkeypatch.setattr(
+        processes.os,
+        "killpg",
+        lambda group_id, selected_signal: calls.append((group_id, selected_signal)),
+    )
+
+    assert processes.wait_for_posix_process_group_exit(321, timeout_seconds=0.0) is False
+    assert calls == [(321, 0)]
+
+
+def test_wait_for_posix_process_group_exit_treats_permission_error_as_live_group(monkeypatch):
+    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(
+        processes.os,
+        "killpg",
+        lambda group_id, selected_signal: (_ for _ in ()).throw(PermissionError()),
+    )
+
+    assert processes.wait_for_posix_process_group_exit(321, timeout_seconds=0.0) is False
 
 
 @pytest.mark.parametrize(
@@ -87,135 +115,14 @@ def test_windows_job_name_rejects_noncanonical_or_injected_names(nonce):
         windows_job_name_for_nonce(nonce)
 
 
-def test_linux_pidfd_group_signal_is_object_bound_and_ordered(monkeypatch):
-    _select_linux(monkeypatch)
+def test_posix_termination_uses_verified_watchdog_capability_without_killpg(monkeypatch):
+    monkeypatch.setattr(processes.os, "name", "posix")
     expected = _identity()
     events = []
     monkeypatch.setattr(
         processes.os,
-        "pidfd_open",
-        lambda pid, flags: events.append(("pidfd_open", pid, flags)) or 71,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes.os,
-        "getpgrp",
-        lambda: events.append(("getpgrp",)) or 111,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes,
-        "inspect_process_identity",
-        lambda pid: events.append(("inspect", pid)) or expected,
-    )
-    monkeypatch.setattr(
-        processes.signal,
-        "pidfd_send_signal",
-        lambda fd, selected_signal, info, flags: events.append(
-            ("pidfd_send_signal", fd, selected_signal, info, flags)
-        ),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes.os,
-        "killpg",
-        lambda *args: pytest.fail("killpg fallback must not run"),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes.os,
-        "close",
-        lambda fd: events.append(("close", fd)),
-    )
-
-    force_kill_verified_contained_process_tree(expected)
-
-    assert events == [
-        ("pidfd_open", 321, 0),
-        ("getpgrp",),
-        ("inspect", 321),
-        ("pidfd_send_signal", 71, 9, None, 4),
-        ("close", 71),
-    ]
-
-
-def test_linux_unsupported_pidfd_group_flag_reinspects_immediately_before_killpg(
-    monkeypatch,
-):
-    _select_linux(monkeypatch)
-    expected = _identity()
-    events = []
-    monkeypatch.setattr(
-        processes.os,
-        "pidfd_open",
-        lambda pid, flags: events.append(("pidfd_open", pid, flags)) or 72,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes.os,
-        "getpgrp",
-        lambda: events.append(("getpgrp",)) or 111,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes,
-        "inspect_process_identity",
-        lambda pid: events.append(("inspect", pid)) or expected,
-    )
-
-    def _unsupported_flag(fd, selected_signal, info, flags):
-        events.append(("pidfd_send_signal", fd, selected_signal, info, flags))
-        raise OSError(errno.EINVAL, "unsupported flag")
-
-    monkeypatch.setattr(
-        processes.signal,
-        "pidfd_send_signal",
-        _unsupported_flag,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes.os,
-        "killpg",
-        lambda pid, selected_signal: events.append(
-            ("killpg", pid, selected_signal)
-        ),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes.os,
-        "close",
-        lambda fd: events.append(("close", fd)),
-    )
-
-    force_kill_verified_contained_process_tree(expected)
-
-    assert events == [
-        ("pidfd_open", 321, 0),
-        ("getpgrp",),
-        ("inspect", 321),
-        ("pidfd_send_signal", 72, 9, None, 4),
-        ("getpgrp",),
-        ("inspect", 321),
-        ("killpg", 321, 9),
-        ("close", 72),
-    ]
-
-
-def test_linux_unsupported_pidfd_open_falls_back_to_exact_reinspection(monkeypatch):
-    _select_linux(monkeypatch)
-    expected = _identity()
-    events = []
-
-    def _unsupported_pidfd(pid, flags):
-        events.append(("pidfd_open", pid, flags))
-        raise OSError(errno.ENOSYS, "unsupported")
-
-    monkeypatch.setattr(processes.os, "pidfd_open", _unsupported_pidfd, raising=False)
-    monkeypatch.setattr(
-        processes.signal,
-        "pidfd_send_signal",
-        lambda *args: pytest.fail("pidfd signaling must not run"),
-        raising=False,
+        "getpid",
+        lambda: events.append(("getpid",)) or 111,
     )
     monkeypatch.setattr(
         processes.os,
@@ -231,154 +138,79 @@ def test_linux_unsupported_pidfd_open_falls_back_to_exact_reinspection(monkeypat
     monkeypatch.setattr(
         processes.os,
         "killpg",
-        lambda pid, selected_signal: events.append(
-            ("killpg", pid, selected_signal)
-        ),
+        lambda *args: pytest.fail("external numeric group signaling must not run"),
         raising=False,
     )
+    monkeypatch.setattr(
+        processes,
+        "request_posix_process_group_termination",
+        lambda **kwargs: events.append(("request", kwargs)),
+    )
 
-    force_kill_verified_contained_process_tree(expected)
+    force_kill_verified_contained_process_tree(
+        expected,
+        containment_nonce=_NONCE,
+    )
 
     assert events == [
-        ("pidfd_open", 321, 0),
+        ("getpid",),
         ("getpgrp",),
         ("inspect", 321),
-        ("killpg", 321, 9),
+        (
+            "request",
+            {
+                "containment_nonce": _NONCE,
+                "expected_parent_pid": 321,
+            },
+        ),
     ]
 
 
-@pytest.mark.parametrize("error_number", [errno.EPERM, errno.ESRCH, errno.EBADF])
-def test_linux_ambiguous_pidfd_signal_errors_never_fallback(
-    monkeypatch,
-    error_number,
-):
-    _select_linux(monkeypatch)
+def test_posix_termination_wraps_watchdog_request_failure(monkeypatch):
+    monkeypatch.setattr(processes.os, "name", "posix")
     expected = _identity()
-    inspected = []
-    closed = []
-    monkeypatch.setattr(processes.os, "pidfd_open", lambda pid, flags: 73, raising=False)
-    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111, raising=False)
+    monkeypatch.setattr(processes.os, "getpid", lambda: 111)
+    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111)
+    monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: expected)
     monkeypatch.setattr(
         processes,
-        "inspect_process_identity",
-        lambda pid: inspected.append(pid) or expected,
+        "request_posix_process_group_termination",
+        lambda **kwargs: (_ for _ in ()).throw(
+            processes.PosixProcessGroupWatchdogError("missing control endpoint")
+        ),
     )
-    monkeypatch.setattr(
-        processes.signal,
-        "pidfd_send_signal",
-        lambda *args: (_ for _ in ()).throw(OSError(error_number, "failure")),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes.os,
-        "killpg",
-        lambda *args: pytest.fail("ambiguous errors must not fallback"),
-        raising=False,
-    )
-    monkeypatch.setattr(processes.os, "close", closed.append)
 
-    with pytest.raises(ProcessInspectionError, match="Failed to terminate"):
-        force_kill_verified_contained_process_tree(expected)
-
-    assert inspected == [321]
-    assert closed == [73]
+    with pytest.raises(ProcessInspectionError, match="Unable to request verified termination"):
+        force_kill_verified_contained_process_tree(
+            expected,
+            containment_nonce=_NONCE,
+        )
 
 
-def test_linux_pidfd_open_access_error_never_inspects_or_signals(monkeypatch):
-    _select_linux(monkeypatch)
+def test_posix_termination_identity_mismatch_never_reaches_watchdog(monkeypatch):
+    monkeypatch.setattr(processes.os, "name", "posix")
     expected = _identity()
-    monkeypatch.setattr(
-        processes.os,
-        "pidfd_open",
-        lambda pid, flags: (_ for _ in ()).throw(PermissionError(errno.EPERM, "denied")),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes,
-        "inspect_process_identity",
-        lambda pid: pytest.fail("identity inspection must not follow ambiguous open errors"),
-    )
-    monkeypatch.setattr(
-        processes.signal,
-        "pidfd_send_signal",
-        lambda *args: pytest.fail("must not signal"),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes.os,
-        "killpg",
-        lambda *args: pytest.fail("must not signal"),
-        raising=False,
-    )
-
-    with pytest.raises(ProcessInspectionError, match="Unable to open a pidfd"):
-        force_kill_verified_contained_process_tree(expected)
-
-
-def test_linux_identity_mismatch_never_signals(monkeypatch):
-    _select_linux(monkeypatch)
-    expected = _identity()
-    monkeypatch.setattr(processes.os, "pidfd_open", lambda pid, flags: 74, raising=False)
-    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111, raising=False)
+    monkeypatch.setattr(processes.os, "getpid", lambda: 111)
+    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111)
     monkeypatch.setattr(
         processes,
         "inspect_process_identity",
         lambda pid: replace(expected, start_key="replacement"),
     )
     monkeypatch.setattr(
-        processes.signal,
-        "pidfd_send_signal",
-        lambda *args: pytest.fail("must not signal"),
-        raising=False,
+        processes,
+        "request_posix_process_group_termination",
+        lambda **kwargs: pytest.fail("mismatched identity must not reach the watchdog"),
     )
-    monkeypatch.setattr(
-        processes.os,
-        "killpg",
-        lambda *args: pytest.fail("must not signal"),
-        raising=False,
-    )
-    monkeypatch.setattr(processes.os, "close", lambda fd: None)
 
     with pytest.raises(ProcessInspectionError, match="no longer matches"):
-        force_kill_verified_contained_process_tree(expected)
+        force_kill_verified_contained_process_tree(
+            expected,
+            containment_nonce=_NONCE,
+        )
 
 
-def test_posix_fallback_reinspection_is_immediately_followed_by_killpg(monkeypatch):
-    expected = _identity()
-    events = []
-    monkeypatch.setattr(processes.os, "name", "posix")
-    monkeypatch.setattr(processes.sys, "platform", "darwin")
-    monkeypatch.setattr(processes.signal, "SIGKILL", 9, raising=False)
-    monkeypatch.setattr(
-        processes.os,
-        "getpgrp",
-        lambda: events.append(("getpgrp",)) or 111,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        processes,
-        "inspect_process_identity",
-        lambda pid: events.append(("inspect", pid)) or expected,
-    )
-    monkeypatch.setattr(
-        processes.os,
-        "killpg",
-        lambda pid, selected_signal: events.append(
-            ("killpg", pid, selected_signal)
-        ),
-        raising=False,
-    )
-
-    force_kill_verified_contained_process_tree(expected)
-
-    assert events == [
-        ("getpgrp",),
-        ("inspect", 321),
-        ("killpg", 321, 9),
-    ]
-
-
-def test_verified_group_kill_refuses_the_pytest_process(monkeypatch):
+def test_verified_group_termination_refuses_the_pytest_process(monkeypatch):
     pytest_pid = os.getpid()
     expected = _identity(
         pid=pytest_pid,
@@ -386,18 +218,19 @@ def test_verified_group_kill_refuses_the_pytest_process(monkeypatch):
         process_session_id=pytest_pid,
     )
     monkeypatch.setattr(processes.os, "name", "posix")
-    monkeypatch.setattr(processes.sys, "platform", "darwin")
-    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111, raising=False)
+    monkeypatch.setattr(processes.os, "getpgrp", lambda: pytest_pid, raising=False)
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: expected)
     monkeypatch.setattr(
-        processes.os,
-        "killpg",
-        lambda *args: pytest.fail("the pytest process must never be signaled"),
-        raising=False,
+        processes,
+        "request_posix_process_group_termination",
+        lambda **kwargs: pytest.fail("the pytest process must never be terminated"),
     )
 
     with pytest.raises(ProcessInspectionError, match="caller's process group"):
-        force_kill_verified_contained_process_tree(expected)
+        force_kill_verified_contained_process_tree(
+            expected,
+            containment_nonce=_NONCE,
+        )
 
 
 def test_create_windows_job_configures_kill_on_close(monkeypatch):
@@ -509,10 +342,7 @@ def test_open_windows_job_verifies_kill_on_close(monkeypatch):
     job.close()
 
     expected_access = (
-        processes._WINDOWS_JOB_OBJECT_ASSIGN_PROCESS
-        | processes._WINDOWS_JOB_OBJECT_QUERY
-        | processes._WINDOWS_JOB_OBJECT_TERMINATE
-        | processes._WINDOWS_SYNCHRONIZE
+        processes._WINDOWS_JOB_OBJECT_QUERY | processes._WINDOWS_JOB_OBJECT_TERMINATE
     )
     assert events == [
         ("open", expected_access, False, _JOB_NAME),
@@ -557,6 +387,150 @@ def test_open_windows_job_returns_none_only_for_confirmed_absence(monkeypatch):
     )
 
     assert open_windows_kill_on_close_job(_NONCE) is None
+
+
+def test_ensure_windows_containment_job_stopped_terminates_and_closes(monkeypatch):
+    _select_windows(monkeypatch)
+    events = []
+
+    class _Job:
+        def __enter__(self):
+            events.append(("enter",))
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            events.append(("close",))
+
+        def terminate(self, *, timeout_seconds: float) -> None:
+            events.append(("terminate", timeout_seconds))
+
+    monkeypatch.setattr(
+        processes,
+        "open_windows_kill_on_close_job",
+        lambda nonce: events.append(("open", nonce)) or _Job(),
+    )
+
+    processes.ensure_windows_containment_job_stopped(
+        _NONCE,
+        timeout_seconds=1.25,
+    )
+
+    assert events == [
+        ("open", _NONCE),
+        ("enter",),
+        ("terminate", 1.25),
+        ("close",),
+    ]
+
+
+def test_ensure_windows_containment_job_stopped_accepts_absent_job(monkeypatch):
+    _select_windows(monkeypatch)
+    monkeypatch.setattr(processes, "open_windows_kill_on_close_job", lambda nonce: None)
+
+    processes.ensure_windows_containment_job_stopped(_NONCE)
+
+
+def test_wait_for_windows_job_empty_polls_active_process_accounting(monkeypatch):
+    _select_windows(monkeypatch)
+    active_counts = iter((2, 1, 0))
+    events = []
+    kernel32 = _FakeKernel32()
+
+    def _query(handle, information_class, information_pointer, size, return_length):
+        information = ctypes.cast(
+            information_pointer,
+            ctypes.POINTER(processes._WindowsJobBasicAccountingInformation),
+        ).contents
+        information.active_processes = next(active_counts)
+        ctypes.cast(return_length, ctypes.POINTER(ctypes.c_uint32)).contents.value = size
+        events.append(("query", handle, information_class, information.active_processes, size))
+        return 1
+
+    kernel32.QueryInformationJobObject = _FakeWindowsFunction(_query)
+    monkeypatch.setattr(processes, "_windows_kernel32", lambda: kernel32)
+    monkeypatch.setattr(processes.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(processes.time, "sleep", lambda seconds: events.append(("sleep", seconds)))
+
+    processes._wait_for_windows_job_empty(
+        "job",
+        name=_JOB_NAME,
+        timeout_seconds=1.0,
+    )
+
+    assert events == [
+        (
+            "query",
+            "job",
+            processes._WINDOWS_JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+            2,
+            ctypes.sizeof(processes._WindowsJobBasicAccountingInformation),
+        ),
+        ("sleep", 0.01),
+        (
+            "query",
+            "job",
+            processes._WINDOWS_JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+            1,
+            ctypes.sizeof(processes._WindowsJobBasicAccountingInformation),
+        ),
+        ("sleep", 0.01),
+        (
+            "query",
+            "job",
+            processes._WINDOWS_JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+            0,
+            ctypes.sizeof(processes._WindowsJobBasicAccountingInformation),
+        ),
+    ]
+
+
+def test_wait_for_windows_job_empty_uses_one_bounded_deadline(monkeypatch):
+    _select_windows(monkeypatch)
+    query_count = 0
+    clock = iter((10.0, 10.0, 10.1))
+    kernel32 = _FakeKernel32()
+
+    def _query(handle, information_class, information_pointer, size, return_length):
+        nonlocal query_count
+        del handle, information_class, size, return_length
+        query_count += 1
+        information = ctypes.cast(
+            information_pointer,
+            ctypes.POINTER(processes._WindowsJobBasicAccountingInformation),
+        ).contents
+        information.active_processes = 1
+        return 1
+
+    kernel32.QueryInformationJobObject = _FakeWindowsFunction(_query)
+    monkeypatch.setattr(processes, "_windows_kernel32", lambda: kernel32)
+    monkeypatch.setattr(processes.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(processes.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(ProcessInspectionError, match="Timed out waiting"):
+        processes._wait_for_windows_job_empty(
+            "job",
+            name=_JOB_NAME,
+            timeout_seconds=0.05,
+        )
+
+    assert query_count == 2
+
+
+def test_wait_for_windows_job_empty_fails_closed_when_accounting_query_fails(
+    monkeypatch,
+):
+    _select_windows(monkeypatch)
+    kernel32 = _FakeKernel32()
+    kernel32.QueryInformationJobObject = _FakeWindowsFunction(lambda *args: 0)
+    monkeypatch.setattr(processes, "_windows_kernel32", lambda: kernel32)
+    monkeypatch.setattr(processes, "_windows_last_error", lambda: 5)
+
+    with pytest.raises(ProcessInspectionError, match="Unable to inspect Windows Job"):
+        processes._wait_for_windows_job_empty(
+            "job",
+            name=_JOB_NAME,
+            timeout_seconds=1.0,
+        )
 
 
 def _install_verified_windows_job_mocks(monkeypatch, expected, events):
@@ -620,18 +594,18 @@ def test_verified_windows_job_kill_orders_identity_membership_and_termination(
 
     force_kill_verified_contained_process_tree(
         expected,
-        windows_job_nonce=_NONCE,
+        containment_nonce=_NONCE,
         timeout_seconds=3.5,
     )
 
     assert events == [
-        ("open_job", _NONCE),
         ("open_process", 321),
         ("inspect", 321, "process"),
+        ("open_job", _NONCE),
         ("membership", "process", "job", 321),
+        ("close_process", "process"),
         ("terminate", "job", _JOB_NAME, 1),
         ("wait", "job", _JOB_NAME, 3.5),
-        ("close_process", "process"),
         ("close_job", "job"),
     ]
 
@@ -662,15 +636,13 @@ def test_verified_windows_job_identity_mismatch_never_queries_or_terminates(
     with pytest.raises(ProcessInspectionError, match="no longer matches"):
         force_kill_verified_contained_process_tree(
             expected,
-            windows_job_nonce=_NONCE,
+            containment_nonce=_NONCE,
         )
 
     assert events == [
-        ("open_job", _NONCE),
         ("open_process", 321),
         ("inspect", 321, "process"),
         ("close_process", "process"),
-        ("close_job", "job"),
     ]
 
 
@@ -695,16 +667,16 @@ def test_verified_windows_job_membership_mismatch_never_terminates(monkeypatch):
     with pytest.raises(ProcessInspectionError, match="not a member"):
         force_kill_verified_contained_process_tree(
             expected,
-            windows_job_nonce=_NONCE,
+            containment_nonce=_NONCE,
         )
 
     assert events == [
-        ("open_job", _NONCE),
         ("open_process", 321),
         ("inspect", 321, "process"),
+        ("open_job", _NONCE),
         ("membership", "process", "job", 321),
-        ("close_process", "process"),
         ("close_job", "job"),
+        ("close_process", "process"),
     ]
 
 
@@ -721,36 +693,39 @@ def test_verified_windows_job_invalid_timeout_never_terminates(monkeypatch):
     with pytest.raises(ValueError, match="finite nonnegative number"):
         force_kill_verified_contained_process_tree(
             expected,
-            windows_job_nonce=_NONCE,
+            containment_nonce=_NONCE,
             timeout_seconds=float("nan"),
         )
 
     assert events == [
-        ("open_job", _NONCE),
         ("open_process", 321),
         ("inspect", 321, "process"),
+        ("open_job", _NONCE),
         ("membership", "process", "job", 321),
         ("close_process", "process"),
         ("close_job", "job"),
     ]
 
 
-def test_verified_windows_job_requires_nonce_before_opening_any_handle(monkeypatch):
+def test_verified_windows_job_rejects_invalid_nonce_before_opening_any_handle(monkeypatch):
     expected = _identity(process_group_id=None, process_session_id=7)
     _select_windows(monkeypatch)
     monkeypatch.setattr(
         processes,
         "open_windows_kill_on_close_job",
-        lambda nonce: pytest.fail("no Job may be opened without a nonce"),
+        lambda nonce: pytest.fail("no Job may be opened with an invalid nonce"),
     )
     monkeypatch.setattr(
         processes,
         "_open_windows_process",
-        lambda pid: pytest.fail("no process may be opened without a nonce"),
+        lambda pid: pytest.fail("no process may be opened with an invalid nonce"),
     )
 
-    with pytest.raises(ProcessInspectionError, match="requires a containment nonce"):
-        force_kill_verified_contained_process_tree(expected)
+    with pytest.raises(ValueError, match="64 lowercase hexadecimal"):
+        force_kill_verified_contained_process_tree(
+            expected,
+            containment_nonce="invalid",
+        )
 
 
 @pytest.mark.parametrize("timeout", [-1, float("inf"), float("nan"), True, "1"])

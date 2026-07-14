@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError, replace
 import os
 import select
+import secrets
 import signal
 import subprocess
 import sys
@@ -14,9 +15,13 @@ from data_engine.platform import processes
 from data_engine.platform.processes import (
     ProcessIdentity,
     ProcessInspectionError,
+    force_kill_verified_contained_process_tree,
     force_kill_verified_process_tree,
     inspect_process_identity,
 )
+
+
+_NONCE = "ab" * 32
 
 
 def _identity(**overrides) -> ProcessIdentity:
@@ -436,60 +441,69 @@ def test_windows_process_identity_propagates_open_access_failure(monkeypatch):
 def test_verified_kill_blocks_every_identity_field_mismatch(monkeypatch, field, value):
     expected = _identity()
     actual = replace(expected, **{field: value})
-    signaled = []
     monkeypatch.setattr(processes.os, "name", "posix")
-    monkeypatch.setattr(processes.sys, "platform", "darwin")
+    monkeypatch.setattr(processes.os, "getpid", lambda: 111)
+    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111)
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: actual)
     monkeypatch.setattr(
-        processes.os,
-        "killpg",
-        lambda pid, selected_signal: signaled.append((pid, selected_signal)),
-        raising=False,
+        processes,
+        "request_posix_process_group_termination",
+        lambda **kwargs: pytest.fail("mismatched identity must not reach the watchdog"),
     )
 
     with pytest.raises(ProcessInspectionError, match="no longer matches"):
-        force_kill_verified_process_tree(expected)
-
-    assert signaled == []
+        force_kill_verified_process_tree(
+            expected,
+            containment_nonce=_NONCE,
+        )
 
 
 def test_verified_posix_kill_requires_isolated_session_leader(monkeypatch):
     expected = _identity(process_session_id=999)
     monkeypatch.setattr(processes.os, "name", "posix")
-    monkeypatch.setattr(processes.sys, "platform", "darwin")
+    monkeypatch.setattr(processes.os, "getpid", lambda: 111)
+    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111)
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: expected)
     monkeypatch.setattr(
-        processes.os,
-        "killpg",
-        lambda *args: pytest.fail("must not signal"),
-        raising=False,
+        processes,
+        "request_posix_process_group_termination",
+        lambda **kwargs: pytest.fail("nonisolated process must not reach the watchdog"),
     )
 
     with pytest.raises(ProcessInspectionError, match="isolated leader"):
-        force_kill_verified_process_tree(expected)
+        force_kill_verified_process_tree(
+            expected,
+            containment_nonce=_NONCE,
+        )
 
 
-def test_verified_posix_kill_signals_matching_isolated_group(monkeypatch):
+def test_verified_posix_kill_requests_matching_watchdog_capability(monkeypatch):
     expected = _identity()
-    signaled = []
+    requests = []
     monkeypatch.setattr(processes.os, "name", "posix")
-    monkeypatch.setattr(processes.sys, "platform", "darwin")
-    monkeypatch.setattr(processes.signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(processes.os, "getpid", lambda: 111)
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: expected)
     monkeypatch.setattr(processes.os, "getpgrp", lambda: 111, raising=False)
     monkeypatch.setattr(
-        processes.os,
-        "killpg",
-        lambda pid, selected_signal: signaled.append((pid, selected_signal)),
-        raising=False,
+        processes,
+        "request_posix_process_group_termination",
+        lambda **kwargs: requests.append(kwargs),
     )
 
-    force_kill_verified_process_tree(expected)
+    force_kill_verified_process_tree(
+        expected,
+        containment_nonce=_NONCE,
+    )
 
-    assert signaled == [(321, 9)]
+    assert requests == [
+        {
+            "containment_nonce": _NONCE,
+            "expected_parent_pid": expected.pid,
+        }
+    ]
 
 
-def test_verified_windows_kill_requires_containment_job(monkeypatch):
+def test_verified_windows_kill_rejects_invalid_containment_nonce(monkeypatch):
     expected = _identity(process_group_id=None, process_session_id=7)
     monkeypatch.setattr(processes.os, "name", "nt")
     monkeypatch.setattr(
@@ -498,18 +512,24 @@ def test_verified_windows_kill_requires_containment_job(monkeypatch):
         lambda *args, **kwargs: pytest.fail("taskkill must not be invoked"),
     )
 
-    with pytest.raises(ProcessInspectionError, match="nonce-named Job"):
-        force_kill_verified_process_tree(expected)
+    with pytest.raises(ValueError, match="64 lowercase hexadecimal"):
+        force_kill_verified_process_tree(
+            expected,
+            containment_nonce="invalid",
+        )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups are required")
 def test_verified_posix_kill_targets_live_parent_and_child_group():
+    containment_nonce = secrets.token_hex(32)
     parent_code = """
 import os
 import signal
 import subprocess
 import sys
+from data_engine.platform.posix_watchdog import arm_posix_process_group_watchdog
 
+arm_posix_process_group_watchdog(containment_nonce=sys.argv[1])
 read_fd, write_fd = os.pipe()
 child_code = "import os, signal, sys; os.write(int(sys.argv[1]), b'R'); os.close(int(sys.argv[1])); signal.pause()"
 child = subprocess.Popen([sys.executable, "-c", child_code, str(write_fd)], pass_fds=(write_fd,))
@@ -521,7 +541,7 @@ print(f"{os.getpid()} {child.pid}", flush=True)
 signal.pause()
 """
     parent = subprocess.Popen(
-        [sys.executable, "-c", parent_code],
+        [sys.executable, "-c", parent_code, containment_nonce],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
@@ -547,13 +567,17 @@ signal.pause()
         assert identity.process_session_id == parent_pid
 
         with pytest.raises(ProcessInspectionError, match="no longer matches"):
-            force_kill_verified_process_tree(
-                replace(identity, executable_path=f"{identity.executable_path}.wrong")
+            force_kill_verified_contained_process_tree(
+                replace(identity, executable_path=f"{identity.executable_path}.wrong"),
+                containment_nonce=containment_nonce,
             )
         os.kill(parent_pid, 0)
         os.kill(child_pid, 0)
 
-        force_kill_verified_process_tree(identity)
+        force_kill_verified_contained_process_tree(
+            identity,
+            containment_nonce=containment_nonce,
+        )
         assert parent.wait(timeout=10) == -signal.SIGKILL
         readable, _, _ = select.select([parent.stdout], [], [], 10)
         assert readable, "child process did not close the process-group readiness pipe"

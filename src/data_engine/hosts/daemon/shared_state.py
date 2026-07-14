@@ -26,6 +26,38 @@ class DaemonSharedStateAdapter:
     def claim_workspace(self, paths: WorkspacePaths) -> str | None:
         return self.workspace_io.claim_workspace(paths)
 
+    def claim_daemon_workspace(
+        self,
+        paths: WorkspacePaths,
+        *,
+        workspace_id: str,
+        machine_id: str,
+        host_name: str,
+        daemon_id: str,
+        pid: int,
+        process_identity: ProcessIdentity,
+        containment_nonce: str,
+        status: str,
+        started_at_utc: str,
+        last_checkpoint_at_utc: str,
+        app_version: str | None,
+    ) -> str | None:
+        """Atomically claim with complete daemon owner and containment metadata."""
+        return self.workspace_io.claim_daemon_workspace(
+            paths,
+            workspace_id=workspace_id,
+            machine_id=machine_id,
+            host_name=host_name,
+            daemon_id=daemon_id,
+            pid=pid,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
+            status=status,
+            started_at_utc=started_at_utc,
+            last_checkpoint_at_utc=last_checkpoint_at_utc,
+            app_version=app_version,
+        )
+
     def release_workspace(self, paths: WorkspacePaths, *, lease_token: str) -> None:
         self.workspace_io.release_workspace(paths, lease_token=lease_token)
 

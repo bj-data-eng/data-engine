@@ -642,6 +642,96 @@ def claim_workspace(paths: WorkspacePaths) -> str | None:
         return lease_token
 
 
+def claim_daemon_workspace(
+    paths: WorkspacePaths,
+    *,
+    workspace_id: str,
+    machine_id: str,
+    host_name: str,
+    daemon_id: str,
+    pid: int,
+    process_identity: ProcessIdentity,
+    containment_nonce: str,
+    status: str,
+    started_at_utc: str,
+    last_checkpoint_at_utc: str,
+    app_version: str | None,
+) -> str | None:
+    """Atomically claim a workspace with a complete daemon owner record.
+
+    The full identity row is published inside the available bundle before its
+    single rename to the token-named leased bundle. A crash before the rename
+    therefore leaves an available workspace, while every visible daemon lease
+    already carries the identity and containment capability needed for exact
+    recovery.
+    """
+    if workspace_id != paths.workspace_id:
+        raise ValueError("A daemon claim workspace id must match its workspace paths.")
+    with _topology_lock(paths):
+        _initialize_workspace_state_locked(paths)
+        current = _locate_workspace_bundle(paths)
+        if current is None or current.state != "available":
+            return None
+        lease_token = secrets.token_hex(16)
+        leased = _leased_bundle_path(paths, lease_token)
+        manifest = _read_snapshot_manifest(current.snapshot_manifest_path)
+        snapshot_generation_id = (
+            _manifest_generation_id(manifest) if manifest is not None else None
+        )
+        row = _metadata_row(
+            snapshot_generation_id=snapshot_generation_id,
+            workspace_id=workspace_id,
+            lease_token=lease_token,
+            machine_id=machine_id,
+            host_name=host_name,
+            daemon_id=daemon_id,
+            pid=pid,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
+            status=status,
+            started_at_utc=started_at_utc,
+            last_checkpoint_at_utc=last_checkpoint_at_utc,
+            app_version=app_version,
+        )
+        try:
+            os.utime(current.root)
+            _scrub_noncurrent_temp_artifacts(
+                current.root,
+                workspace_id=paths.workspace_id,
+                lease_token=lease_token,
+            )
+            remove_file_if_exists(current.lease_metadata_path)
+            _write_initial_daemon_lease_metadata(
+                current,
+                lease_token=lease_token,
+                row=row,
+            )
+            current.root.rename(leased)
+        except FileNotFoundError as exc:
+            raise WorkspaceLeaseLostError(
+                f"Workspace {paths.workspace_id!r} claim lost during marker transition."
+            ) from exc
+        return lease_token
+
+
+def _write_initial_daemon_lease_metadata(
+    bundle: WorkspaceBundlePaths,
+    *,
+    lease_token: str,
+    row: dict[str, Any],
+) -> None:
+    temporary_path = bundle.lease_metadata_path.with_name(
+        f".{bundle.lease_metadata_path.name}.{lease_token}.{uuid4().hex}.tmp"
+    )
+    try:
+        _frame_with_schema([row], _LEASE_METADATA_SCHEMA).write_parquet(temporary_path)
+        with temporary_path.open("rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, bundle.lease_metadata_path)
+    finally:
+        remove_file_if_exists(temporary_path)
+
+
 def release_workspace(paths: WorkspacePaths, *, lease_token: str) -> None:
     """Return only the exact token-owned bundle to available state."""
     token = _validate_lease_token(lease_token)
@@ -1946,6 +2036,7 @@ def _wait_before_snapshot_retry(attempt: int, *, retry_count: int) -> None:
 __all__ = [
     "assert_workspace_lease",
     "checkpoint_workspace_state",
+    "claim_daemon_workspace",
     "claim_workspace",
     "daemon_process_lease_identity",
     "daemon_process_lease_metadata",

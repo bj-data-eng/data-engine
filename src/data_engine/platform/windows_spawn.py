@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 import ctypes
 from dataclasses import dataclass
 import os
@@ -31,6 +31,7 @@ _PROCESS_CREATION_FLAGS = (
 
 _STARTF_USESTDHANDLES = 0x00000100
 _PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
+_PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
 _DUPLICATE_SAME_ACCESS = 0x00000002
 _GENERIC_READ = 0x80000000
 _GENERIC_WRITE = 0x40000000
@@ -120,15 +121,18 @@ def spawn_windows_contained_process(
     containment_nonce: str,
     cwd: str | os.PathLike[str] | None = None,
     env: Mapping[str, str] | None = None,
+    before_resume: Callable[[ProcessIdentity], None] | None = None,
+    after_verified_cleanup: Callable[[], None] | None = None,
 ) -> WindowsContainedProcess:
     """Launch a Windows process that cannot run outside its named Job.
 
-    The process starts suspended with only private ``NUL`` standard handles. The
-    launcher assigns the exact process handle to a new kill-on-close Job and reads
-    its identity before resuming the primary thread. After resume, a
-    non-inheritable Job handle is duplicated directly into the child. That remote
-    handle owns the Job until process exit, so the launcher may safely close its
-    handle without a child-side handshake.
+    The process starts suspended and is attached to a new kill-on-close Job as one
+    atomic ``CreateProcessW`` operation. It inherits only private ``NUL`` standard
+    handles. The launcher verifies Job membership and reads the exact process
+    identity before resuming the primary thread. After resume, a non-inheritable
+    Job handle is duplicated directly into the child. That remote handle owns the
+    Job until process exit, so the launcher may safely close its handle without a
+    child-side handshake.
 
     Args:
         executable: Explicit executable supplied as ``lpApplicationName`` and
@@ -139,6 +143,13 @@ def spawn_windows_contained_process(
         cwd: Optional child working directory.
         env: Optional complete child environment. ``None`` inherits the launcher's
             environment.
+        before_resume: Optional callback invoked with the exact process identity
+            after Job assignment and identity verification, while the primary
+            thread is still suspended. Raising aborts the launch and terminates
+            the contained child.
+        after_verified_cleanup: Optional callback invoked when a failed launch's
+            Job or exact process has been confirmed stopped. Callback failures
+            are attached to the original launch exception.
 
     Returns:
         The exact process identity and containment nonce. No native launcher
@@ -164,22 +175,28 @@ def spawn_windows_contained_process(
     )
     environment_block = _environment_block(env)
 
-    job = create_windows_kill_on_close_job(containment_nonce)
+    job = None
     process_information = _WindowsProcessInformation()
-    process_created = False
     job_assigned = False
     null_input = None
     null_output = None
     attribute_list = None
     attribute_list_buffer = None
+    attribute_list_values = None
     cleanup_error: BaseException | None = None
 
     try:
+        job = create_windows_kill_on_close_job(containment_nonce)
+        job_handle = job._native_handle()  # noqa: SLF001 - same-package native boundary
         null_input, null_output = _open_null_standard_handles()
         (
             attribute_list,
             attribute_list_buffer,
-        ) = _create_handle_attribute_list((null_input, null_output))
+            attribute_list_values,
+        ) = _create_process_attribute_list(
+            inherited_handles=(null_input, null_output),
+            job_handles=(job_handle,),
+        )
         startup_info = _startup_info(
             attribute_list=attribute_list,
             standard_input=null_input,
@@ -199,8 +216,7 @@ def spawn_windows_contained_process(
             startup_info=startup_info,
             process_information=process_information,
         )
-        process_created = True
-
+        job_assigned = True
         process_handle = process_information.process_handle
         thread_handle = process_information.thread_handle
         process_id = int(process_information.process_id)
@@ -209,13 +225,14 @@ def spawn_windows_contained_process(
                 "CreateProcessW returned incomplete process information."
             )
 
-        job_handle = job._native_handle()  # noqa: SLF001 - same-package native boundary
-        _assign_process_to_job(
-            job_handle=job_handle,
-            process_handle=process_handle,
-            process_id=process_id,
-        )
-        job_assigned = True
+        if not processes._windows_process_is_in_job(  # noqa: SLF001
+            process_handle,
+            job_handle,
+            pid=process_id,
+        ):
+            raise ProcessInspectionError(
+                f"Created process {process_id} is outside its required Job."
+            )
 
         identity = processes._inspect_windows_process_identity_from_handle(  # noqa: SLF001
             process_id,
@@ -230,6 +247,8 @@ def spawn_windows_contained_process(
             containment_nonce=containment_nonce,
         )
 
+        if before_resume is not None:
+            before_resume(identity)
         _resume_primary_thread(thread_handle=thread_handle, process_id=process_id)
         _duplicate_job_handle_into_child(
             job_handle=job_handle,
@@ -238,26 +257,35 @@ def spawn_windows_contained_process(
         )
         return result
     except BaseException as exc:
-        if process_created and process_information.process_handle:
+        if job is not None and process_information.process_handle:
             cleanup_error = _terminate_failed_child(
                 job=job,
                 job_assigned=job_assigned,
                 process_handle=process_information.process_handle,
                 process_id=int(process_information.process_id),
             )
+            if cleanup_error is None and after_verified_cleanup is not None:
+                try:
+                    after_verified_cleanup()
+                except BaseException as callback_exc:
+                    exc.add_note(
+                        f"Post-cleanup callback also failed: {callback_exc}"
+                    )
         if cleanup_error is not None:
             exc.add_note(f"Failed-process cleanup also failed: {cleanup_error}")
         raise
     finally:
         if attribute_list is not None:
             _delete_attribute_list(attribute_list)
-        # Keep the backing allocation live until DeleteProcThreadAttributeList.
+        # Keep all attribute storage live until DeleteProcThreadAttributeList.
+        del attribute_list_values
         del attribute_list_buffer
         _close_handle(process_information.thread_handle)
         _close_handle(process_information.process_handle)
         _close_handle(null_output)
         _close_handle(null_input)
-        job.close()
+        if job is not None:
+            job.close()
 
 
 def _path_text(
@@ -356,16 +384,19 @@ def _open_null_standard_handles() -> tuple[object, object]:
         None,
     )
     if _invalid_handle(standard_output):
+        error_number = _last_error()
         _close_handle(standard_input)
         raise ProcessInspectionError(
-            f"Unable to open NUL for process output: {_last_error_detail()}."
+            f"Unable to open NUL for process output: {_error_detail(error_number)}."
         )
     return standard_input, standard_output
 
 
-def _create_handle_attribute_list(
-    handles: tuple[object, ...],
-) -> tuple[ctypes.c_void_p, object]:
+def _create_process_attribute_list(
+    *,
+    inherited_handles: tuple[object, ...],
+    job_handles: tuple[object, ...],
+) -> tuple[ctypes.c_void_p, object, object]:
     kernel32 = _windows_kernel32()
     initialize = kernel32.InitializeProcThreadAttributeList
     initialize.argtypes = [
@@ -377,7 +408,7 @@ def _create_handle_attribute_list(
     initialize.restype = ctypes.c_int
     size = ctypes.c_size_t()
     _set_last_error(0)
-    initialize(None, 1, 0, ctypes.byref(size))
+    initialize(None, 2, 0, ctypes.byref(size))
     error_number = _last_error()
     if size.value == 0 or error_number not in (0, _ERROR_INSUFFICIENT_BUFFER):
         raise ProcessInspectionError(
@@ -386,12 +417,13 @@ def _create_handle_attribute_list(
         )
     backing = ctypes.create_string_buffer(size.value)
     attribute_list = ctypes.cast(backing, ctypes.c_void_p)
-    if not initialize(attribute_list, 1, 0, ctypes.byref(size)):
+    if not initialize(attribute_list, 2, 0, ctypes.byref(size)):
         raise ProcessInspectionError(
             f"Unable to initialize the process handle attribute list: {_last_error_detail()}."
         )
 
-    handle_array = (ctypes.c_void_p * len(handles))(*handles)
+    handle_array = (ctypes.c_void_p * len(inherited_handles))(*inherited_handles)
+    job_array = (ctypes.c_void_p * len(job_handles))(*job_handles)
     update = kernel32.UpdateProcThreadAttribute
     update.argtypes = [
         ctypes.c_void_p,
@@ -412,11 +444,28 @@ def _create_handle_attribute_list(
         None,
         None,
     ):
+        error_number = _last_error()
         _delete_attribute_list(attribute_list)
         raise ProcessInspectionError(
-            f"Unable to restrict inherited process handles: {_last_error_detail()}."
+            "Unable to restrict inherited process handles: "
+            f"{_error_detail(error_number)}."
         )
-    return attribute_list, backing
+    if not update(
+        attribute_list,
+        0,
+        _PROC_THREAD_ATTRIBUTE_JOB_LIST,
+        ctypes.cast(job_array, ctypes.c_void_p),
+        ctypes.sizeof(job_array),
+        None,
+        None,
+    ):
+        error_number = _last_error()
+        _delete_attribute_list(attribute_list)
+        raise ProcessInspectionError(
+            "Unable to attach the process Job at creation: "
+            f"{_error_detail(error_number)}."
+        )
+    return attribute_list, backing, (handle_array, job_array)
 
 
 def _startup_info(
@@ -473,22 +522,6 @@ def _create_suspended_process(
     ):
         raise ProcessInspectionError(
             f"Unable to create suspended Windows process: {_last_error_detail()}."
-        )
-
-
-def _assign_process_to_job(
-    *,
-    job_handle: object,
-    process_handle: object,
-    process_id: int,
-) -> None:
-    kernel32 = _windows_kernel32()
-    assign = kernel32.AssignProcessToJobObject
-    assign.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-    assign.restype = ctypes.c_int
-    if not assign(job_handle, process_handle):
-        raise ProcessInspectionError(
-            f"Unable to contain created process {process_id}: {_last_error_detail()}."
         )
 
 
