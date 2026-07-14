@@ -23,6 +23,7 @@ def test_cli_doctor_reports_workspace_health(monkeypatch, tmp_path, capsys):
     (workspace_root / ".vscode").mkdir(parents=True)
     (workspace_root / ".vscode" / "settings.json").write_text("{}", encoding="utf-8")
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    monkeypatch.setenv(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR, str(workspace_root.parent))
     monkeypatch.setenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, "docs")
     store = LocalSettingsStore.open_default(app_root=app_root)
     store.set_default_workspace_id("docs")
@@ -43,6 +44,7 @@ def test_cli_doctor_preserves_launch_python_path(monkeypatch, tmp_path, capsys):
     workspace_root = tmp_path / "shared_workspaces" / "docs"
     (workspace_root / "flow_modules").mkdir(parents=True)
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    monkeypatch.setenv(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR, str(workspace_root.parent))
     monkeypatch.setenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, "docs")
     monkeypatch.setattr("data_engine.ui.cli.commands_doctor.sys.executable", r"C:\venv\Scripts\python.exe")
     store = LocalSettingsStore.open_default(app_root=app_root)
@@ -388,5 +390,4 @@ def test_cli_main_accepts_injected_dependencies_for_doctor(capsys, tmp_path):
     assert result == 0
     output = capsys.readouterr().out
     assert f"app root: {str(app_root).replace('\\', '/')}" in output
-
 
