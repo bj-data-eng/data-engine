@@ -105,7 +105,7 @@ def test_shutdown_request_wakes_listener_to_exit_accept_loop(tmp_path, monkeypat
         service._shutdown()  # noqa: SLF001
 
 
-def test_checkpoint_failures_release_workspace_and_request_shutdown(tmp_path, monkeypatch):
+def test_checkpoint_failures_release_workspace_when_control_state_publication_fails(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -133,7 +133,23 @@ def test_checkpoint_failures_release_workspace_and_request_shutdown(tmp_path, mo
             self._set = True
 
     service.host.shutdown_event = _SequenceEvent()  # type: ignore[assignment]
-    monkeypatch.setattr(service, "_checkpoint_once", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    checkpoint_statuses: list[str] = []
+    original_checkpoint_once = service._checkpoint_once  # noqa: SLF001 - deterministic failure-path injection
+
+    def _checkpoint_once(*, status: str) -> None:
+        checkpoint_statuses.append(status)
+        original_checkpoint_once(status=status)
+
+    control_state_statuses: list[str] = []
+
+    def _fail_control_state_upsert(**kwargs: object) -> None:
+        status = kwargs["status"]
+        assert isinstance(status, str)
+        control_state_statuses.append(status)
+        raise RuntimeError("control state unavailable")
+
+    monkeypatch.setattr(service, "_checkpoint_once", _checkpoint_once)
+    monkeypatch.setattr(service.runtime_control_ledger.daemon_state, "upsert", _fail_control_state_upsert)
     tick = {"value": 0.0}
 
     def _fake_monotonic() -> float:
@@ -149,6 +165,8 @@ def test_checkpoint_failures_release_workspace_and_request_shutdown(tmp_path, mo
     assert service.host.status == "failed"
     assert service.host.runtime_active is False
     assert service.state.consecutive_checkpoint_failures == 3
+    assert checkpoint_statuses == ["running", "degraded", "degraded"]
+    assert control_state_statuses == ["running", "degraded", "degraded", "degraded", "failed"]
     assert read_lease_metadata(paths) is None
     assert (paths.available_markers_dir / paths.workspace_id).exists() is True
     assert (paths.leased_markers_dir / paths.workspace_id).exists() is False

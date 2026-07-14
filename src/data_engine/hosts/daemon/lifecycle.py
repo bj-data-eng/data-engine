@@ -72,15 +72,32 @@ def checkpoint_loop(service: "DataEngineDaemonService") -> None:
             if failure_count == 2:
                 with service._state_lock:
                     service.state.status = "degraded"
-                service._publish_runtime_event("daemon.degraded")
-                service._update_daemon_state(status="degraded")
+                try:
+                    service._publish_runtime_event("daemon.degraded")
+                except Exception:
+                    service._debug_log("daemon degraded runtime event publication failed")
+                    service._debug_log(traceback.format_exc().rstrip())
+                try:
+                    service._update_daemon_state(status="degraded")
+                except Exception:
+                    service._debug_log("daemon degraded control-state publication failed")
+                    service._debug_log(traceback.format_exc().rstrip())
                 service._debug_log("daemon marked degraded after repeated checkpoint failures")
             if failure_count >= 3:
                 with service._state_lock:
                     service.state.status = "failed"
-                service._publish_runtime_event("daemon.failed")
+                try:
+                    service._publish_runtime_event("daemon.failed")
+                except Exception:
+                    service._debug_log("daemon failed runtime event publication failed")
+                    service._debug_log(traceback.format_exc().rstrip())
                 service._debug_log("relinquishing workspace after repeated checkpoint failures")
-                relinquish_workspace_after_checkpoint_failures(service)
+                try:
+                    relinquish_workspace_after_checkpoint_failures(service)
+                except Exception:
+                    service._debug_log("relinquish after checkpoint failures did not complete")
+                    service._debug_log(traceback.format_exc().rstrip())
+                    shutdown_if_unowned_and_idle(service, reason="checkpoint failure recovery")
                 next_checkpoint_at = time.monotonic() + CHECKPOINT_INTERVAL_SECONDS
 
 
