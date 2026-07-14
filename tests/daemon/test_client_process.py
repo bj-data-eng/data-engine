@@ -25,7 +25,7 @@ from data_engine.hosts.daemon.client import (
     force_shutdown_daemon_process,
 )
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
-from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, _lease_pid_is_live
+from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot, _lease_pid_is_live
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR, machine_id_text
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.runtime.shared_state import (
@@ -246,6 +246,34 @@ def test_workspace_daemon_manager_unconfigured_sync_does_not_create_runtime_stat
     assert snapshot.source == "none"
     assert snapshot.workspace_owned is True
     assert paths.runtime_state_dir.exists() is False
+
+
+def test_workspace_daemon_manager_clears_liveness_when_status_request_fails(tmp_path, monkeypatch):
+    workspace_root = tmp_path / "shared" / "default"
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.is_daemon_live", lambda paths: True)
+    monkeypatch.setattr(
+        "data_engine.hosts.daemon.manager.daemon_request",
+        lambda paths, payload, timeout=0.0: (_ for _ in ()).throw(DaemonClientError("status failed")),
+    )
+    manager = WorkspaceDaemonManager(paths)
+    manager._last_snapshot = WorkspaceDaemonSnapshot(  # noqa: SLF001 - reproduce the cached-status failure path
+        live=True,
+        workspace_owned=True,
+        leased_by_machine_id=None,
+        runtime_active=False,
+        runtime_stopping=False,
+        manual_runs=(),
+        last_checkpoint_at_utc="2026-07-13T12:00:00+00:00",
+        source="daemon",
+    )
+
+    snapshot = manager.sync()
+
+    assert snapshot.live is False
+    assert snapshot.source == "cached"
+    assert manager.daemon_live is False
 
 
 def test_workspace_daemon_manager_reuses_cached_snapshot_when_projection_is_unchanged(tmp_path, monkeypatch):

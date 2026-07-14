@@ -144,6 +144,7 @@ class WorkspaceDaemonManager:
                     timeout=2.0,
                 )
             except DaemonClientError:
+                self._daemon_live = False
                 self._sync_misses += 1
                 if self._last_snapshot is not None:
                     return WorkspaceDaemonSnapshot(
