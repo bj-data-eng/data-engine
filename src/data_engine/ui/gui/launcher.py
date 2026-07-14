@@ -21,19 +21,28 @@ def _configure_qt_webengine_environment() -> None:
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(flags)
 
 
-def launch(theme_name: str = DEFAULT_THEME) -> None:
-    """Create and run the PySide6 application."""
+def launch(theme_name: str = DEFAULT_THEME) -> DataEngineWindow:
+    """Create and show the desktop window.
+
+    The launcher runs the Qt event loop when it creates the application. When
+    embedding Data Engine in an existing Qt application, the caller receives
+    the window immediately and should retain the returned reference.
+    """
     _configure_qt_webengine_environment()
     services = build_gui_services()
-    app = QApplication.instance() or QApplication([])
+    app = QApplication.instance()
+    owns_application = app is None
+    if app is None:
+        app = QApplication([])
     app.setApplicationName(APP_DISPLAY_NAME)
     app.setStyle("Fusion")
     resolved_theme = services.theme_service.resolve_name(theme_name)
     app.setStyleSheet(stylesheet(resolved_theme))
     window = DataEngineWindow(theme_name=resolved_theme, services=services)
     window.show()
-    if QApplication.instance() is app:
+    if owns_application:
         app.exec()
+    return window
 
 
 def main() -> None:
