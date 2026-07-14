@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import ctypes
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from multiprocessing import AuthenticationError
 from multiprocessing.connection import Client, answer_challenge, deliver_challenge
 from pathlib import Path
 import secrets
+import sqlite3
 import subprocess
 import sys
 import time
@@ -45,6 +47,9 @@ class WorkspaceLeaseError(RuntimeError):
 
 
 DAEMON_AUTHKEY_FILE_NAME = ".daemon-authkey"
+_DAEMON_AUTHKEY_BYTE_LENGTH = 32
+_DAEMON_AUTHKEY_LOCK_FILE_NAME = ".daemon-authkey.lock"
+_DAEMON_AUTHKEY_LOCK_TIMEOUT_SECONDS = 2.0
 _SHARED_STATE_ADAPTER = DaemonSharedStateAdapter()
 _WINDOWS_ERROR_ALREADY_EXISTS = 183
 _WINDOWS_STARTUP_MUTEXES: dict[str, int] = {}
@@ -65,30 +70,181 @@ def _daemon_authkey_path(paths: WorkspacePaths) -> Path:
     return paths.runtime_state_dir / DAEMON_AUTHKEY_FILE_NAME
 
 
+def _read_daemon_authkey(authkey_path: Path) -> tuple[bytes | None, bool]:
+    """Return a validated daemon authkey and whether its file exists."""
+    try:
+        token = authkey_path.read_text(encoding="ascii").strip()
+    except FileNotFoundError:
+        return None, False
+    except UnicodeDecodeError:
+        return None, True
+    try:
+        authkey = bytes.fromhex(token)
+    except ValueError:
+        return None, True
+    if len(authkey) != _DAEMON_AUTHKEY_BYTE_LENGTH:
+        return None, True
+    return authkey, True
+
+
+def _try_lock_authkey_file(fd: int) -> None:
+    """Try to lock the first byte of one authkey lock file."""
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_authkey_file(fd: int) -> None:
+    """Unlock the first byte of one authkey lock file."""
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+@contextmanager
+def _authkey_mutation_lock(authkey_path: Path):
+    """Serialize authkey creation and repair across local processes."""
+    lock_path = authkey_path.with_name(_DAEMON_AUTHKEY_LOCK_FILE_NAME)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    acquired = False
+    try:
+        if os.fstat(fd).st_size == 0:
+            os.write(fd, b"\0")
+        deadline = time.monotonic() + _DAEMON_AUTHKEY_LOCK_TIMEOUT_SECONDS
+        while True:
+            try:
+                _try_lock_authkey_file(fd)
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    raise DaemonClientError("Timed out waiting to repair the daemon auth key.") from exc
+                time.sleep(0.01)
+            else:
+                acquired = True
+                break
+        yield
+    finally:
+        if acquired:
+            try:
+                _unlock_authkey_file(fd)
+            except OSError:
+                pass
+        os.close(fd)
+
+
+def _recorded_local_daemon_pid(paths: WorkspacePaths) -> int | None:
+    """Return the PID recorded in the machine-local daemon state database."""
+    db_path = paths.runtime_control_db_path
+    if db_path is None or not db_path.is_file():
+        return None
+    database_uri = f"{db_path.resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(database_uri, uri=True, timeout=0.1) as connection:
+        row = connection.execute(
+            "SELECT pid FROM daemon_state WHERE workspace_id = ?",
+            (paths.workspace_id,),
+        ).fetchone()
+    return int(row[0]) if row is not None else None
+
+
+def _authkey_recovery_is_safe(paths: WorkspacePaths) -> bool:
+    """Return whether no known local daemon can own the current authkey."""
+    try:
+        local_state_pid = _recorded_local_daemon_pid(paths)
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return False
+    if local_state_pid is not None and local_state_pid != os.getpid():
+        if local_state_pid <= 0:
+            return False
+        try:
+            if _pid_is_live(local_state_pid):
+                return False
+        except Exception:
+            return False
+    try:
+        metadata = _SHARED_STATE_ADAPTER.read_lease_metadata(paths)
+    except Exception:
+        return True
+    if metadata is None:
+        return True
+    owner = metadata.get("machine_id")
+    if not isinstance(owner, str) or not owner.strip():
+        return False
+    if owner.strip() != machine_id_text():
+        return True
+    try:
+        lease_pid = int(metadata.get("pid"))
+    except (TypeError, ValueError):
+        return False
+    if lease_pid == os.getpid():
+        return True
+    if lease_pid <= 0:
+        return False
+    try:
+        return not _pid_is_live(lease_pid)
+    except Exception:
+        return False
+
+
+def _quarantine_authkey(authkey_path: Path) -> Path:
+    """Atomically move one malformed daemon authkey to a unique quarantine path."""
+    quarantine_path = authkey_path.with_name(f"{authkey_path.name}.invalid-{secrets.token_hex(8)}")
+    os.replace(authkey_path, quarantine_path)
+    _harden_private_file_permissions(quarantine_path)
+    return quarantine_path
+
+
+def _create_daemon_authkey(authkey_path: Path) -> bytes | None:
+    """Create one authkey exclusively, or return ``None`` after losing a race."""
+    authkey = secrets.token_bytes(_DAEMON_AUTHKEY_BYTE_LENGTH)
+    try:
+        fd = os.open(authkey_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return None
+    try:
+        with os.fdopen(fd, "w", encoding="ascii") as handle:
+            handle.write(authkey.hex())
+    except Exception:
+        try:
+            authkey_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    _harden_private_file_permissions(authkey_path)
+    return authkey
+
+
 def daemon_authkey(paths: WorkspacePaths) -> bytes:
     """Load or create the per-workspace daemon authkey."""
     authkey_path = _daemon_authkey_path(paths)
     authkey_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
-        try:
-            token = authkey_path.read_text(encoding="ascii").strip()
-        except FileNotFoundError:
-            authkey = secrets.token_bytes(32)
-            try:
-                fd = os.open(authkey_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            except FileExistsError:
-                continue
-            with os.fdopen(fd, "w", encoding="ascii") as handle:
-                handle.write(authkey.hex())
-            _harden_private_file_permissions(authkey_path)
+        authkey, _ = _read_daemon_authkey(authkey_path)
+        if authkey is not None:
             return authkey
-        if not token:
-            try:
-                authkey_path.unlink()
-            except FileNotFoundError:
-                pass
-            continue
-        return bytes.fromhex(token)
+        with _authkey_mutation_lock(authkey_path):
+            authkey, authkey_exists = _read_daemon_authkey(authkey_path)
+            if authkey is not None:
+                return authkey
+            if authkey_exists:
+                if not _authkey_recovery_is_safe(paths):
+                    raise DaemonClientError(
+                        "Daemon auth key is malformed and cannot be replaced while a local daemon may still own it."
+                    )
+                _quarantine_authkey(authkey_path)
+            authkey = _create_daemon_authkey(authkey_path)
+            if authkey is not None:
+                return authkey
 
 
 def _encode_message(payload: dict[str, Any]) -> bytes:
@@ -272,6 +428,10 @@ def _kill_pid(pid: int) -> None:
 def _harden_private_file_permissions(path: Path) -> None:
     """Best-effort hardening for one private local file."""
     if os.name != "nt":
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
         return
     username = os.environ.get("USERNAME") or getpass.getuser()
     if not username.strip():

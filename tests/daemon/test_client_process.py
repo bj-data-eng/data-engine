@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import ctypes
 from datetime import UTC, datetime, timedelta
 import os
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -831,18 +833,175 @@ def test_remove_stale_unix_endpoint_deletes_dead_socket_file(tmp_path, monkeypat
     assert endpoint_path.exists() is False
 
 
-def test_daemon_authkey_is_stable_per_workspace(tmp_path, monkeypatch):
+def _authkey_test_paths(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     _write_demo_flow(workspace_root)
     paths = resolve_workspace_paths(workspace_root=workspace_root)
+    authkey_path = paths.runtime_state_dir / daemon_client.DAEMON_AUTHKEY_FILE_NAME
+    authkey_path.parent.mkdir(parents=True, exist_ok=True)
+    return paths, authkey_path
+
+
+def test_daemon_authkey_is_stable_per_workspace(tmp_path, monkeypatch):
+    paths, _ = _authkey_test_paths(tmp_path, monkeypatch)
 
     first = daemon_authkey(paths)
+    monkeypatch.setattr(
+        daemon_client,
+        "_recorded_local_daemon_pid",
+        lambda paths: pytest.fail("valid authkey reads must not inspect daemon ownership"),
+    )
     second = daemon_authkey(paths)
 
     assert first == second
     assert len(first) == 32
+
+
+@pytest.mark.parametrize(
+    "invalid_bytes",
+    [
+        pytest.param(b"not hexadecimal", id="malformed-syntax"),
+        pytest.param(b"ab" * 31, id="wrong-decoded-length"),
+        pytest.param(b"\xff\xfe", id="non-ascii"),
+    ],
+)
+def test_daemon_authkey_quarantines_invalid_unowned_file_and_regenerates(
+    tmp_path,
+    monkeypatch,
+    invalid_bytes,
+):
+    paths, authkey_path = _authkey_test_paths(tmp_path, monkeypatch)
+    authkey_path.write_bytes(invalid_bytes)
+    replacement = bytes(range(32))
+    monkeypatch.setattr(daemon_client.secrets, "token_bytes", lambda length: replacement)
+
+    authkey = daemon_authkey(paths)
+
+    quarantined = tuple(authkey_path.parent.glob(f"{authkey_path.name}.invalid-*"))
+    assert authkey == replacement
+    assert authkey_path.read_text(encoding="ascii") == replacement.hex()
+    assert len(quarantined) == 1
+    assert quarantined[0].read_bytes() == invalid_bytes
+    if os.name != "nt":
+        assert quarantined[0].stat().st_mode & 0o777 == 0o600
+    assert (authkey_path.parent / daemon_client._DAEMON_AUTHKEY_LOCK_FILE_NAME).is_file()
+
+
+def test_daemon_authkey_serializes_concurrent_malformed_file_recovery(tmp_path, monkeypatch):
+    paths, authkey_path = _authkey_test_paths(tmp_path, monkeypatch)
+    authkey_path.write_text("malformed", encoding="ascii")
+    real_read = daemon_client._read_daemon_authkey
+    initial_read_barrier = threading.Barrier(2)
+    local_state = threading.local()
+    generated_keys: list[bytes] = []
+    generated_keys_lock = threading.Lock()
+
+    def _synchronized_initial_read(path):
+        result = real_read(path)
+        if not getattr(local_state, "performed_initial_read", False):
+            local_state.performed_initial_read = True
+            initial_read_barrier.wait(timeout=2.0)
+        return result
+
+    def _next_key(length):
+        with generated_keys_lock:
+            key = bytes([len(generated_keys) + 1]) * length
+            generated_keys.append(key)
+            return key
+
+    monkeypatch.setattr(daemon_client, "_read_daemon_authkey", _synchronized_initial_read)
+    monkeypatch.setattr(daemon_client.secrets, "token_bytes", _next_key)
+    monkeypatch.setattr(daemon_client.secrets, "token_hex", lambda length: "ab" * length)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        authkeys = tuple(executor.map(lambda _: daemon_authkey(paths), range(2)))
+
+    assert authkeys == (authkeys[0], authkeys[0])
+    assert generated_keys == [authkeys[0]]
+    assert authkey_path.read_text(encoding="ascii") == authkeys[0].hex()
+    assert len(tuple(authkey_path.parent.glob(f"{authkey_path.name}.invalid-*"))) == 1
+
+
+def test_daemon_authkey_refuses_recovery_while_recorded_local_daemon_is_live(tmp_path, monkeypatch):
+    paths, authkey_path = _authkey_test_paths(tmp_path, monkeypatch)
+    authkey_path.write_text("malformed", encoding="ascii")
+    monkeypatch.setattr(daemon_client, "_recorded_local_daemon_pid", lambda paths: 4321)
+    monkeypatch.setattr(daemon_client, "_pid_is_live", lambda pid: True)
+
+    with pytest.raises(DaemonClientError, match="local daemon may still own"):
+        daemon_authkey(paths)
+
+    assert authkey_path.read_text(encoding="ascii") == "malformed"
+    assert tuple(authkey_path.parent.glob(f"{authkey_path.name}.invalid-*")) == ()
+
+
+def test_daemon_authkey_refuses_recovery_while_local_workspace_lease_pid_is_live(tmp_path, monkeypatch):
+    paths, authkey_path = _authkey_test_paths(tmp_path, monkeypatch)
+    authkey_path.write_text("malformed", encoding="ascii")
+    monkeypatch.setattr(daemon_client, "_recorded_local_daemon_pid", lambda paths: None)
+    monkeypatch.setattr(daemon_client, "_pid_is_live", lambda pid: True)
+    monkeypatch.setattr(
+        daemon_client._SHARED_STATE_ADAPTER,
+        "read_lease_metadata",
+        lambda paths: {"machine_id": machine_id_text(), "pid": 4321},
+    )
+
+    with pytest.raises(DaemonClientError, match="local daemon may still own"):
+        daemon_authkey(paths)
+
+    assert authkey_path.read_text(encoding="ascii") == "malformed"
+
+
+def test_daemon_authkey_refuses_recovery_when_local_owner_state_is_uncertain(tmp_path, monkeypatch):
+    paths, authkey_path = _authkey_test_paths(tmp_path, monkeypatch)
+    authkey_path.write_text("malformed", encoding="ascii")
+
+    def _fail_state_read(paths):
+        raise daemon_client.sqlite3.DatabaseError("unreadable local state")
+
+    monkeypatch.setattr(daemon_client, "_recorded_local_daemon_pid", _fail_state_read)
+
+    with pytest.raises(DaemonClientError, match="local daemon may still own"):
+        daemon_authkey(paths)
+
+    assert authkey_path.read_text(encoding="ascii") == "malformed"
+
+
+def test_daemon_authkey_recovers_despite_remote_workspace_lease(tmp_path, monkeypatch):
+    paths, authkey_path = _authkey_test_paths(tmp_path, monkeypatch)
+    authkey_path.write_text("malformed", encoding="ascii")
+    monkeypatch.setattr(daemon_client, "_recorded_local_daemon_pid", lambda paths: None)
+    monkeypatch.setattr(
+        daemon_client._SHARED_STATE_ADAPTER,
+        "read_lease_metadata",
+        lambda paths: {"machine_id": "another-machine", "pid": 9876},
+    )
+
+    replacement = bytes(range(32))
+    monkeypatch.setattr(daemon_client.secrets, "token_bytes", lambda length: replacement)
+
+    assert daemon_authkey(paths) == replacement
+    assert authkey_path.read_text(encoding="ascii") == replacement.hex()
+
+
+def test_daemon_authkey_recovers_despite_stale_unix_endpoint_file(tmp_path, monkeypatch):
+    paths, authkey_path = _authkey_test_paths(tmp_path, monkeypatch)
+    if paths.daemon_endpoint_kind != "unix":
+        pytest.skip("Stale Unix endpoint files only apply to Unix sockets.")
+    authkey_path.write_text("malformed", encoding="ascii")
+    endpoint_path = Path(paths.daemon_endpoint_path)
+    endpoint_path.write_text("stale", encoding="ascii")
+    replacement = bytes(range(32))
+    monkeypatch.setattr(daemon_client.secrets, "token_bytes", lambda length: replacement)
+
+    try:
+        assert daemon_authkey(paths) == replacement
+    finally:
+        endpoint_path.unlink(missing_ok=True)
+
+    assert authkey_path.read_text(encoding="ascii") == replacement.hex()
 
 
 def test_daemon_authkey_hardens_created_file(tmp_path, monkeypatch):
