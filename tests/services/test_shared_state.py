@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import threading
 
 import polars as pl
 
@@ -635,6 +636,40 @@ def test_checkpoint_succeeds_when_generation_gc_stat_races(tmp_path, monkeypatch
     assert read_runtime_snapshot_generation(paths) == second_generation
 
 
+def test_generation_gc_pins_the_manifest_selected_generation(tmp_path):
+    workspace_root = tmp_path / "shared" / "default"
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    ledger = RuntimeCacheLedger(paths.runtime_db_path)
+    started = utcnow_text()
+    manifest_generation = checkpoint_workspace_state(
+        paths,
+        ledger,
+        workspace_id="default",
+        machine_id="machine-a",
+        daemon_id="daemon-a",
+        pid=101,
+        status="idle",
+        started_at_utc=started,
+        last_checkpoint_at_utc=started,
+        app_version="0.1.0",
+    )
+    manifest_generation_dir = paths.shared_snapshot_generations_dir / manifest_generation
+    os.utime(manifest_generation_dir, ns=(1, 1))
+    synthetic_generations = tuple(f"{index:032x}" for index in range(1, 4))
+    for index, generation_id in enumerate(synthetic_generations, start=2):
+        generation_dir = paths.shared_snapshot_generations_dir / generation_id
+        generation_dir.mkdir()
+        os.utime(generation_dir, ns=(index, index))
+
+    shared_state_module._garbage_collect_snapshot_generations(  # noqa: SLF001 - GC invariant
+        paths,
+        committed_generation_id=synthetic_generations[-1],
+        protected_generation_ids=frozenset((synthetic_generations[-1],)),
+    )
+
+    assert manifest_generation_dir.is_dir()
+
+
 def test_workspace_io_idle_checkpoint_updates_heartbeat_without_snapshot_scan(tmp_path, monkeypatch):
     workspace_root = tmp_path / "shared" / "default"
     paths = resolve_workspace_paths(workspace_root=workspace_root)
@@ -676,6 +711,155 @@ def test_workspace_io_idle_checkpoint_updates_heartbeat_without_snapshot_scan(tm
     checkpoint("2026-07-13T00:01:00+00:00")
 
     assert read_runtime_snapshot_generation(paths) != first_generation
+
+
+def test_workspace_io_checkpoint_republishes_for_a_distinct_ledger_incarnation(tmp_path):
+    workspace_root = tmp_path / "shared" / "default"
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    workspace_io = WorkspaceIoLayer()
+    started = utcnow_text()
+
+    def populated_ledger(db_path: Path, *, run_id: str) -> RuntimeCacheLedger:
+        ledger = RuntimeCacheLedger(db_path)
+        ledger.runs.record_started(
+            run_id=run_id,
+            flow_name="demo",
+            group_name="Demo",
+            source_path=None,
+            started_at_utc=started,
+        )
+        return ledger
+
+    first = populated_ledger(tmp_path / "first.sqlite", run_id="run-first")
+    second = populated_ledger(tmp_path / "second.sqlite", run_id="run-second")
+    checkpoint_kwargs = {
+        "workspace_id": "default",
+        "machine_id": "machine-a",
+        "daemon_id": "daemon-a",
+        "pid": 101,
+        "status": "idle",
+        "started_at_utc": started,
+        "last_checkpoint_at_utc": started,
+        "app_version": "0.1.0",
+    }
+
+    workspace_io.checkpoint_workspace_state(paths, first, **checkpoint_kwargs)
+    first_generation = read_runtime_snapshot_generation(paths)
+    first.close()
+    workspace_io.checkpoint_workspace_state(paths, second, **checkpoint_kwargs)
+    second_generation = read_runtime_snapshot_generation(paths)
+
+    target = RuntimeCacheLedger(tmp_path / "target.sqlite")
+    assert first_generation != second_generation
+    assert hydrate_local_runtime_state(paths, target) is True
+    assert [run.run_id for run in target.runs.list()] == ["run-second"]
+
+
+def test_workspace_io_hydration_cadence_is_scoped_to_the_target_ledger(tmp_path):
+    workspace_root = tmp_path / "shared" / "default"
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    source = RuntimeCacheLedger(tmp_path / "source.sqlite")
+    started = utcnow_text()
+    source.runs.record_started(
+        run_id="run-1",
+        flow_name="demo",
+        group_name="Demo",
+        source_path=None,
+        started_at_utc=started,
+    )
+    checkpoint_workspace_state(
+        paths,
+        source,
+        workspace_id="default",
+        machine_id="machine-a",
+        daemon_id="daemon-a",
+        pid=101,
+        status="idle",
+        started_at_utc=started,
+        last_checkpoint_at_utc=started,
+        app_version="0.1.0",
+    )
+    workspace_io = WorkspaceIoLayer(hydrate_interval_seconds=60.0)
+    first_target = RuntimeCacheLedger(tmp_path / "first-target.sqlite")
+    second_target = RuntimeCacheLedger(tmp_path / "second-target.sqlite")
+
+    assert workspace_io.hydrate_local_runtime(paths, first_target) is True
+    assert workspace_io.hydrate_local_runtime(paths, second_target) is True
+    assert [run.run_id for run in second_target.runs.list()] == ["run-1"]
+
+
+def test_concurrent_snapshot_publishers_serialize_manifest_and_gc(tmp_path, monkeypatch):
+    workspace_root = tmp_path / "shared" / "default"
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    started = utcnow_text()
+
+    def populated_ledger(db_path: Path, *, run_id: str) -> RuntimeCacheLedger:
+        ledger = RuntimeCacheLedger(db_path)
+        ledger.runs.record_started(
+            run_id=run_id,
+            flow_name="demo",
+            group_name="Demo",
+            source_path=None,
+            started_at_utc=started,
+        )
+        return ledger
+
+    first = populated_ledger(tmp_path / "first.sqlite", run_id="run-first")
+    second = populated_ledger(tmp_path / "second.sqlite", run_id="run-second")
+    first_gc_entered = threading.Event()
+    release_first_gc = threading.Event()
+    second_started = threading.Event()
+    original_gc = shared_state_module._garbage_collect_snapshot_generations  # noqa: SLF001
+    gc_calls = {"count": 0}
+
+    def delayed_first_gc(*args, **kwargs):
+        gc_calls["count"] += 1
+        if gc_calls["count"] == 1:
+            first_gc_entered.set()
+            assert release_first_gc.wait(timeout=2.0)
+        return original_gc(*args, **kwargs)
+
+    monkeypatch.setattr(shared_state_module, "_garbage_collect_snapshot_generations", delayed_first_gc)
+    generations: dict[str, str] = {}
+    errors: list[BaseException] = []
+
+    def publish(name: str, ledger: RuntimeCacheLedger) -> None:
+        if name == "second":
+            second_started.set()
+        try:
+            generations[name] = checkpoint_workspace_state(
+                paths,
+                ledger,
+                workspace_id="default",
+                machine_id="machine-a",
+                daemon_id=f"daemon-{name}",
+                pid=101,
+                status="idle",
+                started_at_utc=started,
+                last_checkpoint_at_utc=started,
+                app_version="0.1.0",
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    first_thread = threading.Thread(target=publish, args=("first", first))
+    second_thread = threading.Thread(target=publish, args=("second", second))
+    first_thread.start()
+    assert first_gc_entered.wait(timeout=2.0)
+    second_thread.start()
+    assert second_started.wait(timeout=2.0)
+    assert second_thread.is_alive()
+    release_first_gc.set()
+    first_thread.join(timeout=3.0)
+    second_thread.join(timeout=3.0)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert errors == []
+    assert read_runtime_snapshot_generation(paths) == generations["second"]
+    target = RuntimeCacheLedger(tmp_path / "target.sqlite")
+    assert hydrate_local_runtime_state(paths, target) is True
+    assert [run.run_id for run in target.runs.list()] == ["run-second"]
 
 
 def test_recover_stale_workspace_quarantines_old_lease(tmp_path, monkeypatch):

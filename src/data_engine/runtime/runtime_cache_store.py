@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import os
 from pathlib import Path
 from typing import Self
+from uuid import uuid4
 
 from data_engine.domain.time import utcnow_text
 from data_engine.domain.source_state import SourceSignature
@@ -1079,6 +1080,7 @@ class RuntimeCacheLedger(_RuntimeCacheSchema):
     """Own the cache/runtime-history SQLite store for runs, logs, and file state."""
 
     def __init__(self, db_path: Path) -> None:
+        self._snapshot_incarnation = uuid4().hex
         super().__init__(db_path)
         self.runs = RuntimeRunRepository(self)
         self.step_outputs = RuntimeStepOutputRepository(self)
@@ -1091,7 +1093,11 @@ class RuntimeCacheLedger(_RuntimeCacheSchema):
             source_signatures=self.source_signatures,
         )
 
-    def snapshot_change_token(self) -> tuple[int, tuple[tuple[int, int], ...]]:
+    def snapshot_incarnation(self) -> str:
+        """Return the stable identity of this open ledger instance."""
+        return self._snapshot_incarnation
+
+    def snapshot_change_token(self) -> tuple[str, int, tuple[tuple[int, int], ...]]:
         """Return a constant-time token that changes after local SQLite writes."""
         connection = self._connection()
         data_version = int(connection.execute("PRAGMA data_version").fetchone()[0])
@@ -1099,7 +1105,7 @@ class RuntimeCacheLedger(_RuntimeCacheSchema):
             connection_changes = tuple(
                 sorted((thread_id, item.total_changes) for thread_id, item in self._connections.items())
             )
-        return (data_version, connection_changes)
+        return (self._snapshot_incarnation, data_version, connection_changes)
 
     def reset_flow(self, flow_name: str) -> None:
         """Delete persisted runtime history and freshness state for one flow."""

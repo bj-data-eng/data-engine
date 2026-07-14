@@ -343,8 +343,8 @@ def test_runtime_binding_resets_incremental_high_water_marks_for_new_snapshot_ge
         assert first_outputs.output_path("docs_manual", "Transform") == old_output
 
         apply_generation("generation-b", message="new message", output_path=new_output)
-        service.reload_logs(binding)
         second_outputs = service.rebuild_step_outputs(binding, flow_cards)
+        service.reload_logs(binding)
 
         assert [entry.line for entry in binding.log_store.entries()] == ["new message"]
         assert second_outputs.output_path("docs_manual", "Transform") == new_output

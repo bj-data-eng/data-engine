@@ -39,6 +39,7 @@ class _CachedRow:
 @dataclass(frozen=True)
 class _HydrationState:
     last_hydrated_at: datetime
+    ledger_incarnation: str
     snapshot_generation_id: str | None
     manifest_signature: tuple[bool, int | None]
 
@@ -143,12 +144,14 @@ class WorkspaceIoLayer:
     def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> bool:
         workspace_key = str(paths.workspace_root)
         now = datetime.now(UTC)
+        ledger_incarnation = ledger.snapshot_incarnation()
         manifest_signature = self._file_signature(paths.shared_snapshot_manifest_path)
         snapshot_generation_id = read_runtime_snapshot_generation(paths)
         with self._lock:
             state = self._hydration_state.get(workspace_key)
             if (
                 state is not None
+                and state.ledger_incarnation == ledger_incarnation
                 and state.manifest_signature == manifest_signature
                 and state.snapshot_generation_id == snapshot_generation_id
                 and (now - state.last_hydrated_at) < timedelta(seconds=self.hydrate_interval_seconds)
@@ -158,6 +161,7 @@ class WorkspaceIoLayer:
         with self._lock:
             self._hydration_state[workspace_key] = _HydrationState(
                 last_hydrated_at=now,
+                ledger_incarnation=ledger_incarnation,
                 snapshot_generation_id=snapshot_generation_id,
                 manifest_signature=manifest_signature,
             )

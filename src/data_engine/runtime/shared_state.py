@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import threading
 import time
 from uuid import uuid4
 from typing import Any, Protocol
@@ -55,6 +56,8 @@ class RuntimeSnapshotStore(Protocol):
     snapshots: _SnapshotRepository
 
     def snapshot_change_token(self) -> object: ...
+
+    def snapshot_incarnation(self) -> str: ...
 
 
 _LEASE_METADATA_SCHEMA: dict[str, pl.DataType] = {
@@ -138,6 +141,8 @@ _SNAPSHOT_ARTIFACT_NAMES = {
     "file_state": "file_state.parquet",
 }
 _GENERATION_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
+_SNAPSHOT_PUBLICATION_LOCKS_GUARD = threading.Lock()
+_SNAPSHOT_PUBLICATION_LOCKS: dict[str, threading.RLock] = {}
 
 
 @dataclass(frozen=True)
@@ -403,6 +408,26 @@ def _publish_shared_runtime_snapshot(
     logs: tuple[PersistedLogEntry, ...],
     file_states: tuple[PersistedFileState, ...],
 ) -> None:
+    with _snapshot_publication_lock(paths):
+        _publish_shared_runtime_snapshot_locked(
+            paths,
+            snapshot_generation_id=snapshot_generation_id,
+            runs=runs,
+            step_runs=step_runs,
+            logs=logs,
+            file_states=file_states,
+        )
+
+
+def _publish_shared_runtime_snapshot_locked(
+    paths: WorkspacePaths,
+    *,
+    snapshot_generation_id: str,
+    runs: tuple[PersistedRun, ...],
+    step_runs: tuple[PersistedStepRun, ...],
+    logs: tuple[PersistedLogEntry, ...],
+    file_states: tuple[PersistedFileState, ...],
+) -> None:
     if _GENERATION_ID_PATTERN.fullmatch(snapshot_generation_id) is None:
         raise ValueError(f"Invalid snapshot generation id: {snapshot_generation_id!r}")
     generations_dir = paths.shared_snapshot_generations_dir
@@ -430,7 +455,21 @@ def _publish_shared_runtime_snapshot(
         if committed_dir.is_dir() and read_runtime_snapshot_generation(paths) != snapshot_generation_id:
             shutil.rmtree(committed_dir, ignore_errors=True)
         raise
-    _garbage_collect_snapshot_generations(paths, committed_generation_id=snapshot_generation_id)
+    _garbage_collect_snapshot_generations(
+        paths,
+        committed_generation_id=snapshot_generation_id,
+        protected_generation_ids=frozenset((snapshot_generation_id,)),
+    )
+
+
+def _snapshot_publication_lock(paths: WorkspacePaths) -> threading.RLock:
+    lock_key = str(paths.shared_snapshot_manifest_path.absolute())
+    with _SNAPSHOT_PUBLICATION_LOCKS_GUARD:
+        lock = _SNAPSHOT_PUBLICATION_LOCKS.get(lock_key)
+        if lock is None:
+            lock = threading.RLock()
+            _SNAPSHOT_PUBLICATION_LOCKS[lock_key] = lock
+        return lock
 
 
 def _snapshot_artifact_paths(generation_dir: Path) -> dict[str, Path]:
@@ -472,6 +511,7 @@ def _garbage_collect_snapshot_generations(
     paths: WorkspacePaths,
     *,
     committed_generation_id: str,
+    protected_generation_ids: frozenset[str] = frozenset(),
 ) -> None:
     try:
         candidates = tuple(paths.shared_snapshot_generations_dir.iterdir())
@@ -490,7 +530,10 @@ def _garbage_collect_snapshot_generations(
             continue
         committed_directories.append((modified_at_ns, candidate))
     committed_directories.sort(key=lambda item: item[0], reverse=True)
-    keep_names = {committed_generation_id}
+    manifest_generation_id = read_runtime_snapshot_generation(paths)
+    keep_names = {committed_generation_id, *protected_generation_ids}
+    if manifest_generation_id is not None:
+        keep_names.add(manifest_generation_id)
     retained_older_names = (
         candidate.name
         for _, candidate in committed_directories
@@ -502,8 +545,12 @@ def _garbage_collect_snapshot_generations(
             break
         keep_names.add(retained_name)
     for _, candidate in committed_directories:
-        if candidate.name not in keep_names:
-            shutil.rmtree(candidate, ignore_errors=True)
+        current_manifest_generation_id = read_runtime_snapshot_generation(paths)
+        if current_manifest_generation_id is not None:
+            keep_names.add(current_manifest_generation_id)
+        if candidate.name in keep_names:
+            continue
+        shutil.rmtree(candidate, ignore_errors=True)
 
 
 def remove_control_request(paths: WorkspacePaths) -> None:
@@ -540,8 +587,9 @@ def reset_flow_state(paths: WorkspacePaths, *, flow_name: str) -> None:
 
 def reset_workspace_state(paths: WorkspacePaths) -> None:
     """Delete shared runtime snapshots and pending control-transfer state for one workspace."""
-    remove_file_if_exists(paths.shared_snapshot_manifest_path)
-    shutil.rmtree(paths.shared_snapshot_generations_dir, ignore_errors=True)
+    with _snapshot_publication_lock(paths):
+        remove_file_if_exists(paths.shared_snapshot_manifest_path)
+        shutil.rmtree(paths.shared_snapshot_generations_dir, ignore_errors=True)
     remove_control_request(paths)
     if paths.stale_markers_dir.is_dir():
         for stale_path in paths.stale_markers_dir.glob(f"{paths.workspace_id}__*"):

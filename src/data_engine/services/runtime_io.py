@@ -603,6 +603,10 @@ class RuntimeIoCacheStore(RuntimeCacheStore):
         """Return a constant-time token for runtime snapshot publication."""
         return self._lease.call(lambda handle: handle.ledger.snapshot_change_token())
 
+    def snapshot_incarnation(self) -> str:
+        """Return the stable identity of the underlying open ledger."""
+        return self._lease.call(lambda handle: handle.ledger.snapshot_incarnation())
+
     def refresh_external_state(self) -> None:
         """Drop cached reads so the next query reflects external daemon writes immediately."""
         self._lease.invalidate_caches()
