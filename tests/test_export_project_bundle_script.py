@@ -28,7 +28,6 @@ def test_build_archive_includes_project_source_and_excludes_artifacts_and_worksp
     (root / "INSTALL").mkdir(parents=True)
     (root / "INSTALL" / "INSTALL MAC.command").write_text("install\n", encoding="utf-8")
     (root / "INSTALL" / "INSTALL WINDOWS.bat").write_text("install\r\n", encoding="utf-8")
-    (root / "INSTALL" / "INSTALL WINDOWS_VM.bat").write_text("install\r\n", encoding="utf-8")
     (root / "INSTALL" / "BUILD DOCS.command").write_text("build\n", encoding="utf-8")
     (root / "INSTALL" / "BUILD DOCS.bat").write_text("build\r\n", encoding="utf-8")
     (workspaces / "example_workspace" / "flow_modules").mkdir(parents=True)
@@ -53,7 +52,6 @@ def test_build_archive_includes_project_source_and_excludes_artifacts_and_worksp
     assert "src/data_engine/module.py" in members
     assert "INSTALL/INSTALL MAC.command" in members
     assert "INSTALL/INSTALL WINDOWS.bat" in members
-    assert "INSTALL/INSTALL WINDOWS_VM.bat" in members
     assert "INSTALL/BUILD DOCS.command" in members
     assert "INSTALL/BUILD DOCS.bat" in members
     assert "repo.code-workspace" in members
@@ -76,7 +74,6 @@ def test_build_archive_code_bundle_excludes_tests_but_keeps_workspaces(tmp_path)
     (root / "INSTALL").mkdir(parents=True)
     (root / "INSTALL" / "INSTALL MAC.command").write_text("install\n", encoding="utf-8")
     (root / "INSTALL" / "INSTALL WINDOWS.bat").write_text("install\r\n", encoding="utf-8")
-    (root / "INSTALL" / "INSTALL WINDOWS_VM.bat").write_text("install\r\n", encoding="utf-8")
     (root / "INSTALL" / "BUILD DOCS.command").write_text("build\n", encoding="utf-8")
     (root / "INSTALL" / "BUILD DOCS.bat").write_text("build\r\n", encoding="utf-8")
     (root / "tests").mkdir(parents=True)
@@ -94,7 +91,6 @@ def test_build_archive_code_bundle_excludes_tests_but_keeps_workspaces(tmp_path)
     assert "src/data_engine/module.py" in members
     assert "INSTALL/INSTALL MAC.command" in members
     assert "INSTALL/INSTALL WINDOWS.bat" in members
-    assert "INSTALL/INSTALL WINDOWS_VM.bat" in members
     assert "INSTALL/BUILD DOCS.command" in members
     assert "INSTALL/BUILD DOCS.bat" in members
     assert "repo.code-workspace" in members

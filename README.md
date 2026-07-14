@@ -19,7 +19,6 @@ Use the installer for your environment:
 
 - macOS: [INSTALL/INSTALL MAC.command](INSTALL/INSTALL%20MAC.command)
 - Windows: [INSTALL/INSTALL WINDOWS.bat](INSTALL/INSTALL%20WINDOWS.bat)
-- Windows VM / CPU-safe Polars path: [INSTALL/INSTALL WINDOWS_VM.bat](INSTALL/INSTALL%20WINDOWS_VM.bat)
 
 For local development:
 

@@ -1,12 +1,12 @@
 [build-system]
 requires = [
-  "setuptools==82.0.1",
-  "APScheduler==3.11.2",
-  "duckdb==1.5.1",
-  "myst-parser==5.0.0",
-  "numpy==2.4.4",
+  "setuptools==83.0.0",
+  "APScheduler==3.11.3",
+  "duckdb==1.5.4",
+  "myst-parser==5.1.0",
+  "numpy==2.5.1",
   "openpyxl==3.1.5",
-  "polars==1.39.3",
+  "polars==1.42.1",
   "Sphinx==9.1.0",
   "sphinx_rtd_theme==3.1.0",
   "xlsxwriter==3.2.9",
@@ -35,14 +35,14 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-  "APScheduler==3.11.2",
-  "duckdb==1.5.1",
-  "fastexcel==0.19.0",
-  "numpy==2.4.4",
+  "APScheduler==3.11.3",
+  "duckdb==1.5.4",
+  "fastexcel==0.20.2",
+  "numpy==2.5.1",
   "openpyxl==3.1.5",
-  "polars==1.39.3",
-  "pyarrow==23.0.1",
-  "PySide6==6.11.0",
+  "polars==1.42.1",
+  "pyarrow==25.0.0",
+  "PySide6==6.11.1",
   "xlsxwriter==3.2.9",
 ]
 
@@ -55,51 +55,48 @@ Issues = "https://github.com/bj-data-eng/data-engine/issues"
 data-engine = "data_engine.ui.cli.app:main"
 
 [project.optional-dependencies]
-polars-lts = [
-  "polars-lts-cpu==1.33.1",
-]
 synthetic = [
   "openpyxl==3.1.5",
-  "pandas==3.0.2",
+  "pandas==3.0.3",
 ]
 notebook = [
-  "ipykernel==7.2.0",
-  "ipython==9.12.0",
-  "jupyterlab==4.5.7",
-  "notebook==7.5.6",
+  "ipykernel==7.3.0",
+  "ipython==9.15.0",
+  "jupyterlab==4.6.1",
+  "notebook==7.6.0",
 ]
 docs = [
-  "myst-parser==5.0.0",
+  "myst-parser==5.1.0",
   "Sphinx==9.1.0",
   "sphinx_rtd_theme==3.1.0",
 ]
 package = [
-  "build==1.4.2",
-  "pyinstaller==6.19.0",
+  "build==1.5.1",
+  "pyinstaller==6.21.0",
   "twine==6.2.0",
 ]
 test = [
   "openpyxl==3.1.5",
-  "pandas==3.0.2",
+  "pandas==3.0.3",
   "pydocstyle==6.3.0",
-  "pytest==9.0.3",
+  "pytest==9.1.1",
   "pytest-cov==7.1.0",
 ]
 dev = [
-  "ipykernel==7.2.0",
-  "ipython==9.12.0",
-  "jupyterlab==4.5.7",
-  "myst-parser==5.0.0",
-  "notebook==7.5.6",
-  "numpy==2.4.4",
+  "ipykernel==7.3.0",
+  "ipython==9.15.0",
+  "jupyterlab==4.6.1",
+  "myst-parser==5.1.0",
+  "notebook==7.6.0",
+  "numpy==2.5.1",
   "openpyxl==3.1.5",
-  "pandas==3.0.2",
-  "pydoclint==0.8.3",
+  "pandas==3.0.3",
+  "pydoclint==0.9.1",
   "pydocstyle==6.3.0",
-  "pyinstaller==6.19.0",
-  "pytest==9.0.3",
+  "pyinstaller==6.21.0",
+  "pytest==9.1.1",
   "pytest-cov==7.1.0",
-  "ruff==0.15.10",
+  "ruff==0.15.21",
   "Sphinx==9.1.0",
   "sphinx_rtd_theme==3.1.0",
   "viztracer==1.1.1",
