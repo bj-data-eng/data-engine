@@ -195,6 +195,35 @@ def test_compose_excel_template_resizes_existing_table_to_new_frame_shape(tmp_pa
     assert_frame_equal(pl.read_excel(template, sheet_name="Claims"), frame)
 
 
+def test_compose_excel_template_unmerges_output_ranges_and_preserves_unrelated_merges(tmp_path: Path):
+    template = tmp_path / "merged_template.xlsx"
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Claims"
+    worksheet.merge_cells("A1:B1")
+    worksheet["A1"] = "old heading"
+    worksheet.merge_cells("D4:E4")
+    worksheet["D4"] = "old note"
+    worksheet["D4"].number_format = "0.00"
+    workbook.save(template)
+
+    frame = pl.DataFrame({"claim_id": [1], "workflow": ["Appeals"]})
+
+    compose_excel(
+        template,
+        sheets=[ExcelSheet(name="Claims", df=frame, table_name="claims")],
+        template=template,
+    )
+
+    updated = load_workbook(template)["Claims"]
+    assert "A1:B1" not in updated.merged_cells
+    assert "D4:E4" in updated.merged_cells
+    assert updated["D4"].value is None
+    assert updated["D4"].number_format == "0.00"
+    assert updated.tables["claims"].ref == "A1:B2"
+    assert_frame_equal(pl.read_excel(template, sheet_name="Claims"), frame)
+
+
 def test_compose_excel_template_updates_multiple_sheets_in_one_call(tmp_path: Path):
     template = tmp_path / "multi_template.xlsx"
     workbook = Workbook()

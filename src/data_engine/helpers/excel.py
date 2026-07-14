@@ -78,7 +78,10 @@ def compose_excel(path: PathLike, sheets: Sequence[ExcelSheet], *, template: Pat
     template : PathLike | None
         Optional template workbook path. When provided, the template workbook is
         copied to a temporary file, the requested sheets are updated, and the
-        composed copy atomically replaces ``path``.
+        composed copy atomically replaces ``path``. Existing values and tables
+        are replaced on each updated worksheet. Merged ranges that intersect the
+        dataframe or table output are unmerged; unrelated merges and cell
+        formatting are preserved.
 
     Returns
     -------
@@ -185,8 +188,17 @@ def _replace_template_sheet(workbook: Any, sheet: ExcelSheet, frame: pl.DataFram
         worksheet = workbook[sheet.name]
     else:
         worksheet = workbook.create_sheet(sheet.name)
-    _clear_worksheet_data(worksheet)
     start_row, start_column = _position_to_one_based(sheet.position)
+    replacement_bounds: tuple[int, int, int, int] | None = None
+    if frame.columns:
+        data_row_count = max(frame.height, 1) if sheet.table_name is not None else frame.height
+        replacement_bounds = (
+            start_row,
+            start_column,
+            start_row + data_row_count,
+            start_column + len(frame.columns) - 1,
+        )
+    _clear_worksheet_data(worksheet, replacement_bounds=replacement_bounds)
     for column_offset, column_name in enumerate(frame.columns):
         worksheet.cell(row=start_row, column=start_column + column_offset, value=column_name)
     for row_offset, values in enumerate(frame.iter_rows(), start=1):
@@ -206,13 +218,36 @@ def _replace_template_sheet(workbook: Any, sheet: ExcelSheet, frame: pl.DataFram
         worksheet.freeze_panes = sheet.freeze_panes
 
 
-def _clear_worksheet_data(worksheet: Any) -> None:
+def _clear_worksheet_data(
+    worksheet: Any,
+    *,
+    replacement_bounds: tuple[int, int, int, int] | None,
+) -> None:
+    from openpyxl.cell.cell import MergedCell
+
     for table_name in list(worksheet.tables):
         del worksheet.tables[table_name]
-    if worksheet.max_row and worksheet.max_column:
-        for row in worksheet.iter_rows():
-            for cell in row:
-                cell.value = None
+    if replacement_bounds is not None:
+        start_row, start_column, end_row, end_column = replacement_bounds
+        overlapping_merged_ranges = [
+            merged_range
+            for merged_range in worksheet.merged_cells.ranges
+            if (
+                merged_range.min_row <= end_row
+                and merged_range.max_row >= start_row
+                and merged_range.min_col <= end_column
+                and merged_range.max_col >= start_column
+            )
+        ]
+        for merged_range in overlapping_merged_ranges:
+            worksheet.unmerge_cells(merged_range.coord)
+
+    # ``iter_rows`` materializes every coordinate in a sparse sheet's bounding
+    # box. Walking openpyxl's existing cell store keeps clearing linear in the
+    # cells the template already contains.
+    for cell in worksheet._cells.values():
+        if not isinstance(cell, MergedCell):
+            cell.value = None
 
 
 def _add_openpyxl_table(
