@@ -142,6 +142,23 @@ def test_load_settings_and_discover_workspaces_from_collection_root(tmp_path, mo
     assert [item.workspace_id for item in discovered] == ["analytics", "default"]
 
 
+def test_load_settings_prefers_explicit_collection_environment_over_persisted_value(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    stored_collection_root = tmp_path / "stored_workspaces"
+    explicit_collection_root = tmp_path / "explicit_workspaces"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    store = LocalSettingsStore.open_default(app_root=app_root)
+    store.set_workspace_collection_root(stored_collection_root)
+    store.set_default_workspace_id("stored")
+    monkeypatch.setenv(DATA_ENGINE_WORKSPACE_COLLECTION_ROOT_ENV_VAR, str(explicit_collection_root))
+    monkeypatch.setenv(DATA_ENGINE_WORKSPACE_ID_ENV_VAR, "explicit")
+
+    settings = load_workspace_settings()
+
+    assert settings.workspace_collection_root == explicit_collection_root.resolve()
+    assert settings.default_selected == "explicit"
+
+
 def test_load_settings_supports_relative_collection_root(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     collection_root = tmp_path / "shared_workspaces"
@@ -271,4 +288,3 @@ def test_resolve_workspace_paths_rejects_unsafe_workspace_ids(tmp_path, monkeypa
 def test_local_workspace_namespace_rejects_unsafe_workspace_ids(tmp_path, workspace_id):
     with pytest.raises(InvalidWorkspaceIdError):
         local_workspace_namespace(tmp_path / "workspace", workspace_id)
-

@@ -78,8 +78,6 @@ class AppStatePolicy:
         stored_default_selected = store.default_workspace_id()
         if env_collection and env_collection.strip():
             collection_root = _stable_workspace_path(env_collection)
-            if stored_collection_root is not None:
-                collection_root = stored_collection_root
             default_selected = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or stored_default_selected
             return WorkspaceSettings(root, settings_path, state_root, runtime_root, collection_root, default_selected)
         if env_workspace_root and env_workspace_root.strip():
