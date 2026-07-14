@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import ctypes
+from collections.abc import Callable
 from datetime import UTC, datetime
 import getpass
 import hashlib
 import json
+import math
 import os
 from multiprocessing import AuthenticationError
-from multiprocessing.connection import Client
+from multiprocessing.connection import Client, answer_challenge, deliver_challenge
 from pathlib import Path
 import secrets
 import subprocess
@@ -110,20 +112,140 @@ def _decode_message(raw: bytes) -> dict[str, Any]:
     return payload
 
 
-def daemon_request(paths: WorkspacePaths, payload: dict[str, Any], *, timeout: float = 5.0) -> dict[str, Any]:
-    """Send one request to the local workspace daemon and return its response."""
+class _DeadlineBoundConnection:
+    """Apply an absolute deadline to connection reads used by authentication."""
+
+    __slots__ = ("_clock", "_connection", "_deadline", "_timeout_message")
+
+    def __init__(
+        self,
+        connection: Any,
+        *,
+        deadline: float,
+        timeout_message: str,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._connection = connection
+        self._deadline = deadline
+        self._timeout_message = timeout_message
+        self._clock = clock
+
+    def send_bytes(self, payload: bytes) -> None:
+        """Send bytes unless the request deadline has already elapsed."""
+        if self._clock() >= self._deadline:
+            raise DaemonClientError(self._timeout_message)
+        self._connection.send_bytes(payload)
+
+    def recv_bytes(self, maxlength: int | None = None) -> bytes:
+        """Receive bytes only when input arrives before the request deadline."""
+        remaining = self._deadline - self._clock()
+        poll_timeout = None if math.isinf(remaining) else remaining
+        if remaining <= 0 or not self._connection.poll(poll_timeout):
+            raise DaemonClientError(self._timeout_message)
+        return self._connection.recv_bytes(maxlength)
+
+
+def _connect_windows_pipe(
+    address: str,
+    *,
+    deadline: float,
+    clock: Callable[[], float] = time.monotonic,
+    winapi: Any | None = None,
+    connection_type: Callable[[int], Any] | None = None,
+) -> Any:
+    """Open one overlapped Windows named-pipe connection before a deadline."""
+    if winapi is None or connection_type is None:
+        import _winapi  # noqa: PLC0415 - Windows-only dependency
+        from multiprocessing.connection import PipeConnection  # noqa: PLC0415 - Windows-only type
+
+        winapi = _winapi
+        connection_type = PipeConnection
+
+    while True:
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise DaemonClientError("Timed out connecting to daemon.")
+        try:
+            handle = winapi.CreateFile(
+                address,
+                winapi.GENERIC_READ | winapi.GENERIC_WRITE,
+                0,
+                winapi.NULL,
+                winapi.OPEN_EXISTING,
+                winapi.FILE_FLAG_OVERLAPPED,
+                winapi.NULL,
+            )
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != winapi.ERROR_PIPE_BUSY:
+                raise
+            remaining = deadline - clock()
+            wait_milliseconds = int(min(remaining, 1.0) * 1000)
+            if wait_milliseconds <= 0:
+                raise DaemonClientError("Timed out connecting to daemon.") from exc
+            try:
+                winapi.WaitNamedPipe(address, wait_milliseconds)
+            except OSError as wait_exc:
+                if getattr(wait_exc, "winerror", None) not in (
+                    winapi.ERROR_SEM_TIMEOUT,
+                    winapi.ERROR_PIPE_BUSY,
+                ):
+                    raise
+            continue
+        break
+
     try:
-        with Client(
-            endpoint_address(paths),
-            family=endpoint_family(paths),
-            authkey=daemon_authkey(paths),
-        ) as connection:
+        winapi.SetNamedPipeHandleState(handle, winapi.PIPE_READMODE_MESSAGE, None, None)
+        return connection_type(handle)
+    except BaseException:
+        winapi.CloseHandle(handle)
+        raise
+
+
+def _windows_pipe_client(address: str, *, authkey: bytes, deadline: float) -> Any:
+    """Connect and perform the standard multiprocessing handshake by a deadline."""
+    connection = _connect_windows_pipe(address, deadline=deadline)
+    bounded_connection = _DeadlineBoundConnection(
+        connection,
+        deadline=deadline,
+        timeout_message="Timed out connecting to daemon.",
+    )
+    try:
+        answer_challenge(bounded_connection, authkey)
+        deliver_challenge(bounded_connection, authkey)
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
+def daemon_request(paths: WorkspacePaths, payload: dict[str, Any], *, timeout: float = 5.0) -> dict[str, Any]:
+    """Send one request to the local workspace daemon and return its response.
+
+    A positive Windows named-pipe timeout is one absolute deadline for pipe
+    availability, authentication reads, and response waiting. Unix sockets
+    retain their response-only timeout. A nonpositive timeout disables response
+    waiting deadlines on either platform.
+    """
+    try:
+        family = endpoint_family(paths)
+        address = endpoint_address(paths)
+        authkey = daemon_authkey(paths)
+        deadline = time.monotonic() + timeout if family == "AF_PIPE" and timeout > 0 else None
+        if deadline is None:
+            connection = Client(address, family=family, authkey=authkey)
+        else:
+            connection = _windows_pipe_client(address, authkey=authkey, deadline=deadline)
+        with connection:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise DaemonClientError("Timed out waiting for daemon response.")
             connection.send_bytes(_encode_message(payload))
             if timeout > 0:
-                deadline = time.monotonic() + timeout
-                while not connection.poll(0.05):
-                    if time.monotonic() >= deadline:
-                        raise DaemonClientError("Timed out waiting for daemon response.")
+                if deadline is None:
+                    deadline = time.monotonic() + timeout
+                remaining = deadline - time.monotonic()
+                poll_timeout = None if math.isinf(remaining) else remaining
+                if remaining <= 0 or not connection.poll(poll_timeout):
+                    raise DaemonClientError("Timed out waiting for daemon response.")
             response = _decode_message(connection.recv_bytes())
     except (AuthenticationError, EOFError, FileNotFoundError, ConnectionRefusedError, OSError) as exc:
         raise DaemonClientError("Daemon is not reachable.") from exc
