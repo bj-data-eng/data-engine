@@ -15,7 +15,13 @@ from data_engine.hosts.daemon.lifecycle import (
     relinquish_workspace_for_control_request,
     shutdown_for_requested_idle_disconnect,
 )
-from data_engine.hosts.daemon.ownership import honor_control_request_if_needed, try_claim_requested_control
+from data_engine.hosts.daemon.ownership import (
+    honor_control_request_if_needed,
+    release_workspace_claim,
+    try_claim_released_workspace,
+    try_claim_requested_control,
+)
+from data_engine.hosts.daemon.runtime_control import stop_active_work
 from data_engine.platform.machine_identity import host_name_text, machine_id_text
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
@@ -41,6 +47,117 @@ def _wait_until(predicate, *, timeout: float = 1.5) -> None:
             return
         time.sleep(0.01)
     assert predicate()
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        {"command": "run_flow", "name": "demo", "wait": False},
+        {"command": "start_engine"},
+    ),
+)
+def test_runtime_command_does_not_reclaim_when_drain_begins_at_claim_boundary(
+    tmp_path,
+    monkeypatch,
+    command,
+):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        release_workspace_claim(service)
+        filesystem_claim_calls: list[object] = []
+        monkeypatch.setattr(
+            service.shared_state_adapter,
+            "claim_workspace",
+            lambda candidate_paths: filesystem_claim_calls.append(candidate_paths) or True,
+        )
+
+        def _begin_drain_before_claim(candidate_service):
+            with candidate_service._state_lock:
+                candidate_service.state.begin_work_drain()
+            return try_claim_released_workspace(candidate_service)
+
+        monkeypatch.setattr(
+            "data_engine.hosts.daemon.runtime_commands.try_claim_released_workspace",
+            _begin_drain_before_claim,
+        )
+
+        response = service._handle_command(command)  # noqa: SLF001
+
+        assert response == {"ok": False, "error": "Runtime work is stopping."}
+        assert filesystem_claim_calls == []
+        assert service.host.workspace_owned is False
+        assert read_lease_metadata(paths) is None
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
+def test_released_workspace_claim_holds_admission_lock_through_filesystem_commit(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    filesystem_claim_entered = threading.Event()
+    allow_filesystem_claim = threading.Event()
+    drain_attempted = threading.Event()
+    drain_finished = threading.Event()
+    claim_results: list[bool] = []
+    original_claim = service.shared_state_adapter.claim_workspace
+
+    def _blocking_claim(candidate_paths):
+        filesystem_claim_entered.set()
+        allow_filesystem_claim.wait()
+        return original_claim(candidate_paths)
+
+    def _claim() -> None:
+        claim_results.append(try_claim_released_workspace(service))
+
+    def _drain() -> None:
+        drain_attempted.set()
+        stop_active_work(service, timeout_seconds=0.0)
+        drain_finished.set()
+
+    release_workspace_claim(service)
+    monkeypatch.setattr(service.shared_state_adapter, "claim_workspace", _blocking_claim)
+    claim_thread = threading.Thread(target=_claim, daemon=True)
+    drain_thread = threading.Thread(target=_drain, daemon=True)
+    claim_thread.start()
+    try:
+        assert filesystem_claim_entered.wait(timeout=1.0) is True
+        state_lock_was_available = service._state_lock.acquire(blocking=False)  # noqa: SLF001
+        if state_lock_was_available:
+            service._state_lock.release()  # noqa: SLF001
+        assert state_lock_was_available is False
+
+        drain_thread.start()
+        assert drain_attempted.wait(timeout=1.0) is True
+        assert drain_finished.is_set() is False
+
+        allow_filesystem_claim.set()
+        claim_thread.join(timeout=1.0)
+        drain_thread.join(timeout=1.0)
+
+        assert claim_thread.is_alive() is False
+        assert drain_thread.is_alive() is False
+        assert claim_results == [True]
+        assert service.state.work_draining is True
+    finally:
+        allow_filesystem_claim.set()
+        claim_thread.join(timeout=1.0)
+        if drain_thread.ident is not None:
+            drain_thread.join(timeout=1.0)
+        service._shutdown()  # noqa: SLF001
+
 
 def test_manual_run_does_not_break_daemon_shutdown_cleanup(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"

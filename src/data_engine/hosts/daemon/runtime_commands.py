@@ -43,11 +43,13 @@ class DaemonRuntimeCommandHandler:
             "run_flow",
             fields={"flow": name, "wait": wait, "request_id": request_id},
         ):
-            if not service.state.workspace_owned and not try_claim_released_workspace(service):
-                return {"ok": False, "error": lease_error_text(service)}
             with service._state_lock:
                 if service.state.work_draining:
                     return {"ok": False, "error": "Runtime work is stopping."}
+                if not service.state.workspace_owned and not try_claim_released_workspace(service):
+                    if service.state.work_draining:
+                        return {"ok": False, "error": "Runtime work is stopping."}
+                    return {"ok": False, "error": lease_error_text(service)}
             cards_by_name = {card.name: card for card in service._load_flow_cards()}
             card = cards_by_name.get(name)
             if card is None or not card.valid:
@@ -206,11 +208,13 @@ class DaemonRuntimeCommandHandler:
             "start_engine",
             fields={"request_id": request_id},
         ):
-            if not service.state.workspace_owned and not try_claim_released_workspace(service):
-                return {"ok": False, "error": lease_error_text(service)}
             with service._state_lock:
                 if service.state.work_draining:
                     return {"ok": False, "error": "Runtime work is stopping."}
+                if not service.state.workspace_owned and not try_claim_released_workspace(service):
+                    if service.state.work_draining:
+                        return {"ok": False, "error": "Runtime work is stopping."}
+                    return {"ok": False, "error": lease_error_text(service)}
                 service.state.clear_shutdown_when_idle()
                 if not service.state.reserve_engine_start(thread=threading.current_thread()):
                     return {"ok": True}

@@ -57,50 +57,48 @@ def lease_error_text(service: "DataEngineDaemonService") -> str:
 def try_claim_released_workspace(service: "DataEngineDaemonService") -> bool:
     """Try to reclaim an available workspace for this daemon."""
     with service._state_lock:
+        if service.state.work_draining:
+            return False
         if service.host.workspace_owned:
             return True
-    shared_state = service.shared_state_adapter
-    metadata = shared_state.read_lease_metadata(service.paths)
-    if metadata is not None:
-        owner = metadata.get("machine_id")
-        if isinstance(owner, str) and owner.strip():
-            owner_host = metadata.get("host_name")
-            with service._state_lock:
-                service.state.set_lease_owner(
-                    owner,
-                    str(owner_host).strip() if isinstance(owner_host, str) and owner_host.strip() else None,
-                )
-            service._publish_runtime_event("workspace.lease_observed")
-        return False
-    try:
-        claimed = shared_state.claim_workspace(service.paths)
-    except Exception:
-        return False
-    if not claimed:
+        shared_state = service.shared_state_adapter
         metadata = shared_state.read_lease_metadata(service.paths)
-        owner = metadata.get("machine_id") if isinstance(metadata, dict) else None
-        owner_host = metadata.get("host_name") if isinstance(metadata, dict) else None
-        with service._state_lock:
+        if metadata is not None:
+            owner = metadata.get("machine_id")
+            owner_host = metadata.get("host_name")
             service.state.set_lease_owner(
                 str(owner) if isinstance(owner, str) and owner.strip() else None,
-                str(owner_host) if isinstance(owner_host, str) and owner_host.strip() else None,
+                str(owner_host).strip()
+                if isinstance(owner_host, str) and owner_host.strip()
+                else None,
             )
-        service._publish_runtime_event("workspace.lease_observed")
-        return False
-    with service._state_lock:
+            service._publish_runtime_event("workspace.lease_observed")
+            return False
+        try:
+            claimed = shared_state.claim_workspace(service.paths)
+        except Exception:
+            return False
+        if not claimed:
+            metadata = shared_state.read_lease_metadata(service.paths)
+            owner = metadata.get("machine_id") if isinstance(metadata, dict) else None
+            owner_host = metadata.get("host_name") if isinstance(metadata, dict) else None
+            service.state.set_lease_owner(
+                str(owner) if isinstance(owner, str) and owner.strip() else None,
+                str(owner_host).strip()
+                if isinstance(owner_host, str) and owner_host.strip()
+                else None,
+            )
+            service._publish_runtime_event("workspace.lease_observed")
+            return False
         service.state.claim_workspace()
-    service._publish_runtime_event("workspace.claimed")
-    try:
-        service._checkpoint_once(status="idle")
-        with service._state_lock:
+        service._publish_runtime_event("workspace.claimed")
+        try:
+            service._checkpoint_once(status="idle")
             service.state.reset_checkpoint_failures()
-    except Exception:
-        with service._state_lock:
-            service.state.release_workspace()
-        service._publish_runtime_event("workspace.released")
-        release_workspace_claim(service)
-        return False
-    return True
+        except Exception:
+            release_workspace_claim(service)
+            return False
+        return True
 
 
 def release_workspace_claim(

@@ -989,6 +989,185 @@ def test_serve_forever_handles_second_request_while_first_is_still_running(tmp_p
     assert service.shutdown_calls == 1
 
 
+def test_serve_forever_closes_idle_connection_before_storage_shutdown(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    receive_started = threading.Event()
+    connection_closed = threading.Event()
+    command_worker_exited = threading.Event()
+    storage_shutdown = threading.Event()
+
+    class _IdleConnection:
+        def recv_bytes(self) -> bytes:
+            receive_started.set()
+            connection_closed.wait()
+            raise EOFError("connection closed")
+
+        def send_bytes(self, payload: bytes) -> None:
+            del payload
+            raise OSError("connection closed")
+
+        def close(self) -> None:
+            connection_closed.set()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            del exc_type, exc, tb
+            command_worker_exited.set()
+            return False
+
+    connection = _IdleConnection()
+
+    class _Listener:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            self._accepted = False
+
+        def accept(self):
+            if not self._accepted:
+                self._accepted = True
+                return connection
+            service.host.shutdown_event.wait()
+            raise OSError("listener closed")
+
+        def close(self) -> None:
+            return None
+
+    class _Service:
+        def __init__(self) -> None:
+            self.paths = paths
+            self._state_lock = threading.RLock()
+            self.state = DaemonHostState.build(started_at_utc="2026-04-06T00:00:00+00:00")
+            self.host = type(
+                "_Host",
+                (),
+                {"shutdown_event": threading.Event(), "listener": None},
+            )()
+
+        def initialize(self) -> None:
+            return None
+
+        def _checkpoint_loop(self) -> None:
+            return None
+
+        def _debug_log(self, message: str) -> None:
+            del message
+
+        def _handle_command(self, payload):
+            raise AssertionError(f"idle connection unexpectedly delivered {payload!r}")
+
+        def _publish_runtime_event(self, event_type: str) -> None:
+            del event_type
+
+        def _shutdown(self) -> None:
+            assert command_worker_exited.is_set() is True
+            storage_shutdown.set()
+
+    service = _Service()
+    monkeypatch.setattr("data_engine.hosts.daemon.server.Listener", _Listener)
+    server_thread = threading.Thread(target=serve_forever, args=(service,), daemon=True)
+    server_thread.start()
+    try:
+        assert receive_started.wait(timeout=1.0) is True
+        service.host.shutdown_event.set()
+        server_thread.join(timeout=1.0)
+
+        assert server_thread.is_alive() is False
+        assert connection_closed.is_set() is True
+        assert command_worker_exited.is_set() is True
+        assert storage_shutdown.is_set() is True
+    finally:
+        connection_closed.set()
+        service.host.shutdown_event.set()
+        server_thread.join(timeout=1.0)
+
+
+def test_fatal_listener_exit_joins_checkpoint_before_closing_ledgers(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    checkpoint_started = threading.Event()
+    shutdown_seen = threading.Event()
+    release_checkpoint = threading.Event()
+    checkpoint_finished = threading.Event()
+    ledger_closes: list[tuple[str, bool]] = []
+    server_errors: list[BaseException] = []
+
+    def _checkpoint_loop() -> None:
+        checkpoint_started.set()
+        service.host.shutdown_event.wait()
+        shutdown_seen.set()
+        release_checkpoint.wait()
+        checkpoint_finished.set()
+
+    monkeypatch.setattr(service, "_checkpoint_loop", _checkpoint_loop)
+    original_cache_close = service.runtime_cache_ledger.close
+    original_control_close = service.runtime_control_ledger.close
+    monkeypatch.setattr(
+        service.runtime_cache_ledger,
+        "close",
+        lambda: (ledger_closes.append(("cache", checkpoint_finished.is_set())), original_cache_close())[1],
+    )
+    monkeypatch.setattr(
+        service.runtime_control_ledger,
+        "close",
+        lambda: (ledger_closes.append(("control", checkpoint_finished.is_set())), original_control_close())[1],
+    )
+
+    class _FatalListener:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def accept(self):
+            assert checkpoint_started.wait(timeout=1.0) is True
+            raise RuntimeError("fatal listener failure")
+
+        def close(self) -> None:
+            return None
+
+    def _run_server() -> None:
+        try:
+            serve_forever(service)
+        except BaseException as exc:  # pragma: no branch - captures the expected fatal boundary
+            server_errors.append(exc)
+
+    monkeypatch.setattr("data_engine.hosts.daemon.server.Listener", _FatalListener)
+    server_thread = threading.Thread(target=_run_server, daemon=True)
+    server_thread.start()
+    try:
+        assert checkpoint_started.wait(timeout=1.0) is True
+        assert shutdown_seen.wait(timeout=1.0) is True
+        assert server_thread.is_alive() is True
+        assert ledger_closes == []
+
+        release_checkpoint.set()
+        server_thread.join(timeout=2.0)
+
+        assert server_thread.is_alive() is False
+        assert checkpoint_finished.is_set() is True
+        assert service.state.checkpoint_thread is not None
+        assert service.state.checkpoint_thread.is_alive() is False
+        assert [(name, finished) for name, finished in ledger_closes] == [
+            ("cache", True),
+            ("control", True),
+        ]
+        assert len(server_errors) == 1
+        assert isinstance(server_errors[0], RuntimeError)
+        assert str(server_errors[0]) == "fatal listener failure"
+    finally:
+        release_checkpoint.set()
+        service.host.shutdown_event.set()
+        server_thread.join(timeout=2.0)
+
+
 def test_daemon_initialize_writes_lease_metadata_before_first_checkpoint(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"

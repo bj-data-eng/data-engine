@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 import time
 import traceback
 from typing import TYPE_CHECKING
@@ -328,10 +329,21 @@ def shutdown_if_unowned_and_idle(service: "DataEngineDaemonService", *, reason: 
 
 def shutdown(service: "DataEngineDaemonService") -> None:
     service._debug_log("shutdown starting")
+    service.host.shutdown_event.set()
+    if service.host.listener is not None:
+        try:
+            service.host.listener.close()
+        except Exception:
+            pass
     service._publish_runtime_event("daemon.shutdown_started")
     wait_for_active_work(service)
-    if service.state.checkpoint_thread is not None and service.state.checkpoint_thread.is_alive():
-        service.state.checkpoint_thread.join(timeout=5.0)
+    checkpoint_thread = service.state.checkpoint_thread
+    if (
+        checkpoint_thread is not None
+        and checkpoint_thread is not threading.current_thread()
+        and checkpoint_thread.is_alive()
+    ):
+        checkpoint_thread.join()
     with service._state_lock:
         workspace_owned = service.host.workspace_owned
         status = service.host.status
@@ -347,11 +359,6 @@ def shutdown(service: "DataEngineDaemonService") -> None:
         pass
     service.runtime_cache_ledger.close()
     service.runtime_control_ledger.close()
-    if service.host.listener is not None:
-        try:
-            service.host.listener.close()
-        except Exception:
-            pass
     if service.paths.daemon_endpoint_kind == "unix":
         try:
             Path(service.paths.daemon_endpoint_path).unlink()

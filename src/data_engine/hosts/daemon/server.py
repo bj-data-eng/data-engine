@@ -26,11 +26,17 @@ if TYPE_CHECKING:
     from data_engine.hosts.daemon.app import DataEngineDaemonService
 
 
+_COMMAND_RECEIVE_TIMEOUT_SECONDS = 5.0
+
+
 def _serve_connection(service: "DataEngineDaemonService", connection) -> None:
     """Handle one accepted daemon connection without blocking the listener loop."""
     with connection:
         payload = None
         try:
+            poll = getattr(connection, "poll", None)
+            if callable(poll) and not poll(_COMMAND_RECEIVE_TIMEOUT_SECONDS):
+                raise TimeoutError("Timed out waiting for a daemon command payload.")
             payload = _decode_message(connection.recv_bytes())
             request_id = str(payload.get("request_id", "")).strip() if isinstance(payload, dict) else ""
             command = str(payload.get("command", "")).strip() if isinstance(payload, dict) else ""
@@ -58,6 +64,16 @@ def _serve_connection(service: "DataEngineDaemonService", connection) -> None:
 def serve_forever(service: "DataEngineDaemonService") -> None:
     """Run the workspace daemon listener loop until shutdown."""
     worker_threads: set[threading.Thread] = set()
+    active_connections: dict[int, object] = {}
+    connection_lock = threading.Lock()
+
+    def _serve_tracked_connection(connection) -> None:
+        try:
+            _serve_connection(service, connection)
+        finally:
+            with connection_lock:
+                active_connections.pop(id(connection), None)
+
     try:
         service.initialize()
         service.state.checkpoint_thread = threading.Thread(target=service._checkpoint_loop, daemon=True)
@@ -78,19 +94,50 @@ def serve_forever(service: "DataEngineDaemonService") -> None:
                     break
                 service._debug_log("listener accept failed but daemon remains alive")
                 continue
-            thread = threading.Thread(target=_serve_connection, args=(service, connection), daemon=True)
+            thread = threading.Thread(target=_serve_tracked_connection, args=(connection,), daemon=True)
+            with connection_lock:
+                active_connections[id(connection)] = connection
             worker_threads.add(thread)
-            thread.start()
+            try:
+                thread.start()
+            except Exception:
+                worker_threads.discard(thread)
+                with connection_lock:
+                    active_connections.pop(id(connection), None)
+                _close_connection(connection)
+                raise
             worker_threads = {worker for worker in worker_threads if worker.is_alive()}
     except Exception as exc:
         service._debug_log(f"serve_forever fatal error: {exc!r}")
         service._debug_log(traceback.format_exc().rstrip())
         raise
     finally:
+        service.host.shutdown_event.set()
+        if service.host.listener is not None:
+            try:
+                service.host.listener.close()
+            except Exception:
+                pass
+        with connection_lock:
+            connections = tuple(active_connections.values())
+        for connection in connections:
+            _close_connection(connection)
         stop_active_work(service)
+        current_thread = threading.current_thread()
         for thread in list(worker_threads):
-            thread.join()
+            if thread is not current_thread:
+                thread.join()
         service._shutdown()
+
+
+def _close_connection(connection) -> None:
+    close = getattr(connection, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except (EOFError, OSError):
+        pass
 
 
 def serve_workspace_daemon(

@@ -96,6 +96,19 @@ def test_control_handoff_keeps_ownership_until_noncooperative_manual_worker_exit
         assert service.host.workspace_owned is False
         assert service.host.shutdown_event.is_set() is True
         assert read_lease_metadata(paths) is None
+        monkeypatch.setattr(
+            service.shared_state_adapter,
+            "claim_workspace",
+            lambda _paths: (_ for _ in ()).throw(AssertionError("draining daemon must not reclaim")),
+        )
+        assert service._handle_command({"command": "run_flow", "name": "demo", "wait": False}) == {  # noqa: SLF001
+            "ok": False,
+            "error": "Runtime work is stopping.",
+        }
+        assert service._handle_command({"command": "start_engine"}) == {  # noqa: SLF001
+            "ok": False,
+            "error": "Runtime work is stopping.",
+        }
     finally:
         release_worker.set()
         service._shutdown()  # noqa: SLF001
