@@ -11,6 +11,19 @@ from data_engine.runtime.file_watch import PollingWatcher, is_temporary_file_pat
 from tests.services.support import rewrite_with_new_timestamp
 
 
+class _MonotonicClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.calls = 0
+
+    def __call__(self) -> float:
+        self.calls += 1
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 def test_iter_candidate_paths_filters_temp_files_and_extensions(tmp_path):
     (tmp_path / "~$draft.xlsx").write_text("x", encoding="utf-8")
     (tmp_path / ".hidden.xlsx").write_text("x", encoding="utf-8")
@@ -67,7 +80,9 @@ def test_temporary_file_helper_covers_common_transient_patterns():
     assert is_temporary_file_path(Path("report.xlsx")) is False
 
 
-def test_polling_watcher_detects_new_and_modified_files_after_settle(tmp_path):
+def test_polling_watcher_detects_new_and_modified_files_after_settle(tmp_path, monkeypatch):
+    clock = _MonotonicClock()
+    monkeypatch.setattr(file_watch, "monotonic", clock)
     watcher = PollingWatcher(tmp_path, extensions=(".xlsx",), settle=1)
     watcher.start()
 
@@ -75,12 +90,34 @@ def test_polling_watcher_detects_new_and_modified_files_after_settle(tmp_path):
     created.write_text("v1", encoding="utf-8")
 
     assert watcher.drain_events() == []
+    clock.advance(0.999)
+    assert watcher.drain_events() == []
+    clock.advance(0.001)
     assert watcher.drain_events() == [created]
 
     rewrite_with_new_timestamp(created, "v2")
 
     assert watcher.drain_events() == []
+    clock.advance(1)
     assert watcher.drain_events() == [created]
+
+
+def test_polling_watcher_restarts_settle_window_when_signature_changes(tmp_path, monkeypatch):
+    clock = _MonotonicClock()
+    monkeypatch.setattr(file_watch, "monotonic", clock)
+    watcher = PollingWatcher(tmp_path, extensions=(".xlsx",), settle=1)
+    watcher.start()
+    target = tmp_path / "docs.xlsx"
+    target.write_text("v1", encoding="utf-8")
+
+    assert watcher.drain_events() == []
+    clock.advance(0.75)
+    rewrite_with_new_timestamp(target, "v2")
+    assert watcher.drain_events() == []
+    clock.advance(0.25)
+    assert watcher.drain_events() == []
+    clock.advance(0.75)
+    assert watcher.drain_events() == [target]
 
 
 def test_polling_watcher_supports_single_file_roots_and_stop(tmp_path):
@@ -107,7 +144,9 @@ def test_polling_watcher_ignores_preexisting_file_on_start(tmp_path):
     assert watcher.drain_events() == []
 
 
-def test_polling_watcher_reprocesses_deleted_then_recreated_file(tmp_path):
+def test_polling_watcher_reprocesses_deleted_then_recreated_file(tmp_path, monkeypatch):
+    clock = _MonotonicClock()
+    monkeypatch.setattr(file_watch, "monotonic", clock)
     target = tmp_path / "docs.xlsx"
     target.write_text("v1", encoding="utf-8")
 
@@ -119,6 +158,7 @@ def test_polling_watcher_reprocesses_deleted_then_recreated_file(tmp_path):
 
     rewrite_with_new_timestamp(target, "v2")
     assert watcher.drain_events() == []
+    clock.advance(1)
     assert watcher.drain_events() == [target]
 
 
@@ -133,7 +173,24 @@ def test_polling_watcher_can_start_before_single_file_exists(tmp_path):
     assert watcher.drain_events() == [target]
 
 
+def test_polling_watcher_samples_monotonic_clock_once_per_drain(tmp_path, monkeypatch):
+    clock = _MonotonicClock()
+    monkeypatch.setattr(file_watch, "monotonic", clock)
+    watcher = PollingWatcher(tmp_path, extensions=(".xlsx",), settle=1)
+    watcher.start()
+    first = tmp_path / "a.xlsx"
+    second = tmp_path / "b.xlsx"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+
+    assert watcher.drain_events() == []
+    assert clock.calls == 1
+
+    clock.advance(1)
+    assert watcher.drain_events() == [first, second]
+    assert clock.calls == 2
+
+
 def test_polling_watcher_rejects_negative_settle(tmp_path):
     with pytest.raises(FlowValidationError, match="zero or greater"):
         PollingWatcher(tmp_path, settle=-1)
-

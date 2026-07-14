@@ -10,12 +10,14 @@ from time import monotonic
 
 from data_engine.core.model import FlowStoppedError
 from data_engine.core.primitives import DateRangeInputValue, FlowContext, WatchSpec
+from data_engine.domain.source_state import SourceSignature
 from data_engine.platform.workspace_models import DATA_ENGINE_RUNTIME_CACHE_DB_PATH_ENV_VAR
 from data_engine.runtime.execution.continuous import ContinuousRuntimeLoop
 from data_engine.runtime.execution.context import QueuedRunJob
 from data_engine.runtime.execution.single import FlowRuntime
 from data_engine.runtime.execution.single import default_runtime_cache_ledger_service
 from data_engine.runtime.execution.runner import FlowRunExecutionPorts, FlowRunExecutor
+from data_engine.runtime.file_watch import PollingWatcher
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 
 
@@ -539,3 +541,57 @@ def test_continuous_runtime_loop_sleeps_until_next_poll_without_pending_futures(
 
     assert isinstance(recorded["seconds"], float)
     assert 0.0 <= recorded["seconds"] <= 0.2
+
+
+def test_continuous_runtime_loop_enqueues_one_batch_with_every_drained_signature(tmp_path, monkeypatch) -> None:
+    source_root = tmp_path / "input"
+    source_root.mkdir()
+    first = source_root / "a.xlsx"
+    second = source_root / "b.xlsx"
+    vanished = source_root / "vanished.xlsx"
+    first_signature = SourceSignature(source_path=str(first), mtime_ns=1, size_bytes=10)
+    second_signature = SourceSignature(source_path=str(second), mtime_ns=2, size_bytes=20)
+
+    class _BatchPolling:
+        def __init__(self) -> None:
+            self.signature_paths: list[Path] = []
+            self.enqueue_calls = 0
+
+        def poll_source_signature(self, flow, source_path):
+            del flow
+            self.signature_paths.append(source_path)
+            return {first: first_signature, second: second_signature}.get(source_path)
+
+        def enqueue_job(self, queue, queued_keys, flow, source_path, *, batch_signatures=()):
+            self.enqueue_calls += 1
+            queue.append(QueuedRunJob(flow=flow, source_path=source_path, batch_signatures=batch_signatures))
+            queued_keys.add((flow.name, None))
+
+    polling = _BatchPolling()
+    runtime = type("_Runtime", (), {"polling": polling})()
+    flow = _Flow(
+        name="batch_poll",
+        group="Docs",
+        steps=(),
+        trigger=WatchSpec(
+            mode="poll",
+            run_as="batch",
+            source=source_root,
+            interval="5s",
+            interval_seconds=5.0,
+            extensions=(".xlsx",),
+        ),
+    )
+    watcher = PollingWatcher(source_root, extensions=(".xlsx",), settle=0)
+    monkeypatch.setattr(watcher, "drain_events", lambda: [first, second, vanished])
+    queue: deque[QueuedRunJob] = deque()
+    queued_keys: set[tuple[str, str | None]] = set()
+    watch_entries = [{"flow": flow, "interval": 5.0, "next_poll": 10.0, "watcher": watcher}]
+
+    ContinuousRuntimeLoop(runtime)._poll_watch_entries(watch_entries, queue, queued_keys, now=10.0)
+
+    assert polling.signature_paths == [first, second, vanished]
+    assert polling.enqueue_calls == 1
+    assert list(queue) == [QueuedRunJob(flow=flow, source_path=None, batch_signatures=(first_signature, second_signature))]
+    assert queued_keys == {("batch_poll", None)}
+    assert watch_entries[0]["next_poll"] == 15.0

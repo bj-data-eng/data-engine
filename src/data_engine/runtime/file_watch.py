@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import monotonic
 from typing import Iterable, Protocol, runtime_checkable
 
 from data_engine.core.model import FlowValidationError
@@ -110,14 +111,14 @@ class PollingWatcher:
         self.extensions = _normalize_extensions(extensions)
         self.settle = settle
         self._seen: dict[Path, tuple[int, int, int]] = {}
-        self._stable_counts: dict[Path, int] = {}
+        self._pending_since: dict[Path, float] = {}
         self._emitted: dict[Path, tuple[int, int, int]] = {}
         self._running = False
 
     def start(self) -> None:
         """Capture an initial filesystem snapshot and begin watching."""
         self._seen = self._snapshot()
-        self._stable_counts = {path: 0 for path in self._seen}
+        self._pending_since = {}
         self._emitted = dict(self._seen)
         self._running = True
 
@@ -131,24 +132,24 @@ class PollingWatcher:
             return []
 
         current = self._snapshot()
+        now = monotonic()
         events: list[Path] = []
-        stable_counts: dict[Path, int] = {}
+        pending_since: dict[Path, float] = {}
 
         for path, signature in current.items():
-            prior_signature = self._seen.get(path)
-            if prior_signature == signature:
-                stable_counts[path] = self._stable_counts.get(path, 0) + 1
-            else:
-                stable_counts[path] = 0
-
             if self._emitted.get(path) == signature:
                 continue
-            if stable_counts[path] < self.settle:
+
+            first_observed_at = self._pending_since.get(path)
+            if self._seen.get(path) != signature or first_observed_at is None:
+                first_observed_at = now
+            if now - first_observed_at < self.settle:
+                pending_since[path] = first_observed_at
                 continue
             events.append(path)
             self._emitted[path] = signature
 
-        self._stable_counts = stable_counts
+        self._pending_since = pending_since
         self._seen = current
         return events
 
@@ -170,10 +171,10 @@ class PollingWatcher:
         return result
 
     def _prune_removed_paths(self, current: dict[Path, tuple[int, int, int]]) -> None:
-        """Drop removed paths from watcher state maps."""
-        current_paths = set(current)
-        self._stable_counts = {path: count for path, count in self._stable_counts.items() if path in current_paths}
-        self._emitted = {path: sig for path, sig in self._emitted.items() if path in current_paths}
+        """Drop removed paths from retained emitted-signature state."""
+        removed_paths = [path for path in self._emitted if path not in current]
+        for path in removed_paths:
+            del self._emitted[path]
 
 
 __all__ = ["IFileWatcher", "PollingWatcher", "iter_candidate_paths", "is_temporary_file_path"]

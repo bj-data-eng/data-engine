@@ -132,21 +132,26 @@ class ContinuousRuntimeLoop:
             watched_flow = entry["flow"]
             watcher = entry["watcher"]
             assert isinstance(watcher, PollingWatcher)
-            for path in watcher.drain_events():
-                watched_trigger = watched_flow.trigger
-                assert isinstance(watched_trigger, WatchSpec)
-                if watched_trigger.run_as == "batch" and watched_trigger.source is not None and watched_trigger.source.is_dir():
+            changed_paths = watcher.drain_events()
+            watched_trigger = watched_flow.trigger
+            assert isinstance(watched_trigger, WatchSpec)
+            if changed_paths and watched_trigger.run_as == "batch" and watched_trigger.source is not None and watched_trigger.source.is_dir():
+                batch_signatures = []
+                for path in changed_paths:
                     signature = self.runtime.polling.poll_source_signature(watched_flow, path)
-                    self.runtime.polling.enqueue_job(
-                        queue,
-                        queued_keys,
-                        watched_flow,
-                        None,
-                        batch_signatures=(signature,) if signature is not None else (),
-                    )
-                    break
-                if self.runtime.polling.is_poll_source_stale(watched_flow, path):
-                    self.runtime.polling.enqueue_job(queue, queued_keys, watched_flow, path)
+                    if signature is not None:
+                        batch_signatures.append(signature)
+                self.runtime.polling.enqueue_job(
+                    queue,
+                    queued_keys,
+                    watched_flow,
+                    None,
+                    batch_signatures=tuple(batch_signatures),
+                )
+            else:
+                for path in changed_paths:
+                    if self.runtime.polling.is_poll_source_stale(watched_flow, path):
+                        self.runtime.polling.enqueue_job(queue, queued_keys, watched_flow, path)
             entry["next_poll"] = now + float(entry["interval"])
 
 __all__ = ["ContinuousRuntimeLoop"]
