@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from data_engine.platform.processes import ProcessIdentity
 from data_engine.platform.workspace_models import WorkspacePaths
 from data_engine.runtime.shared_state import RuntimeSnapshotStore
 from data_engine.services.workspace_io import WorkspaceIoLayer, default_workspace_io_layer
@@ -76,6 +77,8 @@ class DaemonSharedStateAdapter:
         host_name: str,
         daemon_id: str,
         pid: int,
+        process_identity: ProcessIdentity,
+        containment_nonce: str,
         status: str,
         started_at_utc: str,
         last_checkpoint_at_utc: str,
@@ -91,6 +94,8 @@ class DaemonSharedStateAdapter:
             host_name=host_name,
             daemon_id=daemon_id,
             pid=pid,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
             status=status,
             started_at_utc=started_at_utc,
             last_checkpoint_at_utc=last_checkpoint_at_utc,
@@ -111,6 +116,8 @@ class DaemonSharedStateAdapter:
         host_name: str,
         daemon_id: str,
         pid: int,
+        process_identity: ProcessIdentity,
+        containment_nonce: str,
         status: str,
         started_at_utc: str,
         last_checkpoint_at_utc: str,
@@ -124,6 +131,8 @@ class DaemonSharedStateAdapter:
             host_name=host_name,
             daemon_id=daemon_id,
             pid=pid,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
             status=status,
             started_at_utc=started_at_utc,
             last_checkpoint_at_utc=last_checkpoint_at_utc,

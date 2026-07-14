@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from threading import RLock
 from typing import Any
 
+from data_engine.platform.processes import ProcessIdentity
 from data_engine.platform.workspace_models import WorkspacePaths
 from data_engine.runtime.shared_state import (
     RuntimeSnapshotStore,
@@ -189,6 +190,8 @@ class WorkspaceIoLayer:
         host_name: str,
         daemon_id: str,
         pid: int,
+        process_identity: ProcessIdentity,
+        containment_nonce: str,
         status: str,
         started_at_utc: str,
         last_checkpoint_at_utc: str,
@@ -213,6 +216,8 @@ class WorkspaceIoLayer:
                 host_name=host_name,
                 daemon_id=daemon_id,
                 pid=pid,
+                process_identity=process_identity,
+                containment_nonce=containment_nonce,
                 status=status,
                 started_at_utc=started_at_utc,
                 last_checkpoint_at_utc=last_checkpoint_at_utc,
@@ -228,6 +233,8 @@ class WorkspaceIoLayer:
                 host_name=host_name,
                 daemon_id=daemon_id,
                 pid=pid,
+                process_identity=process_identity,
+                containment_nonce=containment_nonce,
                 status=status,
                 started_at_utc=started_at_utc,
                 last_checkpoint_at_utc=last_checkpoint_at_utc,
@@ -259,6 +266,8 @@ class WorkspaceIoLayer:
         host_name: str,
         daemon_id: str,
         pid: int,
+        process_identity: ProcessIdentity,
+        containment_nonce: str,
         status: str,
         started_at_utc: str,
         last_checkpoint_at_utc: str,
@@ -272,6 +281,8 @@ class WorkspaceIoLayer:
             host_name=host_name,
             daemon_id=daemon_id,
             pid=pid,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
             status=status,
             started_at_utc=started_at_utc,
             last_checkpoint_at_utc=last_checkpoint_at_utc,

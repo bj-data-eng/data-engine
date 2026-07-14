@@ -10,13 +10,16 @@ import pytest
 
 import data_engine.runtime.shared_state as shared_state_module
 from data_engine.domain.source_state import SourceSignature
+from data_engine.platform.processes import ProcessIdentity
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.runtime.shared_state import (
     WorkspaceLeaseLostError,
     WorkspaceStateCorruptError,
-    checkpoint_workspace_state as _checkpoint_workspace_state,
+    checkpoint_workspace_state as _runtime_checkpoint_workspace_state,
     claim_workspace,
+    daemon_process_lease_identity,
+    daemon_process_lease_metadata,
     hydrate_local_runtime_state,
     initialize_workspace_state,
     read_control_request,
@@ -27,13 +30,33 @@ from data_engine.runtime.shared_state import (
     release_workspace,
     reset_workspace_state,
     resolve_workspace_bundle,
-    write_lease_metadata,
+    write_lease_metadata as _runtime_write_lease_metadata,
     workspace_lease_operation,
     write_control_request,
 )
 from data_engine.services.workspace_io import WorkspaceIoLayer
 
 from tests.services.support import resolve_workspace_paths
+
+
+_TEST_CONTAINMENT_NONCE = "a" * 64
+
+
+def _test_process_identity(pid: int) -> ProcessIdentity:
+    return ProcessIdentity(
+        pid=pid,
+        start_key=f"test-start-{pid}",
+        executable_path="/test/python",
+        process_group_id=None if os.name == "nt" else pid,
+        process_session_id=pid,
+    )
+
+
+def _owner_process_kwargs(pid: int) -> dict[str, object]:
+    return {
+        "process_identity": _test_process_identity(pid),
+        "containment_nonce": _TEST_CONTAINMENT_NONCE,
+    }
 
 
 def _committed_artifact_paths(paths):
@@ -74,6 +97,12 @@ def _current_bundle(paths):
     return bundle
 
 
+def _checkpoint_workspace_state(paths, ledger, **kwargs):
+    pid = kwargs["pid"]
+    kwargs = {**_owner_process_kwargs(pid), **kwargs}
+    return _runtime_checkpoint_workspace_state(paths, ledger, **kwargs)
+
+
 def checkpoint_workspace_state(paths, ledger, **kwargs):
     """Checkpoint through the current explicit test lease."""
     return _checkpoint_workspace_state(
@@ -82,6 +111,13 @@ def checkpoint_workspace_state(paths, ledger, **kwargs):
         lease_token=_current_lease_token(paths),
         **kwargs,
     )
+
+
+def write_lease_metadata(paths, **kwargs):
+    """Write test lease metadata with one complete process identity."""
+    pid = kwargs["pid"]
+    kwargs = {**_owner_process_kwargs(pid), **kwargs}
+    return _runtime_write_lease_metadata(paths, **kwargs)
 
 
 def _claim_in_subprocess(paths, start_event, result_queue) -> None:
@@ -151,11 +187,111 @@ def test_checkpoint_and_hydrate_workspace_state(tmp_path, monkeypatch):
     assert metadata["workspace_id"] == "default"
     assert metadata["machine_id"] == "machine-a"
     assert metadata["host_name"] == "test-host"
+    assert daemon_process_lease_identity(metadata).process_identity == _test_process_identity(101)
+    assert metadata["containment_nonce"] == _TEST_CONTAINMENT_NONCE
 
     target_ledger = RuntimeCacheLedger(app_root / "artifacts" / "workspaces" / "default" / "runtime_state" / "second.sqlite")
     hydrate_local_runtime_state(paths, target_ledger)
     assert [run.run_id for run in target_ledger.runs.list()] == ["run-1"]
     assert [entry.run_id for entry in target_ledger.logs.list(flow_name="demo")] == ["run-1"]
+
+
+def test_daemon_process_lease_metadata_round_trips_nullable_grouping() -> None:
+    identity = ProcessIdentity(
+        pid=101,
+        start_key="windows-start-key",
+        executable_path="c:/python/python.exe",
+        process_group_id=None,
+        process_session_id=None,
+    )
+
+    metadata = daemon_process_lease_metadata(identity, _TEST_CONTAINMENT_NONCE)
+
+    assert daemon_process_lease_identity(metadata).process_identity == identity
+    assert daemon_process_lease_identity(metadata).containment_nonce == _TEST_CONTAINMENT_NONCE
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    (
+        ("pid", 0),
+        ("process_start_key", ""),
+        ("process_executable_path", ""),
+        ("process_group_id", -1),
+        ("process_session_id", True),
+        ("containment_nonce", "A" * 64),
+    ),
+)
+def test_daemon_process_lease_identity_rejects_malformed_fields(field_name, bad_value) -> None:
+    metadata = daemon_process_lease_metadata(_test_process_identity(101), _TEST_CONTAINMENT_NONCE)
+    metadata[field_name] = bad_value
+
+    with pytest.raises(WorkspaceStateCorruptError, match="invalid process identity"):
+        daemon_process_lease_identity(metadata)
+
+
+def test_daemon_process_lease_identity_rejects_missing_fields() -> None:
+    metadata = daemon_process_lease_metadata(_test_process_identity(101), _TEST_CONTAINMENT_NONCE)
+    metadata.pop("process_start_key")
+
+    with pytest.raises(WorkspaceStateCorruptError, match="missing required process identity fields"):
+        daemon_process_lease_identity(metadata)
+
+
+@pytest.mark.parametrize(
+    ("process_identity", "containment_nonce", "error_text"),
+    (
+        (_test_process_identity(202), _TEST_CONTAINMENT_NONCE, "must match"),
+        (_test_process_identity(101), "bad", "64 lowercase hexadecimal"),
+    ),
+)
+def test_owner_write_rejects_incomplete_process_contract(
+    tmp_path,
+    process_identity,
+    containment_nonce,
+    error_text,
+) -> None:
+    paths = resolve_workspace_paths(workspace_root=tmp_path / "workspace")
+    lease_token = _claim(paths)
+    started = utcnow_text()
+
+    with pytest.raises(ValueError, match=error_text):
+        _runtime_write_lease_metadata(
+            paths,
+            lease_token=lease_token,
+            workspace_id=paths.workspace_id,
+            machine_id="machine-a",
+            host_name="host-a",
+            daemon_id="daemon-a",
+            pid=101,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
+            status="idle",
+            started_at_utc=started,
+            last_checkpoint_at_utc=started,
+            app_version="test",
+        )
+
+    assert _current_bundle(paths).lease_metadata_path.exists() is False
+
+
+def test_persisted_owner_row_without_process_identity_fails_closed(tmp_path) -> None:
+    paths = resolve_workspace_paths(workspace_root=tmp_path / "workspace")
+    lease_token = _claim(paths)
+    bundle = _current_bundle(paths)
+    pl.DataFrame(
+        [
+            {
+                "workspace_id": paths.workspace_id,
+                "lease_token": lease_token,
+                "pid": 101,
+                "status": "idle",
+            }
+        ]
+    ).write_parquet(bundle.lease_metadata_path)
+
+    with pytest.raises(WorkspaceStateCorruptError, match="missing required process identity fields"):
+        read_lease_metadata(paths)
 
 
 def test_shared_state_helpers_accept_protocol_shaped_snapshot_store(tmp_path, monkeypatch):
@@ -744,6 +880,7 @@ def test_workspace_io_idle_checkpoint_updates_heartbeat_without_snapshot_scan(tm
             host_name="test-host",
             daemon_id="daemon-a",
             pid=101,
+            **_owner_process_kwargs(101),
             status="idle",
             started_at_utc=started,
             last_checkpoint_at_utc=checkpoint_at,
@@ -798,6 +935,7 @@ def test_workspace_io_checkpoint_republishes_for_a_distinct_ledger_incarnation(t
         "host_name": "test-host",
         "daemon_id": "daemon-a",
         "pid": 101,
+        **_owner_process_kwargs(101),
         "status": "idle",
         "started_at_utc": started,
         "last_checkpoint_at_utc": started,

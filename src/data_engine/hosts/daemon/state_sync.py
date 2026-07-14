@@ -137,6 +137,8 @@ class DaemonStateSyncHandler:
                 host_name=service.host_name,
                 daemon_id=service.daemon_id,
                 pid=service.pid,
+                process_identity=service.process_identity,
+                containment_nonce=service.containment_nonce,
                 status=status,
                 started_at_utc=service.started_at_utc,
                 last_checkpoint_at_utc=checkpoint_time,

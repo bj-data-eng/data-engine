@@ -14,12 +14,13 @@ import shutil
 import stat
 import threading
 import time
-from typing import Any, Iterator, Literal, Protocol
+from typing import Any, Iterator, Literal, Mapping, Protocol
 from uuid import uuid4
 
 import polars as pl
 
 from data_engine.helpers.polars import write_parquet_atomic
+from data_engine.platform.processes import ProcessIdentity
 from data_engine.platform.workspace_models import WorkspacePaths
 from data_engine.runtime.ledger_models import (
     PersistedFileState,
@@ -87,6 +88,11 @@ _LEASE_METADATA_SCHEMA: dict[str, pl.DataType] = {
     "host_name": pl.String,
     "daemon_id": pl.String,
     "pid": pl.Int64,
+    "process_start_key": pl.String,
+    "process_executable_path": pl.String,
+    "process_group_id": pl.Int64,
+    "process_session_id": pl.Int64,
+    "containment_nonce": pl.String,
     "status": pl.String,
     "last_checkpoint_at_utc": pl.String,
     "started_at_utc": pl.String,
@@ -164,6 +170,7 @@ _LEASE_METADATA_FILE_NAME = "lease.parquet"
 _SNAPSHOT_MANIFEST_FILE_NAME = "snapshot_manifest.json"
 _SNAPSHOT_GENERATIONS_DIR_NAME = "snapshots"
 _LEASE_TOKEN_PATTERN = re.compile(r"[0-9a-f]{32}")
+_CONTAINMENT_NONCE_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _GENERATION_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 _ROOT_TEMP_PATTERN = re.compile(
     r"\.(?:lease\.parquet|snapshot_manifest\.json)\.(?P<token>[0-9a-f]{32})\.[0-9a-f]{32}\.tmp"
@@ -194,6 +201,19 @@ class WorkspaceBundlePaths:
     def topology_signature(self) -> tuple[str, str, str | None]:
         """Return a cache signature that changes across every ownership rename."""
         return (self.state, str(self.root), self.lease_token)
+
+
+@dataclass(frozen=True, slots=True)
+class DaemonProcessLeaseIdentity:
+    """Verified process identity and containment key persisted for one daemon lease.
+
+    Attributes:
+        process_identity: Immutable operating-system identity for the daemon process.
+        containment_nonce: Canonical 256-bit nonce naming its containment boundary.
+    """
+
+    process_identity: ProcessIdentity
+    containment_nonce: str
 
 
 @dataclass(frozen=True)
@@ -649,6 +669,115 @@ def _lease_metadata_placeholder(bundle: WorkspaceBundlePaths, *, workspace_id: s
     }
 
 
+def _validated_daemon_process_fields(
+    *,
+    pid: int,
+    process_identity: ProcessIdentity,
+    containment_nonce: str,
+) -> dict[str, Any]:
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        raise ValueError("A daemon process id must be a positive integer.")
+    if not isinstance(process_identity, ProcessIdentity):
+        raise ValueError("A daemon owner write requires a ProcessIdentity.")
+    if process_identity.pid != pid:
+        raise ValueError("The daemon process id must match its verified process identity.")
+    if not isinstance(process_identity.start_key, str) or not process_identity.start_key.strip():
+        raise ValueError("A daemon process identity requires a non-empty start key.")
+    if not isinstance(process_identity.executable_path, str) or not process_identity.executable_path.strip():
+        raise ValueError("A daemon process identity requires a non-empty executable path.")
+    for field_name, value in (
+        ("process group id", process_identity.process_group_id),
+        ("process session id", process_identity.process_session_id),
+    ):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+            raise ValueError(f"A daemon {field_name} must be a positive integer or null.")
+    if not isinstance(containment_nonce, str) or _CONTAINMENT_NONCE_PATTERN.fullmatch(containment_nonce) is None:
+        raise ValueError("A daemon containment nonce must be exactly 64 lowercase hexadecimal characters.")
+    return {
+        "pid": process_identity.pid,
+        "process_start_key": process_identity.start_key,
+        "process_executable_path": process_identity.executable_path,
+        "process_group_id": process_identity.process_group_id,
+        "process_session_id": process_identity.process_session_id,
+        "containment_nonce": containment_nonce,
+    }
+
+
+def daemon_process_lease_metadata(
+    process_identity: ProcessIdentity,
+    containment_nonce: str,
+) -> dict[str, object]:
+    """Serialize one verified process identity into canonical flat lease fields.
+
+    Args:
+        process_identity: Immutable operating-system identity for the daemon process.
+        containment_nonce: Canonical 256-bit nonce naming its containment boundary.
+
+    Returns:
+        Canonical flat fields suitable for lease, status, or local control metadata.
+
+    Raises:
+        ValueError: If the identity or containment nonce is incomplete or malformed.
+    """
+    if not isinstance(process_identity, ProcessIdentity):
+        raise ValueError("A daemon owner write requires a ProcessIdentity.")
+    return _validated_daemon_process_fields(
+        pid=process_identity.pid,
+        process_identity=process_identity,
+        containment_nonce=containment_nonce,
+    )
+
+
+def daemon_process_lease_identity(metadata: Mapping[str, Any]) -> DaemonProcessLeaseIdentity:
+    """Reconstruct the complete verified daemon identity from one persisted lease row.
+
+    Args:
+        metadata: Lease metadata returned by :func:`read_lease_metadata`.
+
+    Returns:
+        The strict process identity and containment nonce recorded by the owner.
+
+    Raises:
+        WorkspaceStateCorruptError: If any identity field is missing or malformed.
+    """
+    required_fields = {
+        "pid",
+        "process_start_key",
+        "process_executable_path",
+        "process_group_id",
+        "process_session_id",
+        "containment_nonce",
+    }
+    missing_fields = sorted(required_fields.difference(metadata))
+    if missing_fields:
+        raise WorkspaceStateCorruptError(
+            "Daemon lease metadata is missing required process identity fields: "
+            + ", ".join(missing_fields)
+            + "."
+        )
+    pid = metadata["pid"]
+    process_identity = ProcessIdentity(
+        pid=pid,
+        start_key=metadata["process_start_key"],
+        executable_path=metadata["process_executable_path"],
+        process_group_id=metadata["process_group_id"],
+        process_session_id=metadata["process_session_id"],
+    )
+    containment_nonce = metadata["containment_nonce"]
+    try:
+        _validated_daemon_process_fields(
+            pid=pid,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
+        )
+    except (TypeError, ValueError) as exc:
+        raise WorkspaceStateCorruptError("Daemon lease metadata has an invalid process identity.") from exc
+    return DaemonProcessLeaseIdentity(
+        process_identity=process_identity,
+        containment_nonce=containment_nonce,
+    )
+
+
 def _read_lease_metadata_from_bundle(
     bundle: WorkspaceBundlePaths,
     *,
@@ -670,6 +799,7 @@ def _read_lease_metadata_from_bundle(
         raise WorkspaceStateCorruptError(
             f"Workspace {workspace_id!r} lease metadata does not match its marker token."
         )
+    daemon_process_lease_identity(metadata)
     return metadata
 
 
@@ -803,11 +933,18 @@ def _metadata_row(
     host_name: str,
     daemon_id: str,
     pid: int,
+    process_identity: ProcessIdentity,
+    containment_nonce: str,
     status: str,
     started_at_utc: str,
     last_checkpoint_at_utc: str,
     app_version: str | None,
 ) -> dict[str, Any]:
+    process_fields = _validated_daemon_process_fields(
+        pid=pid,
+        process_identity=process_identity,
+        containment_nonce=containment_nonce,
+    )
     return {
         "snapshot_generation_id": snapshot_generation_id,
         "workspace_id": workspace_id,
@@ -815,7 +952,7 @@ def _metadata_row(
         "machine_id": machine_id,
         "host_name": host_name,
         "daemon_id": daemon_id,
-        "pid": pid,
+        **process_fields,
         "status": status,
         "last_checkpoint_at_utc": last_checkpoint_at_utc,
         "started_at_utc": started_at_utc,
@@ -833,6 +970,8 @@ def checkpoint_workspace_state(
     host_name: str,
     daemon_id: str,
     pid: int,
+    process_identity: ProcessIdentity,
+    containment_nonce: str,
     status: str,
     started_at_utc: str,
     last_checkpoint_at_utc: str,
@@ -852,6 +991,8 @@ def checkpoint_workspace_state(
             host_name=host_name,
             daemon_id=daemon_id,
             pid=pid,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
             status=status,
             started_at_utc=started_at_utc,
             last_checkpoint_at_utc=last_checkpoint_at_utc,
@@ -878,6 +1019,8 @@ def checkpoint_workspace_state(
                             host_name=host_name,
                             daemon_id=daemon_id,
                             pid=pid,
+                            process_identity=process_identity,
+                            containment_nonce=containment_nonce,
                             status=status,
                             started_at_utc=started_at_utc,
                             last_checkpoint_at_utc=datetime.now(UTC).isoformat(),
@@ -925,6 +1068,8 @@ def checkpoint_workspace_state(
             host_name=host_name,
             daemon_id=daemon_id,
             pid=pid,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
             status=status,
             started_at_utc=started_at_utc,
             last_checkpoint_at_utc=completed_checkpoint_at_utc,
@@ -943,6 +1088,8 @@ def write_lease_metadata(
     host_name: str,
     daemon_id: str,
     pid: int,
+    process_identity: ProcessIdentity,
+    containment_nonce: str,
     status: str,
     started_at_utc: str,
     last_checkpoint_at_utc: str,
@@ -961,6 +1108,8 @@ def write_lease_metadata(
             host_name=host_name,
             daemon_id=daemon_id,
             pid=pid,
+            process_identity=process_identity,
+            containment_nonce=containment_nonce,
             status=status,
             started_at_utc=started_at_utc,
             last_checkpoint_at_utc=last_checkpoint_at_utc,
@@ -1798,6 +1947,9 @@ __all__ = [
     "assert_workspace_lease",
     "checkpoint_workspace_state",
     "claim_workspace",
+    "daemon_process_lease_identity",
+    "daemon_process_lease_metadata",
+    "DaemonProcessLeaseIdentity",
     "hydrate_local_runtime_state",
     "initialize_workspace_state",
     "lease_is_stale",
