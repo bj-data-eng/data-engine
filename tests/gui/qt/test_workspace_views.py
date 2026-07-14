@@ -12,6 +12,7 @@ from .support import (
     test_refresh_button_clears_flows_without_spawning_daemon_when_workspace_has_no_flow_modules,
     test_refresh_button_reloads_flows,
     test_refresh_button_still_reloads_locally_when_daemon_refresh_fails,
+    test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon,
     test_saving_workspace_collection_root_override_reloads_visible_log_runs,
     test_settings_browse_workspace_collection_root_updates_binding_immediately,
     test_settings_can_rebind_workspace_root_while_runtime_is_active,

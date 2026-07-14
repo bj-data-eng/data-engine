@@ -105,8 +105,12 @@ def rebind_workspace_context(
         manager=window.runtime_binding.daemon_manager,
         clock=window._monotonic,
     )
-    register_client_session(window)
+    try:
+        window.runtime_binding_service.remove_client_session(old_binding, window.client_session_id)
+    except Exception:
+        pass
     window.runtime_binding_service.close_binding(old_binding)
+    register_client_session(window)
     window._ui_timing_log_path = (
         window.workspace_paths.runtime_state_dir / "ui_timing.log"
         if window.workspace_paths.workspace_configured

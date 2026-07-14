@@ -5506,6 +5506,7 @@ def test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon(q
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
     )
     try:
+        old_binding = window.runtime_binding
         original_remove_client_session = window.runtime_binding_service.remove_client_session
 
         def _record_remove_client_session(binding, client_id):
@@ -5516,7 +5517,7 @@ def test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon(q
         window._rebind_workspace_context(workspace_id="docs2")
 
         assert shutdown_calls == []
-        assert remove_calls == []
+        assert remove_calls == [(old_binding, window.client_session_id)]
     finally:
         _dispose_window(qapp, window)
 
