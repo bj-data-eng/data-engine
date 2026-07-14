@@ -5,13 +5,16 @@ Date: 2026-07-13
 Revision notes:
 
 - Updated after removal of the retired operator interface; findings and scope specific to it have been removed.
+- P1-2 is resolved by retaining every accepted runtime worker through finalization and refusing to release ownership or close storage until the workers and checkpoint thread have drained.
+- P1-5 and P1-6 are resolved by manifest-committed immutable snapshot generations, transactional exports, preserved row IDs, and generation-aware cache invalidation.
+- P1-8 is resolved by a durable installation UUID with hostname retained only as display metadata. This is an intentional clean protocol cutover; no compatibility bridge for old daemons was added.
 - P1-7 is resolved by idempotent runtime-I/O leases that reject stale operations and let in-flight work drain before releasing the shared writer.
 - P2-9 is closed as intended product behavior: CLI workspace creation replaces the auto-provisioned VS Code settings file with the current Data Engine settings.
 - All P2 and P3 findings are resolved. The accepted implementations avoid new background pollers, remove redundant layout and response-polling work, bound preview/materialization costs, and keep recovery-only checks off valid hot paths.
 
 Reviewed commit: `b6a01b70d37c7d6bb9885f132e1218eb07d46f62` (`main`)
 
-Resolution progress verified through commit `76b3f5d`.
+Resolution progress verified through commit `c6d5531`.
 
 Remote status at review baseline: the reviewed commit matched `origin/main` after `git fetch --prune`.
 
@@ -19,15 +22,15 @@ Scope: runtime, shared state, daemon lifecycle, platform behavior, CLI, GUI, aut
 
 ## Executive summary
 
-The repository has a strong clean baseline: all 1,002 current tests pass, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and the PEP 517 build and Twine metadata checks succeed. The review initially found 26 reproducible or deterministic issues. Nineteen are now resolved or closed, leaving the seven P1 findings below open:
+The repository has a strong clean baseline: all 1,031 current tests pass, Ruff and pydoclint are clean, the Windows runtime lock resolves with hashes enforced, and the PEP 517 build and Twine metadata checks succeed. The review initially found 26 reproducible or deterministic issues. Twenty-three are now resolved or closed, leaving three P1 findings open:
 
 | Priority | Open | Meaning |
 |---|---:|---|
-| P1 | 7 | Safety, ownership, data-consistency, cross-workspace, or indefinite-hang risk; address before relying on the affected path in production. |
+| P1 | 3 | Safety and ownership risk; address before relying on the affected path in production. |
 | P2 | 0 | All material functional and platform-correctness findings are resolved. |
 | P3 | 0 | All lower-frequency edge cases are resolved. |
 
-The highest-risk cluster is daemon/workspace ownership. Lease mutation is not fenced, forced shutdown can target a reused PID, stop/handoff can release ownership while worker threads are still alive, and POSIX force-stop does not terminate descendants. The next cluster is runtime projection consistency: a reader can accept a torn shared snapshot, and hydration can invalidate incremental cursors indefinitely.
+The remaining risk cluster is daemon/workspace ownership. Lease mutation is not yet fenced, forced shutdown can target a reused PID, and POSIX force-stop does not terminate descendants. Worker draining, atomic snapshot publication, generation-aware hydration, and durable installation identity are now verified on the merged baseline.
 
 ## P1 findings
 
@@ -45,7 +48,9 @@ Impact: split-brain execution, ownership clobbering, and shared-state corruption
 
 Recommendation: issue an immutable fencing token/generation at claim time. Require an atomic token match for every checkpoint, metadata update, and release. A stale daemon that observes a mismatch must stop without writing or releasing anything.
 
-### P1-2 — Stop/handoff forgets worker threads after 1.5 seconds and releases ownership while work can still be running
+### P1-2 — Resolved: stop/handoff retains ownership until every accepted worker has drained
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -56,7 +61,7 @@ Evidence:
 
 Impact: old work can keep writing after ownership moves to another machine, or after its storage has been closed. This compounds P1-1 and can corrupt outputs or runtime state.
 
-Recommendation: retain worker references and active state until every worker has actually stopped. On timeout, fail the handoff or escalate through a safe worker/process termination path; never release ownership or close storage while work remains alive.
+Resolution: startup, runtime, and finalization threads remain tracked until completion. Stop and handoff enter a shared drain-admission state, reject late work and lease reclaims, perform a bounded initial wait, and retry completion through the existing checkpoint lifecycle without adding a poller. Fatal teardown signals shutdown, closes accepted IPC connections, joins command and checkpoint threads, and only then releases ownership and closes ledgers. Deterministic late-claim, non-cooperative-worker, fatal-listener, and silent-client regressions cover the boundary.
 
 ### P1-3 — Forced shutdown can kill an unrelated process after PID reuse
 
@@ -83,7 +88,9 @@ Impact: authored-flow subprocesses can survive force-stop, retain locks, keep wr
 
 Recommendation: terminate the verified daemon process group or enumerate descendants safely. Couple this with the process-identity protections in P1-3.
 
-### P1-5 — The shared snapshot reader accepts torn multi-file generations and can crash SQLite hydration
+### P1-5 — Resolved: shared snapshots publish as one manifest-committed generation
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -96,9 +103,11 @@ A deterministic checkpoint-interleaving reproduction returned zero runs with one
 
 Impact: observers and startup hydration can fail during ordinary transitions to an empty table.
 
-Recommendation: write generation-bearing artifacts for empty tables, publish a committed manifest only after all artifacts are ready, and require every table generation to equal the committed manifest before replacing SQLite.
+Resolution: one SQLite export transaction captures all four runtime tables, including typed empty tables. The writer commits immutable generation artifacts first and atomically replaces a JSON manifest last; readers accept only the manifest-selected generation and validate every artifact before replacing SQLite. Publication and garbage collection share a per-workspace process lock, continuously pin the manifest generation, and retain bounded prior generations. Concurrent-publication, empty-table, interrupted-generation, and hydration-retry coverage verifies the contract.
 
-### P1-6 — Snapshot hydration reassigns row IDs while incremental caches retain obsolete high-water marks
+### P1-6 — Resolved: hydration preserves IDs and independently invalidates incremental consumers
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -111,7 +120,7 @@ Evidence:
 
 Impact: observers can remain permanently stale after hydration or ownership changes, even though the local database is current.
 
-Recommendation: preserve incoming IDs during full replacement, or make hydration generation-aware and explicitly reset every log, step-output, and runtime-I/O cursor/cache.
+Resolution: snapshot replacement preserves persisted step and log IDs and records the applied generation transactionally. Logs and step outputs track independent generation cursors, so either consumer can refresh first without consuming the other consumer's invalidation signal. Every open runtime ledger also carries a unique incarnation in checkpoint and hydration tokens, preventing equal SQLite counters on distinct handles from suppressing publication or hydration. Reused-ID and equal-counter regressions verify both cache paths.
 
 ### P1-7 — Resolved: runtime-I/O proxy closure is idempotent and cannot strand another client
 
@@ -127,7 +136,9 @@ Impact: an ordinary duplicate cleanup path can permanently hang another window, 
 
 Resolution: each proxy now owns an idempotent lease. Closing a lease waits without polling for its own in-flight operations, releases the shared handle exactly once, and rejects later use. Handle shutdown and write admission share one lock, so no write can be queued behind the shutdown sentinel. Snapshot replacement is serialized through the same writer, and a read overlapping invalidation is never cached under the newer generation. Concurrent-close, final-close/open, stale-snapshot, overlapping-read, and surviving-client coverage verifies the lifecycle boundary.
 
-### P1-8 — Hostname-only machine identity can collapse distinct workstations into one owner
+### P1-8 — Resolved: installation UUID is the ownership identity and hostname is display-only
+
+Status: resolved on 2026-07-13.
 
 Evidence:
 
@@ -139,7 +150,7 @@ Evidence:
 
 Impact: broken control transfer and, combined with P1-3, possible signaling of an unrelated local PID.
 
-Recommendation: persist a random installation UUID as machine identity and store hostname separately as display metadata. Include a migration strategy for existing leases.
+Resolution: a canonical UUIDv4 is created or repaired under an immediate SQLite transaction in the machine-local settings store and cached by settings path. Lease and control decisions use that durable UUID; hostname is stored separately for display. Force-stop cleanup mutates metadata only when the lease UUID matches the current installation, including when two machines share a hostname. The daemon protocol uses a clean cutover because no old daemon processes require compatibility.
 
 ## P2 findings
 
