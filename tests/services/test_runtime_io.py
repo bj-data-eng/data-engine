@@ -244,7 +244,10 @@ def test_runtime_io_layer_caches_reads_until_local_write_invalidates(tmp_path: P
 
 
 def test_runtime_binding_service_opens_runtime_io_cache_store(tmp_path: Path) -> None:
-    paths = resolve_workspace_paths(workspace_root=tmp_path / "workspace")
+    paths = resolve_workspace_paths(
+        workspace_root=tmp_path / "folder-name",
+        workspace_id="explicit-id",
+    )
     layer = RuntimeIoLayer(cache_ttl_seconds=1.0)
     service = WorkspaceRuntimeBindingService(
         ledger_service=RuntimeControlLedgerService(),
@@ -257,6 +260,7 @@ def test_runtime_binding_service_opens_runtime_io_cache_store(tmp_path: Path) ->
     binding = service.open_binding(paths)
 
     try:
+        assert binding.runtime_control_ledger.db_path == paths.runtime_control_db_path
         binding.runtime_cache_ledger.execution_state.record_run_started(
             run_id="run-1",
             flow_name="docs_manual",

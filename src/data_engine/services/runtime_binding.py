@@ -175,7 +175,7 @@ class WorkspaceRuntimeBindingService:
         """Open one concrete runtime binding for a workspace selection."""
         if workspace_paths.workspace_configured:
             runtime_cache_ledger = self.runtime_io_layer.open_cache_store(workspace_paths.runtime_cache_db_path)
-            runtime_control_ledger = self.ledger_service.open_for_workspace(workspace_paths.workspace_root)
+            runtime_control_ledger = self.ledger_service.open_control_store(workspace_paths.runtime_control_db_path)
         else:
             runtime_cache_ledger = _NullRuntimeCacheLedger()
             runtime_control_ledger = _NullRuntimeControlLedger()

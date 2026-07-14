@@ -62,7 +62,7 @@ class DaemonHostDependencies:
         factories = factories or default_daemon_host_dependency_factories()
         return cls(
             runtime_cache_ledger=RuntimeCacheLedger(paths.runtime_cache_db_path),
-            runtime_control_ledger=ledger_service.open_for_workspace(paths.workspace_root),
+            runtime_control_ledger=ledger_service.open_control_store(paths.runtime_control_db_path),
             flow_catalog_service=factories.flow_catalog_service_factory(),
             flow_execution_service=factories.flow_execution_service_factory(),
             runtime_execution_service=factories.runtime_execution_service_factory(),

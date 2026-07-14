@@ -66,35 +66,23 @@ def test_ledger_service_delegates_to_runtime_ledger(tmp_path):
     ]
 
 
-def test_ledger_service_opens_workspace_ledgers_through_injected_collaborator(tmp_path):
-    workspace_root = tmp_path / "workspace"
+def test_ledger_service_opens_control_store_through_injected_collaborator(tmp_path):
+    db_path = tmp_path / "runtime" / "runtime_control.sqlite"
     calls: list[object] = []
     ledger = object()
-    service = LedgerService(open_ledger_func=lambda root: calls.append(root) or ledger)
+    service = LedgerService(open_ledger_func=lambda path: calls.append(path) or ledger)
 
-    opened = service.open_for_workspace(workspace_root)
+    opened = service.open_control_store(db_path)
 
     assert opened is ledger
-    assert calls == [workspace_root.resolve()]
+    assert calls == [db_path.resolve()]
 
 
-def test_ledger_service_default_open_uses_runtime_layout_policy(tmp_path):
-    expected_workspace_root = tmp_path / "workspace"
+def test_ledger_service_default_open_uses_supplied_control_db_path(tmp_path):
     expected_db_path = tmp_path / "runtime" / "runtime_control.sqlite"
+    service = LedgerService()
 
-    class _Policy:
-        def resolve_paths(self, *, workspace_root=None, **kwargs):
-            assert kwargs == {}
-            assert workspace_root == expected_workspace_root.resolve()
-
-            class _Paths:
-                runtime_control_db_path = expected_db_path
-
-            return _Paths()
-
-    service = LedgerService(runtime_layout_policy=_Policy())
-
-    ledger = service.open_for_workspace(expected_workspace_root)
+    ledger = service.open_control_store(expected_db_path)
     try:
         assert ledger.db_path == expected_db_path.resolve()
     finally:

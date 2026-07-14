@@ -783,10 +783,10 @@ def test_spawn_daemon_process_does_not_launch_duplicate_local_owner(tmp_path, mo
 
 def test_spawn_daemon_process_uses_windows_creation_flags(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
-    workspace_root = tmp_path / "shared" / "default"
+    workspace_root = tmp_path / "shared" / "folder-name"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     _write_demo_flow(workspace_root)
-    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root, workspace_id="explicit-id")
     monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "nt")
     monkeypatch.setattr("data_engine.hosts.daemon.client.is_daemon_live", lambda paths: False)
     monkeypatch.setattr("data_engine.hosts.daemon.client._wait_for_fresh_local_daemon", lambda paths: False)
@@ -807,6 +807,7 @@ def test_spawn_daemon_process_uses_windows_creation_flags(tmp_path, monkeypatch)
 
     assert spawn_daemon_process(paths) == 0
     assert captured["command"][1:3] == ["-m", "data_engine.hosts.daemon.app"]
+    assert captured["command"][captured["command"].index("--workspace-id") + 1] == "explicit-id"
     assert "creationflags" in captured["kwargs"]
     assert captured["kwargs"]["creationflags"] != 0
     assert "start_new_session" not in captured["kwargs"]

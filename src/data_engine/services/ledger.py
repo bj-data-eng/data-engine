@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Callable
 
 from data_engine.platform.paths import stable_absolute_path
-from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
 from data_engine.runtime.runtime_db import RuntimeControlLedger
 from data_engine.services.runtime_ports import RuntimeControlStore
 
@@ -17,19 +16,12 @@ class RuntimeControlLedgerService:
     def __init__(
         self,
         open_ledger_func: Callable[[Path], RuntimeControlStore] | None = None,
-        *,
-        runtime_layout_policy: RuntimeLayoutPolicy | None = None,
     ) -> None:
-        self.runtime_layout_policy = runtime_layout_policy or RuntimeLayoutPolicy()
-        self._open_ledger_func = open_ledger_func or self._open_default_ledger
+        self._open_ledger_func = open_ledger_func or RuntimeControlLedger
 
-    def _open_default_ledger(self, workspace_root: Path) -> RuntimeControlStore:
-        paths = self.runtime_layout_policy.resolve_paths(workspace_root=workspace_root)
-        return RuntimeControlLedger(paths.runtime_control_db_path)
-
-    def open_for_workspace(self, workspace_root: Path) -> RuntimeControlStore:
-        """Open the configured runtime control ledger for one workspace root."""
-        return self._open_ledger_func(stable_absolute_path(workspace_root))
+    def open_control_store(self, db_path: Path) -> RuntimeControlStore:
+        """Open the runtime control store at an already-resolved database path."""
+        return self._open_ledger_func(stable_absolute_path(db_path))
 
     def close(self, ledger: RuntimeControlStore) -> None:
         """Close one runtime control-ledger connection."""

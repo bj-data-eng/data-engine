@@ -34,7 +34,7 @@ from data_engine.platform.identity import APP_DISPLAY_NAME, APP_VERSION
 from data_engine.platform.local_settings import LocalSettingsStore
 from data_engine.platform.workspace_models import DiscoveredWorkspace, machine_id_text
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
-from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
+from data_engine.runtime.runtime_db import RuntimeCacheLedger, RuntimeControlLedger, utcnow_text
 from data_engine.runtime.execution.logging import RuntimeLogEmitter
 from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, FlowLiveSummary, RunLiveSnapshot, WorkspaceRuntimeProjection, WorkspaceSnapshot
 from data_engine.domain import StepOutputIndex
@@ -344,8 +344,8 @@ class _FakeLedgerService:
         self.purged_sessions: list[dict[str, object]] = []
         self.closed_ledgers: list[object] = []
 
-    def open_for_workspace(self, workspace_root):
-        return RuntimeCacheLedger.open_default(data_root=workspace_root)
+    def open_control_store(self, db_path):
+        return RuntimeControlLedger(db_path)
 
     def register_client_session(self, ledger, *, client_id: str, workspace_id: str, client_kind: str, pid: int) -> None:
         del ledger, client_id, workspace_id, client_kind, pid

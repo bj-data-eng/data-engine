@@ -448,6 +448,8 @@ def spawn_daemon_process(
         str(paths.app_root),
         "--workspace",
         str(paths.workspace_root),
+        "--workspace-id",
+        paths.workspace_id,
         "--lifecycle-policy",
         lifecycle_policy.value,
     ]

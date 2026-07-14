@@ -136,16 +136,17 @@ def test_wait_for_daemon_status_returns_after_projection_change(tmp_path, monkey
 
 def test_daemon_host_dependencies_build_default_opens_workspace_runtime_ledger(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
-    workspace_root = tmp_path / "shared" / "default"
+    workspace_root = tmp_path / "shared" / "folder-name"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     _write_demo_flow(workspace_root)
-    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root, workspace_id="explicit-id")
 
     dependencies = DaemonHostDependencies.build_default(paths)
     try:
         assert isinstance(dependencies.runtime_cache_ledger, RuntimeCacheLedger)
         assert dependencies.runtime_cache_ledger.db_path.name == "runtime_cache.sqlite"
         assert dependencies.runtime_control_ledger.db_path.name == "runtime_control.sqlite"
+        assert dependencies.runtime_control_ledger.db_path == paths.runtime_control_db_path
         assert dependencies.runtime_cache_ledger.db_path.parent.parent.name == "runtime_state"
         assert dependencies.runtime_cache_ledger.db_path.exists() is True
         assert dependencies.runtime_control_ledger.db_path.exists() is True
@@ -168,14 +169,14 @@ def test_daemon_host_dependencies_build_default_uses_injected_ledger_service(tmp
     ledger = RuntimeControlLedger(tmp_path / "custom" / "runtime_control.sqlite")
 
     class _LedgerService:
-        def open_for_workspace(self, workspace_root_arg: Path) -> RuntimeControlLedger:
-            calls.append(workspace_root_arg)
+        def open_control_store(self, db_path: Path) -> RuntimeControlLedger:
+            calls.append(db_path)
             return ledger
 
     dependencies = DaemonHostDependencies.build_default(paths, ledger_service=_LedgerService())
     try:
         assert dependencies.runtime_control_ledger is ledger
-        assert calls == [paths.workspace_root]
+        assert calls == [paths.runtime_control_db_path]
     finally:
         ledger.close()
 
@@ -637,9 +638,40 @@ def test_serve_workspace_daemon_uses_injected_resolve_paths_func(tmp_path):
     assert calls == [(workspace_root, "default")]
 
 
+def test_serve_workspace_daemon_preserves_explicit_workspace_identity(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "folder-name"
+    workspace_id = "explicit-id"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    parent_paths = resolve_workspace_paths(workspace_root=workspace_root, workspace_id=workspace_id)
+    child_paths = []
+
+    class _Service:
+        def __init__(self, paths, *, lifecycle_policy: DaemonLifecyclePolicy) -> None:
+            assert lifecycle_policy is DaemonLifecyclePolicy.EPHEMERAL
+            child_paths.append(paths)
+
+        def serve_forever(self) -> None:
+            return None
+
+    result = serve_workspace_daemon(
+        _Service,
+        workspace_root=workspace_root,
+        workspace_id=workspace_id,
+        lifecycle_policy=DaemonLifecyclePolicy.EPHEMERAL,
+    )
+
+    assert result == 0
+    assert workspace_root.name != workspace_id
+    assert child_paths[0].workspace_id == parent_paths.workspace_id
+    assert child_paths[0].runtime_control_db_path == parent_paths.runtime_control_db_path
+    assert child_paths[0].daemon_endpoint_kind == parent_paths.daemon_endpoint_kind
+    assert child_paths[0].daemon_endpoint_path == parent_paths.daemon_endpoint_path
+
+
 def test_daemon_main_uses_injected_resolve_paths_func(monkeypatch, tmp_path):
-    workspace_root = tmp_path / "shared" / "default"
-    resolved = resolve_workspace_paths(workspace_root=workspace_root, workspace_id="default")
+    workspace_root = tmp_path / "shared" / "folder-name"
+    resolved = resolve_workspace_paths(workspace_root=workspace_root, workspace_id="explicit-id")
     resolve_calls: list[tuple[Path | None, str | None]] = []
     serve_calls: list[tuple[Path, str, str]] = []
 
@@ -660,7 +692,7 @@ def test_daemon_main_uses_injected_resolve_paths_func(monkeypatch, tmp_path):
             "--workspace",
             str(workspace_root),
             "--workspace-id",
-            "default",
+            "explicit-id",
             "--lifecycle-policy",
             "ephemeral",
         ],
@@ -668,7 +700,7 @@ def test_daemon_main_uses_injected_resolve_paths_func(monkeypatch, tmp_path):
     )
 
     assert result == 0
-    assert resolve_calls == [(workspace_root.resolve(), "default")]
+    assert resolve_calls == [(workspace_root.resolve(), "explicit-id")]
     assert serve_calls == [(resolved.workspace_root, resolved.workspace_id, "ephemeral")]
 
 
