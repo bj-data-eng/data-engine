@@ -46,8 +46,8 @@ class DaemonSharedStateAdapter:
     def lease_is_stale(self, paths: WorkspacePaths, *, stale_after_seconds: float) -> bool:
         return self.workspace_io.lease_is_stale(paths, stale_after_seconds=stale_after_seconds)
 
-    def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> None:
-        self.workspace_io.hydrate_local_runtime(paths, ledger)
+    def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> bool:
+        return self.workspace_io.hydrate_local_runtime(paths, ledger)
 
     def checkpoint_workspace_state(
         self,

@@ -15,9 +15,9 @@ class SharedStateService:
     def __init__(self, *, workspace_io: WorkspaceIoLayer | None = None) -> None:
         self.workspace_io = workspace_io or default_workspace_io_layer()
 
-    def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> None:
+    def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> bool:
         """Replace one local runtime ledger from the shared workspace snapshots."""
-        self.workspace_io.hydrate_local_runtime(paths, ledger)
+        return self.workspace_io.hydrate_local_runtime(paths, ledger)
 
     def read_lease_metadata(self, paths: WorkspacePaths) -> dict[str, Any] | None:
         """Return current workspace lease metadata, if present."""

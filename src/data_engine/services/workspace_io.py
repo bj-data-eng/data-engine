@@ -17,6 +17,7 @@ from data_engine.runtime.shared_state import (
     initialize_workspace_state,
     read_control_request,
     read_lease_metadata,
+    read_runtime_snapshot_generation,
     recover_stale_workspace,
     release_workspace,
     remove_control_request,
@@ -39,7 +40,13 @@ class _CachedRow:
 class _HydrationState:
     last_hydrated_at: datetime
     snapshot_generation_id: str | None
-    lease_signature: tuple[bool, int | None]
+    manifest_signature: tuple[bool, int | None]
+
+
+@dataclass(frozen=True)
+class _CheckpointState:
+    change_token: object
+    snapshot_generation_id: str
 
 
 class WorkspaceIoLayer:
@@ -57,6 +64,7 @@ class WorkspaceIoLayer:
         self._lease_cache: dict[str, _CachedRow] = {}
         self._control_cache: dict[str, _CachedRow] = {}
         self._hydration_state: dict[str, _HydrationState] = {}
+        self._checkpoint_state: dict[str, _CheckpointState] = {}
 
     @staticmethod
     def _file_signature(path) -> tuple[bool, int | None]:
@@ -90,7 +98,7 @@ class WorkspaceIoLayer:
             )
         return None if normalized is None else dict(normalized)
 
-    def _invalidate_workspace(self, paths: WorkspacePaths) -> None:
+    def _invalidate_workspace(self, paths: WorkspacePaths, *, preserve_checkpoint: bool = False) -> None:
         lease_key = str(paths.lease_metadata_path)
         control_key = str(paths.control_request_path)
         workspace_key = str(paths.workspace_root)
@@ -98,6 +106,8 @@ class WorkspaceIoLayer:
             self._lease_cache.pop(lease_key, None)
             self._control_cache.pop(control_key, None)
             self._hydration_state.pop(workspace_key, None)
+            if not preserve_checkpoint:
+                self._checkpoint_state.pop(workspace_key, None)
 
     def initialize_workspace(self, paths: WorkspacePaths) -> None:
         initialize_workspace_state(paths)
@@ -133,30 +143,25 @@ class WorkspaceIoLayer:
     def hydrate_local_runtime(self, paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> bool:
         workspace_key = str(paths.workspace_root)
         now = datetime.now(UTC)
-        lease_signature = self._file_signature(paths.lease_metadata_path)
-        metadata = self.read_lease_metadata(paths)
-        snapshot_generation_id = (
-            str(metadata.get("snapshot_generation_id")).strip()
-            if isinstance(metadata, dict) and isinstance(metadata.get("snapshot_generation_id"), str)
-            else None
-        )
+        manifest_signature = self._file_signature(paths.shared_snapshot_manifest_path)
+        snapshot_generation_id = read_runtime_snapshot_generation(paths)
         with self._lock:
             state = self._hydration_state.get(workspace_key)
             if (
                 state is not None
-                and state.lease_signature == lease_signature
+                and state.manifest_signature == manifest_signature
                 and state.snapshot_generation_id == snapshot_generation_id
                 and (now - state.last_hydrated_at) < timedelta(seconds=self.hydrate_interval_seconds)
             ):
                 return False
-        hydrate_local_runtime_state(paths, ledger)
+        hydrated = hydrate_local_runtime_state(paths, ledger)
         with self._lock:
             self._hydration_state[workspace_key] = _HydrationState(
                 last_hydrated_at=now,
                 snapshot_generation_id=snapshot_generation_id,
-                lease_signature=lease_signature,
+                manifest_signature=manifest_signature,
             )
-        return True
+        return hydrated
 
     def checkpoint_workspace_state(
         self,
@@ -173,20 +178,48 @@ class WorkspaceIoLayer:
         last_checkpoint_at_utc: str,
         app_version: str | None,
     ) -> None:
-        checkpoint_runtime_workspace_state(
-            paths,
-            ledger,
-            workspace_id=workspace_id,
-            machine_id=machine_id,
-            host_name=host_name,
-            daemon_id=daemon_id,
-            pid=pid,
-            status=status,
-            started_at_utc=started_at_utc,
-            last_checkpoint_at_utc=last_checkpoint_at_utc,
-            app_version=app_version,
-        )
-        self._invalidate_workspace(paths)
+        workspace_key = str(paths.workspace_root)
+        change_token = ledger.snapshot_change_token()
+        committed_generation_id = read_runtime_snapshot_generation(paths)
+        with self._lock:
+            checkpoint_state = self._checkpoint_state.get(workspace_key)
+        if (
+            checkpoint_state is not None
+            and checkpoint_state.change_token == change_token
+            and checkpoint_state.snapshot_generation_id == committed_generation_id
+        ):
+            write_lease_metadata(
+                paths,
+                workspace_id=workspace_id,
+                machine_id=machine_id,
+                host_name=host_name,
+                daemon_id=daemon_id,
+                pid=pid,
+                status=status,
+                started_at_utc=started_at_utc,
+                last_checkpoint_at_utc=last_checkpoint_at_utc,
+                app_version=app_version,
+            )
+        else:
+            committed_generation_id = checkpoint_runtime_workspace_state(
+                paths,
+                ledger,
+                workspace_id=workspace_id,
+                machine_id=machine_id,
+                host_name=host_name,
+                daemon_id=daemon_id,
+                pid=pid,
+                status=status,
+                started_at_utc=started_at_utc,
+                last_checkpoint_at_utc=last_checkpoint_at_utc,
+                app_version=app_version,
+            )
+            with self._lock:
+                self._checkpoint_state[workspace_key] = _CheckpointState(
+                    change_token=change_token,
+                    snapshot_generation_id=committed_generation_id,
+                )
+        self._invalidate_workspace(paths, preserve_checkpoint=True)
 
     def read_lease_metadata(self, paths: WorkspacePaths) -> dict[str, Any] | None:
         return self._cache_read(

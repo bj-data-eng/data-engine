@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
+import json
+import os
 from pathlib import Path
+import re
 import shutil
+import time
 from uuid import uuid4
 from typing import Any, Protocol
 
@@ -22,41 +26,35 @@ from data_engine.runtime.ledger_models import (
 from data_engine.runtime.runtime_db import parse_utc_text
 
 
-class _RunRepository(Protocol):
-    def list(self) -> tuple[PersistedRun, ...]: ...
-
-
-class _StepOutputRepository(Protocol):
-    def list_for_run(self, run_id: str) -> tuple[PersistedStepRun, ...]: ...
-
-
-class _LogRepository(Protocol):
-    def list(self) -> tuple[PersistedLogEntry, ...]: ...
-
-
-class _SourceSignatureRepository(Protocol):
-    def list_file_states(self) -> tuple[PersistedFileState, ...]: ...
-
-
 class _SnapshotRepository(Protocol):
+    def export(
+        self,
+    ) -> tuple[
+        tuple[PersistedRun, ...],
+        tuple[PersistedStepRun, ...],
+        tuple[PersistedLogEntry, ...],
+        tuple[PersistedFileState, ...],
+    ]: ...
+
+    def applied_generation_id(self) -> str | None: ...
+
     def replace(
         self,
         *,
+        generation_id: str,
         runs: tuple[PersistedRun, ...],
         step_runs: tuple[PersistedStepRun, ...],
         logs: tuple[PersistedLogEntry, ...],
         file_states: tuple[PersistedFileState, ...],
-    ) -> None: ...
+    ) -> bool: ...
 
 
 class RuntimeSnapshotStore(Protocol):
     """Minimal runtime snapshot surface used by workspace coordination."""
 
-    runs: _RunRepository
-    step_outputs: _StepOutputRepository
-    logs: _LogRepository
-    source_signatures: _SourceSignatureRepository
     snapshots: _SnapshotRepository
+
+    def snapshot_change_token(self) -> object: ...
 
 
 _LEASE_METADATA_SCHEMA: dict[str, pl.DataType] = {
@@ -131,6 +129,24 @@ _FILE_STATE_SCHEMA: dict[str, pl.DataType] = {
 }
 
 _PARQUET_READ_RETRIES = 3
+_SNAPSHOT_FORMAT_VERSION = 1
+_SNAPSHOT_GENERATIONS_TO_KEEP = 3
+_SNAPSHOT_ARTIFACT_NAMES = {
+    "runs": "runs.parquet",
+    "step_runs": "step_runs.parquet",
+    "logs": "logs.parquet",
+    "file_state": "file_state.parquet",
+}
+_GENERATION_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
+
+
+@dataclass(frozen=True)
+class _CommittedRuntimeSnapshot:
+    generation_id: str
+    runs: tuple[PersistedRun, ...]
+    step_runs: tuple[PersistedStepRun, ...]
+    logs: tuple[PersistedLogEntry, ...]
+    file_states: tuple[PersistedFileState, ...]
 
 
 def initialize_workspace_state(paths: WorkspacePaths) -> None:
@@ -142,10 +158,8 @@ def initialize_workspace_state(paths: WorkspacePaths) -> None:
         paths.stale_markers_dir,
         paths.lease_metadata_dir,
         paths.control_requests_dir,
-        paths.shared_state_dir / "runs",
-        paths.shared_state_dir / "step_runs",
-        paths.shared_state_dir / "logs",
-        paths.shared_state_dir / "file_state",
+        paths.shared_snapshot_generations_dir,
+        paths.shared_snapshot_manifest_path.parent,
     ):
         directory.mkdir(parents=True, exist_ok=True)
     available = paths.available_markers_dir / paths.workspace_id
@@ -242,11 +256,19 @@ def checkpoint_workspace_state(
     started_at_utc: str,
     last_checkpoint_at_utc: str,
     app_version: str | None,
-) -> None:
+) -> str:
     """Write shared runtime snapshots and workspace lease metadata."""
     initialize_workspace_state(paths)
     snapshot_generation_id = uuid4().hex
-    _write_shared_runtime_snapshot(paths, ledger, snapshot_generation_id=snapshot_generation_id)
+    runs, step_runs, logs, file_states = ledger.snapshots.export()
+    _publish_shared_runtime_snapshot(
+        paths,
+        snapshot_generation_id=snapshot_generation_id,
+        runs=runs,
+        step_runs=step_runs,
+        logs=logs,
+        file_states=file_states,
+    )
     _write_lease_metadata(
         paths.lease_metadata_path,
         {
@@ -262,6 +284,7 @@ def checkpoint_workspace_state(
             "app_version": app_version,
         },
     )
+    return snapshot_generation_id
 
 
 def write_lease_metadata(
@@ -279,10 +302,11 @@ def write_lease_metadata(
 ) -> None:
     """Write lease metadata without rewriting the shared runtime snapshot."""
     initialize_workspace_state(paths)
+    snapshot_generation_id = read_runtime_snapshot_generation(paths)
     _write_lease_metadata(
         paths.lease_metadata_path,
         {
-            "snapshot_generation_id": uuid4().hex,
+            "snapshot_generation_id": snapshot_generation_id,
             "workspace_id": workspace_id,
             "machine_id": machine_id,
             "host_name": host_name,
@@ -296,13 +320,31 @@ def write_lease_metadata(
     )
 
 
-def hydrate_local_runtime_state(paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> None:
+def hydrate_local_runtime_state(paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> bool:
     """Replace local SQLite runtime tables from shared parquet snapshots when present."""
+    snapshot_generation_id = read_runtime_snapshot_generation(paths)
+    if snapshot_generation_id is None:
+        return False
+    if ledger.snapshots.applied_generation_id() == snapshot_generation_id:
+        return False
     snapshot = _read_consistent_runtime_snapshot(paths)
     if snapshot is None:
-        return
-    runs, step_runs, logs, file_states = snapshot
-    ledger.snapshots.replace(runs=runs, step_runs=step_runs, logs=logs, file_states=file_states)
+        return False
+    return ledger.snapshots.replace(
+        generation_id=snapshot.generation_id,
+        runs=snapshot.runs,
+        step_runs=snapshot.step_runs,
+        logs=snapshot.logs,
+        file_states=snapshot.file_states,
+    )
+
+
+def read_runtime_snapshot_generation(paths: WorkspacePaths) -> str | None:
+    """Return the currently committed shared snapshot generation."""
+    manifest = _read_snapshot_manifest(paths.shared_snapshot_manifest_path)
+    if manifest is None:
+        return None
+    return _manifest_generation_id(manifest)
 
 
 def read_lease_metadata(paths: WorkspacePaths) -> dict[str, Any] | None:
@@ -352,37 +394,116 @@ def write_control_request(
     )
 
 
-def _write_shared_runtime_snapshot(
+def _publish_shared_runtime_snapshot(
     paths: WorkspacePaths,
-    ledger: RuntimeSnapshotStore,
     *,
     snapshot_generation_id: str,
-) -> None:
-    runs = ledger.runs.list()
-    _write_runs(paths.shared_runs_path, runs, snapshot_generation_id=snapshot_generation_id)
-    step_runs = tuple(step for run in runs for step in ledger.step_outputs.list_for_run(run.run_id))
-    _write_step_runs(paths.shared_step_runs_path, step_runs, snapshot_generation_id=snapshot_generation_id)
-    _write_logs(paths.shared_logs_path, ledger.logs.list(), snapshot_generation_id=snapshot_generation_id)
-    _write_file_states(
-        paths.shared_file_state_path,
-        ledger.source_signatures.list_file_states(),
-        snapshot_generation_id=snapshot_generation_id,
-    )
-
-
-def _replace_shared_runtime_snapshot(
-    paths: WorkspacePaths,
-    *,
     runs: tuple[PersistedRun, ...],
     step_runs: tuple[PersistedStepRun, ...],
     logs: tuple[PersistedLogEntry, ...],
     file_states: tuple[PersistedFileState, ...],
 ) -> None:
-    snapshot_generation_id = uuid4().hex
-    _write_runs(paths.shared_runs_path, runs, snapshot_generation_id=snapshot_generation_id)
-    _write_step_runs(paths.shared_step_runs_path, step_runs, snapshot_generation_id=snapshot_generation_id)
-    _write_logs(paths.shared_logs_path, logs, snapshot_generation_id=snapshot_generation_id)
-    _write_file_states(paths.shared_file_state_path, file_states, snapshot_generation_id=snapshot_generation_id)
+    if _GENERATION_ID_PATTERN.fullmatch(snapshot_generation_id) is None:
+        raise ValueError(f"Invalid snapshot generation id: {snapshot_generation_id!r}")
+    generations_dir = paths.shared_snapshot_generations_dir
+    generations_dir.mkdir(parents=True, exist_ok=True)
+    staging_dir = generations_dir / f".{snapshot_generation_id}.{uuid4().hex}.tmp"
+    committed_dir = generations_dir / snapshot_generation_id
+    staging_dir.mkdir()
+    try:
+        artifact_paths = _snapshot_artifact_paths(staging_dir)
+        _write_runs(artifact_paths["runs"], runs, snapshot_generation_id=snapshot_generation_id)
+        _write_step_runs(artifact_paths["step_runs"], step_runs, snapshot_generation_id=snapshot_generation_id)
+        _write_logs(artifact_paths["logs"], logs, snapshot_generation_id=snapshot_generation_id)
+        _write_file_states(artifact_paths["file_state"], file_states, snapshot_generation_id=snapshot_generation_id)
+        _replace_path_with_retries(staging_dir, committed_dir)
+        _write_snapshot_manifest_atomic(
+            paths.shared_snapshot_manifest_path,
+            {
+                "format_version": _SNAPSHOT_FORMAT_VERSION,
+                "generation_id": snapshot_generation_id,
+                "artifacts": dict(_SNAPSHOT_ARTIFACT_NAMES),
+            },
+        )
+    except BaseException:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        if committed_dir.is_dir() and read_runtime_snapshot_generation(paths) != snapshot_generation_id:
+            shutil.rmtree(committed_dir, ignore_errors=True)
+        raise
+    _garbage_collect_snapshot_generations(paths, committed_generation_id=snapshot_generation_id)
+
+
+def _snapshot_artifact_paths(generation_dir: Path) -> dict[str, Path]:
+    return {name: generation_dir / filename for name, filename in _SNAPSHOT_ARTIFACT_NAMES.items()}
+
+
+def _write_snapshot_manifest_atomic(path: Path, manifest: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        with temporary_path.open("x", encoding="utf-8", newline="\n") as stream:
+            json.dump(manifest, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        _replace_path_with_retries(temporary_path, path)
+    except BaseException:
+        remove_file_if_exists(temporary_path)
+        raise
+
+
+def _replace_path_with_retries(source_path: Path, target_path: Path) -> None:
+    last_error: PermissionError | None = None
+    for delay_seconds in (0.0, 0.02, 0.05, 0.1, 0.2):
+        if delay_seconds:
+            time.sleep(delay_seconds)
+        try:
+            os.replace(source_path, target_path)
+            return
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) != 5:
+                raise
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+
+
+def _garbage_collect_snapshot_generations(
+    paths: WorkspacePaths,
+    *,
+    committed_generation_id: str,
+) -> None:
+    try:
+        candidates = tuple(paths.shared_snapshot_generations_dir.iterdir())
+    except OSError:
+        return
+    committed_directories: list[tuple[int, Path]] = []
+    for candidate in candidates:
+        try:
+            is_committed_directory = (
+                candidate.is_dir() and _GENERATION_ID_PATTERN.fullmatch(candidate.name) is not None
+            )
+            modified_at_ns = candidate.stat().st_mtime_ns
+        except OSError:
+            continue
+        if not is_committed_directory:
+            continue
+        committed_directories.append((modified_at_ns, candidate))
+    committed_directories.sort(key=lambda item: item[0], reverse=True)
+    keep_names = {committed_generation_id}
+    retained_older_names = (
+        candidate.name
+        for _, candidate in committed_directories
+        if candidate.name != committed_generation_id
+    )
+    for _ in range(max(_SNAPSHOT_GENERATIONS_TO_KEEP - 1, 0)):
+        retained_name = next(retained_older_names, None)
+        if retained_name is None:
+            break
+        keep_names.add(retained_name)
+    for _, candidate in committed_directories:
+        if candidate.name not in keep_names:
+            shutil.rmtree(candidate, ignore_errors=True)
 
 
 def remove_control_request(paths: WorkspacePaths) -> None:
@@ -398,31 +519,29 @@ def reset_flow_state(paths: WorkspacePaths, *, flow_name: str) -> None:
     snapshot = _read_consistent_runtime_snapshot(paths)
     if snapshot is None:
         return
-    runs, step_runs, logs, file_states = snapshot
-    removed_run_ids = {run.run_id for run in runs if run.flow_name == flow_name}
-    _replace_shared_runtime_snapshot(
+    removed_run_ids = {run.run_id for run in snapshot.runs if run.flow_name == flow_name}
+    _publish_shared_runtime_snapshot(
         paths,
-        runs=tuple(run for run in runs if run.flow_name != flow_name),
+        snapshot_generation_id=uuid4().hex,
+        runs=tuple(run for run in snapshot.runs if run.flow_name != flow_name),
         step_runs=tuple(
             step_run
-            for step_run in step_runs
+            for step_run in snapshot.step_runs
             if step_run.flow_name != flow_name and step_run.run_id not in removed_run_ids
         ),
         logs=tuple(
             log
-            for log in logs
+            for log in snapshot.logs
             if log.flow_name != flow_name and (log.run_id is None or log.run_id not in removed_run_ids)
         ),
-        file_states=tuple(file_state for file_state in file_states if file_state.flow_name != flow_name),
+        file_states=tuple(file_state for file_state in snapshot.file_states if file_state.flow_name != flow_name),
     )
 
 
 def reset_workspace_state(paths: WorkspacePaths) -> None:
     """Delete shared runtime snapshots and pending control-transfer state for one workspace."""
-    remove_file_if_exists(paths.shared_runs_path)
-    remove_file_if_exists(paths.shared_step_runs_path)
-    remove_file_if_exists(paths.shared_logs_path)
-    remove_file_if_exists(paths.shared_file_state_path)
+    remove_file_if_exists(paths.shared_snapshot_manifest_path)
+    shutil.rmtree(paths.shared_snapshot_generations_dir, ignore_errors=True)
     remove_control_request(paths)
     if paths.stale_markers_dir.is_dir():
         for stale_path in paths.stale_markers_dir.glob(f"{paths.workspace_id}__*"):
@@ -444,9 +563,6 @@ def _write_lease_metadata(path: Path, row: dict[str, Any]) -> None:
 
 
 def _write_runs(path: Path, rows: tuple[PersistedRun, ...], *, snapshot_generation_id: str) -> None:
-    if not rows:
-        remove_file_if_exists(path)
-        return
     write_parquet_atomic(
         _frame_with_schema(
             [{"snapshot_generation_id": snapshot_generation_id, **asdict(row)} for row in rows],
@@ -457,9 +573,6 @@ def _write_runs(path: Path, rows: tuple[PersistedRun, ...], *, snapshot_generati
 
 
 def _write_step_runs(path: Path, rows: tuple[PersistedStepRun, ...], *, snapshot_generation_id: str) -> None:
-    if not rows:
-        remove_file_if_exists(path)
-        return
     write_parquet_atomic(
         _frame_with_schema(
             [{"snapshot_generation_id": snapshot_generation_id, **asdict(row)} for row in rows],
@@ -470,9 +583,6 @@ def _write_step_runs(path: Path, rows: tuple[PersistedStepRun, ...], *, snapshot
 
 
 def _write_logs(path: Path, rows: tuple[PersistedLogEntry, ...], *, snapshot_generation_id: str) -> None:
-    if not rows:
-        write_parquet_atomic(_frame_with_schema([], _LOGS_SCHEMA), path)
-        return
     write_parquet_atomic(
         _frame_with_schema(
             [{"snapshot_generation_id": snapshot_generation_id, **asdict(row)} for row in rows],
@@ -483,9 +593,6 @@ def _write_logs(path: Path, rows: tuple[PersistedLogEntry, ...], *, snapshot_gen
 
 
 def _write_file_states(path: Path, rows: tuple[PersistedFileState, ...], *, snapshot_generation_id: str) -> None:
-    if not rows:
-        remove_file_if_exists(path)
-        return
     write_parquet_atomic(
         _frame_with_schema(
             [{"snapshot_generation_id": snapshot_generation_id, **asdict(row)} for row in rows],
@@ -503,34 +610,6 @@ def remove_file_if_exists(path: Path) -> None:
         pass
 
 
-def _read_runs(path: Path) -> tuple[PersistedRun, ...]:
-    if not path.is_file():
-        return ()
-    frame = _read_parquet_with_retries(path)
-    return tuple(PersistedRun(**_drop_snapshot_generation_id(row)) for row in frame.to_dicts())
-
-
-def _read_step_runs(path: Path) -> tuple[PersistedStepRun, ...]:
-    if not path.is_file():
-        return ()
-    frame = _read_parquet_with_retries(path)
-    return tuple(PersistedStepRun(**_drop_snapshot_generation_id(row)) for row in frame.to_dicts())
-
-
-def _read_logs(path: Path) -> tuple[PersistedLogEntry, ...]:
-    if not path.is_file():
-        return ()
-    frame = _read_parquet_with_retries(path)
-    return tuple(PersistedLogEntry(**_drop_snapshot_generation_id(row)) for row in frame.to_dicts())
-
-
-def _read_file_states(path: Path) -> tuple[PersistedFileState, ...]:
-    if not path.is_file():
-        return ()
-    frame = _read_parquet_with_retries(path)
-    return tuple(PersistedFileState(**_drop_snapshot_generation_id(row)) for row in frame.to_dicts())
-
-
 def _snapshot_generation_id_from_frame(frame: pl.DataFrame) -> str | None:
     if frame.height == 0 or "snapshot_generation_id" not in frame.columns:
         return None
@@ -546,11 +625,19 @@ def _drop_snapshot_generation_id(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
-def _read_parquet_with_retries(path: Path, *, retries: int = _PARQUET_READ_RETRIES) -> pl.DataFrame:
+def _read_parquet_with_retries(
+    path: Path,
+    *,
+    retries: int = _PARQUET_READ_RETRIES,
+    required: bool = False,
+) -> pl.DataFrame:
     last_error: Exception | None = None
     for _ in range(max(retries, 1)):
         if not path.is_file():
-            return pl.DataFrame()
+            if not required:
+                return pl.DataFrame()
+            last_error = FileNotFoundError(path)
+            continue
         try:
             return pl.read_parquet(path)
         except (FileNotFoundError, OSError, pl.exceptions.PolarsError) as exc:
@@ -568,39 +655,92 @@ def _read_single_row_parquet(path: Path) -> dict[str, Any] | None:
     return frame.row(0, named=True)
 
 
+def _read_snapshot_manifest(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _manifest_generation_id(manifest: dict[str, Any]) -> str | None:
+    if manifest.get("format_version") != _SNAPSHOT_FORMAT_VERSION:
+        return None
+    generation_id = manifest.get("generation_id")
+    if not isinstance(generation_id, str) or _GENERATION_ID_PATTERN.fullmatch(generation_id) is None:
+        return None
+    if manifest.get("artifacts") != _SNAPSHOT_ARTIFACT_NAMES:
+        return None
+    return generation_id
+
+
+def _frame_matches_generation(
+    frame: pl.DataFrame,
+    *,
+    schema: dict[str, pl.DataType],
+    generation_id: str,
+) -> bool:
+    if dict(frame.schema) != schema:
+        return False
+    if frame.height == 0:
+        return True
+    return _snapshot_generation_id_from_frame(frame) == generation_id
+
+
 def _read_consistent_runtime_snapshot(
     paths: WorkspacePaths,
     *,
     retries: int = _PARQUET_READ_RETRIES,
-) -> tuple[
-    tuple[PersistedRun, ...],
-    tuple[PersistedStepRun, ...],
-    tuple[PersistedLogEntry, ...],
-    tuple[PersistedFileState, ...],
-] | None:
-    for _ in range(max(retries, 1)):
-        runs_frame = _read_parquet_with_retries(paths.shared_runs_path)
-        step_runs_frame = _read_parquet_with_retries(paths.shared_step_runs_path)
-        logs_frame = _read_parquet_with_retries(paths.shared_logs_path)
-        file_states_frame = _read_parquet_with_retries(paths.shared_file_state_path)
-        generations = {
-            generation
-            for generation in (
-                _snapshot_generation_id_from_frame(runs_frame),
-                _snapshot_generation_id_from_frame(step_runs_frame),
-                _snapshot_generation_id_from_frame(logs_frame),
-                _snapshot_generation_id_from_frame(file_states_frame),
+) -> _CommittedRuntimeSnapshot | None:
+    retry_count = max(retries, 1)
+    for attempt in range(retry_count):
+        manifest = _read_snapshot_manifest(paths.shared_snapshot_manifest_path)
+        generation_id = _manifest_generation_id(manifest) if manifest is not None else None
+        if generation_id is None:
+            return None
+        artifact_paths = _snapshot_artifact_paths(paths.shared_snapshot_generations_dir / generation_id)
+        try:
+            runs_frame = _read_parquet_with_retries(artifact_paths["runs"], required=True)
+            step_runs_frame = _read_parquet_with_retries(artifact_paths["step_runs"], required=True)
+            logs_frame = _read_parquet_with_retries(artifact_paths["logs"], required=True)
+            file_states_frame = _read_parquet_with_retries(artifact_paths["file_state"], required=True)
+        except (FileNotFoundError, OSError, pl.exceptions.PolarsError):
+            _wait_before_snapshot_retry(attempt, retry_count=retry_count)
+            continue
+        if not all(
+            (
+                _frame_matches_generation(runs_frame, schema=_RUNS_SCHEMA, generation_id=generation_id),
+                _frame_matches_generation(step_runs_frame, schema=_STEP_RUNS_SCHEMA, generation_id=generation_id),
+                _frame_matches_generation(logs_frame, schema=_LOGS_SCHEMA, generation_id=generation_id),
+                _frame_matches_generation(file_states_frame, schema=_FILE_STATE_SCHEMA, generation_id=generation_id),
             )
-            if generation is not None
-        }
-        if len(generations) <= 1:
-            return (
-                tuple(PersistedRun(**_drop_snapshot_generation_id(row)) for row in runs_frame.to_dicts()),
-                tuple(PersistedStepRun(**_drop_snapshot_generation_id(row)) for row in step_runs_frame.to_dicts()),
-                tuple(PersistedLogEntry(**_drop_snapshot_generation_id(row)) for row in logs_frame.to_dicts()),
-                tuple(PersistedFileState(**_drop_snapshot_generation_id(row)) for row in file_states_frame.to_dicts()),
-            )
+        ):
+            _wait_before_snapshot_retry(attempt, retry_count=retry_count)
+            continue
+        final_manifest = _read_snapshot_manifest(paths.shared_snapshot_manifest_path)
+        if final_manifest != manifest:
+            _wait_before_snapshot_retry(attempt, retry_count=retry_count)
+            continue
+        return _CommittedRuntimeSnapshot(
+            generation_id=generation_id,
+            runs=tuple(PersistedRun(**_drop_snapshot_generation_id(row)) for row in runs_frame.to_dicts()),
+            step_runs=tuple(
+                PersistedStepRun(**_drop_snapshot_generation_id(row)) for row in step_runs_frame.to_dicts()
+            ),
+            logs=tuple(PersistedLogEntry(**_drop_snapshot_generation_id(row)) for row in logs_frame.to_dicts()),
+            file_states=tuple(
+                PersistedFileState(**_drop_snapshot_generation_id(row)) for row in file_states_frame.to_dicts()
+            ),
+        )
     return None
+
+
+def _wait_before_snapshot_retry(attempt: int, *, retry_count: int) -> None:
+    if attempt + 1 >= retry_count:
+        return
+    time.sleep((0.02, 0.05, 0.1)[min(attempt, 2)])
 
 
 __all__ = [
@@ -611,6 +751,7 @@ __all__ = [
     "lease_is_stale",
     "read_control_request",
     "read_lease_metadata",
+    "read_runtime_snapshot_generation",
     "recover_stale_workspace",
     "remove_control_request",
     "reset_flow_state",

@@ -74,6 +74,10 @@ class RuntimeExecutionStateWriter(Protocol):
     ) -> int: ...
 
 
+class RuntimeSnapshotStateReader(Protocol):
+    def applied_generation_id(self) -> str | None: ...
+
+
 class RuntimeCacheStore(Protocol):
     """Cache/runtime-history store surface used above the runtime store layer."""
 
@@ -82,6 +86,7 @@ class RuntimeCacheStore(Protocol):
     logs: RuntimeLogReader
     source_signatures: RuntimeSourceSignatureStore
     execution_state: RuntimeExecutionStateWriter
+    snapshots: RuntimeSnapshotStateReader
 
     def close(self) -> None: ...
 
@@ -112,5 +117,6 @@ __all__ = [
     "RuntimeLogReader",
     "RuntimeRunReader",
     "RuntimeSourceSignatureStore",
+    "RuntimeSnapshotStateReader",
     "RuntimeStepOutputReader",
 ]

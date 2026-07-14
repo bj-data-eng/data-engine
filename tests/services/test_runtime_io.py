@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 import threading
+from types import SimpleNamespace
 
 import pytest
 
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
+from data_engine.runtime.ledger_models import PersistedLogEntry, PersistedRun, PersistedStepRun
 from data_engine.services.ledger import RuntimeControlLedgerService
 from data_engine.services.logs import LogService
 from data_engine.services.daemon_state import DaemonStateService
@@ -78,7 +80,7 @@ def test_runtime_io_store_close_is_idempotent_and_preserves_other_clients(tmp_pa
     with pytest.raises(RuntimeError, match="closed"):
         closing_store.runs.list()
     with pytest.raises(RuntimeError, match="closed"):
-        stale_snapshots.replace(runs=(), step_runs=(), logs=(), file_states=())
+        stale_snapshots.replace(generation_id="stale", runs=(), step_runs=(), logs=(), file_states=())
     assert surviving_store._handle._writer.is_alive()  # type: ignore[attr-defined]
 
     try:
@@ -106,7 +108,7 @@ def test_runtime_io_snapshot_replace_is_serialized_and_invalidates_reads(tmp_pat
     )
     assert store.runs.list(flow_name="docs_manual")
 
-    store.snapshots.replace(runs=(), step_runs=(), logs=(), file_states=())
+    store.snapshots.replace(generation_id="generation-1", runs=(), step_runs=(), logs=(), file_states=())
 
     assert store.runs.list(flow_name="docs_manual") == ()
     store.close()
@@ -148,7 +150,7 @@ def test_runtime_io_does_not_cache_a_read_that_overlaps_invalidation(tmp_path: P
     reader.start()
     try:
         assert stale_rows_loaded.wait(timeout=1.0)
-        store.snapshots.replace(runs=(), step_runs=(), logs=(), file_states=())
+        store.snapshots.replace(generation_id="generation-1", runs=(), step_runs=(), logs=(), file_states=())
     finally:
         resume_reader.set()
     reader.join(timeout=1.0)
@@ -269,6 +271,83 @@ def test_runtime_binding_service_opens_runtime_io_cache_store(tmp_path: Path) ->
             started_at_utc=utcnow_text(),
         )
         assert binding.runtime_cache_ledger.runs.list(flow_name="docs_manual")
+    finally:
+        service.close_binding(binding)
+
+
+def test_runtime_binding_resets_incremental_high_water_marks_for_new_snapshot_generation(tmp_path: Path) -> None:
+    paths = resolve_workspace_paths(workspace_root=tmp_path / "workspace", workspace_id="workspace")
+    layer = RuntimeIoLayer(cache_ttl_seconds=60.0)
+    service = WorkspaceRuntimeBindingService(
+        ledger_service=RuntimeControlLedgerService(),
+        log_service=LogService(),
+        daemon_state_service=DaemonStateService(),
+        runtime_history_service=RuntimeHistoryService(),
+        runtime_io_layer=layer,
+    )
+    binding = service.open_binding(paths)
+    started_at = utcnow_text()
+    old_output = tmp_path / "old.parquet"
+    new_output = tmp_path / "new.parquet"
+    old_output.touch()
+    new_output.touch()
+    run = PersistedRun(
+        run_id="run-1",
+        flow_name="docs_manual",
+        group_name="Docs",
+        source_path=None,
+        status="success",
+        started_at_utc=started_at,
+        finished_at_utc=started_at,
+        error_text=None,
+    )
+
+    def apply_generation(generation_id: str, *, message: str, output_path: Path) -> None:
+        binding.runtime_cache_ledger.snapshots.replace(
+            generation_id=generation_id,
+            runs=(run,),
+            step_runs=(
+                PersistedStepRun(
+                    id=1,
+                    run_id="run-1",
+                    flow_name="docs_manual",
+                    step_label="Transform",
+                    status="success",
+                    started_at_utc=started_at,
+                    finished_at_utc=started_at,
+                    elapsed_ms=1,
+                    error_text=None,
+                    output_path=str(output_path),
+                ),
+            ),
+            logs=(
+                PersistedLogEntry(
+                    id=1,
+                    run_id="run-1",
+                    flow_name="docs_manual",
+                    step_label=None,
+                    level="INFO",
+                    message=message,
+                    created_at_utc=started_at,
+                ),
+            ),
+            file_states=(),
+        )
+
+    flow_cards = {"docs_manual": SimpleNamespace(operation_items=("Transform",))}
+    try:
+        apply_generation("generation-a", message="old message", output_path=old_output)
+        service.reload_logs(binding)
+        first_outputs = service.rebuild_step_outputs(binding, flow_cards)
+        assert [entry.line for entry in binding.log_store.entries()] == ["old message"]
+        assert first_outputs.output_path("docs_manual", "Transform") == old_output
+
+        apply_generation("generation-b", message="new message", output_path=new_output)
+        service.reload_logs(binding)
+        second_outputs = service.rebuild_step_outputs(binding, flow_cards)
+
+        assert [entry.line for entry in binding.log_store.entries()] == ["new message"]
+        assert second_outputs.output_path("docs_manual", "Transform") == new_output
     finally:
         service.close_binding(binding)
 

@@ -127,14 +127,16 @@ class _RuntimeCacheHandle:
             self._invalidate_caches()
             return None
         if action == "snapshot_replace":
-            self._ledger.snapshots.replace(
+            replaced = self._ledger.snapshots.replace(
+                generation_id=payload["generation_id"],
                 runs=payload["runs"],
                 step_runs=payload["step_runs"],
                 logs=payload["logs"],
                 file_states=payload["file_states"],
             )
-            self._invalidate_caches()
-            return None
+            if replaced:
+                self._invalidate_caches()
+            return replaced
         raise ValueError(f"Unknown runtime IO write action: {action}")
 
     def _invalidate_caches(self) -> None:
@@ -447,20 +449,40 @@ class _RuntimeSnapshotsProxy:
     def __init__(self, handle: _RuntimeCacheLease) -> None:
         self._handle = handle
 
+    def export(
+        self,
+    ) -> tuple[
+        tuple[PersistedRun, ...],
+        tuple[PersistedStepRun, ...],
+        tuple[PersistedLogEntry, ...],
+        tuple[PersistedFileState, ...],
+    ]:
+        """Read one transactionally consistent runtime snapshot."""
+        return self._handle.call(lambda handle: handle.ledger.snapshots.export())
+
+    def applied_generation_id(self) -> str | None:
+        """Return the shared generation last applied to this cache."""
+        return self._handle.call(lambda handle: handle.ledger.snapshots.applied_generation_id())
+
     def replace(
         self,
         *,
+        generation_id: str,
         runs: tuple[PersistedRun, ...],
         step_runs: tuple[PersistedStepRun, ...],
         logs: tuple[PersistedLogEntry, ...],
         file_states: tuple[PersistedFileState, ...],
-    ) -> None:
-        self._handle.submit_write(
-            "snapshot_replace",
-            runs=runs,
-            step_runs=step_runs,
-            logs=logs,
-            file_states=file_states,
+    ) -> bool:
+        """Apply one shared snapshot generation through the serialized writer."""
+        return bool(
+            self._handle.submit_write(
+                "snapshot_replace",
+                generation_id=generation_id,
+                runs=runs,
+                step_runs=step_runs,
+                logs=logs,
+                file_states=file_states,
+            )
         )
 
 
@@ -576,6 +598,10 @@ class RuntimeIoCacheStore(RuntimeCacheStore):
 
     def close(self) -> None:
         self._lease.close()
+
+    def snapshot_change_token(self) -> object:
+        """Return a constant-time token for runtime snapshot publication."""
+        return self._lease.call(lambda handle: handle.ledger.snapshot_change_token())
 
     def refresh_external_state(self) -> None:
         """Drop cached reads so the next query reflects external daemon writes immediately."""

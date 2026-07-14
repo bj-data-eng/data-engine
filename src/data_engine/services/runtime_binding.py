@@ -33,6 +33,7 @@ class _NullRuntimeCacheLedger:
         self.logs = _NullRuntimeLogRepository()
         self.source_signatures = _NullRuntimeSourceSignatureRepository()
         self.execution_state = _NullRuntimeExecutionStateRepository()
+        self.snapshots = _NullRuntimeSnapshotRepository()
 
     def close(self) -> None:
         return
@@ -110,6 +111,14 @@ class _NullRuntimeExecutionStateRepository:
         del kwargs
 
 
+class _NullRuntimeSnapshotRepository:
+    """No-op snapshot state for an unconfigured workspace selection."""
+
+    def applied_generation_id(self) -> str | None:
+        """Return no applied shared generation."""
+        return None
+
+
 class _NullClientSessionRepository:
     """No-op client-session repository for an unconfigured workspace selection."""
 
@@ -170,6 +179,7 @@ class WorkspaceRuntimeBindingService:
         self.runtime_history_service = runtime_history_service
         self.runtime_io_layer = runtime_io_layer or default_runtime_io_layer()
         self._step_output_cache: dict[int, tuple[tuple[object, ...], int | None, StepOutputIndex]] = {}
+        self._snapshot_generation_by_binding: dict[int, str | None] = {}
 
     def open_binding(self, workspace_paths: WorkspacePaths) -> WorkspaceRuntimeBinding:
         """Open one concrete runtime binding for a workspace selection."""
@@ -179,17 +189,20 @@ class WorkspaceRuntimeBindingService:
         else:
             runtime_cache_ledger = _NullRuntimeCacheLedger()
             runtime_control_ledger = _NullRuntimeControlLedger()
-        return WorkspaceRuntimeBinding(
+        binding = WorkspaceRuntimeBinding(
             workspace_paths=workspace_paths,
             runtime_cache_ledger=runtime_cache_ledger,
             runtime_control_ledger=runtime_control_ledger,
             log_store=self.log_service.create_store(runtime_cache_ledger),
             daemon_manager=self.daemon_state_service.create_manager(workspace_paths),
         )
+        self._snapshot_generation_by_binding[id(binding)] = runtime_cache_ledger.snapshots.applied_generation_id()
+        return binding
 
     def close_binding(self, binding: WorkspaceRuntimeBinding) -> None:
         """Close one concrete runtime binding."""
         self._step_output_cache.pop(id(binding), None)
+        self._snapshot_generation_by_binding.pop(id(binding), None)
         binding.runtime_cache_ledger.close()
         self.ledger_service.close(binding.runtime_control_ledger)
 
@@ -261,7 +274,19 @@ class WorkspaceRuntimeBindingService:
 
     def reload_logs(self, binding: WorkspaceRuntimeBinding) -> None:
         """Reload the binding log store from its runtime cache store."""
+        if self._refresh_snapshot_generation(binding):
+            binding.log_store.replace(self.log_service.transient_entries(binding.log_store))
         self.log_service.reload(binding.log_store, binding.runtime_cache_ledger)
+
+    def _refresh_snapshot_generation(self, binding: WorkspaceRuntimeBinding) -> bool:
+        binding_key = id(binding)
+        current_generation = binding.runtime_cache_ledger.snapshots.applied_generation_id()
+        previous_generation = self._snapshot_generation_by_binding.get(binding_key)
+        self._snapshot_generation_by_binding[binding_key] = current_generation
+        if previous_generation == current_generation:
+            return False
+        self._step_output_cache.pop(binding_key, None)
+        return True
 
     def invalidate_flow_history(self, binding: WorkspaceRuntimeBinding, *, flow_name: str) -> None:
         """Drop one flow's cached logs and derived step-output state after destructive resets."""
@@ -274,6 +299,7 @@ class WorkspaceRuntimeBindingService:
         flow_cards: dict[str, FlowCatalogLike],
     ) -> StepOutputIndex:
         """Rebuild latest successful per-step output paths for visible flows."""
+        self._refresh_snapshot_generation(binding)
         cache_key = id(binding)
         flow_signature = tuple(
             sorted((flow_name, tuple(card.operation_items)) for flow_name, card in flow_cards.items())

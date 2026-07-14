@@ -101,6 +101,14 @@ class _RuntimeCacheSchema(_RuntimeSqliteStore):
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS shared_snapshot_state (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                generation_id TEXT NOT NULL
+            )
+            """
+        )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_flow_started ON runs(flow_name, started_at_utc DESC)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_status_started ON runs(status, started_at_utc, run_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_step_runs_run ON step_runs(run_id, id)")
@@ -846,17 +854,63 @@ class RuntimeSnapshotRepository:
     def __init__(self, store: _RuntimeCacheSchema) -> None:
         self._store = store
 
+    def export(
+        self,
+    ) -> tuple[
+        tuple[PersistedRun, ...],
+        tuple[PersistedStepRun, ...],
+        tuple[PersistedLogEntry, ...],
+        tuple[PersistedFileState, ...],
+    ]:
+        """Read one transactionally consistent runtime snapshot."""
+        connection = self._store._connection()
+        connection.execute("BEGIN")
+        try:
+            snapshot = (
+                self._store.runs.list(),
+                self._store.step_outputs.list(),
+                self._store.logs.list(),
+                self._store.source_signatures.list_file_states(),
+            )
+        except Exception:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+        return snapshot
+
+    def applied_generation_id(self) -> str | None:
+        """Return the shared generation last applied to this cache."""
+        row = self._store._connection().execute(
+            "SELECT generation_id FROM shared_snapshot_state WHERE singleton = 1"
+        ).fetchone()
+        if row is None:
+            return None
+        generation_id = str(row["generation_id"]).strip()
+        return generation_id or None
+
     def replace(
         self,
         *,
+        generation_id: str,
         runs: tuple[PersistedRun, ...],
         step_runs: tuple[PersistedStepRun, ...],
         logs: tuple[PersistedLogEntry, ...],
         file_states: tuple[PersistedFileState, ...],
-    ) -> None:
+    ) -> bool:
+        """Apply one shared generation atomically, preserving source row IDs."""
+        normalized_generation_id = generation_id.strip()
+        if not normalized_generation_id:
+            raise ValueError("Snapshot generation id cannot be empty.")
         connection = self._store._connection()
         connection.execute("BEGIN IMMEDIATE")
         try:
+            current_row = connection.execute(
+                "SELECT generation_id FROM shared_snapshot_state WHERE singleton = 1"
+            ).fetchone()
+            if current_row is not None and str(current_row["generation_id"]) == normalized_generation_id:
+                connection.rollback()
+                return False
             connection.execute("DELETE FROM step_runs")
             connection.execute("DELETE FROM logs")
             connection.execute("DELETE FROM runs")
@@ -884,11 +938,12 @@ class RuntimeSnapshotRepository:
             if step_runs:
                 connection.executemany(
                     """
-                    INSERT INTO step_runs(run_id, flow_name, step_label, status, started_at_utc, finished_at_utc, elapsed_ms, error_text, output_path)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO step_runs(id, run_id, flow_name, step_label, status, started_at_utc, finished_at_utc, elapsed_ms, error_text, output_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
+                            row.id,
                             row.run_id,
                             row.flow_name,
                             row.step_label,
@@ -905,10 +960,13 @@ class RuntimeSnapshotRepository:
             if logs:
                 connection.executemany(
                     """
-                    INSERT INTO logs(run_id, flow_name, step_label, level, message, created_at_utc)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO logs(id, run_id, flow_name, step_label, level, message, created_at_utc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    [(row.run_id, row.flow_name, row.step_label, row.level, row.message, row.created_at_utc) for row in logs],
+                    [
+                        (row.id, row.run_id, row.flow_name, row.step_label, row.level, row.message, row.created_at_utc)
+                        for row in logs
+                    ],
                 )
             if file_states:
                 deduped_file_states: dict[tuple[str, str], PersistedFileState] = {}
@@ -933,11 +991,20 @@ class RuntimeSnapshotRepository:
                         for row in deduped_file_states.values()
                     ],
                 )
+            connection.execute(
+                """
+                INSERT INTO shared_snapshot_state(singleton, generation_id)
+                VALUES (1, ?)
+                ON CONFLICT(singleton) DO UPDATE SET generation_id = excluded.generation_id
+                """,
+                (normalized_generation_id,),
+            )
         except Exception:
             connection.rollback()
             raise
         else:
             connection.commit()
+        return True
 
 
 class RuntimeExecutionStateRepository:
@@ -1024,6 +1091,16 @@ class RuntimeCacheLedger(_RuntimeCacheSchema):
             source_signatures=self.source_signatures,
         )
 
+    def snapshot_change_token(self) -> tuple[int, tuple[tuple[int, int], ...]]:
+        """Return a constant-time token that changes after local SQLite writes."""
+        connection = self._connection()
+        data_version = int(connection.execute("PRAGMA data_version").fetchone()[0])
+        with self._connections_lock:
+            connection_changes = tuple(
+                sorted((thread_id, item.total_changes) for thread_id, item in self._connections.items())
+            )
+        return (data_version, connection_changes)
+
     def reset_flow(self, flow_name: str) -> None:
         """Delete persisted runtime history and freshness state for one flow."""
         connection = self._connection()
@@ -1049,6 +1126,7 @@ class RuntimeCacheLedger(_RuntimeCacheSchema):
             connection.execute("DELETE FROM logs")
             connection.execute("DELETE FROM runs")
             connection.execute("DELETE FROM file_state")
+            connection.execute("DELETE FROM shared_snapshot_state")
         except Exception:
             connection.rollback()
             raise

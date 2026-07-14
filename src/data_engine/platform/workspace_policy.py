@@ -30,11 +30,9 @@ from data_engine.platform.workspace_models import (
     WORKSPACE_FLOW_MODULES_DIR_NAME,
     WORKSPACE_LEASED_MARKERS_DIR_NAME,
     WORKSPACE_LEASE_METADATA_DIR_NAME,
-    WORKSPACE_SHARED_FILE_STATE_DIR_NAME,
-    WORKSPACE_SHARED_LOGS_DIR_NAME,
-    WORKSPACE_SHARED_RUNS_DIR_NAME,
+    WORKSPACE_SHARED_SNAPSHOT_GENERATIONS_DIR_NAME,
+    WORKSPACE_SHARED_SNAPSHOT_MANIFESTS_DIR_NAME,
     WORKSPACE_SHARED_STATE_DIR_NAME,
-    WORKSPACE_SHARED_STEP_RUNS_DIR_NAME,
     WORKSPACE_STALE_MARKERS_DIR_NAME,
     WORKSPACE_STATE_DIR_NAME,
     WorkspacePaths,
@@ -297,10 +295,12 @@ class RuntimeLayoutPolicy:
             control_requests_dir=control_requests_dir,
             control_request_path=control_requests_dir / f"{discovered.workspace_id}.parquet",
             shared_state_dir=shared_state_dir,
-            shared_runs_path=shared_state_dir / WORKSPACE_SHARED_RUNS_DIR_NAME / f"{discovered.workspace_id}.parquet",
-            shared_step_runs_path=shared_state_dir / WORKSPACE_SHARED_STEP_RUNS_DIR_NAME / f"{discovered.workspace_id}.parquet",
-            shared_logs_path=shared_state_dir / WORKSPACE_SHARED_LOGS_DIR_NAME / f"{discovered.workspace_id}.parquet",
-            shared_file_state_path=shared_state_dir / WORKSPACE_SHARED_FILE_STATE_DIR_NAME / f"{discovered.workspace_id}.parquet",
+            shared_snapshot_generations_dir=(
+                shared_state_dir / WORKSPACE_SHARED_SNAPSHOT_GENERATIONS_DIR_NAME / discovered.workspace_id
+            ),
+            shared_snapshot_manifest_path=(
+                shared_state_dir / WORKSPACE_SHARED_SNAPSHOT_MANIFESTS_DIR_NAME / f"{discovered.workspace_id}.json"
+            ),
             artifacts_dir=artifacts_dir,
             workspace_cache_dir=workspace_cache_dir,
             compiled_flow_modules_dir=workspace_cache_dir / "compiled_flow_modules",

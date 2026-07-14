@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import shutil
 
 
 import data_engine.hosts.daemon.client as daemon_client
@@ -16,6 +17,7 @@ from data_engine.runtime.shared_state import (
     claim_workspace,
     initialize_workspace_state,
     read_lease_metadata,
+    read_runtime_snapshot_generation,
     release_workspace,
     remove_lease_metadata,
 )
@@ -53,19 +55,19 @@ def test_shutdown_creates_runtime_snapshot_parquets(tmp_path, monkeypatch):
         response = service._handle_command({"command": "run_flow", "name": "demo", "wait": True})  # noqa: SLF001
         assert response["ok"] is True
 
-        for path in (paths.shared_runs_path, paths.shared_step_runs_path, paths.shared_logs_path):
-            if path.exists():
-                path.unlink()
+        shutil.rmtree(paths.shared_snapshot_generations_dir, ignore_errors=True)
+        paths.shared_snapshot_manifest_path.unlink(missing_ok=True)
 
-        assert paths.shared_runs_path.exists() is False
-        assert paths.shared_step_runs_path.exists() is False
-        assert paths.shared_logs_path.exists() is False
+        assert read_runtime_snapshot_generation(paths) is None
 
         service._shutdown()  # noqa: SLF001
 
-        assert paths.shared_runs_path.exists() is True
-        assert paths.shared_step_runs_path.exists() is True
-        assert paths.shared_logs_path.exists() is True
+        generation_id = read_runtime_snapshot_generation(paths)
+        assert generation_id is not None
+        generation_dir = paths.shared_snapshot_generations_dir / generation_id
+        assert (generation_dir / "runs.parquet").is_file()
+        assert (generation_dir / "step_runs.parquet").is_file()
+        assert (generation_dir / "logs.parquet").is_file()
     finally:
         service._shutdown()  # noqa: SLF001
 

@@ -387,6 +387,9 @@ def test_replace_runtime_snapshot_begins_immediate_transaction(tmp_path, monkeyp
             statements.append(sql.strip())
             return self
 
+        def fetchone(self):
+            return None
+
         def commit(self) -> None:
             statements.append("COMMIT")
 
@@ -396,6 +399,7 @@ def test_replace_runtime_snapshot_begins_immediate_transaction(tmp_path, monkeyp
     monkeypatch.setattr(ledger, "_connection", lambda: _ConnectionProbe())  # noqa: SLF001 - targeted transaction test
 
     ledger.snapshots.replace(
+        generation_id="generation-1",
         runs=(PersistedRun(run_id="run-1", flow_name="demo", group_name="Demo", source_path=None, status="success", started_at_utc="2026-04-06T00:00:00+00:00", finished_at_utc="2026-04-06T00:00:01+00:00", error_text=None),),
         step_runs=(PersistedStepRun(id=1, run_id="run-1", flow_name="demo", step_label="Step 1", status="success", started_at_utc="2026-04-06T00:00:00+00:00", finished_at_utc="2026-04-06T00:00:01+00:00", elapsed_ms=1, error_text=None, output_path=None),),
         logs=(PersistedLogEntry(id=1, run_id="run-1", flow_name="demo", step_label=None, level="INFO", message="done", created_at_utc="2026-04-06T00:00:01+00:00"),),
@@ -404,4 +408,3 @@ def test_replace_runtime_snapshot_begins_immediate_transaction(tmp_path, monkeyp
 
     assert statements[0] == "BEGIN IMMEDIATE"
     assert statements[-1] == "COMMIT"
-

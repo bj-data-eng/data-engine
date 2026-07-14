@@ -314,9 +314,8 @@ def main(argv: list[str] | None = None) -> int:
             record_check(read_lease_metadata(paths) is None, f"{paths.workspace_id}: lease metadata removed after shutdown", failures)
             record_check((paths.available_markers_dir / paths.workspace_id).exists(), f"{paths.workspace_id}: available marker restored after shutdown", failures)
             record_check(not (paths.leased_markers_dir / paths.workspace_id).exists(), f"{paths.workspace_id}: leased marker removed after shutdown", failures)
-            record_check(paths.shared_runs_path.exists(), f"{paths.workspace_id}: shared runs parquet exists after shutdown", failures)
-            record_check(paths.shared_step_runs_path.exists(), f"{paths.workspace_id}: shared step_runs parquet exists after shutdown", failures)
-            record_check(paths.shared_logs_path.exists(), f"{paths.workspace_id}: shared logs parquet exists after shutdown", failures)
+            manifest_exists = paths.shared_snapshot_manifest_path.is_file()
+            record_check(manifest_exists, f"{paths.workspace_id}: shared snapshot manifest exists after shutdown", failures)
     finally:
         cleanup_temp_suite(workspace_paths)
         if previous_app_root is None:

@@ -130,10 +130,8 @@ def test_reset_service_resets_workspace_local_and_shared_state(tmp_path):
     finally:
         reset_runtime_cache_ledger.close()
         reset_runtime_control_ledger.close()
-    assert paths.shared_runs_path.exists() is False
-    assert paths.shared_step_runs_path.exists() is False
-    assert paths.shared_logs_path.exists() is False
-    assert paths.shared_file_state_path.exists() is False
+    assert paths.shared_snapshot_manifest_path.exists() is False
+    assert paths.shared_snapshot_generations_dir.exists() is False
     assert paths.control_request_path.exists() is False
     assert (paths.available_markers_dir / paths.workspace_id).is_dir()
     assert paths.lease_metadata_path.exists() is True
