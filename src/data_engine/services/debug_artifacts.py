@@ -14,6 +14,9 @@ from data_engine.views.artifacts import classify_artifact_preview
 
 DEBUG_ARTIFACTS_DIR_NAME = "debug_artifacts"
 _SAFE_NAME_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
+_GENERATED_ARTIFACT_TIMESTAMP_PATTERN = re.compile(
+    r"__\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}(?:-\d+)?(?:Z|[+-]\d{2}-\d{2})__"
+)
 
 
 def debug_artifacts_dir(runtime_state_dir: Path) -> Path:
@@ -41,18 +44,29 @@ def list_debug_artifacts(runtime_state_dir: Path) -> tuple[DebugArtifactRecord, 
     root = debug_artifacts_dir(runtime_state_dir)
     if not root.is_dir():
         return ()
+    paths = tuple(path for path in sorted(root.iterdir()) if path.is_file())
+    metadata_sidecars = {
+        path.with_suffix(".json")
+        for path in paths
+        if path.suffix.lower() != ".json"
+    }
     records: list[DebugArtifactRecord] = []
     seen_stems: set[str] = set()
-    for path in sorted(root.iterdir()):
-        if not path.is_file():
-            continue
+    for path in paths:
+        metadata: dict[str, Any]
         if path.suffix.lower() == ".json":
-            continue
-        metadata: dict[str, Any] = {}
+            if path in metadata_sidecars or not _looks_like_generated_artifact(path):
+                continue
+            metadata = _read_json(path)
+            if not _is_embedded_json_artifact(metadata):
+                continue
+            metadata_path = path
+        else:
+            metadata = {}
+            metadata_path = path.with_suffix(".json")
+            if metadata_path.is_file():
+                metadata = _read_json(metadata_path)
         artifact_path = path
-        metadata_path = path.with_suffix(".json")
-        if metadata_path.is_file():
-            metadata = _read_json(metadata_path)
         kind = classify_artifact_preview(path).kind
         stem = path.stem
         if stem in seen_stems:
@@ -157,6 +171,15 @@ def _read_json(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {"value": payload}
+
+
+def _looks_like_generated_artifact(path: Path) -> bool:
+    return _GENERATED_ARTIFACT_TIMESTAMP_PATTERN.search(path.stem) is not None
+
+
+def _is_embedded_json_artifact(payload: dict[str, Any]) -> bool:
+    debug_info = payload.get("debug")
+    return isinstance(debug_info, dict) and debug_info.get("artifact_kind") == "json"
 
 
 __all__ = [

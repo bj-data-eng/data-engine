@@ -18,7 +18,7 @@ from shiboken6 import delete as shiboken_delete
 from shiboken6 import isValid as shiboken_is_valid
 
 from data_engine.core.model import FlowValidationError
-from data_engine.core.primitives import ManualInputSpec
+from data_engine.core.primitives import FlowDebugContext, ManualInputSpec
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot
 from data_engine.domain import (
     ActiveRunState,
@@ -3388,34 +3388,40 @@ def test_debug_view_lists_previews_and_clears_saved_debug_artifacts(qapp):
         _dispose_window(qapp, window)
 
 
-def test_debug_view_ignores_json_only_artifacts(qapp):
+def test_debug_view_lists_and_renders_saved_json_artifact(qapp):
     window = _make_window()
     try:
         debug_dir = window.workspace_paths.runtime_state_dir / "debug_artifacts"
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        artifact_path = debug_dir / "example_manual__Write-Target__2026-04-19T00-00-00Z__summary.json"
-        artifact_path.write_text(
-            json.dumps(
-                {
-                    "debug": {
-                        "workspace_id": window.workspace_paths.workspace_id,
-                        "flow_name": "example_manual",
-                        "step_name": "Write Target",
-                    },
-                    "info": {"rows": 3},
-                    "data": {"output_path": "C:/output/example.parquet", "row_count": 3},
-                },
-                indent=2,
-                sort_keys=True,
-            ),
-            encoding="utf-8",
+        context = FlowDebugContext(
+            root=debug_dir,
+            workspace_id=window.workspace_paths.workspace_id,
+            flow_name="example_manual",
+            run_id="run-json",
+            source_path="C:/input/example.xlsx",
+            step_name="Write Target",
+        )
+        artifact_path = context.save_json(
+            {"output_path": "C:/output/example.parquet", "row_count": 3},
+            name="summary",
+            info={"rows": 3},
         )
 
         window.debug_button.click()
         qapp.processEvents()
 
-        assert window.debug_artifact_list.count() == 0
-        assert window.debug_artifact_list.count() == 0
+        assert window.debug_artifact_list.count() == 1
+        record = window.debug_artifact_list.currentItem().data(Qt.ItemDataRole.UserRole)
+        assert record.artifact_path == artifact_path
+        explorer = window.debug_preview_layout.itemAt(0).widget()
+        table = explorer.findChild(QTableWidget, "outputPreviewTable")
+        assert isinstance(table, QTableWidget)
+        columns = {
+            table.horizontalHeaderItem(index).text(): index
+            for index in range(table.columnCount())
+        }
+        assert table.item(0, columns["data.output_path"]).text() == "C:/output/example.parquet"
+        assert table.item(0, columns["data.row_count"]).text() == "3"
+        assert table.item(0, columns["info.rows"]).text() == "3"
     finally:
         _dispose_window(qapp, window)
 
