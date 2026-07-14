@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
 
 from data_engine.authoring.flow import Flow
 from data_engine.core.primitives import DateRangeInputValue, ManualInputSpec
@@ -378,6 +379,67 @@ def test_start_engine_retries_after_empty_automated_flow_snapshot(tmp_path, monk
 
         assert response["ok"] is True
         assert calls == [True, True]
+    finally:
+        service._shutdown()  # noqa: SLF001
+
+
+def test_start_engine_clears_reservation_after_catalog_load_failure(tmp_path, monkeypatch):
+    app_root = tmp_path / "data_engine"
+    workspace_root = tmp_path / "shared" / "default"
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        catalog_calls: list[bool] = []
+
+        def _fake_load_flow_cards(*, force: bool = False):
+            catalog_calls.append(force)
+            if len(catalog_calls) == 1:
+                raise RuntimeError("catalog boom")
+            return (
+                QtFlowCard(
+                    name="demo_poll",
+                    group="Demo",
+                    title="Demo Poll",
+                    description="Recovered automated flow.",
+                    source_root="(not set)",
+                    target_root="(not set)",
+                    mode="poll",
+                    interval="5s",
+                    operations="Emit Value",
+                    operation_items=("Emit Value",),
+                    state="poll ready",
+                    valid=True,
+                    category="automated",
+                ),
+            )
+
+        monkeypatch.setattr(service, "_load_flow_cards", _fake_load_flow_cards)
+        monkeypatch.setattr(
+            service.flow_execution_service,
+            "load_flows",
+            lambda flow_names, workspace_root=None: [
+                Flow(name=flow_name, group="Demo").step(lambda context: 1, label="Emit Value")
+                for flow_name in flow_names
+            ],
+        )
+        monkeypatch.setattr(
+            service.runtime_execution_service,
+            "run_automated",
+            lambda flows, runtime_ledger, runtime_stop_event, flow_stop_event, workspace_id=None: [],
+        )
+
+        with pytest.raises(RuntimeError, match="catalog boom"):
+            service._handle_command({"command": "start_engine"})  # noqa: SLF001
+        assert service.state.engine_starting is False
+
+        second_response = service._handle_command({"command": "start_engine"})  # noqa: SLF001
+
+        assert second_response["ok"] is True
+        assert catalog_calls == [True, True]
     finally:
         service._shutdown()  # noqa: SLF001
 

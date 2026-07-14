@@ -183,32 +183,37 @@ class DaemonRuntimeCommandHandler:
                 service.state.clear_shutdown_when_idle()
                 if not service.state.reserve_engine_start():
                     return {"ok": True}
-            service._publish_runtime_event("engine.start_reserved", correlation_id=request_id)
-            flow_names = self.automated_flow_names(force=True)
-            if not flow_names:
-                flow_names = self.automated_flow_names(force=True)
-            if not flow_names:
-                with service._state_lock:
-                    service.state.clear_engine_start_reservation()
-                service._publish_runtime_event("engine.start_reservation_cleared", correlation_id=request_id)
-                return {"ok": False, "error": "No automated flows are available."}
+            startup_committed = False
             try:
-                with service._timed_operation(
-                    "daemon.runtime",
-                    "load_engine_flows",
-                    fields={"flow_count": len(flow_names), "request_id": request_id},
-                ):
-                    flows = service.flow_execution_service.load_flows(flow_names, workspace_root=service.paths.workspace_root)
-            except Exception as exc:
+                service._publish_runtime_event("engine.start_reserved", correlation_id=request_id)
+                flow_names = self.automated_flow_names(force=True)
+                if not flow_names:
+                    flow_names = self.automated_flow_names(force=True)
+                if not flow_names:
+                    return {"ok": False, "error": "No automated flows are available."}
+                try:
+                    with service._timed_operation(
+                        "daemon.runtime",
+                        "load_engine_flows",
+                        fields={"flow_count": len(flow_names), "request_id": request_id},
+                    ):
+                        flows = service.flow_execution_service.load_flows(
+                            flow_names,
+                            workspace_root=service.paths.workspace_root,
+                        )
+                except Exception as exc:
+                    return {"ok": False, "error": str(exc)}
                 with service._state_lock:
-                    service.state.clear_engine_start_reservation()
-                service._publish_runtime_event("engine.start_reservation_cleared", correlation_id=request_id)
-                return {"ok": False, "error": str(exc)}
-            with service._state_lock:
-                runtime_stop_event = threading.Event()
-                flow_stop_event = threading.Event()
-                service.state.set_engine_threads(runtime_stop_event=runtime_stop_event, flow_stop_event=flow_stop_event)
-                service.state.begin_runtime(status="running", active_flow_names=tuple(flow_names))
+                    runtime_stop_event = threading.Event()
+                    flow_stop_event = threading.Event()
+                    service.state.set_engine_threads(runtime_stop_event=runtime_stop_event, flow_stop_event=flow_stop_event)
+                    service.state.begin_runtime(status="running", active_flow_names=tuple(flow_names))
+                    startup_committed = True
+            finally:
+                if not startup_committed:
+                    with service._state_lock:
+                        service.state.clear_engine_start_reservation()
+                    service._publish_runtime_event("engine.start_reservation_cleared", correlation_id=request_id)
             service._publish_runtime_event("engine.started", correlation_id=request_id)
 
             def _target() -> None:
