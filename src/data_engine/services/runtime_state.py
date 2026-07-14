@@ -664,9 +664,9 @@ class RuntimeStateService:
         """Return recent run timing/error summary from the runtime ledger."""
         runs_repo = getattr(getattr(binding, "runtime_cache_ledger", None), "runs", None)
         if runs_repo is not None and hasattr(runs_repo, "list"):
-            persisted_runs = tuple(runs_repo.list(flow_name=flow_name))
+            persisted_runs = runs_repo.list(flow_name=flow_name)
             if persisted_runs:
-                newest = persisted_runs[-1]
+                newest = persisted_runs[0]
                 return newest.started_at_utc, newest.finished_at_utc, newest.error_text
         return None, None, None
 

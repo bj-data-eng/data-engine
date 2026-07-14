@@ -14,6 +14,7 @@ from data_engine.domain import (
     RuntimeSessionState,
     WorkspaceControlState,
 )
+from data_engine.runtime.ledger_models import PersistedRun
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
 from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, FlowLiveSummary, RuntimeStateService, WorkspaceSnapshot
 
@@ -269,6 +270,57 @@ def test_rebuild_projection_rebuilds_operation_tracker_from_persisted_step_runs(
         assert write_state.elapsed_seconds is None
     finally:
         ledger.close()
+
+
+def test_latest_run_times_for_flow_uses_newest_first_repository_order():
+    newest = PersistedRun(
+        run_id="new-run",
+        flow_name="poller",
+        group_name="Imports",
+        source_path="new.xlsx",
+        status="failed",
+        started_at_utc="2026-07-13T12:00:00+00:00",
+        finished_at_utc="2026-07-13T12:01:00+00:00",
+        error_text="new failure",
+    )
+    older = PersistedRun(
+        run_id="old-run",
+        flow_name="poller",
+        group_name="Imports",
+        source_path="old.xlsx",
+        status="success",
+        started_at_utc="2026-07-12T12:00:00+00:00",
+        finished_at_utc="2026-07-12T12:01:00+00:00",
+        error_text=None,
+    )
+
+    class _NewestFirstRuns:
+        def __init__(self) -> None:
+            self.calls: list[str | None] = []
+
+        def list(self, *, flow_name=None):
+            self.calls.append(flow_name)
+            return newest, older
+
+    runs = _NewestFirstRuns()
+    binding = type(
+        "_Binding",
+        (),
+        {"runtime_cache_ledger": type("_Ledger", (), {"runs": runs})()},
+    )()
+    service = RuntimeStateService(
+        runtime_binding_service=type("_BindingService", (), {})(),
+        log_service=type("_LogService", (), {})(),
+    )
+
+    result = service._latest_run_times_for_flow(binding, "poller")
+
+    assert result == (
+        newest.started_at_utc,
+        newest.finished_at_utc,
+        newest.error_text,
+    )
+    assert runs.calls == ["poller"]
 
 
 def test_runtime_state_service_emits_snapshot_events_to_subscribers():
@@ -1337,4 +1389,3 @@ def test_runtime_state_service_prefers_daemon_flow_activity_over_local_flow_stat
 
     assert snapshot.flows["manual_flow"].state == "running"
     assert snapshot.flows["manual_flow"].running_step_counts == {"Transform": 1}
-
