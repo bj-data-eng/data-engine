@@ -313,21 +313,25 @@ class DataEngineDaemonService:
     def _update_daemon_state(self, *, status: str) -> None:
         self.command_handler.update_daemon_state(status=status)
 
-    def _relinquish_workspace_after_checkpoint_failures(self) -> None:
-        relinquish_workspace_after_checkpoint_failures(self)
+    def _relinquish_workspace_after_checkpoint_failures(self) -> bool:
+        return relinquish_workspace_after_checkpoint_failures(self)
 
     def _relinquish_workspace_for_control_request(
         self,
         requester_machine_id: str,
         requester_host_name: str | None,
-    ) -> None:
-        relinquish_workspace_for_control_request(self, requester_machine_id, requester_host_name)
+    ) -> bool:
+        return relinquish_workspace_for_control_request(
+            self,
+            requester_machine_id,
+            requester_host_name,
+        )
 
-    def _relinquish_workspace_for_missing_root(self) -> None:
-        relinquish_workspace_for_missing_root(self)
+    def _relinquish_workspace_for_missing_root(self) -> bool:
+        return relinquish_workspace_for_missing_root(self)
 
-    def _shutdown_for_requested_idle_disconnect(self, *, reason: str) -> None:
-        shutdown_for_requested_idle_disconnect(self, reason=reason)
+    def _shutdown_for_requested_idle_disconnect(self, *, reason: str) -> bool:
+        return shutdown_for_requested_idle_disconnect(self, reason=reason)
 
     def _shutdown_if_unowned_and_idle(self, *, reason: str) -> None:
         shutdown_if_unowned_and_idle(self, reason=reason)

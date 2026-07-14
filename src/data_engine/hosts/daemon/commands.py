@@ -7,6 +7,7 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 from data_engine.hosts.daemon.runtime_commands import DaemonRuntimeCommandHandler
+from data_engine.hosts.daemon.runtime_control import stop_active_work
 from data_engine.hosts.daemon.state_sync import DaemonStateSyncHandler
 
 if TYPE_CHECKING:
@@ -97,9 +98,25 @@ class DaemonCommandHandler:
             if command == "stop_flow":
                 return self.runtime_commands.stop_flow(str(payload.get("name", "")), request_id=request_id)
             if command == "shutdown_daemon":
+                with self.service._state_lock:
+                    self.service.state.request_shutdown()
+                    if self.service.state.runtime_active or self.service.state.engine_starting:
+                        self.service.state.stop_runtime(status="stopping")
+                    else:
+                        self.service.state.status = "stopping"
+                self.service._publish_runtime_event("daemon.shutdown_requested", correlation_id=request_id)
+                drain_result = stop_active_work(self.service, timeout_seconds=0.0)
+                if not drain_result.complete:
+                    return {
+                        "ok": True,
+                        "draining": True,
+                        "active_workers": list(drain_result.remaining_workers),
+                    }
+                with self.service._state_lock:
+                    self.service.state.clear_shutdown_request()
                 self.service.host.shutdown_event.set()
                 threading.Thread(target=self.service._wake_listener, daemon=True).start()
-                return {"ok": True}
+                return {"ok": True, "draining": False}
             return {"ok": False, "error": f"Unknown command: {command}"}
 
     def checkpoint_once(self, *, status: str) -> None:

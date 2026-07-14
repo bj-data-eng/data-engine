@@ -26,8 +26,7 @@ def honor_control_request_if_needed(service: "DataEngineDaemonService") -> bool:
         return False
     requester_host_name = str(metadata.get("requester_host_name", "")).strip() or None
     service._debug_log(f"control request received requester={requester}")
-    service._relinquish_workspace_for_control_request(requester, requester_host_name)
-    return True
+    return service._relinquish_workspace_for_control_request(requester, requester_host_name)
 
 
 def try_claim_requested_control(service: "DataEngineDaemonService") -> bool:

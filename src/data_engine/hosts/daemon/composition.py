@@ -104,12 +104,20 @@ class DaemonHostState:
     runtime_active: bool
     runtime_stopping: bool
     engine_starting: bool
+    work_draining: bool
+    work_drain_complete: bool
+    shutdown_requested: bool
+    checkpoint_failure_relinquish_requested: bool
     active_engine_flow_names: tuple[str, ...]
     engine_thread: threading.Thread | None
+    engine_start_thread: threading.Thread | None
+    finishing_engine_thread: threading.Thread | None
     engine_runtime_stop_event: threading.Event
     engine_flow_stop_event: threading.Event
     pending_manual_run_names: set[str]
+    pending_manual_run_threads: dict[str, threading.Thread]
     manual_run_threads: dict[str, threading.Thread]
+    finishing_manual_run_threads: dict[str, threading.Thread]
     manual_runtime_stop_events: dict[str, threading.Event]
     manual_flow_stop_events: dict[str, threading.Event]
     shutdown_event: threading.Event
@@ -131,12 +139,20 @@ class DaemonHostState:
             runtime_active=False,
             runtime_stopping=False,
             engine_starting=False,
+            work_draining=False,
+            work_drain_complete=False,
+            shutdown_requested=False,
+            checkpoint_failure_relinquish_requested=False,
             active_engine_flow_names=(),
             engine_thread=None,
+            engine_start_thread=None,
+            finishing_engine_thread=None,
             engine_runtime_stop_event=threading.Event(),
             engine_flow_stop_event=threading.Event(),
             pending_manual_run_names=set(),
+            pending_manual_run_threads={},
             manual_run_threads={},
+            finishing_manual_run_threads={},
             manual_runtime_stop_events={},
             manual_flow_stop_events={},
             shutdown_event=threading.Event(),
@@ -171,6 +187,7 @@ class DaemonHostState:
     def begin_runtime(self, *, status: str = "running", active_flow_names: tuple[str, ...] = ()) -> None:
         """Mark the engine runtime as active and running."""
         self.engine_starting = False
+        self.engine_start_thread = None
         self.runtime_active = True
         self.runtime_stopping = False
         self.active_engine_flow_names = tuple(active_flow_names)
@@ -178,13 +195,13 @@ class DaemonHostState:
 
     def stop_runtime(self, *, status: str = "stopping") -> None:
         """Mark the engine runtime as stopping."""
-        self.engine_starting = False
         self.runtime_stopping = True
         self.status = status
 
     def end_runtime(self, *, status: str = "idle") -> None:
         """Mark the engine runtime as inactive."""
         self.engine_starting = False
+        self.engine_start_thread = None
         self.runtime_active = False
         self.runtime_stopping = False
         self.active_engine_flow_names = ()
@@ -226,27 +243,31 @@ class DaemonHostState:
         self.engine_flow_stop_event = flow_stop_event
         self.engine_thread = engine_thread
 
-    def reserve_engine_start(self) -> bool:
+    def reserve_engine_start(self, *, thread: threading.Thread) -> bool:
         """Reserve engine startup so concurrent start requests collapse to one attempt."""
-        if self.runtime_active or self.engine_starting:
+        if self.runtime_active or self.engine_starting or self.work_draining:
             return False
         self.engine_starting = True
+        self.engine_start_thread = thread
         return True
 
     def clear_engine_start_reservation(self) -> None:
         """Clear any in-progress engine startup reservation."""
         self.engine_starting = False
+        self.engine_start_thread = None
 
-    def reserve_manual_run(self, name: str) -> bool:
+    def reserve_manual_run(self, name: str, *, thread: threading.Thread) -> bool:
         """Reserve one manual run name before flow loading starts."""
-        if name in self.pending_manual_run_names:
+        if name in self.pending_manual_run_names or self.work_draining:
             return False
         self.pending_manual_run_names.add(name)
+        self.pending_manual_run_threads[name] = thread
         return True
 
     def clear_manual_run_reservation(self, name: str) -> None:
         """Clear one in-progress manual run reservation."""
         self.pending_manual_run_names.discard(name)
+        self.pending_manual_run_threads.pop(name, None)
 
     def register_manual_run(
         self,
@@ -255,19 +276,48 @@ class DaemonHostState:
         thread: threading.Thread,
         runtime_stop_event: threading.Event,
         flow_stop_event: threading.Event,
-    ) -> None:
+    ) -> bool:
         """Register one manual run and its graceful and hard stop signals."""
+        if self.work_draining:
+            return False
         self.pending_manual_run_names.discard(name)
+        self.pending_manual_run_threads.pop(name, None)
         self.manual_run_threads[name] = thread
         self.manual_runtime_stop_events[name] = runtime_stop_event
         self.manual_flow_stop_events[name] = flow_stop_event
+        return True
 
     def unregister_manual_run(self, name: str) -> None:
         """Remove one completed manual run."""
         self.pending_manual_run_names.discard(name)
+        self.pending_manual_run_threads.pop(name, None)
         self.manual_run_threads.pop(name, None)
         self.manual_runtime_stop_events.pop(name, None)
         self.manual_flow_stop_events.pop(name, None)
+
+    def begin_work_drain(self) -> bool:
+        """Close runtime admission and report whether this call began the drain."""
+        was_draining = self.work_draining
+        self.work_draining = True
+        if not was_draining:
+            self.work_drain_complete = False
+        return not was_draining
+
+    def request_shutdown(self) -> None:
+        """Request process shutdown after all runtime work has drained."""
+        self.shutdown_requested = True
+
+    def clear_shutdown_request(self) -> None:
+        """Clear a completed process-shutdown request."""
+        self.shutdown_requested = False
+
+    def request_checkpoint_failure_relinquish(self) -> None:
+        """Persist terminal ownership relinquish after repeated checkpoint failures."""
+        self.checkpoint_failure_relinquish_requested = True
+
+    def clear_checkpoint_failure_relinquish(self) -> None:
+        """Clear a completed checkpoint-failure relinquish request."""
+        self.checkpoint_failure_relinquish_requested = False
 
     def set_listener(self, listener: object | None) -> None:
         """Update the active listener object."""

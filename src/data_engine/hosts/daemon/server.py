@@ -8,7 +8,6 @@ from pathlib import Path
 from contextlib import nullcontext
 import threading
 import traceback
-import time
 from typing import TYPE_CHECKING
 
 from data_engine.domain import DaemonLifecyclePolicy
@@ -20,6 +19,7 @@ from data_engine.hosts.daemon.client import (
     endpoint_address,
     endpoint_family,
 )
+from data_engine.hosts.daemon.runtime_control import stop_active_work
 from data_engine.services import WorkspaceService
 
 if TYPE_CHECKING:
@@ -87,12 +87,9 @@ def serve_forever(service: "DataEngineDaemonService") -> None:
         service._debug_log(traceback.format_exc().rstrip())
         raise
     finally:
-        deadline = time.monotonic() + 2.0
+        stop_active_work(service)
         for thread in list(worker_threads):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            thread.join(timeout=min(remaining, 0.2))
+            thread.join()
         service._shutdown()
 
 

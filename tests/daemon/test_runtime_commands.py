@@ -11,7 +11,10 @@ from data_engine.domain import DaemonLifecyclePolicy
 from data_engine.hosts.daemon.app import (
     DataEngineDaemonService,
 )
-from data_engine.hosts.daemon.lifecycle import relinquish_workspace_for_control_request
+from data_engine.hosts.daemon.lifecycle import (
+    relinquish_workspace_for_control_request,
+    shutdown_for_requested_idle_disconnect,
+)
 from data_engine.hosts.daemon.ownership import honor_control_request_if_needed, try_claim_requested_control
 from data_engine.platform.machine_identity import host_name_text, machine_id_text
 from data_engine.platform.workspace_models import DATA_ENGINE_APP_ROOT_ENV_VAR
@@ -801,9 +804,14 @@ def test_stop_engine_can_request_shutdown_when_idle_for_last_client_disconnect(t
         monkeypatch.setattr(service.runtime_execution_service, "run_automated", _blocking_run)
 
         assert service._handle_command({"command": "start_engine"})["ok"] is True  # noqa: SLF001
+        engine_thread = service.state.engine_thread
+        assert engine_thread is not None
         assert service._handle_command({"command": "stop_engine", "shutdown_when_idle": True})["ok"] is True  # noqa: SLF001
 
         release_engine.set()
+        engine_thread.join(timeout=1.0)
+        assert engine_thread.is_alive() is False
+        assert shutdown_for_requested_idle_disconnect(service, reason="test runtime drained") is True
 
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:

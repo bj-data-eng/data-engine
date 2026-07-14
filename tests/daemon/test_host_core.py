@@ -375,27 +375,28 @@ def test_initialize_service_enters_observer_mode_for_other_machine_lease(tmp_pat
 
 
 def test_stop_active_work_signals_running_threads_and_resets_runtime_state():
-    class _State:
-        def __init__(self) -> None:
-            self.end_runtime_calls = 0
-            self.last_status = None
-            self.engine_runtime_stop_event = threading.Event()
-            self.engine_flow_stop_event = threading.Event()
-            self.manual_runtime_stop_events = {"manual": threading.Event()}
-            self.manual_flow_stop_events = {"manual": threading.Event()}
-            self.engine_thread = None
-            self.manual_run_threads = {}
-
-        def end_runtime(self, *, status: str = "idle") -> None:
-            self.end_runtime_calls += 1
-            self.last_status = status
-
     class _Service:
         def __init__(self) -> None:
             self._state_lock = threading.RLock()
-            self.state = _State()
-            self.state.engine_thread = threading.Thread(target=self._wait_for_engine_stop)
-            self.state.manual_run_threads = {"manual": threading.Thread(target=self._wait_for_manual_stop)}
+            self.state = DaemonHostState.build(started_at_utc="2026-04-06T00:00:00+00:00")
+            engine_thread = threading.Thread(target=self._wait_for_engine_stop)
+            manual_thread = threading.Thread(target=self._wait_for_manual_stop)
+            self.engine_runtime_stop_event = threading.Event()
+            self.engine_flow_stop_event = threading.Event()
+            self.state.set_engine_threads(
+                runtime_stop_event=self.engine_runtime_stop_event,
+                flow_stop_event=self.engine_flow_stop_event,
+                engine_thread=engine_thread,
+            )
+            self.state.begin_runtime()
+            self.manual_runtime_stop_event = threading.Event()
+            self.manual_flow_stop_event = threading.Event()
+            self.state.register_manual_run(
+                "manual",
+                thread=manual_thread,
+                runtime_stop_event=self.manual_runtime_stop_event,
+                flow_stop_event=self.manual_flow_stop_event,
+            )
             self.published_events: list[str] = []
 
         def _wait_for_engine_stop(self) -> None:
@@ -411,16 +412,111 @@ def test_stop_active_work_signals_running_threads_and_resets_runtime_state():
     service.state.engine_thread.start()
     service.state.manual_run_threads["manual"].start()
 
-    stop_active_work(service)  # noqa: SLF001 - direct lifecycle helper test
+    result = stop_active_work(service)  # noqa: SLF001 - direct lifecycle helper test
 
-    assert service.state.engine_runtime_stop_event.is_set() is True
-    assert service.state.engine_flow_stop_event.is_set() is True
-    assert service.state.manual_runtime_stop_events["manual"].is_set() is True
-    assert service.state.manual_flow_stop_events["manual"].is_set() is True
-    assert service.state.engine_thread.is_alive() is False
-    assert service.state.manual_run_threads["manual"].is_alive() is False
-    assert service.state.end_runtime_calls == 1
-    assert service.state.last_status == "idle"
+    assert result.complete is True
+    assert service.engine_runtime_stop_event.is_set() is True
+    assert service.engine_flow_stop_event.is_set() is True
+    assert service.manual_runtime_stop_event.is_set() is True
+    assert service.manual_flow_stop_event.is_set() is True
+    assert service.state.engine_thread is None
+    assert service.state.manual_run_threads == {}
+    assert service.state.runtime_active is False
+    assert service.state.status == "idle"
+    assert service.state.work_draining is True
+    assert service.published_events == ["runtime.stopped"]
+
+
+def test_stop_active_work_retains_noncooperative_engine_until_later_retry():
+    release_worker = threading.Event()
+    worker_started = threading.Event()
+
+    class _Service:
+        def __init__(self) -> None:
+            self._state_lock = threading.RLock()
+            self.state = DaemonHostState.build(started_at_utc="2026-04-06T00:00:00+00:00")
+            self.published_events: list[str] = []
+
+        def _publish_runtime_event(self, event_type: str) -> None:
+            self.published_events.append(event_type)
+
+    def _ignore_stop_request() -> None:
+        worker_started.set()
+        release_worker.wait()
+
+    service = _Service()
+    engine_thread = threading.Thread(target=_ignore_stop_request, daemon=True)
+    service.state.set_engine_threads(
+        runtime_stop_event=threading.Event(),
+        flow_stop_event=threading.Event(),
+        engine_thread=engine_thread,
+    )
+    service.state.begin_runtime()
+    engine_thread.start()
+    assert worker_started.wait(timeout=1.0) is True
+
+    first_result = stop_active_work(service, timeout_seconds=0.01)
+
+    assert first_result.complete is False
+    assert first_result.remaining_workers == ("engine runtime",)
+    assert service.state.engine_thread is engine_thread
+    assert service.state.runtime_active is True
+    assert service.state.runtime_stopping is True
+    assert service.state.work_draining is True
+    assert service.published_events == []
+
+    release_worker.set()
+    engine_thread.join(timeout=1.0)
+    second_result = stop_active_work(service, timeout_seconds=0.0)
+
+    assert second_result.complete is True
+    assert service.state.engine_thread is None
+    assert service.state.runtime_active is False
+    assert service.published_events == ["runtime.stopped"]
+
+
+def test_stop_active_work_retains_noncooperative_manual_worker_until_later_retry():
+    release_worker = threading.Event()
+    worker_started = threading.Event()
+
+    class _Service:
+        def __init__(self) -> None:
+            self._state_lock = threading.RLock()
+            self.state = DaemonHostState.build(started_at_utc="2026-04-06T00:00:00+00:00")
+            self.published_events: list[str] = []
+
+        def _publish_runtime_event(self, event_type: str) -> None:
+            self.published_events.append(event_type)
+
+    def _ignore_stop_request() -> None:
+        worker_started.set()
+        release_worker.wait()
+
+    service = _Service()
+    manual_thread = threading.Thread(target=_ignore_stop_request, daemon=True)
+    service.state.register_manual_run(
+        "manual",
+        thread=manual_thread,
+        runtime_stop_event=threading.Event(),
+        flow_stop_event=threading.Event(),
+    )
+    manual_thread.start()
+    assert worker_started.wait(timeout=1.0) is True
+
+    first_result = stop_active_work(service, timeout_seconds=0.01)
+
+    assert first_result.complete is False
+    assert first_result.remaining_workers == ("manual runtime:manual",)
+    assert service.state.manual_run_threads == {"manual": manual_thread}
+    assert service.state.work_draining is True
+    assert service.published_events == []
+
+    release_worker.set()
+    manual_thread.join(timeout=1.0)
+    second_result = stop_active_work(service, timeout_seconds=0.0)
+
+    assert second_result.complete is True
+    assert service.state.manual_run_threads == {}
     assert service.published_events == ["runtime.stopped"]
 
 
@@ -754,10 +850,11 @@ def test_serve_forever_processes_one_command_then_shuts_down(tmp_path, monkeypat
     class _Service:
         def __init__(self, paths) -> None:
             self.paths = paths
+            self._state_lock = threading.RLock()
             self.initialize_calls = 0
             self.handle_calls: list[dict[str, object]] = []
             self.shutdown_calls = 0
-            self.state = type("_State", (), {"checkpoint_thread": None})()
+            self.state = DaemonHostState.build(started_at_utc="2026-04-06T00:00:00+00:00")
             self.host = type(
                 "_Host",
                 (),
@@ -779,6 +876,9 @@ def test_serve_forever_processes_one_command_then_shuts_down(tmp_path, monkeypat
 
         def _shutdown(self) -> None:
             self.shutdown_calls += 1
+
+        def _publish_runtime_event(self, event_type: str) -> None:
+            del event_type
 
     service = _Service(paths)
     monkeypatch.setattr("data_engine.hosts.daemon.server.Listener", _Listener)
@@ -835,9 +935,10 @@ def test_serve_forever_handles_second_request_while_first_is_still_running(tmp_p
     class _Service:
         def __init__(self, paths) -> None:
             self.paths = paths
+            self._state_lock = threading.RLock()
             self.initialize_calls = 0
             self.shutdown_calls = 0
-            self.state = type("_State", (), {"checkpoint_thread": None})()
+            self.state = DaemonHostState.build(started_at_utc="2026-04-06T00:00:00+00:00")
             self.host = type(
                 "_Host",
                 (),
@@ -867,6 +968,9 @@ def test_serve_forever_handles_second_request_while_first_is_still_running(tmp_p
 
         def _shutdown(self) -> None:
             self.shutdown_calls += 1
+
+        def _publish_runtime_event(self, event_type: str) -> None:
+            del event_type
 
     service = _Service(paths)
     monkeypatch.setattr("data_engine.hosts.daemon.server.Listener", _Listener)

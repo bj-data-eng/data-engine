@@ -45,6 +45,9 @@ class DaemonRuntimeCommandHandler:
         ):
             if not service.state.workspace_owned and not try_claim_released_workspace(service):
                 return {"ok": False, "error": lease_error_text(service)}
+            with service._state_lock:
+                if service.state.work_draining:
+                    return {"ok": False, "error": "Runtime work is stopping."}
             cards_by_name = {card.name: card for card in service._load_flow_cards()}
             card = cards_by_name.get(name)
             if card is None or not card.valid:
@@ -60,7 +63,12 @@ class DaemonRuntimeCommandHandler:
                 return {"ok": False, "error": str(exc)}
             with service._state_lock:
                 existing_thread = service.state.manual_run_threads.get(name)
-                if (existing_thread is not None and existing_thread.is_alive()) or name in service.state.pending_manual_run_names:
+                finishing_thread = service.state.finishing_manual_run_threads.get(name)
+                if (
+                    (existing_thread is not None and existing_thread.is_alive())
+                    or (finishing_thread is not None and finishing_thread.is_alive())
+                    or name in service.state.pending_manual_run_names
+                ):
                     return {"ok": False, "error": f"Flow {name} is already running."}
                 active_same_group = next(
                     (
@@ -86,7 +94,8 @@ class DaemonRuntimeCommandHandler:
                     )
                 if active_same_group is not None:
                     return {"ok": False, "error": f"Group {card.group} already has {active_same_group} running."}
-                service.state.reserve_manual_run(name)
+                if not service.state.reserve_manual_run(name, thread=threading.current_thread()):
+                    return {"ok": False, "error": "Runtime work is stopping."}
                 service._publish_runtime_event("manual.run_reserved", correlation_id=request_id, payload={"flow_name": name})
             try:
                 runtime_stop_event = threading.Event()
@@ -135,39 +144,59 @@ class DaemonRuntimeCommandHandler:
                         )
                     finally:
                         with service._state_lock:
+                            service.state.finishing_manual_run_threads[name] = threading.current_thread()
                             service.state.unregister_manual_run(name)
-                        service._publish_runtime_event(
-                            "manual.run_unregistered",
-                            correlation_id=request_id,
-                            payload={"flow_name": name},
-                        )
-                        service.runtime_cache_ledger.close_current_thread_connection()
+                        try:
+                            service._publish_runtime_event(
+                                "manual.run_unregistered",
+                                correlation_id=request_id,
+                                payload={"flow_name": name},
+                            )
+                            service.runtime_cache_ledger.close_current_thread_connection()
+                        finally:
+                            with service._state_lock:
+                                if service.state.finishing_manual_run_threads.get(name) is threading.current_thread():
+                                    service.state.finishing_manual_run_threads.pop(name, None)
 
                 thread = threading.Thread(target=_target, daemon=True)
                 with service._state_lock:
-                    service.state.register_manual_run(
+                    registered = service.state.register_manual_run(
                         name,
                         thread=thread,
                         runtime_stop_event=runtime_stop_event,
                         flow_stop_event=flow_stop_event,
                     )
-                service._publish_runtime_event(
-                    "manual.run_registered",
-                    correlation_id=request_id,
-                    payload={"flow_name": name},
-                )
-                thread.start()
+                    if not registered:
+                        raise RuntimeError("Runtime work is stopping.")
+                    service._publish_runtime_event(
+                        "manual.run_registered",
+                        correlation_id=request_id,
+                        payload={"flow_name": name},
+                    )
+                    try:
+                        thread.start()
+                    except Exception:
+                        service.state.finishing_manual_run_threads[name] = threading.current_thread()
+                        service.state.unregister_manual_run(name)
+                        raise
                 if wait:
                     thread.join()
                 return {"ok": True}
             except Exception as exc:
+                current_thread = threading.current_thread()
                 with service._state_lock:
+                    service.state.finishing_manual_run_threads[name] = current_thread
                     service.state.clear_manual_run_reservation(name)
-                service._publish_runtime_event(
-                    "manual.run_reservation_cleared",
-                    correlation_id=request_id,
-                    payload={"flow_name": name},
-                )
+                try:
+                    service._publish_runtime_event(
+                        "manual.run_reservation_cleared",
+                        correlation_id=request_id,
+                        payload={"flow_name": name},
+                    )
+                finally:
+                    with service._state_lock:
+                        if service.state.finishing_manual_run_threads.get(name) is current_thread:
+                            service.state.finishing_manual_run_threads.pop(name, None)
                 return {"ok": False, "error": str(exc)}
 
     def start_engine(self, *, request_id: str | None = None) -> dict[str, Any]:
@@ -180,8 +209,10 @@ class DaemonRuntimeCommandHandler:
             if not service.state.workspace_owned and not try_claim_released_workspace(service):
                 return {"ok": False, "error": lease_error_text(service)}
             with service._state_lock:
+                if service.state.work_draining:
+                    return {"ok": False, "error": "Runtime work is stopping."}
                 service.state.clear_shutdown_when_idle()
-                if not service.state.reserve_engine_start():
+                if not service.state.reserve_engine_start(thread=threading.current_thread()):
                     return {"ok": True}
             startup_committed = False
             try:
@@ -203,65 +234,86 @@ class DaemonRuntimeCommandHandler:
                         )
                 except Exception as exc:
                     return {"ok": False, "error": str(exc)}
+                runtime_stop_event = threading.Event()
+                flow_stop_event = threading.Event()
+
+                def _target() -> None:
+                    try:
+                        with service._timed_operation(
+                            "daemon.runtime",
+                            "run_engine",
+                            fields={"flow_count": len(flows), "request_id": request_id},
+                        ):
+                            service.runtime_execution_service.run_automated(
+                                flows,
+                                runtime_ledger=service.runtime_execution_ledger,
+                                runtime_stop_event=runtime_stop_event,
+                                flow_stop_event=flow_stop_event,
+                                workspace_id=service.paths.workspace_id,
+                            )
+                        service._debug_log("engine runtime exited normally")
+                    except Exception as exc:
+                        service._debug_log(f"engine runtime crashed error={exc!r}")
+                        service._debug_log(traceback.format_exc().rstrip())
+                        raise
+                    finally:
+                        orphaned_run_count, orphaned_step_count = (
+                            service.runtime_cache_ledger.reconcile_orphaned_activity(
+                                status="stopped",
+                                finished_at_utc=utcnow_text(),
+                                error_text="Engine stopped before completion.",
+                            )
+                        )
+                        if orphaned_run_count or orphaned_step_count:
+                            service._debug_log(
+                                "reconciled orphaned runtime rows after engine stop"
+                                f" runs={orphaned_run_count} steps={orphaned_step_count}"
+                            )
+                        with service._state_lock:
+                            service.state.finishing_engine_thread = threading.current_thread()
+                            service.state.end_runtime(status="idle")
+                        try:
+                            service._publish_runtime_event("engine.stopped", correlation_id=request_id)
+                            service._shutdown_for_requested_idle_disconnect(
+                                reason="engine stopped after client disconnect"
+                            )
+                            service._debug_log(f"engine thread finished status={service.state.status}")
+                        finally:
+                            with service._state_lock:
+                                if service.state.finishing_engine_thread is threading.current_thread():
+                                    service.state.finishing_engine_thread = None
+
+                engine_thread = threading.Thread(target=_target, daemon=True)
                 with service._state_lock:
-                    runtime_stop_event = threading.Event()
-                    flow_stop_event = threading.Event()
-                    service.state.set_engine_threads(runtime_stop_event=runtime_stop_event, flow_stop_event=flow_stop_event)
+                    if service.state.work_draining:
+                        return {"ok": False, "error": "Runtime work is stopping."}
+                    service.state.set_engine_threads(
+                        runtime_stop_event=runtime_stop_event,
+                        flow_stop_event=flow_stop_event,
+                        engine_thread=engine_thread,
+                    )
                     service.state.begin_runtime(status="running", active_flow_names=tuple(flow_names))
+                    service._publish_runtime_event("engine.started", correlation_id=request_id)
+                    try:
+                        engine_thread.start()
+                    except Exception:
+                        service.state.finishing_engine_thread = threading.current_thread()
+                        service.state.end_runtime(status="idle")
+                        raise
                     startup_committed = True
+                return {"ok": True}
             finally:
                 if not startup_committed:
+                    current_thread = threading.current_thread()
                     with service._state_lock:
+                        service.state.finishing_engine_thread = current_thread
                         service.state.clear_engine_start_reservation()
-                    service._publish_runtime_event("engine.start_reservation_cleared", correlation_id=request_id)
-            service._publish_runtime_event("engine.started", correlation_id=request_id)
-
-            def _target() -> None:
-                try:
-                    with service._timed_operation(
-                        "daemon.runtime",
-                        "run_engine",
-                        fields={"flow_count": len(flows), "request_id": request_id},
-                    ):
-                        service.runtime_execution_service.run_automated(
-                            flows,
-                            runtime_ledger=service.runtime_execution_ledger,
-                            runtime_stop_event=runtime_stop_event,
-                            flow_stop_event=flow_stop_event,
-                            workspace_id=service.paths.workspace_id,
-                        )
-                    service._debug_log("engine runtime exited normally")
-                except Exception as exc:
-                    service._debug_log(f"engine runtime crashed error={exc!r}")
-                    service._debug_log(traceback.format_exc().rstrip())
-                    raise
-                finally:
-                    orphaned_run_count, orphaned_step_count = service.runtime_cache_ledger.reconcile_orphaned_activity(
-                        status="stopped",
-                        finished_at_utc=utcnow_text(),
-                        error_text="Engine stopped before completion.",
-                    )
-                    if orphaned_run_count or orphaned_step_count:
-                        service._debug_log(
-                            "reconciled orphaned runtime rows after engine stop"
-                            f" runs={orphaned_run_count} steps={orphaned_step_count}"
-                        )
-                    with service._state_lock:
-                        service.state.end_runtime(status="idle")
-                    service._publish_runtime_event("engine.stopped", correlation_id=request_id)
-                    service._shutdown_for_requested_idle_disconnect(reason="engine stopped after client disconnect")
-                    service._debug_log(f"engine thread finished status={service.state.status}")
-
-            engine_thread = threading.Thread(target=_target, daemon=True)
-            with service._state_lock:
-                service.state.engine_thread = engine_thread
-            try:
-                engine_thread.start()
-            except Exception:
-                with service._state_lock:
-                    service.state.end_runtime(status="idle")
-                raise
-            return {"ok": True}
+                    try:
+                        service._publish_runtime_event("engine.start_reservation_cleared", correlation_id=request_id)
+                    finally:
+                        with service._state_lock:
+                            if service.state.finishing_engine_thread is current_thread:
+                                service.state.finishing_engine_thread = None
 
     def stop_engine(self, *, request_id: str | None = None, shutdown_when_idle: bool = False) -> dict[str, Any]:
         service = self.service
