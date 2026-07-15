@@ -53,6 +53,7 @@ _WINDOWS_JOB_NAME_PREFIX = "Local\\DataEngineDaemonJob-"
 _WINDOWS_JOB_NONCE_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _DARWIN_PROC_PIDTBSDINFO = 3
 _DARWIN_PROC_PIDPATHINFO_MAXSIZE = 4096
+_HOST_OS_NAME = os.name
 
 
 class ProcessInspectionError(RuntimeError):
@@ -257,7 +258,7 @@ def inspect_process_identity(pid: int) -> ProcessIdentity | None:
     """
     if pid <= 0:
         return None
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         return _inspect_windows_process_identity(pid)
     if sys.platform == "darwin":
         return _inspect_darwin_process_identity(pid)
@@ -336,7 +337,7 @@ def force_kill_verified_contained_process_tree(
             target disappears or changes, or termination cannot be confirmed.
         ValueError: If a Windows nonce or timeout is invalid.
     """
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         _force_kill_verified_windows_job(
             expected,
             nonce=containment_nonce,
@@ -384,7 +385,7 @@ def wait_for_posix_process_group_exit(
             be inspected safely.
         ValueError: If the group ID or timeout is invalid.
     """
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         raise ProcessInspectionError("POSIX process-group waits require a POSIX host.")
     if isinstance(process_group_id, bool) or not isinstance(process_group_id, int):
         raise ValueError("A POSIX process-group ID must be a positive integer.")
@@ -990,7 +991,7 @@ def create_windows_kill_on_close_job(nonce: str) -> WindowsKillOnCloseJob:
             already exists, or the Job cannot be configured.
         ValueError: If ``nonce`` is not canonical.
     """
-    if os.name != "nt":
+    if _HOST_OS_NAME != "nt":
         raise ProcessInspectionError("Windows Job objects require Windows.")
     name = windows_job_name_for_nonce(nonce)
     kernel32 = _windows_kernel32()
@@ -1031,7 +1032,7 @@ def open_windows_kill_on_close_job(nonce: str) -> WindowsKillOnCloseJob | None:
             inspecting the Job fails, or kill-on-close is not configured.
         ValueError: If ``nonce`` is not canonical.
     """
-    if os.name != "nt":
+    if _HOST_OS_NAME != "nt":
         raise ProcessInspectionError("Windows Job objects require Windows.")
     name = windows_job_name_for_nonce(nonce)
     kernel32 = _windows_kernel32()
@@ -1082,7 +1083,7 @@ def open_verified_windows_kill_on_close_job(
             Job is absent, identity or membership differs, or inspection fails.
         ValueError: If ``nonce`` is not canonical.
     """
-    if os.name != "nt":
+    if _HOST_OS_NAME != "nt":
         raise ProcessInspectionError("Windows Job objects require Windows.")
     windows_job_name_for_nonce(nonce)
     process_handle = _open_windows_process(expected.pid)
@@ -1345,7 +1346,7 @@ def windows_subprocess_creationflags(
     detached: bool = False,
 ) -> int:
     """Return Windows subprocess creation flags supported by the host Python."""
-    if os.name != "nt":
+    if _HOST_OS_NAME != "nt":
         return 0
     flags = 0
     if new_process_group:
@@ -1363,7 +1364,7 @@ def process_is_running(pid: int | None, *, treat_defunct_as_dead: bool = True) -
     """Return whether one OS process id currently exists and is active."""
     if pid is None or pid <= 0:
         return False
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         return _windows_process_is_running(pid)
     try:
         os.kill(pid, 0)
@@ -1409,7 +1410,7 @@ def _windows_process_is_running(pid: int) -> bool:
 
 def process_status(pid: int) -> str | None:
     """Return the platform process status text for one pid when available."""
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         return (
             "Running" if process_is_running(pid, treat_defunct_as_dead=False) else None
         )
@@ -1426,7 +1427,7 @@ def process_status(pid: int) -> str | None:
 
 def list_processes() -> list[ProcessInfo]:
     """Return the local process table in a normalized shape."""
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         return _list_windows_processes()
     return _list_posix_processes()
 
@@ -1503,7 +1504,7 @@ def collapse_windows_launcher_processes(
     rows: list[ClassifiedProcessInfo],
 ) -> list[ClassifiedProcessInfo]:
     """Prefer the real child interpreter over a Windows venv launcher parent."""
-    if os.name != "nt":
+    if _HOST_OS_NAME != "nt":
         return rows
     child_by_parent: dict[int, list[ClassifiedProcessInfo]] = {}
     for row in rows:
@@ -1523,7 +1524,7 @@ def collapse_windows_launcher_processes(
 
 def force_kill_process_tree(pid: int) -> None:
     """Forcefully terminate one local process id and its children when supported."""
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         result = subprocess.run(
             ["taskkill", "/PID", str(pid), "/T", "/F"],
             capture_output=True,

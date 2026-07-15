@@ -232,7 +232,7 @@ def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
             ]
         )
 
-    monkeypatch.setattr("data_engine.platform.processes.os.name", "nt")
+    monkeypatch.setattr("data_engine.platform.processes._HOST_OS_NAME", "nt")
     monkeypatch.setattr(
         "data_engine.platform.processes.subprocess.run",
         lambda command, **kwargs: recorded.append((command, kwargs)) or _Completed(),
@@ -308,7 +308,7 @@ def test_cli_doctor_daemons_treats_windows_status_as_non_defunct(monkeypatch, tm
             del paths, lease_token, stale_after_seconds
             return False
 
-    monkeypatch.setattr("data_engine.domain.diagnostics.os.name", "nt")
+    monkeypatch.setattr("data_engine.domain.diagnostics._HOST_OS_NAME", "nt")
 
     result = commands_doctor.doctor_daemons(
         settings=settings,
@@ -375,8 +375,8 @@ def test_cli_doctor_daemons_collapses_windows_launcher_parent_processes(monkeypa
             del paths, lease_token, stale_after_seconds
             return False
 
-    monkeypatch.setattr("data_engine.platform.processes.os.name", "nt")
-    monkeypatch.setattr("data_engine.domain.diagnostics.os.name", "nt")
+    monkeypatch.setattr("data_engine.platform.processes._HOST_OS_NAME", "nt")
+    monkeypatch.setattr("data_engine.domain.diagnostics._HOST_OS_NAME", "nt")
 
     result = commands_doctor.doctor_daemons(
         settings=settings,

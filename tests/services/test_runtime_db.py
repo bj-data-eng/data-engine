@@ -712,7 +712,6 @@ def test_runtime_control_ledger_serializes_concurrent_schema_migration(tmp_path)
 
 def test_runtime_control_ledger_counts_live_windows_client_sessions(tmp_path, monkeypatch):
     ledger = RuntimeControlLedger(tmp_path / "runtime_state" / "runtime_control.sqlite")
-    monkeypatch.setattr(runtime_control_store_module.os, "name", "nt")
     monkeypatch.setattr(
         runtime_control_store_module,
         "process_is_running",

@@ -19,7 +19,7 @@ def test_posix_bootstrap_arms_watchdog_before_loading_daemon_app(monkeypatch):
         "--containment-nonce",
         _TEST_CONTAINMENT_NONCE,
     ]
-    monkeypatch.setattr(daemon_bootstrap.os, "name", "posix")
+    monkeypatch.setattr(daemon_bootstrap, "_HOST_OS_NAME", "posix")
 
     result = daemon_bootstrap.main(
         arguments,
@@ -45,7 +45,7 @@ def test_windows_bootstrap_delegates_without_posix_watchdog(monkeypatch):
         "--containment-nonce",
         _TEST_CONTAINMENT_NONCE,
     ]
-    monkeypatch.setattr(daemon_bootstrap.os, "name", "nt")
+    monkeypatch.setattr(daemon_bootstrap, "_HOST_OS_NAME", "nt")
 
     result = daemon_bootstrap.main(
         arguments,
@@ -59,7 +59,7 @@ def test_windows_bootstrap_delegates_without_posix_watchdog(monkeypatch):
 
 
 def test_posix_bootstrap_refuses_missing_nonce_before_daemon_import(monkeypatch):
-    monkeypatch.setattr(daemon_bootstrap.os, "name", "posix")
+    monkeypatch.setattr(daemon_bootstrap, "_HOST_OS_NAME", "posix")
 
     with pytest.raises(SystemExit, match="requires exactly one --containment-nonce"):
         daemon_bootstrap.main(
@@ -70,7 +70,7 @@ def test_posix_bootstrap_refuses_missing_nonce_before_daemon_import(monkeypatch)
 
 
 def test_bootstrap_rejects_duplicate_containment_nonces_before_arming(monkeypatch):
-    monkeypatch.setattr(daemon_bootstrap.os, "name", "posix")
+    monkeypatch.setattr(daemon_bootstrap, "_HOST_OS_NAME", "posix")
 
     with pytest.raises(SystemExit, match="exactly one --containment-nonce"):
         daemon_bootstrap.main(
@@ -96,7 +96,7 @@ def test_posix_launch_handshake_gates_normal_exec_after_watchdog_arm(monkeypatch
         "--launch-release-fd",
         "42",
     ]
-    monkeypatch.setattr(daemon_bootstrap.os, "name", "posix")
+    monkeypatch.setattr(daemon_bootstrap, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(
         daemon_bootstrap,
         "_publish_launch_identity",
@@ -192,7 +192,7 @@ def test_posix_normal_stage_adopts_watchdog_before_loading_app(monkeypatch):
         "--containment-nonce",
         _TEST_CONTAINMENT_NONCE,
     ]
-    monkeypatch.setattr(daemon_bootstrap.os, "name", "posix")
+    monkeypatch.setattr(daemon_bootstrap, "_HOST_OS_NAME", "posix")
 
     result = daemon_bootstrap.main(
         arguments,
@@ -233,7 +233,7 @@ def test_posix_normal_stage_preserves_interpreter_path_order(monkeypatch):
         daemon_bootstrap._PACKAGE_ROOT,  # noqa: SLF001
         "/environment/site-packages",
     ]
-    monkeypatch.setattr(daemon_bootstrap.os, "name", "posix")
+    monkeypatch.setattr(daemon_bootstrap, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(
         daemon_bootstrap.sys,
         "path",

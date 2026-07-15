@@ -78,13 +78,13 @@ def test_importing_daemon_client_does_not_create_fake_ctypes_windll():
 
 
 def test_windows_subprocess_creationflags_are_zero_on_non_windows(monkeypatch):
-    monkeypatch.setattr("data_engine.platform.processes.os.name", "posix")
+    monkeypatch.setattr("data_engine.platform.processes._HOST_OS_NAME", "posix")
 
     assert daemon_client.windows_subprocess_creationflags(new_process_group=True, no_window=True, detached=True) == 0
 
 
 def test_windows_subprocess_creationflags_uses_numeric_fallbacks_when_simulating_windows(monkeypatch):
-    monkeypatch.setattr("data_engine.platform.processes.os.name", "nt")
+    monkeypatch.setattr("data_engine.platform.processes._HOST_OS_NAME", "nt")
     monkeypatch.delattr("data_engine.platform.processes.subprocess.CREATE_NEW_PROCESS_GROUP", raising=False)
     monkeypatch.delattr("data_engine.platform.processes.subprocess.CREATE_NO_WINDOW", raising=False)
     monkeypatch.delattr("data_engine.platform.processes.subprocess.DETACHED_PROCESS", raising=False)
@@ -100,7 +100,7 @@ def test_windows_startup_lock_requires_windll_when_simulating_windows(tmp_path, 
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     _write_demo_flow(workspace_root)
     paths = resolve_workspace_paths(workspace_root=workspace_root)
-    monkeypatch.setattr(daemon_client.os, "name", "nt")
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", "nt")
     monkeypatch.delattr(daemon_client.ctypes, "windll", raising=False)
 
     with pytest.raises(DaemonClientError, match="ctypes.windll"):
@@ -137,7 +137,7 @@ def test_fork_child_cleanup_closes_inherited_startup_lock_descriptions(
     workspace_root = tmp_path / "shared" / "default"
     _write_demo_flow(workspace_root)
     paths = resolve_workspace_paths(workspace_root=workspace_root)
-    monkeypatch.setattr(daemon_client.os, "name", "posix")
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", "posix")
     assert daemon_client._acquire_startup_lock(paths) is True
     lock_path = daemon_client._startup_lock_path(paths)
     inherited_lock_fd = daemon_client._POSIX_STARTUP_LOCK_FDS[lock_path]
@@ -220,10 +220,10 @@ def test_posix_reaper_start_failure_kills_retained_child_without_watchdog_reques
 
         def wait(self, *, timeout):
             events.append(("wait", timeout))
-            return -signal.SIGKILL
+            return -9
 
     process = _Process()
-    monkeypatch.setattr(daemon_client.os, "name", "posix")
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(daemon_client.os, "pipe", lambda: next(pipe_results))
     monkeypatch.setattr(
         daemon_client.os,
@@ -301,7 +301,7 @@ def test_posix_reaper_start_failure_kills_retained_child_without_watchdog_reques
 
 
 def test_posix_launch_requires_gated_stable_identity(monkeypatch):
-    monkeypatch.setattr(daemon_client.os, "name", "posix")
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(
         daemon_client.subprocess,
         "Popen",
@@ -373,7 +373,7 @@ def test_prior_dead_tombstone_drains_platform_containment(platform_name, monkeyp
         containment_nonce=_TEST_CONTAINMENT_NONCE,
     )
     events = []
-    monkeypatch.setattr(daemon_client.os, "name", platform_name)
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", platform_name)
     monkeypatch.setattr(
         daemon_client,
         "_recorded_local_daemon_process",
@@ -1012,7 +1012,7 @@ def test_lease_pid_is_live_delegates_to_pid_helper(monkeypatch):
 
 
 def test_pid_is_live_uses_windows_helper_without_ps(monkeypatch):
-    monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "nt")
+    monkeypatch.setattr("data_engine.hosts.daemon.client._HOST_OS_NAME", "nt")
     monkeypatch.setattr("data_engine.hosts.daemon.client.process_is_running", lambda pid: pid == 123)
     monkeypatch.setattr(
         "data_engine.platform.processes.subprocess.run",
@@ -1034,7 +1034,7 @@ def test_windows_job_cleanup_refuses_ambiguous_process_inspection(monkeypatch):
         process_identity=expected,
         containment_nonce=_TEST_CONTAINMENT_NONCE,
     )
-    monkeypatch.setattr(daemon_client.os, "name", "nt")
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", "nt")
     monkeypatch.setattr(
         daemon_client,
         "open_verified_windows_kill_on_close_job",
@@ -1191,6 +1191,7 @@ def test_force_shutdown_daemon_process_releases_verified_lease_immediately(
         "data_engine.hosts.daemon.client.force_kill_verified_contained_process_tree",
         _kill,
     )
+    monkeypatch.setattr(daemon_client, "_open_verified_windows_daemon_job", lambda _record: None)
     monkeypatch.setattr(
         daemon_client,
         "wait_for_posix_process_group_exit",
@@ -1368,14 +1369,18 @@ def test_force_shutdown_fails_when_exited_posix_leader_has_remaining_descendants
     workspace_root = tmp_path / "shared" / "default"
     _write_demo_flow(workspace_root)
     paths = resolve_workspace_paths(workspace_root=workspace_root)
-    expected = _test_process_identity(321)
+    expected = replace(
+        _test_process_identity(321),
+        process_group_id=321,
+        process_session_id=321,
+    )
     record = daemon_client._DaemonProcessRecord(
         daemon_id="daemon-a",
         process_identity=expected,
         containment_nonce=_TEST_CONTAINMENT_NONCE,
     )
 
-    monkeypatch.setattr(daemon_client.os, "name", "posix")
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(daemon_client, "_local_daemon_process", lambda paths: record)
     monkeypatch.setattr(
         daemon_client,
@@ -1425,7 +1430,7 @@ def test_windows_force_shutdown_retains_verified_job_across_leader_exit(
             events.append(("close",))
 
     job = _Job()
-    monkeypatch.setattr(daemon_client.os, "name", "nt")
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", "nt")
     monkeypatch.setattr(daemon_client, "_local_daemon_process", lambda paths: record)
     monkeypatch.setattr(
         daemon_client,
@@ -1482,7 +1487,7 @@ def test_windows_startup_timeout_uses_retained_job_after_leader_exit(monkeypatch
 
     job = _Job()
     paths = SimpleNamespace()
-    monkeypatch.setattr(daemon_client.os, "name", "nt")
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", "nt")
     with daemon_client._WINDOWS_LAUNCH_JOBS_LOCK:
         daemon_client._WINDOWS_LAUNCH_JOBS[expected] = job
     try:
@@ -1538,6 +1543,7 @@ def test_force_shutdown_never_falls_back_when_containment_verification_fails(
         lambda *args, **kwargs: (_ for _ in ()).throw(DaemonClientError("unreachable")),
     )
     monkeypatch.setattr(daemon_client, "inspect_process_identity", lambda pid: expected)
+    monkeypatch.setattr(daemon_client, "_open_verified_windows_daemon_job", lambda _record: None)
 
     def _refuse(identity, *, containment_nonce):
         kill_calls.append((identity, containment_nonce))
@@ -1744,7 +1750,7 @@ def test_recorded_local_daemon_accepts_windows_path_casing_variants(
         workspace_root=str(paths.workspace_root).swapcase(),
     )
     ledger.close()
-    monkeypatch.setattr(daemon_client.os, "name", "nt")
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", "nt")
 
     record = daemon_client._recorded_local_daemon_process(paths)
 
@@ -2166,7 +2172,7 @@ def test_spawn_daemon_process_uses_atomic_windows_containment(tmp_path, monkeypa
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     _write_demo_flow(workspace_root)
     paths = resolve_workspace_paths(workspace_root=workspace_root, workspace_id="explicit-id")
-    monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "nt")
+    monkeypatch.setattr("data_engine.hosts.daemon.client._HOST_OS_NAME", "nt")
     monkeypatch.setattr("data_engine.hosts.daemon.client.is_daemon_live", lambda paths: False)
     monkeypatch.setattr("data_engine.hosts.daemon.client._wait_for_fresh_local_daemon", lambda paths: False)
     monkeypatch.setattr("data_engine.hosts.daemon.client._same_machine_live_lease_process", lambda paths: None)
@@ -2722,7 +2728,7 @@ def test_harden_private_file_permissions_uses_no_window_creationflags_on_windows
     calls: list[dict[str, object]] = []
 
     monkeypatch.setenv("USERNAME", "codex-user")
-    monkeypatch.setattr(daemon_client.os, "name", "nt")
+    monkeypatch.setattr(daemon_client, "_HOST_OS_NAME", "nt")
     monkeypatch.setattr(
         daemon_client.subprocess,
         "run",

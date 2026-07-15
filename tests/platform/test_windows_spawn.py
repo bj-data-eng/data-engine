@@ -303,6 +303,7 @@ def _event_names(events) -> list[str]:
 
 
 def test_spawn_rejects_non_windows_before_creating_job(monkeypatch):
+    monkeypatch.setattr(windows_spawn, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(
         windows_spawn,
         "create_windows_kill_on_close_job",
@@ -650,14 +651,21 @@ def test_real_windows_job_spawn_supports_verified_tree_termination(tmp_path):
 def test_real_windows_job_kills_descendant_when_leader_exits(tmp_path):
     nonce = new_process_containment_nonce()
     child_pid_path = tmp_path / "contained-child.pid"
-    parent_source = (
-        "from pathlib import Path; import subprocess, sys; "
-        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
-        "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')"
+    release_path = tmp_path / "release-parent"
+    parent_source = "\n".join(
+        (
+            "from pathlib import Path",
+            "import subprocess, sys, time",
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])",
+            "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')",
+            "deadline = time.monotonic() + 30.0",
+            "while not Path(sys.argv[2]).exists() and time.monotonic() < deadline:",
+            "    time.sleep(0.01)",
+        )
     )
     launched = windows_spawn.spawn_windows_contained_process(
         sys.executable,
-        ("-c", parent_source, str(child_pid_path)),
+        ("-c", parent_source, str(child_pid_path), str(release_path)),
         containment_nonce=nonce,
     )
 
@@ -668,11 +676,15 @@ def test_real_windows_job_kills_descendant_when_leader_exits(tmp_path):
         child_pid = int(child_pid_path.read_text(encoding="ascii"))
         child_identity = inspect_process_identity(child_pid)
         assert child_identity is not None
+        release_path.write_text("release", encoding="ascii")
         while time.monotonic() < deadline:
-            if (
-                inspect_process_identity(launched.pid) != launched.process_identity
-                and inspect_process_identity(child_pid) != child_identity
-            ):
+            try:
+                leader_exited = inspect_process_identity(launched.pid) != launched.process_identity
+                child_exited = inspect_process_identity(child_pid) != child_identity
+            except ProcessInspectionError:
+                time.sleep(0.01)
+                continue
+            if leader_exited and child_exited:
                 break
             time.sleep(0.01)
         assert inspect_process_identity(launched.pid) != launched.process_identity

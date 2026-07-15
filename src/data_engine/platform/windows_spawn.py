@@ -46,6 +46,7 @@ _WAIT_FAILED = 0xFFFFFFFF
 _RESUME_THREAD_FAILED = 0xFFFFFFFF
 _CLEANUP_WAIT_MILLISECONDS = 5_000
 _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+_HOST_OS_NAME = os.name
 
 
 class _WindowsSecurityAttributes(ctypes.Structure):
@@ -162,7 +163,7 @@ def spawn_windows_contained_process(
         ValueError: If paths, arguments, or environment entries are empty or
             contain invalid null characters, or if the nonce is not canonical.
     """
-    if os.name != "nt":
+    if _HOST_OS_NAME != "nt":
         raise ProcessInspectionError("Atomic Windows process launch requires Windows.")
 
     executable_text = _path_text(executable, label="Executable", allow_empty=False)

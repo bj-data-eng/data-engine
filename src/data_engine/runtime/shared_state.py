@@ -172,11 +172,9 @@ _SNAPSHOT_GENERATIONS_DIR_NAME = "snapshots"
 _LEASE_TOKEN_PATTERN = re.compile(r"[0-9a-f]{32}")
 _CONTAINMENT_NONCE_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _GENERATION_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
-_ROOT_TEMP_PATTERN = re.compile(
-    r"\.(?:lease\.parquet|snapshot_manifest\.json)\.(?P<token>[0-9a-f]{32})\.[0-9a-f]{32}\.tmp"
-)
+_ROOT_TEMP_PATTERN = re.compile(r"\.(?:l|m)\.(?P<token>[0-9a-f]{32})\.[0-9a-f]{16}\.tmp")
 _STAGING_TEMP_PATTERN = re.compile(
-    r"\.snapshot\.(?P<token>[0-9a-f]{32})\.[0-9a-f]{32}\.[0-9a-f]{32}\.tmp"
+    r"\.s\.(?P<token>[0-9a-f]{32})\.[0-9a-f]{8}\.tmp"
 )
 _RECOVERY_PREFIX = ".recovering__"
 _SNAPSHOT_PUBLICATION_LOCKS_GUARD = threading.Lock()
@@ -720,13 +718,10 @@ def _write_initial_daemon_lease_metadata(
     lease_token: str,
     row: dict[str, Any],
 ) -> None:
-    temporary_path = bundle.lease_metadata_path.with_name(
-        f".{bundle.lease_metadata_path.name}.{lease_token}.{uuid4().hex}.tmp"
-    )
+    temporary_path = bundle.lease_metadata_path.with_name(f".l.{lease_token}.{uuid4().hex[:16]}.tmp")
     try:
         _frame_with_schema([row], _LEASE_METADATA_SCHEMA).write_parquet(temporary_path)
-        with temporary_path.open("rb") as stream:
-            os.fsync(stream.fileno())
+        _sync_file_contents(temporary_path)
         os.replace(temporary_path, bundle.lease_metadata_path)
     finally:
         remove_file_if_exists(temporary_path)
@@ -1383,7 +1378,7 @@ def _publish_shared_runtime_snapshot_locked(
         description="snapshot root",
     )
     _assert_exact_lease_path(paths, lease_token)
-    staging_dir = generations_dir / f".snapshot.{lease_token}.{snapshot_generation_id}.{uuid4().hex}.tmp"
+    staging_dir = generations_dir / f".s.{lease_token}.{uuid4().hex[:8]}.tmp"
     committed_dir = generations_dir / snapshot_generation_id
     try:
         staging_dir.mkdir()
@@ -1507,7 +1502,7 @@ def _write_snapshot_manifest_atomic(
     manifest: dict[str, Any],
 ) -> None:
     _assert_exact_lease_path(paths, lease_token)
-    temporary_path = path.with_name(f".{path.name}.{lease_token}.{uuid4().hex}.tmp")
+    temporary_path = path.with_name(f".m.{lease_token}.{uuid4().hex[:16]}.tmp")
     try:
         with temporary_path.open("x", encoding="utf-8", newline="\n") as stream:
             json.dump(manifest, stream, sort_keys=True, separators=(",", ":"))
@@ -1729,6 +1724,12 @@ def _frame_with_schema(rows: list[dict[str, Any]], schema: dict[str, pl.DataType
     return pl.DataFrame(rows, schema=schema, infer_schema_length=None)
 
 
+def _sync_file_contents(path: Path) -> None:
+    """Flush a completed file through a descriptor writable on every host."""
+    with path.open("r+b") as stream:
+        os.fsync(stream.fileno())
+
+
 def _write_parquet_atomic_owned(
     paths: WorkspacePaths,
     *,
@@ -1737,11 +1738,10 @@ def _write_parquet_atomic_owned(
     path: Path,
 ) -> None:
     _assert_exact_lease_path(paths, lease_token)
-    temporary_path = path.with_name(f".{path.name}.{lease_token}.{uuid4().hex}.tmp")
+    temporary_path = path.with_name(f".l.{lease_token}.{uuid4().hex[:16]}.tmp")
     try:
         frame.write_parquet(temporary_path)
-        with temporary_path.open("rb") as stream:
-            os.fsync(stream.fileno())
+        _sync_file_contents(temporary_path)
         _replace_owned_path(paths, lease_token=lease_token, source_path=temporary_path, target_path=path)
     except FileNotFoundError as exc:
         raise WorkspaceLeaseLostError(
@@ -1749,6 +1749,25 @@ def _write_parquet_atomic_owned(
         ) from exc
     finally:
         remove_file_if_exists(temporary_path)
+
+
+def _write_parquet_staged_owned(
+    paths: WorkspacePaths,
+    *,
+    lease_token: str,
+    frame: pl.DataFrame,
+    path: Path,
+) -> None:
+    """Write one artifact inside an unpublished, token-owned staging directory."""
+    _assert_exact_lease_path(paths, lease_token)
+    try:
+        frame.write_parquet(path)
+        _sync_file_contents(path)
+        _assert_exact_lease_path(paths, lease_token)
+    except FileNotFoundError as exc:
+        raise WorkspaceLeaseLostError(
+            f"Workspace {paths.workspace_id!r} lease disappeared during parquet staging."
+        ) from exc
 
 
 def _write_lease_metadata_owned(
@@ -1774,7 +1793,7 @@ def _write_runs(
     rows: tuple[PersistedRun, ...],
     snapshot_generation_id: str,
 ) -> None:
-    _write_parquet_atomic_owned(
+    _write_parquet_staged_owned(
         paths,
         lease_token=lease_token,
         frame=_frame_with_schema(
@@ -1793,7 +1812,7 @@ def _write_step_runs(
     rows: tuple[PersistedStepRun, ...],
     snapshot_generation_id: str,
 ) -> None:
-    _write_parquet_atomic_owned(
+    _write_parquet_staged_owned(
         paths,
         lease_token=lease_token,
         frame=_frame_with_schema(
@@ -1812,7 +1831,7 @@ def _write_logs(
     rows: tuple[PersistedLogEntry, ...],
     snapshot_generation_id: str,
 ) -> None:
-    _write_parquet_atomic_owned(
+    _write_parquet_staged_owned(
         paths,
         lease_token=lease_token,
         frame=_frame_with_schema(
@@ -1831,7 +1850,7 @@ def _write_file_states(
     rows: tuple[PersistedFileState, ...],
     snapshot_generation_id: str,
 ) -> None:
-    _write_parquet_atomic_owned(
+    _write_parquet_staged_owned(
         paths,
         lease_token=lease_token,
         frame=_frame_with_schema(

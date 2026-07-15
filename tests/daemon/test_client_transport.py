@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import socket
 import struct
 import time
@@ -124,6 +125,7 @@ def test_deadline_bound_connection_polls_only_for_remaining_time() -> None:
     ),
     ids=("partial-header", "partial-payload"),
 )
+@pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor I/O is required")
 def test_deadline_bound_unix_receive_times_out_during_partial_frame(
     partial_frame: bytes,
 ) -> None:
@@ -147,6 +149,7 @@ def test_deadline_bound_unix_receive_times_out_during_partial_frame(
         sending_socket.close()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor I/O is required")
 def test_deadline_bound_unix_send_times_out_when_peer_stops_reading() -> None:
     sending_socket, receiving_socket = socket.socketpair()
     try:
@@ -168,6 +171,7 @@ def test_deadline_bound_unix_send_times_out_when_peer_stops_reading() -> None:
         receiving_socket.close()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor I/O is required")
 def test_deadline_bound_unix_rejects_oversized_frame_from_header() -> None:
     receiving_socket, sending_socket = socket.socketpair()
     try:
@@ -187,6 +191,7 @@ def test_deadline_bound_unix_rejects_oversized_frame_from_header() -> None:
 
 
 @pytest.mark.skipif(not hasattr(daemon_client.select, "poll"), reason="poll is unavailable")
+@pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor I/O is required")
 def test_deadline_bound_unix_uses_high_descriptor_safe_poll(monkeypatch) -> None:
     receiving_socket, sending_socket = socket.socketpair()
     try:
@@ -341,6 +346,7 @@ def test_windows_pipe_client_uses_standard_authentication_order_and_closes_on_fa
 def test_unix_socket_connect_uses_only_the_remaining_deadline() -> None:
     calls: list[tuple[str, object]] = []
     connection = object()
+    socket_family = 1
 
     class _Socket:
         def close(self) -> None:
@@ -376,11 +382,12 @@ def test_unix_socket_connect_uses_only_the_remaining_deadline() -> None:
         clock=lambda: 10.0,
         socket_factory=_socket_factory,
         connection_type=_connection_type,
+        socket_family=socket_family,
     )
 
     assert result is connection
     assert calls == [
-        ("socket", (socket.AF_UNIX, socket.SOCK_STREAM)),
+        ("socket", (socket_family, socket.SOCK_STREAM)),
         ("timeout", pytest.approx(0.25)),
         ("connect", "daemon.sock"),
         ("blocking", True),
@@ -410,6 +417,7 @@ def test_unix_socket_connect_closes_socket_after_timeout() -> None:
             clock=lambda: 10.0,
             socket_factory=lambda _family, _kind: _Socket(),
             connection_type=lambda handle: handle,
+            socket_family=1,
         )
 
     assert closed == [True]

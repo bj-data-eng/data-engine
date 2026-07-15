@@ -18,6 +18,7 @@ _LAUNCH_RELEASE_FD_OPTION = "--launch-release-fd"
 _ARMED_WATCHDOG_PID_OPTION = "--armed-watchdog-pid"
 _LAUNCH_RELEASE_TIMEOUT_SECONDS = 30.0
 _MAX_LAUNCH_IDENTITY_BYTES = 16_384
+_HOST_OS_NAME = os.name
 
 
 def _containment_nonce_from_argv(argv: list[str]) -> str:
@@ -212,10 +213,10 @@ def main(
             "The daemon bootstrap cannot adopt and create a watchdog in one stage."
         )
     containment_nonce = _containment_nonce_from_argv(arguments)
-    if os.name == "posix" and armed_watchdog_pid is None:
+    if _HOST_OS_NAME == "posix" and armed_watchdog_pid is None:
         _prepare_isolated_package_import_path()
 
-    if os.name == "posix":
+    if _HOST_OS_NAME == "posix":
         if armed_watchdog_pid is None:
             if arm_watchdog_func is None:
                 from data_engine.platform.posix_watchdog import (
@@ -258,7 +259,7 @@ def main(
                 armed_watchdog_pid,
                 containment_nonce=containment_nonce,
             )
-    elif os.name == "nt":
+    elif _HOST_OS_NAME == "nt":
         if ready_fd is not None or armed_watchdog_pid is not None:
             raise SystemExit("Windows daemon bootstrap received POSIX launch state.")
         (verify_windows_containment_func or _verify_current_windows_containment)(

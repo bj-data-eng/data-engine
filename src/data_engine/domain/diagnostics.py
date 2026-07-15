@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+_HOST_OS_NAME = os.name
+
 
 @dataclass(frozen=True)
 class DoctorCheck:
@@ -42,7 +44,7 @@ class ClassifiedProcessInfo:
     @property
     def is_orphaned(self) -> bool:
         """Return whether this process row is now parented by init/launchd."""
-        if os.name == "nt":
+        if _HOST_OS_NAME == "nt":
             return False
         return self.ppid == 1
 
@@ -52,7 +54,7 @@ def is_defunct_process_status(status: str) -> bool:
     normalized = status.strip().lower()
     if normalized == "defunct":
         return True
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         return False
     return normalized.startswith("z")
 
@@ -66,4 +68,3 @@ class WorkspaceLeaseDiagnostic:
     state: str
     stale: bool
     local_owner: bool
-

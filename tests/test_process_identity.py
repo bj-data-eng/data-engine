@@ -441,9 +441,9 @@ def test_windows_process_identity_propagates_open_access_failure(monkeypatch):
 def test_verified_kill_blocks_every_identity_field_mismatch(monkeypatch, field, value):
     expected = _identity()
     actual = replace(expected, **{field: value})
-    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(processes.os, "getpid", lambda: 111)
-    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111)
+    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111, raising=False)
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: actual)
     monkeypatch.setattr(
         processes,
@@ -460,9 +460,9 @@ def test_verified_kill_blocks_every_identity_field_mismatch(monkeypatch, field, 
 
 def test_verified_posix_kill_requires_isolated_session_leader(monkeypatch):
     expected = _identity(process_session_id=999)
-    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(processes.os, "getpid", lambda: 111)
-    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111)
+    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111, raising=False)
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: expected)
     monkeypatch.setattr(
         processes,
@@ -480,7 +480,7 @@ def test_verified_posix_kill_requires_isolated_session_leader(monkeypatch):
 def test_verified_posix_kill_requests_matching_watchdog_capability(monkeypatch):
     expected = _identity()
     requests = []
-    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(processes.os, "getpid", lambda: 111)
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: expected)
     monkeypatch.setattr(processes.os, "getpgrp", lambda: 111, raising=False)
@@ -505,7 +505,7 @@ def test_verified_posix_kill_requests_matching_watchdog_capability(monkeypatch):
 
 def test_verified_windows_kill_rejects_invalid_containment_nonce(monkeypatch):
     expected = _identity(process_group_id=None, process_session_id=7)
-    monkeypatch.setattr(processes.os, "name", "nt")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "nt")
     monkeypatch.setattr(
         processes.subprocess,
         "run",

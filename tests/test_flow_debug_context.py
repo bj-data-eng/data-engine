@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+import shutil
 
 import polars as pl
 
@@ -74,6 +75,23 @@ def test_flow_debug_context_save_json_writes_embedded_debug_payload(tmp_path: Pa
     assert record.step_name == "Write Summary"
     assert record.source_path == "C:/input/docs_flat_2.xlsx"
     assert record.metadata == payload
+
+
+def test_flow_debug_context_recreates_cleared_artifact_directory(tmp_path: Path) -> None:
+    root = debug_artifacts_dir(tmp_path)
+    context = FlowDebugContext(
+        root=root,
+        workspace_id="docs2",
+        flow_name="example_mirror",
+        run_id="run-2",
+        source_path=None,
+        step_name="Write Summary",
+    )
+    shutil.rmtree(root)
+
+    artifact_path = context.save_json({"status": "ok"}, name="summary")
+
+    assert artifact_path.exists()
 
 
 def test_list_debug_artifacts_ignores_sidecars_malformed_json_and_unrelated_json(tmp_path: Path) -> None:

@@ -14,6 +14,8 @@ from data_engine.platform.interpreters import preferred_gui_python_executable
 from data_engine.platform.paths import path_display
 from data_engine.platform.processes import windows_subprocess_creationflags
 
+_HOST_OS_NAME = os.name
+
 
 def start_surface(surface: str) -> int:
     """Launch one operator surface."""
@@ -36,7 +38,7 @@ def start_gui_subprocess() -> int:
             "stdout": startup_log,
             "stderr": startup_log,
         }
-        if os.name == "nt":
+        if _HOST_OS_NAME == "nt":
             creationflags = windows_subprocess_creationflags(new_process_group=True, detached=True)
             if creationflags:
                 kwargs["creationflags"] = creationflags

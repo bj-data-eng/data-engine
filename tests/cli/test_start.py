@@ -65,7 +65,7 @@ def test_preferred_gui_python_executable_preserves_venv_python_on_macos(monkeypa
     venv_python = tmp_path / ".venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("", encoding="utf-8")
-    monkeypatch.setattr("data_engine.ui.cli.commands_start.os.name", "posix")
+    monkeypatch.setattr("data_engine.ui.cli.commands_start._HOST_OS_NAME", "posix")
     monkeypatch.setattr("data_engine.ui.cli.commands_start.sys.platform", "darwin")
     monkeypatch.setattr("data_engine.ui.cli.commands_start.sys.executable", str(venv_python))
 

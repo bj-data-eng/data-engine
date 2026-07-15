@@ -26,6 +26,7 @@ _FALLBACK_PARENT_POLL_SECONDS: Final = 0.1
 _CONTROL_REQUEST_PREFIX: Final = b"terminate:"
 _CONTAINMENT_NONCE_PATTERN: Final = re.compile(r"[0-9a-f]{64}")
 _CONTROL_ENDPOINT_PREFIX: Final = "data-engine-wd-"
+_HOST_OS_NAME: Final = os.name
 
 
 class PosixProcessGroupWatchdogError(RuntimeError):
@@ -176,7 +177,7 @@ def arm_posix_process_group_watchdog(
         raise PosixProcessGroupWatchdogError(
             "The POSIX process-group watchdog exited after it was armed."
         )
-    if os.name != "posix":
+    if _HOST_OS_NAME != "posix":
         raise PosixProcessGroupWatchdogError(
             "The process-group watchdog requires a POSIX host."
         )
@@ -317,7 +318,7 @@ def adopt_posix_process_group_watchdog(
     """
     global _ARMED_WATCHDOG
 
-    if os.name != "posix":
+    if _HOST_OS_NAME != "posix":
         raise PosixProcessGroupWatchdogError(
             "The process-group watchdog requires a POSIX host."
         )

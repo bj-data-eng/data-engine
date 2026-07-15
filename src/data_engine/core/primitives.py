@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import tomllib
@@ -25,6 +26,7 @@ from data_engine.services.debug_artifacts import (
 )
 
 T = TypeVar("T")
+_DEBUG_ARTIFACT_PATH_BUDGET = 240
 
 
 @dataclass(frozen=True)
@@ -597,13 +599,20 @@ class FlowDebugContext:
         return artifact_path
 
     def _artifact_paths(self, *, name: str | None, extension: str) -> tuple[Path, Path, str]:
+        self.root.mkdir(parents=True, exist_ok=True)
         saved_at_utc = utcnow_text()
-        timestamp_token = saved_at_utc.replace(":", "-").replace(".", "-").replace("+00:00", "Z")
+        timestamp_token = saved_at_utc.replace("+00:00", "Z").replace(":", "-").replace(".", "-")
         flow_token = sanitize_debug_name(self.flow_name, fallback="flow")
         step_token = sanitize_debug_name(self.step_name, fallback="step")
         name_token = sanitize_debug_name(name, fallback="artifact")
         stem = f"{flow_token}__{step_token}__{timestamp_token}__{name_token}"
         artifact_path = self.root / f"{stem}{extension}"
+        if len(str(artifact_path)) > _DEBUG_ARTIFACT_PATH_BUDGET:
+            identity = hashlib.sha256(
+                f"{flow_token}\0{step_token}\0{timestamp_token}\0{name_token}\0{extension}".encode()
+            ).hexdigest()[:12]
+            stem = f"debug__{timestamp_token}__{identity}"
+            artifact_path = self.root / f"{stem}{extension}"
         metadata_path = artifact_path.with_suffix(".json")
         display_name = f"{self.flow_name} / {(self.step_name or 'Step')} / {timestamp_token}"
         return artifact_path, metadata_path, display_name

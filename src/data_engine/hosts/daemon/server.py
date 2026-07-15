@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
 _COMMAND_RECEIVE_TIMEOUT_SECONDS = 5.0
 _MAX_CONNECTION_WORKERS = 32
+_HOST_OS_NAME = os.name
 
 
 def _require_current_process_containment(
@@ -62,11 +63,11 @@ def _require_current_process_containment(
         raise ProcessInspectionError(
             f"Current daemon process {current_pid} does not match its recorded identity."
         )
-    if os.name == "posix":
+    if _HOST_OS_NAME == "posix":
         arm_posix_process_group_watchdog(
             containment_nonce=containment_nonce,
         )
-    elif os.name == "nt":
+    elif _HOST_OS_NAME == "nt":
         job = open_verified_windows_kill_on_close_job(
             actual_identity,
             nonce=containment_nonce,
@@ -74,7 +75,7 @@ def _require_current_process_containment(
         job.close()
     else:
         raise ProcessInspectionError(
-            f"Daemon process containment is unsupported on platform {os.name!r}."
+            f"Daemon process containment is unsupported on platform {_HOST_OS_NAME!r}."
         )
     return actual_identity
 

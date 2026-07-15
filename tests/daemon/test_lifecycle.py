@@ -5,6 +5,8 @@ import shutil
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 import data_engine.hosts.daemon.client as daemon_client
 from data_engine.domain import DaemonLifecyclePolicy
 from data_engine.hosts.daemon.app import (
@@ -729,13 +731,14 @@ def test_persistent_daemon_stays_alive_when_no_live_clients_remain(tmp_path, mon
     service._shutdown()  # noqa: SLF001
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file locking is required")
 def test_spawn_daemon_process_waits_on_existing_startup_lock(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     _write_demo_flow(workspace_root)
     paths = resolve_workspace_paths(workspace_root=workspace_root)
-    monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "posix")
+    monkeypatch.setattr("data_engine.hosts.daemon.client._HOST_OS_NAME", "posix")
     paths.runtime_state_dir.mkdir(parents=True, exist_ok=True)
     lock_path = paths.runtime_state_dir / ".daemon-start.lock"
     lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -765,7 +768,7 @@ def test_windows_startup_lock_uses_named_mutex_without_lock_file(tmp_path, monke
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
     _write_demo_flow(workspace_root)
     paths = resolve_workspace_paths(workspace_root=workspace_root)
-    monkeypatch.setattr("data_engine.hosts.daemon.client.os.name", "nt")
+    monkeypatch.setattr("data_engine.hosts.daemon.client._HOST_OS_NAME", "nt")
 
     handles: list[int] = []
     released: list[int] = []

@@ -1037,7 +1037,7 @@ def test_serve_forever_fails_closed_before_initialize_when_watchdog_is_unarmed(
         def initialize(self) -> None:
             initialize_calls.append(True)
 
-    monkeypatch.setattr(daemon_server.os, "name", "posix")
+    monkeypatch.setattr(daemon_server, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(daemon_server.os, "getpid", lambda: expected.pid)
     monkeypatch.setattr(
         daemon_server,
@@ -1070,7 +1070,7 @@ def test_containment_guard_verifies_and_closes_the_current_windows_job(monkeypat
         def close(self) -> None:
             events.append("close")
 
-    monkeypatch.setattr(daemon_server.os, "name", "nt")
+    monkeypatch.setattr(daemon_server, "_HOST_OS_NAME", "nt")
     monkeypatch.setattr(daemon_server.os, "getpid", lambda: expected.pid)
     monkeypatch.setattr(
         daemon_server,

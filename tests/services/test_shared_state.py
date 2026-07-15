@@ -149,6 +149,15 @@ def _claim_daemon(paths, *, containment_nonce: str = _TEST_CONTAINMENT_NONCE):
     )
 
 
+def test_sync_file_contents_uses_a_windows_compatible_descriptor(tmp_path):
+    path = tmp_path / "artifact.parquet"
+    path.write_bytes(b"parquet payload")
+
+    shared_state_module._sync_file_contents(path)
+
+    assert path.read_bytes() == b"parquet payload"
+
+
 def test_initialize_claim_and_release_workspace_markers(tmp_path, monkeypatch):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"

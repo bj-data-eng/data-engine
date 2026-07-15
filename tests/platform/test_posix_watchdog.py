@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -257,10 +258,10 @@ def test_watchdog_control_request_authenticates_then_kills_its_pinned_group():
 
 
 def test_watchdog_refuses_a_nonisolated_parent(monkeypatch):
-    monkeypatch.setattr(posix_watchdog.os, "name", "posix")
+    monkeypatch.setattr(posix_watchdog, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(posix_watchdog.os, "getpid", lambda: 101)
-    monkeypatch.setattr(posix_watchdog.os, "getpgrp", lambda: 202)
-    monkeypatch.setattr(posix_watchdog.os, "getsid", lambda pid: 202)
+    monkeypatch.setattr(posix_watchdog.os, "getpgrp", lambda: 202, raising=False)
+    monkeypatch.setattr(posix_watchdog.os, "getsid", lambda pid: 202, raising=False)
 
     with pytest.raises(PosixProcessGroupWatchdogError, match="dedicated process group"):
         arm_posix_process_group_watchdog(containment_nonce=_NONCE)
@@ -280,12 +281,13 @@ def test_watchdog_rejects_rearm_with_a_different_nonce(monkeypatch):
 def test_adopt_watchdog_verifies_direct_child_and_restarts_supervision(monkeypatch):
     events = []
     monkeypatch.setattr(posix_watchdog, "_ARMED_WATCHDOG", None)
-    monkeypatch.setattr(posix_watchdog.os, "name", "posix")
+    monkeypatch.setattr(posix_watchdog, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(posix_watchdog.os, "getpid", lambda: 101)
-    monkeypatch.setattr(posix_watchdog.os, "getpgrp", lambda: 101)
-    monkeypatch.setattr(posix_watchdog.os, "getsid", lambda pid: 101)
-    monkeypatch.setattr(posix_watchdog.os, "getpgid", lambda pid: 101)
-    monkeypatch.setattr(posix_watchdog.os, "waitpid", lambda pid, flags: (0, 0))
+    monkeypatch.setattr(posix_watchdog.os, "getpgrp", lambda: 101, raising=False)
+    monkeypatch.setattr(posix_watchdog.os, "getsid", lambda pid: 101, raising=False)
+    monkeypatch.setattr(posix_watchdog.os, "getpgid", lambda pid: 101, raising=False)
+    monkeypatch.setattr(posix_watchdog.os, "waitpid", lambda pid, flags: (0, 0), raising=False)
+    monkeypatch.setattr(posix_watchdog.os, "WNOHANG", 1, raising=False)
     monkeypatch.setattr(
         posix_watchdog,
         "_verify_private_control_endpoint",
@@ -328,9 +330,13 @@ def test_control_request_never_blocks_on_a_full_watchdog_queue(monkeypatch):
             raise BlockingIOError("watchdog queue is full")
 
     monkeypatch.setattr(
-        posix_watchdog.socket,
+        posix_watchdog,
         "socket",
-        lambda *args, **kwargs: _FullSocket(),
+        SimpleNamespace(
+            AF_UNIX=1,
+            SOCK_DGRAM=2,
+            socket=lambda *args, **kwargs: _FullSocket(),
+        ),
     )
 
     with pytest.raises(PosixProcessGroupWatchdogError, match="Unable to request termination"):
@@ -342,6 +348,7 @@ def test_control_request_never_blocks_on_a_full_watchdog_queue(monkeypatch):
     assert events[0] == ("setblocking", False)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Unix-domain sockets are required")
 def test_failed_duplicate_bind_never_unlinks_the_live_owner_endpoint(monkeypatch):
     containment_nonce = secrets.token_hex(32)
     endpoint = posix_watchdog.posix_watchdog_endpoint(containment_nonce)
@@ -370,10 +377,10 @@ def test_failed_duplicate_bind_never_unlinks_the_live_owner_endpoint(monkeypatch
 
 def test_watchdog_launch_failure_closes_both_readiness_pipe_ends(monkeypatch):
     closed_fds = []
-    monkeypatch.setattr(posix_watchdog.os, "name", "posix")
+    monkeypatch.setattr(posix_watchdog, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(posix_watchdog.os, "getpid", lambda: 101)
-    monkeypatch.setattr(posix_watchdog.os, "getpgrp", lambda: 101)
-    monkeypatch.setattr(posix_watchdog.os, "getsid", lambda pid: 101)
+    monkeypatch.setattr(posix_watchdog.os, "getpgrp", lambda: 101, raising=False)
+    monkeypatch.setattr(posix_watchdog.os, "getsid", lambda pid: 101, raising=False)
     monkeypatch.setattr(posix_watchdog.os, "pipe", lambda: (41, 42))
     monkeypatch.setattr(posix_watchdog.os, "close", closed_fds.append)
     monkeypatch.setattr(

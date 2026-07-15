@@ -85,10 +85,12 @@ _WINDOWS_ERROR_ALREADY_EXISTS = 183
 _WINDOWS_STARTUP_MUTEXES: dict[str, int] = {}
 _POSIX_STARTUP_LOCK_FDS: dict[Path, int] = {}
 _POSIX_STARTUP_LOCKS_LOCK = threading.Lock()
+_AUTHKEY_MUTATION_THREAD_LOCK = threading.RLock()
 _POSIX_DAEMON_REAPERS_LOCK = threading.Lock()
 _POSIX_DAEMON_PROCESSES: dict[ProcessIdentity, subprocess.Popen[bytes]] = {}
 _WINDOWS_LAUNCH_JOBS_LOCK = threading.Lock()
 _WINDOWS_LAUNCH_JOBS: dict[ProcessIdentity, WindowsKillOnCloseJob] = {}
+_HOST_OS_NAME = os.name
 
 
 def _close_inherited_posix_startup_locks() -> None:
@@ -160,7 +162,7 @@ def _read_daemon_authkey(authkey_path: Path) -> tuple[bytes | None, bool]:
 
 def _try_lock_authkey_file(fd: int) -> None:
     """Try to lock the first byte of one authkey lock file."""
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         import msvcrt
 
         os.lseek(fd, 0, os.SEEK_SET)
@@ -173,7 +175,7 @@ def _try_lock_authkey_file(fd: int) -> None:
 
 def _unlock_authkey_file(fd: int) -> None:
     """Unlock the first byte of one authkey lock file."""
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         import msvcrt
 
         os.lseek(fd, 0, os.SEEK_SET)
@@ -187,31 +189,34 @@ def _unlock_authkey_file(fd: int) -> None:
 @contextmanager
 def _authkey_mutation_lock(authkey_path: Path):
     """Serialize authkey creation and repair across local processes."""
-    lock_path = authkey_path.with_name(_DAEMON_AUTHKEY_LOCK_FILE_NAME)
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-    acquired = False
-    try:
-        if os.fstat(fd).st_size == 0:
-            os.write(fd, b"\0")
-        deadline = time.monotonic() + _DAEMON_AUTHKEY_LOCK_TIMEOUT_SECONDS
-        while True:
-            try:
-                _try_lock_authkey_file(fd)
-            except OSError as exc:
-                if time.monotonic() >= deadline:
-                    raise DaemonClientError("Timed out waiting to repair the daemon auth key.") from exc
-                time.sleep(0.01)
-            else:
-                acquired = True
-                break
-        yield
-    finally:
-        if acquired:
-            try:
-                _unlock_authkey_file(fd)
-            except OSError:
-                pass
-        os.close(fd)
+    with _AUTHKEY_MUTATION_THREAD_LOCK:
+        lock_path = authkey_path.with_name(_DAEMON_AUTHKEY_LOCK_FILE_NAME)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        acquired = False
+        try:
+            if os.fstat(fd).st_size == 0:
+                os.write(fd, b"\0")
+            deadline = time.monotonic() + _DAEMON_AUTHKEY_LOCK_TIMEOUT_SECONDS
+            while True:
+                try:
+                    _try_lock_authkey_file(fd)
+                except OSError as exc:
+                    if time.monotonic() >= deadline:
+                        raise DaemonClientError(
+                            "Timed out waiting to repair the daemon auth key."
+                        ) from exc
+                    time.sleep(0.01)
+                else:
+                    acquired = True
+                    break
+            yield
+        finally:
+            if acquired:
+                try:
+                    _unlock_authkey_file(fd)
+                except OSError:
+                    pass
+            os.close(fd)
 
 
 def _daemon_process_record_from_metadata(
@@ -254,7 +259,7 @@ def _recorded_local_daemon_process(
         ) from exc
     if state is None:
         return None
-    path_case_insensitive = os.name == "nt"
+    path_case_insensitive = _HOST_OS_NAME == "nt"
     endpoint_matches = (
         normalized_path_text(state.endpoint_path).casefold()
         == normalized_path_text(paths.daemon_endpoint_path).casefold()
@@ -445,7 +450,7 @@ class _DeadlineBoundConnection:
         self._connection = connection
         self._deadline = deadline
         self._timeout_message = timeout_message
-        self._family = family or ("AF_PIPE" if os.name == "nt" else "AF_UNIX")
+        self._family = family or ("AF_PIPE" if _HOST_OS_NAME == "nt" else "AF_UNIX")
         self._clock = clock or time.monotonic
         self._winapi = winapi
 
@@ -781,6 +786,7 @@ def _connect_unix_socket(
     clock: Callable[[], float] = time.monotonic,
     socket_factory: Callable[[int, int], Any] = socket.socket,
     connection_type: Callable[[int], Any] | None = None,
+    socket_family: int | None = None,
 ) -> Any:
     """Open one Unix-domain socket connection before an absolute deadline."""
     if connection_type is None:
@@ -792,7 +798,10 @@ def _connect_unix_socket(
     if remaining <= 0:
         raise DaemonClientError("Timed out connecting to daemon.")
 
-    unix_socket = socket_factory(socket.AF_UNIX, socket.SOCK_STREAM)
+    selected_family = getattr(socket, "AF_UNIX", None) if socket_family is None else socket_family
+    if selected_family is None:
+        raise OSError("Unix-domain sockets are unavailable on this host.")
+    unix_socket = socket_factory(selected_family, socket.SOCK_STREAM)
     try:
         unix_socket.settimeout(None if math.isinf(remaining) else remaining)
         try:
@@ -881,7 +890,7 @@ def is_daemon_live(paths: WorkspacePaths) -> bool:
 
 def _harden_private_file_permissions(path: Path) -> None:
     """Best-effort hardening for one private local file."""
-    if os.name != "nt":
+    if _HOST_OS_NAME != "nt":
         try:
             path.chmod(0o600)
         except OSError:
@@ -896,7 +905,7 @@ def _harden_private_file_permissions(path: Path) -> None:
             "stderr": subprocess.DEVNULL,
             "check": False,
         }
-        if os.name == "nt":
+        if _HOST_OS_NAME == "nt":
             kwargs["creationflags"] = windows_subprocess_creationflags(no_window=True)
         subprocess.run(
             [
@@ -1028,7 +1037,7 @@ def _wait_for_posix_daemon_group_exit(
     timeout_seconds: float = 2.0,
 ) -> None:
     """Confirm that an exited POSIX leader has no same-group descendants."""
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         return
     if (
         expected.process_group_id != expected.pid
@@ -1084,7 +1093,7 @@ def _finish_verified_daemon_exit(
 ) -> None:
     """Confirm containment drain and clean state after an exact daemon exits."""
     expected = process_record.process_identity
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         try:
             if windows_job is None:
                 ensure_windows_containment_job_stopped(
@@ -1265,7 +1274,7 @@ def _windows_kernel32() -> Any:
 
 def _acquire_startup_lock(paths: WorkspacePaths) -> bool:
     """Try to acquire the per-workspace daemon startup lock."""
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         mutex_name = _windows_startup_mutex_name(paths)
         kernel32 = _windows_kernel32()
         _configure_ctypes_function(
@@ -1311,7 +1320,7 @@ def _acquire_startup_lock(paths: WorkspacePaths) -> bool:
 
 def _release_startup_lock(paths: WorkspacePaths) -> None:
     """Release the per-workspace daemon startup lock when held."""
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         mutex_name = _windows_startup_mutex_name(paths)
         handle = _WINDOWS_STARTUP_MUTEXES.pop(mutex_name, None)
         if handle is None:
@@ -1469,7 +1478,7 @@ def _launch_contained_daemon(
     on_verified_drain: Callable[[], None] | None = None,
 ) -> ProcessIdentity:
     """Launch one daemon and release it only after its exact identity is accepted."""
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         identity = spawn_windows_contained_process(
             command[0],
             command[1:],
@@ -1857,7 +1866,7 @@ def _wait_for_prior_local_daemon_release(
             )
         time.sleep(min(remaining, 0.05))
 
-    if os.name == "nt":
+    if _HOST_OS_NAME == "nt":
         try:
             ensure_windows_containment_job_stopped(
                 process_record.containment_nonce,
@@ -1886,7 +1895,7 @@ def _reachable_daemon_matches_launch(
         raise DaemonClientError(
             "A different daemon generation answered during startup."
         )
-    if os.name != "nt":
+    if _HOST_OS_NAME != "nt":
         if process_record.process_identity != launch_identity:
             raise DaemonClientError(
                 "The daemon answering after launch has a different process identity."
@@ -1968,7 +1977,7 @@ def spawn_daemon_process(
         containment_nonce = new_process_containment_nonce()
         bootstrap_command = (
             [sys.executable, "-P", "-m", "data_engine.daemon_bootstrap"]
-            if os.name == "nt"
+            if _HOST_OS_NAME == "nt"
             else [sys.executable, "-I", "-S", _DAEMON_BOOTSTRAP_PATH]
         )
         command = [
@@ -2049,7 +2058,7 @@ def _open_verified_windows_daemon_job(
     process_record: _DaemonProcessRecord,
 ) -> WindowsKillOnCloseJob | None:
     """Retain a verified Windows Job or drain it after an exact leader race."""
-    if os.name != "nt":
+    if _HOST_OS_NAME != "nt":
         return None
     expected = process_record.process_identity
     try:

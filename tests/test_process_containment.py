@@ -50,7 +50,7 @@ def _identity(**overrides) -> ProcessIdentity:
 
 
 def _select_windows(monkeypatch) -> None:
-    monkeypatch.setattr(processes.os, "name", "nt")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "nt")
 
 
 def test_containment_nonce_is_canonical_256_bit_lowercase_hex():
@@ -65,23 +65,25 @@ def test_containment_nonce_is_canonical_256_bit_lowercase_hex():
 
 
 def test_wait_for_posix_process_group_exit_returns_when_group_is_absent(monkeypatch):
-    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(
         processes.os,
         "killpg",
         lambda group_id, selected_signal: (_ for _ in ()).throw(ProcessLookupError()),
+        raising=False,
     )
 
     assert processes.wait_for_posix_process_group_exit(321, timeout_seconds=0.0) is True
 
 
 def test_wait_for_posix_process_group_exit_reports_live_group_at_deadline(monkeypatch):
-    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "posix")
     calls = []
     monkeypatch.setattr(
         processes.os,
         "killpg",
         lambda group_id, selected_signal: calls.append((group_id, selected_signal)),
+        raising=False,
     )
 
     assert processes.wait_for_posix_process_group_exit(321, timeout_seconds=0.0) is False
@@ -89,11 +91,12 @@ def test_wait_for_posix_process_group_exit_reports_live_group_at_deadline(monkey
 
 
 def test_wait_for_posix_process_group_exit_treats_permission_error_as_live_group(monkeypatch):
-    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(
         processes.os,
         "killpg",
         lambda group_id, selected_signal: (_ for _ in ()).throw(PermissionError()),
+        raising=False,
     )
 
     assert processes.wait_for_posix_process_group_exit(321, timeout_seconds=0.0) is False
@@ -116,7 +119,7 @@ def test_windows_job_name_rejects_noncanonical_or_injected_names(nonce):
 
 
 def test_posix_termination_uses_verified_watchdog_capability_without_killpg(monkeypatch):
-    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "posix")
     expected = _identity()
     events = []
     monkeypatch.setattr(
@@ -167,10 +170,10 @@ def test_posix_termination_uses_verified_watchdog_capability_without_killpg(monk
 
 
 def test_posix_termination_wraps_watchdog_request_failure(monkeypatch):
-    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "posix")
     expected = _identity()
     monkeypatch.setattr(processes.os, "getpid", lambda: 111)
-    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111)
+    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111, raising=False)
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: expected)
     monkeypatch.setattr(
         processes,
@@ -188,10 +191,10 @@ def test_posix_termination_wraps_watchdog_request_failure(monkeypatch):
 
 
 def test_posix_termination_identity_mismatch_never_reaches_watchdog(monkeypatch):
-    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "posix")
     expected = _identity()
     monkeypatch.setattr(processes.os, "getpid", lambda: 111)
-    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111)
+    monkeypatch.setattr(processes.os, "getpgrp", lambda: 111, raising=False)
     monkeypatch.setattr(
         processes,
         "inspect_process_identity",
@@ -217,7 +220,7 @@ def test_verified_group_termination_refuses_the_pytest_process(monkeypatch):
         process_group_id=pytest_pid,
         process_session_id=pytest_pid,
     )
-    monkeypatch.setattr(processes.os, "name", "posix")
+    monkeypatch.setattr(processes, "_HOST_OS_NAME", "posix")
     monkeypatch.setattr(processes.os, "getpgrp", lambda: pytest_pid, raising=False)
     monkeypatch.setattr(processes, "inspect_process_identity", lambda pid: expected)
     monkeypatch.setattr(
