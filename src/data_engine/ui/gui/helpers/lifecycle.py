@@ -9,8 +9,15 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QApplication
 
+from data_engine.platform.paths import stable_path_identity_text
+
 if TYPE_CHECKING:
+    from data_engine.platform.workspace_models import WorkspacePaths
     from data_engine.ui.gui.app import DataEngineWindow
+
+
+def _client_session_workspace_key(paths: "WorkspacePaths") -> str:
+    return stable_path_identity_text(paths.runtime_control_db_path)
 
 
 def register_client_session(window: "DataEngineWindow") -> None:
@@ -21,6 +28,14 @@ def register_client_session(window: "DataEngineWindow") -> None:
         client_kind="ui",
         pid=os.getpid(),
     )
+    paths = window.runtime_binding.workspace_paths
+    if not paths.workspace_configured:
+        return
+    registrations = getattr(window, "_client_session_workspace_paths", None)
+    if not isinstance(registrations, dict):
+        registrations = {}
+        window._client_session_workspace_paths = registrations
+    registrations[_client_session_workspace_key(paths)] = paths
 
 
 def is_last_process_ui_window(window: "DataEngineWindow") -> bool:
@@ -38,19 +53,45 @@ def unregister_client_session_and_check_for_shutdown(
     *,
     purge_process_ui_sessions: bool = False,
 ) -> bool:
-    """Remove this UI session and return whether no local clients remain."""
-    try:
-        window.runtime_binding_service.remove_client_session(window.runtime_binding, window.client_session_id)
-        if purge_process_ui_sessions:
-            window.runtime_binding_service.purge_process_client_sessions(
-                window.runtime_binding,
-                client_kind="ui",
-                pid=os.getpid(),
-            )
-        remaining = window.runtime_binding_service.count_live_client_sessions(window.runtime_binding)
-        return remaining == 0
-    except Exception:
-        return False
+    """Remove this UI session from every workspace visited by the window."""
+    current_binding = window.runtime_binding
+    current_paths = current_binding.workspace_paths
+    current_key = _client_session_workspace_key(current_paths)
+    registrations = getattr(window, "_client_session_workspace_paths", None)
+    registered_paths = dict(registrations) if isinstance(registrations, dict) else {}
+    if current_paths.workspace_configured:
+        registered_paths[current_key] = current_paths
+
+    current_workspace_has_no_clients = False
+    for workspace_key, paths in registered_paths.items():
+        binding = current_binding if workspace_key == current_key else None
+        opened_binding = False
+        try:
+            if binding is None:
+                binding = window.runtime_binding_service.open_binding(paths)
+                opened_binding = True
+            window.runtime_binding_service.remove_client_session(binding, window.client_session_id)
+            if purge_process_ui_sessions:
+                window.runtime_binding_service.purge_process_client_sessions(
+                    binding,
+                    client_kind="ui",
+                    pid=os.getpid(),
+                )
+            remaining = window.runtime_binding_service.count_live_client_sessions(binding)
+            if workspace_key == current_key:
+                current_workspace_has_no_clients = remaining == 0
+        except Exception:
+            if workspace_key == current_key:
+                current_workspace_has_no_clients = False
+        finally:
+            if opened_binding and binding is not None:
+                try:
+                    window.runtime_binding_service.close_binding(binding)
+                except Exception:
+                    pass
+    if isinstance(registrations, dict):
+        registrations.clear()
+    return current_workspace_has_no_clients
 
 
 def shutdown_daemon_on_close(window: "DataEngineWindow") -> None:

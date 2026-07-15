@@ -1434,6 +1434,7 @@ def test_switching_workspace_immediately_syncs_daemon_state_for_selected_workspa
         discover_workspaces_func=lambda app_root=None, workspace_collection_root=None: discovered,
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
     )
+    daemon_start_calls = _attach_call_recorder(window, "_ensure_daemon_started")
     sync_calls = _attach_call_recorder(window, "_sync_from_daemon")
     try:
         window._auto_daemon_enabled = True
@@ -1444,6 +1445,7 @@ def test_switching_workspace_immediately_syncs_daemon_state_for_selected_workspa
         qapp.processEvents()
 
         assert window.workspace_paths.workspace_id == "docs2"
+        assert len(daemon_start_calls) == 1
         assert len(sync_calls) == 1
     finally:
         _dispose_window(qapp, window)
@@ -5489,7 +5491,7 @@ def test_rebind_workspace_context_recreates_daemon_subscription_and_clears_log_c
         _dispose_window(qapp, window)
 
 
-def test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon(qapp, monkeypatch, tmp_path):
+def test_rebind_workspace_context_retains_old_workspace_client_session(qapp, monkeypatch, tmp_path):
     del monkeypatch
     workspace_collection_root = tmp_path / "workspaces"
     docs_root = workspace_collection_root / "docs"
@@ -5524,7 +5526,6 @@ def test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon(q
         resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
     )
     try:
-        old_binding = window.runtime_binding
         original_remove_client_session = window.runtime_binding_service.remove_client_session
 
         def _record_remove_client_session(binding, client_id):
@@ -5535,7 +5536,62 @@ def test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon(q
         window._rebind_workspace_context(workspace_id="docs2")
 
         assert shutdown_calls == []
-        assert remove_calls == [(old_binding, window.client_session_id)]
+        assert remove_calls == []
+        assert {
+            paths.workspace_id for paths in window._client_session_workspace_paths.values()
+        } == {"docs", "docs2"}
+    finally:
+        _dispose_window(qapp, window)
+
+
+def test_unregister_client_session_cleans_every_visited_workspace(qapp, monkeypatch, tmp_path):
+    workspace_collection_root = tmp_path / "workspaces"
+    docs_root = workspace_collection_root / "docs"
+    docs2_root = workspace_collection_root / "docs2"
+    (docs_root / "flow_modules").mkdir(parents=True)
+    (docs2_root / "flow_modules").mkdir(parents=True)
+    discovered = (
+        DiscoveredWorkspace(workspace_id="docs", workspace_root=docs_root),
+        DiscoveredWorkspace(workspace_id="docs2", workspace_root=docs2_root),
+    )
+
+    def _resolve(workspace_id=None):
+        target = docs_root if workspace_id in (None, "docs") else docs2_root
+        target_id = "docs" if workspace_id in (None, "docs") else "docs2"
+        return resolve_workspace_paths(workspace_root=target, workspace_id=target_id)
+
+    window = _make_window(
+        discover_workspaces_func=lambda app_root=None, workspace_collection_root=None: discovered,
+        resolve_workspace_paths_func=lambda workspace_id=None, **kwargs: _resolve(workspace_id),
+    )
+    removed_workspaces: list[str] = []
+    purged_workspaces: list[str] = []
+    try:
+        window._rebind_workspace_context(workspace_id="docs2")
+        monkeypatch.setattr(
+            window.runtime_binding_service,
+            "remove_client_session",
+            lambda binding, client_id: removed_workspaces.append(binding.workspace_paths.workspace_id),
+        )
+        monkeypatch.setattr(
+            window.runtime_binding_service,
+            "purge_process_client_sessions",
+            lambda binding, **kwargs: purged_workspaces.append(binding.workspace_paths.workspace_id),
+        )
+        monkeypatch.setattr(
+            window.runtime_binding_service,
+            "count_live_client_sessions",
+            lambda binding: 0,
+        )
+
+        should_shutdown_current = window._unregister_client_session_and_check_for_shutdown(
+            purge_process_ui_sessions=True,
+        )
+
+        assert should_shutdown_current is True
+        assert removed_workspaces == ["docs", "docs2"]
+        assert purged_workspaces == ["docs", "docs2"]
+        assert window._client_session_workspace_paths == {}
     finally:
         _dispose_window(qapp, window)
 

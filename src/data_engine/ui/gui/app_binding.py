@@ -106,6 +106,7 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
         discovered_workspace_ids=(item.workspace_id for item in discovered),
     )
     window.client_session_id = uuid4().hex
+    window._client_session_workspace_paths = {}
     window.settings_workspace_target_id = window.workspace_paths.workspace_id
     window._settings_workspace_target_pinned = False
 

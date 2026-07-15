@@ -49,20 +49,6 @@ def _sync_workspace_selector(window: "DataEngineWindow") -> None:
                 settings_selector.blockSignals(False)
 
 
-def _shutdown_old_workspace_if_orphaned(window: "DataEngineWindow", old_binding) -> None:
-    try:
-        remaining = window.runtime_binding_service.count_live_client_sessions(old_binding)
-    except Exception:
-        return
-    if remaining != 0:
-        return
-    # Let the daemon own its own lifetime once this UI detaches. The daemon
-    # already knows whether active engine/manual work is still running, while the
-    # UI rebind path only knows the client count and would otherwise stop active
-    # work when switching away from a busy workspace.
-    return
-
-
 def rebind_workspace_context(
     window: "DataEngineWindow",
     *,
@@ -105,10 +91,6 @@ def rebind_workspace_context(
         manager=window.runtime_binding.daemon_manager,
         clock=window._monotonic,
     )
-    try:
-        window.runtime_binding_service.remove_client_session(old_binding, window.client_session_id)
-    except Exception:
-        pass
     window.runtime_binding_service.close_binding(old_binding)
     register_client_session(window)
     window._ui_timing_log_path = (
@@ -163,6 +145,7 @@ def rebind_workspace_context(
     window._refresh_action_buttons()
     initialize_docs_view(window)
     if window._auto_daemon_enabled:
+        window._ensure_daemon_started()
         window._ensure_daemon_wait_worker()
         window._sync_from_daemon()
 

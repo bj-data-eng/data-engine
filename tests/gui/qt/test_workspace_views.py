@@ -13,7 +13,7 @@ from .support import (
     test_refresh_button_clears_flows_without_spawning_daemon_when_workspace_has_no_flow_modules,
     test_refresh_button_reloads_flows,
     test_refresh_button_still_reloads_locally_when_daemon_refresh_fails,
-    test_rebind_workspace_context_does_not_force_shutdown_old_workspace_daemon,
+    test_rebind_workspace_context_retains_old_workspace_client_session,
     test_saving_workspace_collection_root_override_reloads_visible_log_runs,
     test_settings_browse_workspace_collection_root_updates_binding_immediately,
     test_settings_can_rebind_workspace_root_while_runtime_is_active,
@@ -25,6 +25,7 @@ from .support import (
     test_switching_workspaces_invalidates_stale_deferred_modal_callbacks,
     test_switching_workspaces_reloads_visible_log_runs_from_new_workspace,
     test_sync_from_daemon_immediately_clears_ui_when_current_workspace_disappears,
+    test_unregister_client_session_cleans_every_visited_workspace,
     test_workspace_selector_shows_placeholder_when_no_workspaces_are_discovered,
     test_workspace_switch_remains_available_while_current_workspace_runtime_is_active,
 )

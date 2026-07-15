@@ -639,7 +639,12 @@ def test_real_windows_job_spawn_supports_verified_tree_termination(tmp_path):
         )
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
-            if inspect_process_identity(launched.pid) != launched.process_identity:
+            try:
+                leader_exited = inspect_process_identity(launched.pid) != launched.process_identity
+            except ProcessInspectionError:
+                time.sleep(0.01)
+                continue
+            if leader_exited:
                 break
             time.sleep(0.01)
         assert inspect_process_identity(launched.pid) != launched.process_identity
