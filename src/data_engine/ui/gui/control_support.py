@@ -103,8 +103,8 @@ class GuiControlMixin:
     def _apply_daemon_update_batch(self: "DataEngineWindow", payload: object = None) -> None:
         self.runtime_controller.apply_daemon_update_batch(self, payload)
 
-    def _refresh_log_view(self: "DataEngineWindow", *, force_scroll_to_bottom: bool = False) -> None:
-        present_refresh_log_view(self, force_scroll_to_bottom=force_scroll_to_bottom)
+    def _refresh_log_view(self: "DataEngineWindow") -> None:
+        present_refresh_log_view(self)
 
     def _add_log_run_item(self: "DataEngineWindow", run_group: FlowRunState) -> None:
         present_add_log_run_item(self, run_group)

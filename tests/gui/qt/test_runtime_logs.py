@@ -2,8 +2,7 @@
 
 from .support import (
     test_finish_run_does_not_show_modal_for_automated_flow_failure,
-    test_live_log_refresh_does_not_snap_when_near_bottom_but_not_at_end,
-    test_live_log_refresh_preserves_scroll_position_when_not_at_bottom,
+    test_refresh_log_view_loads_newest_runs_at_top,
     test_log_view_limits_visible_run_history_for_busy_flow,
     test_poll_log_queue_batches_selected_flow_refresh,
     test_poll_log_queue_yields_when_backlog_exceeds_tick_limit,

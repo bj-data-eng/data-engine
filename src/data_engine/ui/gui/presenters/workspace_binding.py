@@ -141,7 +141,7 @@ def rebind_workspace_context(
     refresh_workspace_root_controls(window)
     window._load_flows()
     window._refresh_debug_artifacts()
-    window._refresh_log_view(force_scroll_to_bottom=True)
+    window._refresh_log_view()
     window._refresh_action_buttons()
     initialize_docs_view(window)
     if window._auto_daemon_enabled:

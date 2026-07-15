@@ -61,7 +61,6 @@ from data_engine.domain import FlowLogEntry
 from data_engine.domain import RuntimeStepEvent, parse_runtime_event
 from data_engine.views.models import QtFlowCard
 from data_engine.views.logs import FlowLogStore
-from data_engine.ui.gui.presenters.logs import next_log_scroll_value
 from data_engine.ui.gui.theme import stylesheet, theme_button_text, toggle_theme_name
 from data_engine.ui.gui.widgets.logs import build_log_run_widget
 from data_engine.ui.gui.widgets.sidebar import build_flow_row_widget, build_group_row_widget
@@ -1571,7 +1570,7 @@ def test_switching_workspaces_reloads_visible_log_runs_from_new_workspace(qapp, 
                 ),
             )
         )
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         assert window.log_view.count() == 1
         assert [group.source_label for group in window.log_store.runs_for_flow(flow_name)] == ["docs.xlsx"]
@@ -1612,12 +1611,12 @@ def test_switching_workspaces_reloads_visible_log_runs_from_new_workspace(qapp, 
         window.workspace_selector.setCurrentIndex(target_index)
         qapp.processEvents()
         window.selected_flow_name = flow_name
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         assert window.workspace_paths.workspace_id == "docs2"
         assert window.log_store is replacement_store
         assert [group.source_label for group in window.log_store.runs_for_flow(flow_name)] == ["docs2_a.xlsx", "docs2_b.xlsx"]
-        assert _visible_log_run_primary_labels(window) == ["docs2_a.xlsx", "docs2_b.xlsx"]
+        assert _visible_log_run_primary_labels(window) == ["docs2_b.xlsx", "docs2_a.xlsx"]
     finally:
         _dispose_window(qapp, window)
 
@@ -1665,7 +1664,7 @@ def test_switching_to_workspace_with_no_flows_clears_grouped_log_pane(qapp, monk
                 ),
             )
         )
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         assert window.log_view.count() == 1
         assert _visible_log_run_primary_labels(window) == ["docs.xlsx"]
@@ -1820,7 +1819,7 @@ def test_saving_workspace_collection_root_override_reloads_visible_log_runs(qapp
                 ),
             )
         )
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         assert window.log_view.count() == 1
         assert [group.source_label for group in window.log_store.runs_for_flow(flow_name)] == ["startup.xlsx"]
@@ -1859,12 +1858,12 @@ def test_saving_workspace_collection_root_override_reloads_visible_log_runs(qapp
         window.browse_workspace_root_button.click()
         window._flush_deferred_ui_updates()
         window.selected_flow_name = flow_name
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         assert window.workspace_paths.workspace_collection_root == override_root.resolve()
         assert window.log_store is replacement_store
         assert [group.source_label for group in window.log_store.runs_for_flow(flow_name)] == ["override_a.xlsx", "override_b.xlsx"]
-        assert _visible_log_run_primary_labels(window) == ["override_a.xlsx", "override_b.xlsx"]
+        assert _visible_log_run_primary_labels(window) == ["override_b.xlsx", "override_a.xlsx"]
     finally:
         _dispose_window(qapp, window)
 
@@ -5863,24 +5862,40 @@ def test_show_run_error_details_uses_persisted_run_error_for_flow_level_failure(
         _dispose_window(qapp, window)
 
 
-def test_live_log_refresh_preserves_scroll_position_when_not_at_bottom(qapp, monkeypatch):
-    del qapp, monkeypatch
+def test_refresh_log_view_loads_newest_runs_at_top(qapp, monkeypatch):
+    window = _make_window()
 
-    assert next_log_scroll_value(
-        previous_value=40,
-        previous_maximum=100,
-        current_maximum=120,
-    ) == 40
+    def _run(run_id: str, display_label: str) -> FlowRunState:
+        return FlowRunState(
+            key=("poller", run_id),
+            display_label=display_label,
+            source_label=f"{run_id}.xlsx",
+            status="success",
+            elapsed_seconds=1.0,
+            summary_entry=None,
+            steps=(),
+            entries=(),
+        )
 
+    older_run = _run("run-old", "2026-04-20 09:00:00 AM")
+    newer_run = _run("run-new", "2026-04-20 10:00:00 AM")
+    monkeypatch.setattr(
+        window.history_query_service,
+        "list_flow_runs_from_ledger",
+        lambda _ledger, *, flow_name=None, limit=50: (older_run, newer_run),
+    )
+    try:
+        window.selected_flow_name = "poller"
 
-def test_live_log_refresh_does_not_snap_when_near_bottom_but_not_at_end(qapp, monkeypatch):
-    del qapp, monkeypatch
+        window._refresh_log_view()
 
-    assert next_log_scroll_value(
-        previous_value=98,
-        previous_maximum=100,
-        current_maximum=120,
-    ) == 98
+        visible_run_ids = [
+            window.log_view.run_group(window.log_view.item(index)).key[1]
+            for index in range(window.log_view.count())
+        ]
+        assert visible_run_ids == ["run-new", "run-old"]
+    finally:
+        _dispose_window(qapp, window)
 
 
 def test_set_flow_states_skips_sidebar_rebuild_when_state_is_unchanged(qapp, monkeypatch):
@@ -5939,10 +5954,10 @@ def test_poll_log_queue_batches_selected_flow_refresh(qapp, monkeypatch):
     refresh_calls = 0
     original = window._refresh_log_view
 
-    def counting_refresh(*, force_scroll_to_bottom: bool = False):
+    def counting_refresh():
         nonlocal refresh_calls
         refresh_calls += 1
-        return original(force_scroll_to_bottom=force_scroll_to_bottom)
+        return original()
 
     monkeypatch.setattr(window, "_refresh_log_view", counting_refresh)
     try:
@@ -6126,10 +6141,10 @@ def test_refresh_log_view_skips_row_rebuild_when_visible_runs_are_unchanged(qapp
 
         monkeypatch.setattr(log_presenter, "add_log_run_item", counting_add)
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
         first_item = window.log_view.item(0)
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
         second_item = window.log_view.item(0)
 
         assert add_calls == 1
@@ -6205,11 +6220,11 @@ def test_refresh_log_view_reloads_ledger_runs_when_log_store_is_unchanged(qapp, 
             list_flow_runs_from_ledger,
         )
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
         item = window.log_view.item(0)
         first_group = window.log_view.run_group(item)
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
         second_group = window.log_view.run_group(item)
 
         assert first_group is not None and first_group.status == "started"
@@ -6285,11 +6300,11 @@ def test_refresh_log_view_reloads_legacy_log_runs_without_cached_groups(qapp, mo
 
         monkeypatch.setattr(window.history_query_service, "list_flow_runs", list_flow_runs)
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
         item = window.log_view.item(0)
         first_group = window.log_view.run_group(item)
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
         second_group = window.log_view.run_group(item)
 
         assert first_group is not None and first_group.status == "started"
@@ -6328,7 +6343,7 @@ def test_refresh_log_view_refreshes_runtime_cache_before_querying_ledger_runs(qa
         finally:
             direct_ledger.close()
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         assert window.log_view.count() == 1
         item = window.log_view.item(0)
@@ -6749,7 +6764,7 @@ def test_finish_run_reloads_visible_run_history_from_empty_state(qapp, monkeypat
     window = _make_window()
     try:
         window._select_flow("manual_review")
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
         assert window.log_view.count() == 0
 
         reloaded = {"called": False}
@@ -6813,7 +6828,7 @@ def test_refresh_log_view_updates_duration_when_live_row_finishes_in_place(qapp,
             )
         )
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         item = window.log_view.item(0)
         assert item is not None
@@ -6835,7 +6850,7 @@ def test_refresh_log_view_updates_duration_when_live_row_finishes_in_place(qapp,
             )
         )
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         assert window.log_view.duration_text(item) == "9.9s"
     finally:
@@ -6868,7 +6883,7 @@ def test_refresh_log_view_updates_only_changed_rows_when_one_live_duration_chang
                 )
             )
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         from data_engine.ui.gui.presenters import logs as log_presenter
 
@@ -6897,9 +6912,9 @@ def test_refresh_log_view_updates_only_changed_rows_when_one_live_duration_chang
             )
         )
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
-        assert updated_indexes == [2]
+        assert updated_indexes == [0]
     finally:
         _dispose_window(qapp, window)
 
@@ -6977,7 +6992,7 @@ def test_refresh_log_view_success_rows_ignore_transparent_log_button(qapp, monke
             )
         )
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         item = window.log_view.item(0)
         assert item is not None
@@ -7004,7 +7019,7 @@ def test_refresh_log_view_success_rows_ignore_transparent_log_button(qapp, monke
             )
         )
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
         QTest.mouseClick(window.log_view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, click_point)
 
         assert shown == [flow_name]
@@ -7038,7 +7053,7 @@ def test_refresh_log_view_failed_button_opens_error_details_directly(qapp, monke
             )
         )
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         item = window.log_view.item(0)
         assert item is not None
@@ -7960,7 +7975,7 @@ def test_refresh_log_view_prefers_daemon_live_runs_for_parallel_flow(qapp, monke
             },
         )
 
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
         assert window.log_view.count() == 4
     finally:

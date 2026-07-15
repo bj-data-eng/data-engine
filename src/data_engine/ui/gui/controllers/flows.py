@@ -61,7 +61,7 @@ class _GuiWorkspaceCatalogController:
             ).with_selected_flow_name(None)
             self.populate_flow_tree(window)
             presentation.refresh_selection(window, None)
-            window._refresh_log_view(force_scroll_to_bottom=True)
+            window._refresh_log_view()
             presentation.refresh_action_buttons(window)
             presentation.refresh_summary(window)
             window._refresh_workspace_visibility_panel()
@@ -75,7 +75,7 @@ class _GuiWorkspaceCatalogController:
             self.populate_flow_tree(window)
             window._append_log_line(f"Failed to load flows: {message}")
             presentation.refresh_selection(window, None)
-            window._refresh_log_view(force_scroll_to_bottom=True)
+            window._refresh_log_view()
             presentation.refresh_action_buttons(window)
             presentation.refresh_summary(window)
             window._refresh_workspace_visibility_panel()
@@ -424,12 +424,12 @@ class _GuiFlowPresentationController:
             self.refresh_selection(window, None)
             self.refresh_action_buttons(window)
             window._refresh_sidebar_selection()
-            window._refresh_log_view(force_scroll_to_bottom=True)
+            window._refresh_log_view()
             return
         self.refresh_selection(window, presentation.selected_card)
         self.refresh_action_buttons(window)
         window._refresh_sidebar_selection()
-        window._refresh_log_view(force_scroll_to_bottom=True)
+        window._refresh_log_view()
 
     def refresh_selection(self, window: "DataEngineWindow", card: QtFlowCard | None) -> None:
         workspace_snapshot = getattr(window, "workspace_snapshot", None)
