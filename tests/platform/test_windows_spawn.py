@@ -67,6 +67,7 @@ def _identity() -> ProcessIdentity:
 
 
 def _select_windows(monkeypatch) -> None:
+    monkeypatch.setattr(windows_spawn, "_HOST_OS_NAME", "nt")
     monkeypatch.setattr(
         windows_spawn,
         "os",
