@@ -44,6 +44,11 @@ def _default_cli_dependencies() -> CliDependencies:
 
 
 def main(argv: list[str] | None = None, *, dependencies: CliDependencies | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if getattr(sys, "frozen", False) and len(arguments) == 3 and arguments[0] == "--internal-duckdb-maintenance":
+        from data_engine.helpers.duckdb._maintenance_worker import main as compact_worker_main
+
+        return compact_worker_main(arguments[1], Path(arguments[2]))
     parser = build_parser()
     args = parser.parse_args(argv)
     dependencies = dependencies or _default_cli_dependencies()

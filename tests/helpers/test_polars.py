@@ -620,6 +620,46 @@ def test_propagate_value_relative_selectors_return_null_when_adjacent_row_is_mis
     assert result.to_dict(as_series=False)["after_last"] == ["done", "done", None, None]
 
 
+@pytest.mark.parametrize("lazy", [False, True])
+@pytest.mark.parametrize("descending", [False, True])
+@pytest.mark.parametrize("predicate", ["default", "true", "false", "null", "scalar_expression"])
+@pytest.mark.parametrize("which", ["first", "last", "before_first", "after_first", "before_last", "after_last"])
+def test_propagate_value_broadcasts_scalar_predicates_per_group(lazy, descending, predicate, which):
+    frame = pl.DataFrame(
+        {
+            "group": ["a", "b", "a", "c", "a", "b"],
+            "order": [3, 2, 1, 1, 2, 1],
+            "value": ["a3", "b2", "a1", "c1", "a2", "b1"],
+        }
+    )
+    where = {
+        "default": None,
+        "true": pl.lit(True),
+        "false": pl.lit(False),
+        "null": pl.lit(None, dtype=pl.Boolean),
+        "scalar_expression": pl.col("order").count() > 0,
+    }[predicate]
+    incoming = frame.lazy() if lazy else frame
+    result = incoming.with_columns(
+        selected=incoming.de.propagate_value(
+            "value", over="group", sort_by="order", which=which, where=where, descending=descending
+        )
+    )
+    if lazy:
+        result = result.collect()
+    expected_by_group = {}
+    for group in ("a", "b", "c"):
+        values = frame.filter(pl.col("group") == group).sort("order", descending=descending)["value"].to_list()
+        index = {"first": 0, "last": -1, "after_first": 1, "before_last": -2}.get(which)
+        expected_by_group[group] = (
+            values[index]
+            if predicate not in {"false", "null"} and index is not None and -len(values) <= index < len(values)
+            else None
+        )
+    assert result["selected"].to_list() == [expected_by_group[group] for group in frame["group"]]
+    assert_frame_equal(result.select(frame.columns), frame)
+
+
 def test_propagate_value_rejects_unknown_selector():
     with pytest.raises(ValueError, match="which"):
         propagate_value("status", over="claim_id", sort_by="step_index", which="middle")

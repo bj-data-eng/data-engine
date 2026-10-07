@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import polars as pl
+
 from data_engine.helpers.duckdb import duckdb
 from data_engine.helpers.duckdb._common import FrameLike
 from data_engine.helpers.duckdb._common import _index_name
@@ -137,7 +139,13 @@ def attach_dimension(
     key_column: str = "dimension_key",
     drop_key: bool = False,
 ):
-    """Attach an existing surrogate key mapping table to an input dataframe."""
+    """Attach an existing surrogate key mapping table to an input dataframe.
+
+    Natural-key components match nulls to nulls, including composite keys.
+    The result preserves input row order and count, including repeated keys;
+    unmatched keys receive a null surrogate key. ``drop_key=True`` removes
+    the natural-key columns after attachment.
+    """
 
     df = _materialize_frame(df)
 
@@ -154,7 +162,9 @@ def attach_dimension(
         select=[*join_columns, key_column],
     ).unique(subset=list(join_columns), maintain_order=True)
 
-    normalized = df.join(mapping, on=list(join_columns), how="left", validate="m:1")
+    normalized = df.join(
+        mapping, on=list(join_columns), how="left", validate="m:1", nulls_equal=True, maintain_order="left"
+    )
     if drop_key:
         normalized = normalized.drop(list(join_columns))
     return normalized
@@ -213,7 +223,9 @@ def denormalize_columns(
         select=[normalized_key_column, *selected_columns],
     ).unique(subset=[normalized_key_column], maintain_order=True)
 
-    denormalized = df.join(mapping, on=[normalized_key_column], how="left", validate="m:1")
+    denormalized = df.join(
+        mapping, on=[normalized_key_column], how="left", validate="m:1", maintain_order="left"
+    )
     if drop_key:
         denormalized = denormalized.drop([normalized_key_column])
     return denormalized
@@ -228,8 +240,61 @@ def normalize_columns(
     key_column: str = "dimension_key",
     drop_key: bool = True,
     returns: str | None = "df",
-):
-    """Build missing surrogate keys and attach them back onto the input dataframe."""
+) -> pl.DataFrame | None:
+    """Build missing surrogate keys and attach them back onto the input dataframe.
+
+    Each distinct natural-key combination, including null components, receives
+    a persistent surrogate key. Repeated calls reuse existing keys. The default
+    ``returns="df"`` preserves input row order and count and removes natural-key
+    columns when ``drop_key=True``. Use ``returns="map"`` for the distinct
+    mapping or ``returns=None`` to persist it without returning a dataframe.
+
+    Parameters
+    ----------
+    db_path : str | Path
+        DuckDB database file path.
+    table : str
+        Dimension table name, optionally schema-qualified.
+    df : FrameLike
+        Input dataframe or lazy frame to collect and normalize.
+    on : str | list[str] | tuple[str, ...]
+        Natural-key columns, matched with null-safe equality.
+    key_column : str
+        Surrogate key column to create and attach.
+    drop_key : bool
+        Whether to remove natural-key columns from normalized input rows.
+    returns : str | None
+        ``"df"`` for normalized input rows, ``"map"`` for the distinct mapping,
+        or ``None`` to persist the dimension without returning rows.
+
+    Returns
+    -------
+    pl.DataFrame | None
+        Collected normalized dataframe, mapping dataframe, or ``None`` as
+        selected by ``returns``.
+
+    Raises
+    ------
+    ValueError
+        If ``returns`` is unsupported or the natural/key columns are invalid.
+    RuntimeError
+        If dimension creation unexpectedly fails to return a mapping.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import polars as pl
+        from data_engine.helpers.duckdb import normalize_columns
+
+        normalized = normalize_columns(
+            "output/report.duckdb",
+            "dim_member",
+            df=pl.DataFrame({"member": ["a", None, "a"], "amount": [10, 20, 30]}),
+            on="member",
+            key_column="member_key",
+        )
+    """
 
     if returns not in {"df", "map", None}:
         raise ValueError('returns must be "df", "map", or None.')

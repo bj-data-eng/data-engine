@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
 
 from openpyxl import Workbook
 from openpyxl import load_workbook
@@ -9,6 +10,8 @@ from openpyxl.worksheet.table import TableStyleInfo
 import polars as pl
 from polars.testing import assert_frame_equal
 import pytest
+import xlsxwriter
+from xlsxwriter.worksheet import Worksheet
 
 from data_engine.helpers import ExcelSheet
 from data_engine.helpers import compose_excel
@@ -420,3 +423,206 @@ def test_compose_excel_rejects_non_polars_frames(tmp_path: Path):
         )
 
     assert list(tmp_path.glob(".report.xlsx.*.tmp.xlsx")) == []
+
+
+@pytest.mark.parametrize("template_mode", [False, True])
+@pytest.mark.parametrize("name", ["R", "r", "C", "c", "R1C1", "r123c456", "C1R1", "A1", "XFD1048576", " claims "])
+def test_invalid_table_names_preserve_existing_output(tmp_path, template_mode, name):
+    target = tmp_path / "report.xlsx"
+    compose_excel(target, [ExcelSheet("Claims", pl.DataFrame({"id": [7]}), table_name="claims")])
+    before = target.read_bytes()
+    with pytest.raises(ValueError, match="table name"):
+        compose_excel(
+            target,
+            [ExcelSheet("Claims", pl.DataFrame({"id": [1]}), table_name=name)],
+            template=target if template_mode else None,
+        )
+    assert target.read_bytes() == before
+    assert list(tmp_path.glob(".report.xlsx.*.tmp.xlsx")) == []
+
+
+@pytest.mark.parametrize("failure", ["warning", "return_code", "silent_skip"])
+@pytest.mark.parametrize("named_table", [False, True])
+def test_failed_table_writes_preserve_existing_output(tmp_path, monkeypatch, failure, named_table):
+    target = tmp_path / "report.xlsx"
+    compose_excel(target, [ExcelSheet("Claims", pl.DataFrame({"id": [7]}), table_name="claims")])
+    before = target.read_bytes()
+    real_add_table = Worksheet.add_table
+
+    def failing_add_table(self, *args, **kwargs):
+        if failure == "warning":
+            real_add_table(self, *args, **kwargs)
+            warnings.warn("table write warning", UserWarning, stacklevel=2)
+            return 0
+        return -2 if failure == "return_code" else 0
+
+    monkeypatch.setattr(Worksheet, "add_table", failing_add_table)
+    with pytest.raises((ValueError, UserWarning), match="table"):
+        compose_excel(
+            target,
+            [ExcelSheet("Claims", pl.DataFrame({"id": [1]}), table_name="new_claims" if named_table else None)],
+        )
+    assert target.read_bytes() == before
+    assert list(tmp_path.glob(".report.xlsx.*.tmp.xlsx")) == []
+
+
+@pytest.mark.parametrize("template_mode", [False, True])
+def test_duplicate_case_insensitive_headers_fail_without_publication(tmp_path, template_mode):
+    target = tmp_path / "report.xlsx"
+    compose_excel(target, [ExcelSheet("Claims", pl.DataFrame({"id": [7]}), table_name="claims")])
+    before = target.read_bytes()
+    with pytest.raises((ValueError, UserWarning), match="header"):
+        compose_excel(
+            target,
+            [ExcelSheet("Claims", pl.DataFrame({"id": [1], "ID": [2]}), table_name="new_claims")],
+            template=target if template_mode else None,
+        )
+    assert target.read_bytes() == before
+    assert list(tmp_path.glob(".report.xlsx.*.tmp.xlsx")) == []
+
+
+@pytest.mark.parametrize("failure", ["warning", "silent_skip"])
+def test_failed_template_table_writes_preserve_output(tmp_path, monkeypatch, failure):
+    from openpyxl.worksheet.worksheet import Worksheet as TemplateWorksheet
+
+    target = tmp_path / "report.xlsx"
+    compose_excel(target, [ExcelSheet("Claims", pl.DataFrame({"id": [7]}), table_name="claims")])
+    before = target.read_bytes()
+    real_add_table = TemplateWorksheet.add_table
+
+    def failing_add_table(self, table):
+        if table.displayName != "new_claims":
+            return real_add_table(self, table)
+        if failure == "warning":
+            real_add_table(self, table)
+            warnings.warn("table write warning", UserWarning, stacklevel=2)
+
+    monkeypatch.setattr(TemplateWorksheet, "add_table", failing_add_table)
+    with pytest.raises((ValueError, UserWarning), match="table"):
+        compose_excel(
+            target,
+            [ExcelSheet("Claims", pl.DataFrame({"id": [1]}), table_name="new_claims")],
+            template=target,
+        )
+    assert target.read_bytes() == before
+    assert list(tmp_path.glob(".report.xlsx.*.tmp.xlsx")) == []
+
+
+def test_missing_serialized_table_preserves_output(tmp_path, monkeypatch):
+    target = tmp_path / "report.xlsx"
+    compose_excel(target, [ExcelSheet("Claims", pl.DataFrame({"id": [7]}), table_name="claims")])
+    before = target.read_bytes()
+    real_close = xlsxwriter.Workbook.close
+
+    def close_without_tables(self):
+        for worksheet in self.worksheets():
+            worksheet.tables.clear()
+        return real_close(self)
+
+    monkeypatch.setattr(xlsxwriter.Workbook, "close", close_without_tables)
+    with pytest.raises(ValueError, match="table output is incomplete"):
+        compose_excel(target, [ExcelSheet("Claims", pl.DataFrame({"id": [1]}), table_name="new_claims")])
+    assert target.read_bytes() == before
+    assert list(tmp_path.glob(".report.xlsx.*.tmp.xlsx")) == []
+
+
+def test_fresh_workbook_preserves_explicit_formula_options(tmp_path):
+    target = tmp_path / "formulas.xlsx"
+    compose_excel(
+        target,
+        [
+            ExcelSheet(
+                "Claims",
+                pl.DataFrame({"amount": [2], "text": ["=1+2"]}),
+                table_name="claims",
+                write_options={"formulas": {"double": "=[@amount]*2"}},
+            )
+        ],
+    )
+    workbook = load_workbook(target, data_only=False)
+    try:
+        assert workbook["Claims"]["B2"].data_type == "s"
+        assert workbook["Claims"]["C2"].data_type == "f"
+    finally:
+        workbook.close()
+
+
+@pytest.mark.parametrize("template_mode", [False, True])
+@pytest.mark.parametrize("empty", [False, True])
+def test_fresh_and_template_empty_or_nullable_data_round_trip(tmp_path, template_mode, empty):
+    template = tmp_path / "template.xlsx"
+    workbook = Workbook()
+    workbook.active.title = "Claims"
+    workbook.save(template)
+    workbook.close()
+    frame = pl.DataFrame({"text": [None, "=1+2"], "amount": [3, None]})
+    if empty:
+        frame = frame.head(0)
+    target = tmp_path / "report.xlsx"
+    compose_excel(target, [ExcelSheet("Claims", frame, table_name="claims")], template=template if template_mode else None)
+    result = load_workbook(target)
+    try:
+        worksheet = result["Claims"]
+        assert worksheet.tables["claims"].ref == ("A1:B2" if empty else "A1:B3")
+        assert [worksheet.cell(1, column).value for column in (1, 2)] == frame.columns
+        for row_offset, row in enumerate(frame.rows(), start=2):
+            assert tuple(worksheet.cell(row_offset, column).value for column in (1, 2)) == row
+        if not empty:
+            assert worksheet["A3"].data_type == "s"
+    finally:
+        result.close()
+
+
+@pytest.mark.parametrize("template_mode", [False, True])
+def test_invalid_table_name_does_not_create_output(tmp_path, template_mode):
+    template = tmp_path / "template.xlsx"
+    workbook = Workbook()
+    workbook.save(template)
+    workbook.close()
+    target = tmp_path / "report.xlsx"
+    with pytest.raises(ValueError, match="reserved"):
+        compose_excel(
+            target,
+            [ExcelSheet("Claims", pl.DataFrame({"id": [1]}), table_name="r")],
+            template=template if template_mode else None,
+        )
+    assert not target.exists()
+    assert list(tmp_path.glob(".report.xlsx.*.tmp.xlsx")) == []
+
+
+@pytest.mark.parametrize("lazy", [False, True])
+@pytest.mark.parametrize("table_name", [None, "claims"])
+@pytest.mark.parametrize("position", ["A1", (2, 1)])
+def test_fresh_and_template_strings_are_literal_text(tmp_path, lazy, table_name, position):
+    template = tmp_path / "template.xlsx"
+    workbook = Workbook()
+    workbook.active.title = "Claims"
+    workbook["Claims"]["A1"] = "=99+1"
+    workbook["Claims"]["H20"] = "=SUM(A1:A2)"
+    workbook.create_sheet("Summary")["A1"] = "=Claims!H20"
+    workbook.save(template)
+    workbook.close()
+    before = template.read_bytes()
+    values = ["=1+2", "=SUM(A1:A2)", "{=1+2}", "#DIV/0!", "+1+2", "-1+2", "@SUM(A1:A2)", "001", "plain"]
+    frame = pl.DataFrame({"=header": values, "#N/A": values[::-1]})
+    spec = ExcelSheet("Claims", frame.lazy() if lazy else frame, table_name=table_name, position=position)
+    outputs = [tmp_path / "fresh.xlsx", tmp_path / "from_template.xlsx"]
+    compose_excel(outputs[0], [spec])
+    compose_excel(outputs[1], [spec], template=template)
+    start_row, start_column = (1, 1) if position == "A1" else (3, 2)
+    for path in outputs:
+        result = load_workbook(path, data_only=False)
+        try:
+            worksheet = result["Claims"]
+            for row_offset, row in enumerate([tuple(frame.columns), *frame.rows()]):
+                for column_offset, value in enumerate(row):
+                    cell = worksheet.cell(start_row + row_offset, start_column + column_offset)
+                    assert (cell.value, cell.data_type) == (value, "s")
+            if path == outputs[1]:
+                assert (worksheet["H20"].value, worksheet["H20"].data_type) == ("=SUM(A1:A2)", "f")
+                assert (result["Summary"]["A1"].value, result["Summary"]["A1"].data_type) == ("=Claims!H20", "f")
+                if position != "A1":
+                    assert worksheet["A1"].data_type == "f"
+        finally:
+            result.close()
+    assert template.read_bytes() == before

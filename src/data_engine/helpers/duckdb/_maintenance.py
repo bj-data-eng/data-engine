@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 
 import polars as pl
 
@@ -15,6 +20,8 @@ from data_engine.helpers.duckdb._common import _quote_identifier
 from data_engine.helpers.duckdb._common import _quote_table_ref
 from data_engine.helpers.duckdb._common import _resolved_db_path
 from data_engine.helpers.duckdb._common import _table_column_names
+from data_engine.platform.interpreters import console_python_executable
+from data_engine.platform.processes import windows_subprocess_creationflags
 
 
 def _default_index_name(*, table: str, columns: tuple[str, ...]) -> str:
@@ -171,7 +178,54 @@ def compact_database(
     recreated afterward when their original ``CREATE INDEX`` statement still
     applies to the compacted table. Indexes that reference dropped columns are
     reported as skipped.
+
+    Schema-dropping maintenance runs in an isolated process holding DuckDB's
+    exclusive file lock. Close all database connections before calling this
+    helper; an open connection causes maintenance to fail without dropping any
+    columns. Other writers cannot connect until the worker releases its lock.
     """
+
+    normalized_tables = _normalize_table_names(tables)
+    resolved_db_path = _resolved_db_path(db_path)
+    if not drop_all_null_columns:
+        return _compact_database_in_process(
+            resolved_db_path, tables=normalized_tables, drop_all_null_columns=False, vacuum=vacuum,
+        )
+    request = json.dumps({"db_path": str(resolved_db_path), "tables": normalized_tables, "vacuum": vacuum})
+    environment = os.environ.copy()
+    source_root = str(Path(__file__).parents[3])
+    environment["PYTHONPATH"] = os.pathsep.join(
+        part for part in (source_root, environment.get("PYTHONPATH", "")) if part
+    )
+    with tempfile.TemporaryDirectory(prefix="data-engine-compaction-") as directory:
+        result_path = Path(directory) / "result.arrow"
+        command = (
+            [sys.executable, "--internal-duckdb-maintenance", request, str(result_path)]
+            if getattr(sys, "frozen", False)
+            else [str(console_python_executable()), "-m", "data_engine.helpers.duckdb._maintenance_worker",
+                  request, str(result_path)]
+        )
+        completed = subprocess.run(
+            command,
+            env=environment, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=windows_subprocess_creationflags(no_window=True),
+            check=False,
+        )
+        if completed.returncode:
+            error_path = result_path.with_suffix(".error.json")
+            if error_path.exists():
+                error = json.loads(error_path.read_text(encoding="utf-8"))
+                error_type = ValueError if error["type"] == "ValueError" else getattr(duckdb, error["type"], RuntimeError)
+                raise error_type(error["message"])
+            raise RuntimeError(f"Exclusive DuckDB compaction worker failed: {completed.stderr[-4096:]}")
+        return pl.read_ipc(result_path, memory_map=False)
+
+
+def _compact_database_in_process(
+    db_path: str | Path, *, tables: str | list[str] | tuple[str, ...] | None = None,
+    drop_all_null_columns: bool = True, vacuum: bool = True,
+) -> pl.DataFrame:
+    """Perform maintenance on the isolated worker's sole database connection."""
 
     normalized_tables = _normalize_table_names(tables)
     resolved_db_path = _resolved_db_path(db_path)

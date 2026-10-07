@@ -11,6 +11,9 @@ import shutil
 import time
 from typing import Any
 from uuid import uuid4
+import warnings
+from xml.etree import ElementTree
+from zipfile import ZipFile
 
 import polars as pl
 import xlsxwriter
@@ -20,7 +23,25 @@ ExcelFrame = pl.DataFrame | pl.LazyFrame
 
 _INVALID_SHEET_CHARS = set("[]:*?/\\")
 _CELL_REFERENCE_RE = re.compile(r"^[A-Za-z]{1,3}[1-9][0-9]*$")
+_RC_REFERENCE_RE = re.compile(r"^[RC][0-9]+[RC][0-9]+$", re.IGNORECASE)
 _TABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+class _CheckedWorksheet(xlsxwriter.worksheet.Worksheet):
+    def __init__(self) -> None:
+        super().__init__()
+        self.add_write_handler(str, xlsxwriter.worksheet.Worksheet.write_string)
+
+    def add_table(self, *args: Any, **kwargs: Any) -> int:
+        previous_count = len(self.tables)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = super().add_table(*args, **kwargs)
+        if caught:
+            raise ValueError(f"Excel table write failed: {caught[0].message}")
+        if result != 0 or len(self.tables) != previous_count + 1:
+            raise ValueError(f"Excel table write failed or was skipped (return code {result!r}).")
+        return result
 
 
 @dataclass(frozen=True)
@@ -35,7 +56,10 @@ class ExcelSheet:
         Dataframe to write. Lazy frames are collected when the workbook is
         composed.
     table_name : str | None
-        Optional Excel table name for the written dataframe.
+        Optional Excel table name for the written dataframe. Names use letters,
+        digits, and underscores, start with a letter or underscore, and have
+        at most 255 characters. Reserved ``R``/``C`` and cell-reference names
+        are rejected case-insensitively; surrounding whitespace is rejected.
     position : str | tuple[int, int]
         Top-left cell where the dataframe table should be written.
     table_style : str | dict[str, Any] | None
@@ -69,6 +93,10 @@ def compose_excel(path: PathLike, sheets: Sequence[ExcelSheet], *, template: Pat
     Excel writer, so sheet-level options map directly to
     ``pl.DataFrame.write_excel`` behavior.
 
+    Dataframe strings and headers are written as literal text, including values
+    beginning with ``=``. Table write warnings, failures, or skipped writes fail
+    composition before publication, leaving an existing target unchanged.
+
     Parameters
     ----------
     path : PathLike
@@ -81,7 +109,8 @@ def compose_excel(path: PathLike, sheets: Sequence[ExcelSheet], *, template: Pat
         composed copy atomically replaces ``path``. Existing values and tables
         are replaced on each updated worksheet. Merged ranges that intersect the
         dataframe or table output are unmerged; unrelated merges and cell
-        formatting are preserved.
+        formatting are preserved. Existing formulas outside the replacement
+        range, and all untouched worksheets, retain their formulas.
 
     Returns
     -------
@@ -90,6 +119,8 @@ def compose_excel(path: PathLike, sheets: Sequence[ExcelSheet], *, template: Pat
 
     Raises
     ------
+    ValueError
+        If sheet specifications, table names, or table output are invalid.
     Exception
         If workbook validation, dataframe collection, Excel writing, or atomic
         replacement fails.
@@ -127,9 +158,12 @@ def compose_excel(path: PathLike, sheets: Sequence[ExcelSheet], *, template: Pat
             template=template,
         )
     workbook = xlsxwriter.Workbook(temporary_path)
+    workbook.worksheet_class = _CheckedWorksheet
+    workbook_closed = False
     try:
         for sheet in normalized_sheets:
             frame = _collect_frame(sheet.df)
+            _validate_frame_headers(frame)
             options = dict(sheet.write_options)
             frame.write_excel(
                 workbook,
@@ -142,13 +176,20 @@ def compose_excel(path: PathLike, sheets: Sequence[ExcelSheet], *, template: Pat
                 freeze_panes=sheet.freeze_panes,
                 **options,
             )
+            worksheet = workbook.get_worksheet_by_name(sheet.name)
+            if worksheet is None or not worksheet.tables:
+                raise ValueError(f"Excel table write was skipped for worksheet {sheet.name!r}.")
+        table_names = tuple(table["name"] for worksheet in workbook.worksheets() for table in worksheet.tables)
         workbook.close()
+        workbook_closed = True
+        _verify_written_tables(temporary_path, table_names)
         _replace_atomic(temporary_path, target_path)
     except Exception:
-        try:
-            workbook.close()
-        except Exception:
-            pass
+        if not workbook_closed:
+            try:
+                workbook.close()
+            except Exception:
+                pass
         _remove_temporary_file(temporary_path)
         raise
     return target_path
@@ -174,8 +215,14 @@ def _compose_template_excel(
         workbook = load_workbook(temporary_path)
         for sheet in sheets:
             frame = _collect_frame(sheet.df)
+            _validate_frame_headers(frame)
             _replace_template_sheet(workbook, sheet, frame)
-        workbook.save(temporary_path)
+        table_names = tuple(name for worksheet in workbook.worksheets for name in worksheet.tables)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            workbook.save(temporary_path)
+        workbook.close()
+        _verify_written_tables(temporary_path, table_names)
         _replace_atomic(temporary_path, target_path)
     except Exception:
         _remove_temporary_file(temporary_path)
@@ -200,10 +247,13 @@ def _replace_template_sheet(workbook: Any, sheet: ExcelSheet, frame: pl.DataFram
         )
     _clear_worksheet_data(worksheet, replacement_bounds=replacement_bounds)
     for column_offset, column_name in enumerate(frame.columns):
-        worksheet.cell(row=start_row, column=start_column + column_offset, value=column_name)
+        cell = worksheet.cell(row=start_row, column=start_column + column_offset, value=column_name)
+        cell.data_type = "s"
     for row_offset, values in enumerate(frame.iter_rows(), start=1):
         for column_offset, value in enumerate(values):
-            worksheet.cell(row=start_row + row_offset, column=start_column + column_offset, value=value)
+            cell = worksheet.cell(row=start_row + row_offset, column=start_column + column_offset, value=value)
+            if isinstance(value, str):
+                cell.data_type = "s"
     if sheet.table_name is not None and frame.columns:
         _add_openpyxl_table(
             worksheet,
@@ -247,6 +297,11 @@ def _clear_worksheet_data(
     # cells the template already contains.
     for cell in worksheet._cells.values():
         if not isinstance(cell, MergedCell):
+            if cell.data_type == "f" and (
+                replacement_bounds is None
+                or not (start_row <= cell.row <= end_row and start_column <= cell.column <= end_column)
+            ):
+                continue
             cell.value = None
 
 
@@ -278,7 +333,11 @@ def _add_openpyxl_table(
         showRowStripes=True,
         showColumnStripes=False,
     )
-    worksheet.add_table(table)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        worksheet.add_table(table)
+    if table_name not in worksheet.tables:
+        raise ValueError(f"Excel table write was skipped for table {table_name!r}.")
 
 
 def _position_to_one_based(position: str | tuple[int, int]) -> tuple[int, int]:
@@ -339,15 +398,36 @@ def _validate_table_name(name: str) -> str:
     normalized = name.strip()
     if not normalized:
         raise ValueError("table names must not be blank.")
+    if normalized != name:
+        raise ValueError(f"table name {name!r} must not contain surrounding whitespace.")
     if len(normalized) > 255:
         raise ValueError(f"table name {name!r} must be 255 characters or fewer.")
     if not _TABLE_NAME_RE.fullmatch(normalized):
         raise ValueError(
             f"table name {name!r} must start with a letter or underscore and contain only letters, numbers, and underscores."
         )
-    if _CELL_REFERENCE_RE.fullmatch(normalized):
+    if normalized.casefold() in {"r", "c"}:
+        raise ValueError(f"table name {name!r} is reserved by Excel.")
+    if _CELL_REFERENCE_RE.fullmatch(normalized) or _RC_REFERENCE_RE.fullmatch(normalized):
         raise ValueError(f"table name {name!r} must not look like an Excel cell reference.")
     return normalized.casefold()
+
+
+def _validate_frame_headers(frame: pl.DataFrame) -> None:
+    names = [name.casefold() for name in frame.columns]
+    if len(names) != len(set(names)):
+        raise ValueError("Excel table headers must be unique case-insensitively.")
+
+
+def _verify_written_tables(path: Path, expected_names: tuple[str, ...]) -> None:
+    with ZipFile(path) as archive:
+        written_names = [
+            ElementTree.fromstring(archive.read(name)).get("displayName")
+            for name in archive.namelist()
+            if name.startswith("xl/tables/") and name.endswith(".xml")
+        ]
+    if sorted(written_names) != sorted(expected_names):
+        raise ValueError("Excel table output is incomplete; target workbook was not replaced.")
 
 
 def _replace_atomic(source_path: Path, target_path: Path) -> None:

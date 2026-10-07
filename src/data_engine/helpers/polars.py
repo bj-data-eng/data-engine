@@ -347,7 +347,9 @@ def propagate_value(
         ``"after_last"``.
     where : pl.Expr | None
         Optional row predicate that limits which sorted rows can supply the
-        propagated value.
+        propagated value. Omission or a scalar true predicate matches every
+        row in each window; false or null matches none. Relative selectors
+        take the immediately adjacent sorted row, or null at a boundary.
     descending : DescendingLike
         Sort direction passed to ``Expr.sort_by``.
     nulls_last : bool
@@ -448,14 +450,13 @@ def propagate_value(
         descending=descending,
         nulls_last=nulls_last,
     )
-    sorted_where = (
-        where.sort_by(
-            sort_exprs,
-            descending=descending,
-            nulls_last=nulls_last,
-        )
-        if where is not None
-        else pl.lit(True)
+    # Relative selectors need one predicate value per row before cumulative
+    # matching and shifting, including when the predicate is a scalar.
+    row_where = (where if where is not None else pl.lit(True)).fill_null(False) & pl.repeat(True, pl.len())
+    sorted_where = row_where.sort_by(
+        sort_exprs,
+        descending=descending,
+        nulls_last=nulls_last,
     )
     if normalized_which == "first":
         ordered = ordered.filter(sorted_where)

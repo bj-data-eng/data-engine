@@ -386,6 +386,11 @@ That says: "replace every persisted `status` slice represented by this batch, th
 Use this helper for explicit maintenance flows when you want to clean one DuckDB
 file after a period of ingestion.
 
+Close all DuckDB connections to this file before schema-dropping compaction.
+The helper runs the null scan and schema cleanup in an isolated worker holding
+DuckDB's exclusive file lock. An existing connection makes maintenance refuse
+without removing columns, and other writers cannot connect during the cleanup.
+
 Signature:
 
 ```python

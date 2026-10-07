@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import duckdb
 import polars as pl
+from polars.testing import assert_frame_equal
 import pytest
 
 from data_engine.helpers import duckdb as duckdb_helpers
@@ -18,6 +19,68 @@ from data_engine.helpers.duckdb import read_table
 from data_engine.helpers.duckdb import replace_rows_by_file
 from data_engine.helpers.duckdb import replace_rows_by_values
 from data_engine.helpers.duckdb import replace_table
+
+
+@pytest.mark.parametrize("lazy", [False, True])
+@pytest.mark.parametrize("on", [["member"], ["member", "category"]])
+def test_nullable_dimensions_preserve_identity_order_and_round_trip(tmp_path, lazy, on):
+    db_path = tmp_path / "nullable.duckdb"
+    frame = pl.DataFrame(
+        {
+            "member": [None, "b", "a", None, "a", None],
+            "category": [None, "medical", None, "dental", None, None],
+            "amount": [60, 10, 40, 20, 50, 30],
+        }
+    )
+    incoming = frame.lazy() if lazy else frame
+    normalized = normalize_columns(db_path, "dim_member", df=incoming, on=on)
+    assert normalized.height == frame.height
+    assert normalized["amount"].to_list() == frame["amount"].to_list()
+    assert normalized["dimension_key"].null_count() == 0
+    restored = denormalize_columns(db_path, "dim_member", df=normalized, drop_key=True)
+    assert_frame_equal(restored.select(frame.columns), frame)
+
+    mapping = read_table(db_path, "dim_member")
+    assert mapping.height == frame.select(on).unique().height
+    key_by_natural = {tuple(row[column] for column in on): row["dimension_key"] for row in mapping.to_dicts()}
+    assert normalized["dimension_key"].to_list() == [
+        key_by_natural[tuple(row[column] for column in on)] for row in frame.to_dicts()
+    ]
+
+    reordered = frame.reverse()
+    attached = attach_dimension(db_path, "dim_member", df=reordered.lazy() if lazy else reordered, on=on)
+    assert_frame_equal(attached.select(frame.columns), reordered)
+    assert attached["dimension_key"].to_list() == normalized["dimension_key"].reverse().to_list()
+    repeated = normalize_columns(db_path, "dim_member", df=reordered, on=on)
+    assert repeated["dimension_key"].to_list() == attached["dimension_key"].to_list()
+    assert_frame_equal(read_table(db_path, "dim_member"), mapping)
+
+
+def test_attach_nullable_dimension_preserves_unmatched_and_empty_rows(tmp_path):
+    db_path = tmp_path / "nullable.duckdb"
+    natural = pl.DataFrame({"member": [None, "a"], "category": [None, "medical"]})
+    build_dimension(db_path, "dim_member", df=natural)
+    incoming = pl.DataFrame(
+        {"member": [None, None, "missing", "a"], "category": [None, "missing", None, "medical"]}
+    )
+    attached = attach_dimension(db_path, "dim_member", df=incoming, on=natural.columns)
+    assert_frame_equal(attached.select(incoming.columns), incoming)
+    assert attached["dimension_key"].is_null().to_list() == [False, True, True, False]
+    empty = attach_dimension(db_path, "dim_member", df=incoming.head(0), on=natural.columns)
+    assert empty.height == 0
+    assert empty.schema == attached.schema
+
+
+def test_all_null_natural_keys_reuse_the_same_persistent_key(tmp_path):
+    db_path = tmp_path / "nullable.duckdb"
+    frame = pl.DataFrame({"member": [None, None], "amount": [10, 20]}, schema_overrides={"member": pl.String})
+    first = normalize_columns(db_path, "dim_member", df=frame, on="member")
+    repeated = normalize_columns(db_path, "dim_member", df=frame.lazy(), on="member")
+    assert first["dimension_key"].to_list() == [1, 1]
+    assert_frame_equal(first, repeated)
+    assert read_table(db_path, "dim_member").height == 1
+    restored = denormalize_columns(db_path, "dim_member", df=repeated, drop_key=True)
+    assert_frame_equal(restored.select(frame.columns), frame)
 
 
 def test_build_dimension_creates_dimension_and_returns_unique_mapping(tmp_path):
