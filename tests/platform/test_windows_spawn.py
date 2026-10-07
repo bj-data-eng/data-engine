@@ -616,7 +616,8 @@ def test_real_windows_job_spawn_supports_verified_tree_termination(tmp_path):
     parent_source = (
         "from pathlib import Path; import subprocess, sys, time; "
         "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
-        "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii'); "
+        "pid_path = Path(sys.argv[1]); pending_path = pid_path.with_suffix('.tmp'); "
+        "pending_path.write_text(str(child.pid), encoding='ascii'); pending_path.replace(pid_path); "
         "time.sleep(60)"
     )
     launched = windows_spawn.spawn_windows_contained_process(
@@ -663,7 +664,10 @@ def test_real_windows_job_kills_descendant_when_leader_exits(tmp_path):
             "from pathlib import Path",
             "import subprocess, sys, time",
             "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])",
-            "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')",
+            "pid_path = Path(sys.argv[1])",
+            "pending_path = pid_path.with_suffix('.tmp')",
+            "pending_path.write_text(str(child.pid), encoding='ascii')",
+            "pending_path.replace(pid_path)",
             "deadline = time.monotonic() + 30.0",
             "while not Path(sys.argv[2]).exists() and time.monotonic() < deadline:",
             "    time.sleep(0.01)",
