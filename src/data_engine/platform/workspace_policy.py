@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import unicodedata
 from pathlib import Path
 from typing import Final
 
@@ -117,6 +118,26 @@ class WorkspaceDiscoveryPolicy:
             value = fallback
         return validate_workspace_id(value)
 
+    def _canonical_workspace_root(self, root: Path) -> Path:
+        """Use stored directory spelling while preserving the authored reparse-point path."""
+        if root.parent == root:
+            return root
+        parent = self._canonical_workspace_root(root.parent)
+        if not root.is_dir():
+            return parent / root.name
+        for candidate in parent.iterdir():
+            if candidate.name == root.name:
+                return candidate
+            if (
+                unicodedata.normalize("NFC", candidate.name).casefold() == unicodedata.normalize("NFC", root.name).casefold()
+                and candidate.samefile(root)
+            ):
+                return candidate
+        return parent / root.name
+
+    def _inferred_workspace_id(self, root: Path) -> str:
+        return self._normalize_workspace_id(root.name or "default")
+
     def _placeholder_workspace(self, *, app_root: Path) -> tuple[DiscoveredWorkspace, Path, bool]:
         placeholder_root = app_root / self.PLACEHOLDER_WORKSPACE_ROOT_NAME
         return (
@@ -134,8 +155,8 @@ class WorkspaceDiscoveryPolicy:
     ) -> tuple[DiscoveredWorkspace, ...]:
         """Discover valid workspaces beneath the collection root."""
         if explicit_workspace_root is not None:
-            root = _stable_workspace_path(explicit_workspace_root)
-            workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or root.name or "default"
+            root = self._canonical_workspace_root(_stable_workspace_path(explicit_workspace_root))
+            workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or self._inferred_workspace_id(root)
             return (DiscoveredWorkspace(workspace_id=workspace_id, workspace_root=root),)
 
         settings = self.app_state_policy.load_settings(app_root=app_root)
@@ -148,8 +169,9 @@ class WorkspaceDiscoveryPolicy:
             return ()
         if not collection_root.exists():
             return ()
+        collection_root = self._canonical_workspace_root(collection_root)
         if (collection_root / WORKSPACE_FLOW_MODULES_DIR_NAME).is_dir():
-            workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or "default"
+            workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or self._inferred_workspace_id(collection_root)
             return (DiscoveredWorkspace(workspace_id=workspace_id, workspace_root=collection_root),)
         discovered: list[DiscoveredWorkspace] = []
         for candidate in sorted(path for path in collection_root.iterdir() if path.is_dir()):
@@ -166,35 +188,32 @@ class WorkspaceDiscoveryPolicy:
         workspace_collection_root: Path | None,
         data_root: Path | None,
     ) -> tuple[DiscoveredWorkspace, Path, bool]:
-        """Select one authored workspace and collection root from the current policy."""
+        """Select a workspace, requiring explicit collection ids to exist.
+
+        An explicit root selects that literal path, including a new provisioning
+        target. Only default selection may fall back to the first discovered entry.
+        """
         explicit_root = workspace_root if workspace_root is not None else data_root
         env_workspace_root = os.environ.get(DATA_ENGINE_WORKSPACE_ROOT_ENV_VAR)
         if explicit_root is not None:
-            discovered_root = _stable_workspace_path(explicit_root)
-            fallback_id = self.PLACEHOLDER_WORKSPACE_ID if discovered_root.name == self.PLACEHOLDER_WORKSPACE_ROOT_NAME else (discovered_root.name or "default")
-            selected_id = self._normalize_workspace_id(workspace_id) if workspace_id is not None else fallback_id
+            discovered_root = self._canonical_workspace_root(_stable_workspace_path(explicit_root))
+            selected_id = self._normalize_workspace_id(workspace_id) if workspace_id is not None else self._inferred_workspace_id(discovered_root)
             collection_root = (
                 _stable_workspace_path(workspace_collection_root)
                 if workspace_collection_root is not None
                 else discovered_root.parent
             )
             return DiscoveredWorkspace(workspace_id=selected_id, workspace_root=discovered_root), collection_root, True
-        if env_workspace_root and env_workspace_root.strip():
-            discovered_root = _stable_workspace_path(env_workspace_root)
+        if env_workspace_root and env_workspace_root.strip() and workspace_collection_root is None:
+            discovered_root = self._canonical_workspace_root(_stable_workspace_path(env_workspace_root))
             env_workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR)
             if workspace_id is not None:
                 selected_id = self._normalize_workspace_id(workspace_id)
             elif env_workspace_id and env_workspace_id.strip():
                 selected_id = self._normalize_workspace_id(env_workspace_id)
             else:
-                fallback_id = self.PLACEHOLDER_WORKSPACE_ID if discovered_root.name == self.PLACEHOLDER_WORKSPACE_ROOT_NAME else (discovered_root.name or "default")
-                selected_id = fallback_id
-            collection_root = (
-                _stable_workspace_path(workspace_collection_root)
-                if workspace_collection_root is not None
-                else discovered_root.parent
-            )
-            return DiscoveredWorkspace(workspace_id=selected_id, workspace_root=discovered_root), collection_root, True
+                selected_id = self._inferred_workspace_id(discovered_root)
+            return DiscoveredWorkspace(workspace_id=selected_id, workspace_root=discovered_root), discovered_root.parent, True
 
         settings = self.app_state_policy.load_settings(app_root=app_root)
         collection_root = (
@@ -203,21 +222,32 @@ class WorkspaceDiscoveryPolicy:
             else settings.workspace_collection_root
         )
         if collection_root is None:
+            if workspace_id is not None:
+                requested_id = self._normalize_workspace_id(workspace_id)
+                raise FileNotFoundError(f"Workspace {requested_id!r} has no configured collection root.")
             return self._placeholder_workspace(app_root=app_root)
+        collection_root = self._canonical_workspace_root(collection_root)
+        if (collection_root / WORKSPACE_FLOW_MODULES_DIR_NAME).is_dir():
+            selected_id = (
+                self._normalize_workspace_id(workspace_id)
+                if workspace_id is not None
+                else self._normalize_workspace_id(os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR) or self._inferred_workspace_id(collection_root))
+            )
+            return DiscoveredWorkspace(workspace_id=selected_id, workspace_root=collection_root), collection_root, True
         discovered_all = self.discover(app_root=app_root, workspace_collection_root=collection_root)
         if not discovered_all:
             if workspace_id is not None:
                 selected_id = self._normalize_workspace_id(workspace_id)
+                raise FileNotFoundError(f"Workspace {selected_id!r} was not found in {collection_root}.")
+            env_workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR)
+            if env_workspace_id and env_workspace_id.strip():
+                selected_id = self._normalize_workspace_id(env_workspace_id)
             else:
-                env_workspace_id = os.environ.get(DATA_ENGINE_WORKSPACE_ID_ENV_VAR)
-                if env_workspace_id and env_workspace_id.strip():
-                    selected_id = self._normalize_workspace_id(env_workspace_id)
-                else:
-                    selected_id = (
-                        self._normalize_workspace_id(settings.default_selected, fallback=self.PLACEHOLDER_WORKSPACE_ID)
-                        if settings.default_selected is not None
-                else self.PLACEHOLDER_WORKSPACE_ID
-            )
+                selected_id = (
+                    self._normalize_workspace_id(settings.default_selected, fallback=self.PLACEHOLDER_WORKSPACE_ID)
+                    if settings.default_selected is not None
+                    else self.PLACEHOLDER_WORKSPACE_ID
+                )
             discovered = DiscoveredWorkspace(workspace_id=selected_id, workspace_root=collection_root / selected_id)
             return discovered, collection_root, True
 
@@ -230,7 +260,14 @@ class WorkspaceDiscoveryPolicy:
             return discovered_all[0], collection_root, True
         requested_id = self._normalize_workspace_id(requested_id, fallback=self.PLACEHOLDER_WORKSPACE_ID)
         by_id = {item.workspace_id: item for item in discovered_all}
-        return by_id.get(requested_id, discovered_all[0]), collection_root, True
+        selected = by_id.get(requested_id)
+        if selected is None:
+            requested_root = collection_root / requested_id
+            if requested_root.is_dir():
+                selected = next((item for item in discovered_all if item.workspace_root.samefile(requested_root)), None)
+        if selected is None and workspace_id is not None:
+            raise FileNotFoundError(f"Workspace {requested_id!r} was not found in {collection_root}.")
+        return selected or discovered_all[0], collection_root, True
 
 
 class RuntimeLayoutPolicy:
@@ -249,7 +286,11 @@ class RuntimeLayoutPolicy:
         data_root: Path | None = None,
         app_root: Path | None = None,
     ) -> WorkspacePaths:
-        """Resolve authored, shared, and local-artifact paths for one selected workspace."""
+        """Resolve authored, shared, and local-artifact paths for one selected workspace.
+
+        Explicit collection ids must exist or raise FileNotFoundError. Provide
+        workspace_root to resolve the literal target for a new workspace.
+        """
         resolved_app_root = self.app_state_policy.effective_app_root(app_root=app_root)
         discovered, collection_root, workspace_configured = self.discovery_policy.select_workspace(
             app_root=resolved_app_root,

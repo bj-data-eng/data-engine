@@ -123,7 +123,7 @@ def _effective_run_groups(
     live_truth_authoritative: bool,
 ) -> tuple[FlowRunState, ...]:
     """Merge persisted run groups with daemon-owned live run truth for one flow."""
-    if not live_runs:
+    if live_runs is None:
         return run_groups
 
     live_flow_runs = _live_runs_for_flow(flow_name=flow_name, live_runs=live_runs)
@@ -237,6 +237,7 @@ def _current_step_elapsed_seconds(run: LiveRunLike) -> float | None:
 def _overlay_live_run(existing: FlowRunState | None, live_run: LiveRunLike) -> FlowRunState:
     """Return one run-group state updated with daemon-owned live run truth."""
     live_entry = _live_run_entry(live_run)
+    step_entry = _live_run_entry(live_run, current_step=True)
     source_label = short_source_label(live_run.source_path)
     entries = existing.entries if existing is not None and existing.entries else (live_entry,)
     existing_steps = () if existing is None else existing.steps
@@ -252,7 +253,7 @@ def _overlay_live_run(existing: FlowRunState | None, live_run: LiveRunLike) -> F
                 step_name=live_run.current_step_name,
                 status=current_step_status,
                 elapsed_seconds=_current_step_elapsed_seconds(live_run),
-                entry=live_entry,
+                entry=step_entry,
             ),
         )
     return FlowRunState(
@@ -261,7 +262,7 @@ def _overlay_live_run(existing: FlowRunState | None, live_run: LiveRunLike) -> F
         source_label=source_label,
         status=_run_group_status_from_live_state(live_run.state),
         elapsed_seconds=live_run.elapsed_seconds if live_run.elapsed_seconds is not None else (existing.elapsed_seconds if existing is not None else None),
-        summary_entry=existing.summary_entry if existing is not None and existing.summary_entry is not None else live_entry,
+        summary_entry=live_entry,
         steps=tuple(live_steps),
         entries=tuple(entries),
     )
@@ -276,10 +277,10 @@ def _display_label_for_live_run(live_run: LiveRunLike) -> str:
     return datetime.now(UTC).astimezone().strftime("%Y-%m-%d %I:%M:%S %p")
 
 
-def _live_run_entry(live_run: LiveRunLike) -> FlowLogEntry:
+def _live_run_entry(live_run: LiveRunLike, *, current_step: bool = False) -> FlowLogEntry:
     """Create one synthetic flow-log entry for a daemon-native live run."""
     timestamp = (
-        parse_utc_text(live_run.current_step_started_at_utc)
+        parse_utc_text(live_run.current_step_started_at_utc if current_step else live_run.started_at_utc)
         or parse_utc_text(live_run.started_at_utc)
         or parse_utc_text(live_run.finished_at_utc)
         or datetime.now(UTC)
@@ -297,10 +298,11 @@ def _live_run_entry(live_run: LiveRunLike) -> FlowLogEntry:
         event=RuntimeStepEvent(
             run_id=live_run.run_id,
             flow_name=live_run.flow_name,
-            step_name=live_run.current_step_name,
+            step_name=live_run.current_step_name if current_step else None,
             source_label=short_source_label(live_run.source_path),
             status=event_status,
-            elapsed_seconds=live_run.elapsed_seconds,
+            elapsed_seconds=_current_step_elapsed_seconds(live_run) if current_step else live_run.elapsed_seconds,
+            started_at_utc=live_run.current_step_started_at_utc if current_step else live_run.started_at_utc,
         ),
     )
 

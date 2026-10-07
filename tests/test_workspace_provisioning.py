@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+
+import pytest
 
 from data_engine.platform.workspace_models import WORKSPACE_FLOW_HELPERS_DIR_NAME, WORKSPACE_TEMPLATES_DIR_NAME
 from data_engine.platform.workspace_policy import RuntimeLayoutPolicy
+from data_engine.runtime.shared_state import initialize_workspace_state, resolve_workspace_bundle
 from data_engine.services.workspace_provisioning import (
     WorkspaceProvisioningService,
     collection_vscode_settings,
@@ -18,7 +22,7 @@ def test_workspace_provisioning_creates_missing_workspace_assets(monkeypatch, tm
     collection_root = tmp_path / "workspaces"
     monkeypatch.setenv("DATA_ENGINE_APP_ROOT", str(app_root))
     monkeypatch.setenv("DATA_ENGINE_WORKSPACE_COLLECTION_ROOT", str(collection_root))
-    paths = resolve_workspace_paths(workspace_id="docs")
+    paths = resolve_workspace_paths(workspace_root=collection_root / "docs", workspace_id="docs")
 
     result = WorkspaceProvisioningService().provision_workspace(paths)
 
@@ -83,3 +87,66 @@ def test_collection_vscode_settings_use_collection_root_terminal_env(monkeypatch
     assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_COLLECTION_ROOT"] == str(collection_root)
     assert "DATA_ENGINE_WORKSPACE_ROOT" not in settings["terminal.integrated.env.osx"]
     assert "DATA_ENGINE_WORKSPACE_ROOT" not in settings["terminal.integrated.env.windows"]
+
+
+@pytest.mark.parametrize("platform", ["linux", "osx", "windows"])
+def test_provisioned_terminal_environment_preserves_alias_roundtrip(tmp_path, monkeypatch, platform):
+    workspace_root = tmp_path / "workspaces" / "docs"
+    paths = resolve_workspace_paths(workspace_root=workspace_root, workspace_id="Analytics-Alias")
+    WorkspaceProvisioningService().provision_workspace(paths)
+    initialize_workspace_state(paths)
+    original_bundle = resolve_workspace_bundle(paths)
+    settings = json.loads((workspace_root / ".vscode" / "settings.json").read_text(encoding="utf-8"))
+
+    terminal_env = settings[f"terminal.integrated.env.{platform}"]
+    assert terminal_env["DATA_ENGINE_WORKSPACE_ID"] == "Analytics-Alias"
+    for key, value in terminal_env.items():
+        monkeypatch.setenv(key, value)
+    reopened = resolve_workspace_paths()
+
+    assert reopened.workspace_id == paths.workspace_id
+    assert reopened.runtime_cache_db_path == paths.runtime_cache_db_path
+    assert reopened.runtime_control_db_path == paths.runtime_control_db_path
+    assert reopened.daemon_endpoint_path == paths.daemon_endpoint_path
+    assert resolve_workspace_bundle(reopened).root == original_bundle.root
+
+
+def test_provisioning_new_literal_target_leaves_existing_workspace_untouched(tmp_path):
+    collection = tmp_path / "workspaces"
+    existing = collection / "alpha"
+    (existing / "flow_modules").mkdir(parents=True)
+    sentinel = existing / "flow_modules" / "flow.py"
+    sentinel.write_text("# Existing authored flow\n", encoding="utf-8")
+    before = {path.relative_to(existing): path.read_bytes() for path in existing.rglob("*") if path.is_file()}
+
+    paths = resolve_workspace_paths(workspace_root=collection / "new_workspace", workspace_collection_root=collection)
+    result = WorkspaceProvisioningService().provision_workspace(paths)
+
+    assert result.workspace_root == collection / "new_workspace"
+    assert paths.workspace_id == "new_workspace"
+    assert paths.flow_modules_dir.is_dir()
+    assert {path.relative_to(existing): path.read_bytes() for path in existing.rglob("*") if path.is_file()} == before
+    assert not (existing / "config").exists()
+    assert not (existing / ".vscode").exists()
+
+
+def test_stale_explicit_target_cannot_provision_an_unrelated_workspace(tmp_path):
+    collection = tmp_path / "workspaces"
+    existing = collection / "alpha"
+    (existing / "flow_modules").mkdir(parents=True)
+    sentinel = existing / "flow_modules" / "flow.py"
+    sentinel.write_text("# Keep this flow\n", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match="deleted"):
+        paths = resolve_workspace_paths(workspace_id="deleted", workspace_collection_root=collection)
+        WorkspaceProvisioningService().provision_workspace(paths)
+
+    assert sentinel.read_text(encoding="utf-8") == "# Keep this flow\n"
+    assert tuple(existing.iterdir()) == (existing / "flow_modules",)
+    assert not (collection / ".vscode").exists()
+
+
+def test_workspace_settings_builder_accepts_explicit_alias(tmp_path):
+    settings = workspace_vscode_settings(tmp_path / "docs", app_root=tmp_path / "app", workspace_id="alias")
+
+    assert settings["terminal.integrated.env.windows"]["DATA_ENGINE_WORKSPACE_ID"] == "alias"

@@ -201,12 +201,11 @@ class GuiWindowSupportMixin:
         except RuntimeError:
             return
 
-    def _schedule_daemon_update_batch(self: "DataEngineWindow", batch: DaemonUpdateBatch) -> None:
+    def _schedule_daemon_update_batch(self: "DataEngineWindow", batch: DaemonUpdateBatch, *, token: tuple[int, str]) -> None:
         """Queue one lane-based daemon update back onto the Qt main thread."""
-        if getattr(self, "ui_closing", False):
+        if getattr(self, "ui_closing", False) or not self._matches_workspace_binding_token(token):
             return
         self.daemon_subscription.mark_subscription(self._monotonic())
-        token = self._workspace_binding_token()
         existing_token, existing_batch = self._unwrap_daemon_batch_payload(
             getattr(self, "_pending_daemon_update_batch", None)
         )
@@ -232,9 +231,10 @@ class GuiWindowSupportMixin:
             return
         from data_engine.ui.gui.helpers import start_worker_thread
 
+        token = self._workspace_binding_token()
         self.daemon_subscription.ensure_started(
-            workspace_available=lambda: not self.ui_closing and self._has_authored_workspace(),
-            on_update=lambda batch: (None if self.ui_closing else self._schedule_daemon_update_batch(batch)),
+            workspace_available=lambda: not self.ui_closing and self._matches_workspace_binding_token(token) and self._has_authored_workspace(),
+            on_update=lambda batch: self._schedule_daemon_update_batch(batch, token=token),
             start_worker=lambda target: start_worker_thread(self, target=target),
         )
 

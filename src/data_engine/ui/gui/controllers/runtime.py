@@ -18,7 +18,7 @@ from data_engine.services.daemon_state import DaemonUpdateBatch
 from data_engine.domain import DaemonStatusState, RuntimeSessionState
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.platform.instrumentation import append_timing_line, timed_operation
-from data_engine.ui.gui.helpers import start_worker_thread
+from data_engine.ui.gui.controllers.jobs import WorkspaceJob, start_workspace_job
 if TYPE_CHECKING:
     from data_engine.ui.gui.app import DataEngineWindow
 
@@ -103,15 +103,15 @@ class GuiRuntimeController:
         )
 
     def daemon_wait_worker(self, window: "DataEngineWindow") -> None:
+        token = window._workspace_binding_token()
+        manager = window.runtime_binding.daemon_manager
+        subscription = window.daemon_subscription
         window.daemon_state_service.run_subscription_loop(
-            window.runtime_binding.daemon_manager,
-            stop_event=window.daemon_subscription.stop_event,
-            workspace_available=lambda: not window.ui_closing and window._has_authored_workspace(),
-            on_update=lambda batch: (
-                window.daemon_subscription.mark_subscription(window._monotonic()),
-                None if window.ui_closing else window._schedule_daemon_update_batch(batch),
-            )[-1],
-            timeout_seconds=window.daemon_subscription.timeout_seconds,
+            manager,
+            stop_event=subscription.stop_event,
+            workspace_available=lambda: not window.ui_closing and window._matches_workspace_binding_token(token) and window._has_authored_workspace(),
+            on_update=lambda batch: window._schedule_daemon_update_batch(batch, token=token),
+            timeout_seconds=subscription.timeout_seconds,
         )
 
     def _emit_daemon_sync_finished(self, window: "DataEngineWindow", payload: object) -> None:
@@ -321,39 +321,41 @@ class GuiRuntimeController:
             window.flow_controller.load_flows(window)
             return
         window._daemon_sync_in_progress = True
-        token = window._workspace_binding_token()
-        start_worker_thread(window, target=self._sync_from_daemon_worker, args=(window, token))
+        start_workspace_job(
+            window,
+            target=self._sync_from_daemon_worker,
+            args=(tuple(window.flow_cards.values()), window._daemon_startup_in_progress),
+        )
 
-    def _sync_from_daemon_worker(self, window: "DataEngineWindow", token: tuple[int, str]) -> None:
+    def _sync_from_daemon_worker(self, window: "DataEngineWindow", job: WorkspaceJob, flow_cards: tuple, daemon_startup_in_progress: bool) -> None:
         payload: dict[str, object]
         try:
             with timed_operation(
-                window._ui_timing_log_path,
+                job.timing_log_path,
                 scope="gui.sync",
                 event="sync_from_daemon",
-                fields={"workspace": token[1]},
+                fields={"workspace": job.token[1]},
             ):
-                flow_cards = tuple(window.flow_cards.values())
                 sync_state = window.runtime_binding_service.sync_runtime_state(
-                    window.runtime_binding,
+                    job.binding,
                     runtime_application=self.runtime_application,
                     flow_cards=flow_cards,
-                    daemon_startup_in_progress=window._daemon_startup_in_progress,
+                    daemon_startup_in_progress=daemon_startup_in_progress,
                 )
                 projection = self.runtime_state_service.rebuild_projection(
-                    window.runtime_binding,
+                    job.binding,
                     runtime_application=self.runtime_application,
                     flow_cards=flow_cards,
                     runtime_session=sync_state.runtime_session,
                     now=window._monotonic(),
                 )
                 workspace_snapshot = self.runtime_state_service.snapshot_from_projection(
-                    binding=window.runtime_binding,
+                    binding=job.binding,
                     flow_cards=flow_cards,
                     projection=projection,
                     workspace_control_state=sync_state.workspace_control_state,
                     daemon_live=bool(getattr(sync_state.snapshot, "live", False)),
-                    daemon_startup_in_progress=window._daemon_startup_in_progress,
+                    daemon_startup_in_progress=daemon_startup_in_progress,
                     daemon_projection_version=int(getattr(sync_state.snapshot, "projection_version", 0) or 0),
                     daemon_transport_mode=str(getattr(sync_state.snapshot, "transport_mode", "heartbeat") or "heartbeat"),
                     daemon_engine_starting=bool(getattr(sync_state.snapshot, "engine_starting", False)),
@@ -362,25 +364,20 @@ class GuiRuntimeController:
                     daemon_flow_activity=tuple(getattr(sync_state.snapshot, "flow_activity", ()) or ()),
                 )
             payload = {
-                "workspace_token": token,
+                "workspace_token": job.token,
                 "sync_state": sync_state,
                 "projection": projection,
                 "workspace_snapshot": workspace_snapshot,
             }
         except Exception as exc:
-            payload = {"workspace_token": token, "error": exc}
+            payload = {"workspace_token": job.token, "error": exc}
         self._emit_daemon_sync_finished(window, payload)
 
     def finish_daemon_sync(self, window: "DataEngineWindow", payload: object) -> None:
+        if not isinstance(payload, dict) or not window._matches_workspace_binding_token(payload.get("workspace_token")):
+            return
         rerun_requested = False
         try:
-            if not isinstance(payload, dict):
-                return
-            token = payload.get("workspace_token")
-            if not isinstance(token, tuple) or len(token) != 2:
-                return
-            if not window._matches_workspace_binding_token(token):
-                return
             error = payload.get("error")
             if error is not None:
                 error_text = str(error)
@@ -443,31 +440,30 @@ class GuiRuntimeController:
             return False
         window._last_daemon_spawn_attempt = now
         window._daemon_startup_in_progress = True
-        start_worker_thread(window, target=window._start_daemon_worker)
+        start_workspace_job(window, target=self.start_daemon_worker)
         return False
 
-    def start_daemon_worker(self, window: "DataEngineWindow") -> None:
+    def start_daemon_worker(self, window: "DataEngineWindow", job: WorkspaceJob) -> None:
         if window.ui_closing:
-            window.signals.daemon_startup_finished.emit(False, "")
             return
         success = False
         error_text = ""
-        spawn_result = self.runtime_application.spawn_daemon(window.workspace_paths)
+        spawn_result = self.runtime_application.spawn_daemon(job.paths)
         if not spawn_result.ok:
             error_text = spawn_result.error
         elif window.ui_closing:
-            self._shutdown_started_daemon_if_orphaned(window)
+            self._shutdown_started_daemon_if_orphaned(window, job.paths)
         else:
-            success = self.daemon_service.is_live(window.workspace_paths)
+            success = self.daemon_service.is_live(job.paths)
         if not success and not error_text:
             error_text = "Daemon startup did not provide any additional error details."
-        window.signals.daemon_startup_finished.emit(success, error_text)
+        self._emit_control_action_finished(window, job, "daemon_startup", {"success": success, "error_text": error_text})
 
-    def _shutdown_started_daemon_if_orphaned(self, window: "DataEngineWindow") -> None:
+    def _shutdown_started_daemon_if_orphaned(self, window: "DataEngineWindow", paths) -> None:
         """Shut down one late-starting ephemeral daemon when no local clients remain."""
         temporary_binding = None
         try:
-            temporary_binding = window.runtime_binding_service.open_binding(window.workspace_paths)
+            temporary_binding = window.runtime_binding_service.open_binding(paths)
             remaining_clients = window.runtime_binding_service.count_live_client_sessions(temporary_binding)
         except Exception:
             remaining_clients = 1
@@ -480,7 +476,7 @@ class GuiRuntimeController:
         if remaining_clients != 0:
             return
         try:
-            window._shutdown_daemon_on_close()
+            window._daemon_request(paths, {"command": "shutdown_daemon"}, timeout=1.5)
         except Exception:
             return
 
@@ -512,19 +508,18 @@ class GuiRuntimeController:
             return False
         window._pending_control_actions.add(action_name)
         window._pending_control_action_tokens[action_name] = window._workspace_binding_token()
-        start_worker_thread(window, target=target, args=args)
+        start_workspace_job(window, target=target, args=args)
         window.flow_controller.refresh_action_buttons(window)
         return True
 
     @staticmethod
-    def _emit_control_action_finished(window: "DataEngineWindow", action_name: str, payload: object) -> None:
+    def _emit_control_action_finished(window: "DataEngineWindow", job: WorkspaceJob, action_name: str, payload: object) -> None:
         if window.ui_closing:
             return
         try:
-            token = window._pending_control_action_tokens.get(action_name, window._workspace_binding_token())
             window.signals.control_action_finished.emit(
                 action_name,
-                window._control_action_payload(payload, token=token),
+                window._control_action_payload(payload, token=job.token),
             )
         except RuntimeError:
             pass
@@ -554,7 +549,6 @@ class GuiRuntimeController:
                 window.flow_controller.refresh_action_buttons(window)
                 return
         action_args = (
-            window,
             {
                 "paths": window.workspace_paths,
                 "action_context": action_context,
@@ -571,11 +565,12 @@ class GuiRuntimeController:
     def _run_selected_flow_worker(
         self,
         window: "DataEngineWindow",
+        job: WorkspaceJob,
         action_kwargs: dict[str, object],
         card_name: str | None,
     ) -> None:
         with timed_operation(
-            window._ui_timing_log_path,
+            job.timing_log_path,
             scope="gui.action",
             event="run_selected_flow",
             fields={"flow": card_name},
@@ -583,6 +578,7 @@ class GuiRuntimeController:
             result = self.command_service.run_selected_flow(**action_kwargs)
         self._emit_control_action_finished(
             window,
+            job,
             "run_selected_flow",
             {"result": result, "card_name": card_name},
         )
@@ -602,12 +598,12 @@ class GuiRuntimeController:
             "has_automated_flows": any(card.valid and card.mode in {"poll", "schedule"} for card in window.flow_cards.values()),
             "blocked_status_text": self._blocked_status_text(window),
         }
-        self._begin_control_action(window, "start_runtime", target=self._start_runtime_worker, args=(window, action_kwargs))
+        self._begin_control_action(window, "start_runtime", target=self._start_runtime_worker, args=(action_kwargs,))
 
-    def _start_runtime_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
-        with timed_operation(window._ui_timing_log_path, scope="gui.action", event="start_engine"):
+    def _start_runtime_worker(self, window: "DataEngineWindow", job: WorkspaceJob, action_kwargs: dict[str, object]) -> None:
+        with timed_operation(job.timing_log_path, scope="gui.action", event="start_engine"):
             result = self.command_service.start_engine(**action_kwargs)
-        self._emit_control_action_finished(window, "start_runtime", result)
+        self._emit_control_action_finished(window, job, "start_runtime", result)
 
     def stop_runtime(self, window: "DataEngineWindow") -> None:
         action_context = window.flow_controller.presentation._action_context(window)
@@ -622,12 +618,12 @@ class GuiRuntimeController:
             "blocked_status_text": self._blocked_status_text(window),
             "timeout": 5.0,
         }
-        self._begin_control_action(window, "stop_runtime", target=self._stop_runtime_worker, args=(window, action_kwargs))
+        self._begin_control_action(window, "stop_runtime", target=self._stop_runtime_worker, args=(action_kwargs,))
 
-    def _stop_runtime_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
-        with timed_operation(window._ui_timing_log_path, scope="gui.action", event="stop_engine"):
+    def _stop_runtime_worker(self, window: "DataEngineWindow", job: WorkspaceJob, action_kwargs: dict[str, object]) -> None:
+        with timed_operation(job.timing_log_path, scope="gui.action", event="stop_engine"):
             result = self.command_service.stop_pipeline(**action_kwargs)
-        self._emit_control_action_finished(window, "stop_runtime", result)
+        self._emit_control_action_finished(window, job, "stop_runtime", result)
 
     def toggle_runtime(self, window: "DataEngineWindow") -> None:
         if self._current_runtime_session(window).runtime_active:
@@ -652,17 +648,17 @@ class GuiRuntimeController:
             "blocked_status_text": self._blocked_status_text(window),
             "timeout": 5.0,
         }
-        if self._begin_control_action(window, "stop_pipeline", target=self._stop_pipeline_worker, args=(window, action_kwargs)):
+        if self._begin_control_action(window, "stop_pipeline", target=self._stop_pipeline_worker, args=(action_kwargs,)):
             if action_context.selected_manual_running and card is not None:
                 window.manual_flow_stopping_groups.add(card.group)
                 if card.name in window.flow_states and window.flow_states.get(card.name) != "failed":
                     window.flow_controller.set_flow_state(window, card.name, "stopping flow")
                 window.flow_controller.refresh_action_buttons(window)
 
-    def _stop_pipeline_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
-        with timed_operation(window._ui_timing_log_path, scope="gui.action", event="stop_pipeline"):
+    def _stop_pipeline_worker(self, window: "DataEngineWindow", job: WorkspaceJob, action_kwargs: dict[str, object]) -> None:
+        with timed_operation(job.timing_log_path, scope="gui.action", event="stop_pipeline"):
             result = self.command_service.stop_pipeline(**action_kwargs)
-        self._emit_control_action_finished(window, "stop_pipeline", result)
+        self._emit_control_action_finished(window, job, "stop_pipeline", result)
 
     def finish_control_action(self, window: "DataEngineWindow", action_name: str, payload: object) -> None:
         window._pending_control_actions.discard(action_name)

@@ -17,7 +17,7 @@ from data_engine.services import (
 )
 from data_engine.platform.identity import APP_DISPLAY_NAME
 from data_engine.platform.instrumentation import timed_operation
-from data_engine.ui.gui.helpers import start_worker_thread
+from data_engine.ui.gui.controllers.jobs import WorkspaceJob, start_workspace_job
 from data_engine.views import (
     GuiActionState,
     QtFlowCard,
@@ -140,7 +140,7 @@ class _GuiWorkspaceCatalogController:
             if target_pinned
             else current_id
         )
-        if workspace_ids and settings_target_id not in workspace_ids:
+        if workspace_ids and settings_target_id not in workspace_ids and not target_pinned:
             settings_target_id = current_id
             window._settings_workspace_target_pinned = False
         window.settings_workspace_target_id = settings_target_id
@@ -171,7 +171,10 @@ class _GuiWorkspaceCatalogController:
             try:
                 settings_selector.clear()
                 if not workspace_ids:
-                    settings_selector.addItem("(no workspace)", "")
+                    settings_selector.addItem(
+                        f"{settings_target_id} (unavailable)" if target_pinned else "(no workspace)",
+                        settings_target_id if target_pinned else "",
+                    )
                     settings_selector.setCurrentIndex(0)
                     settings_selector.setEnabled(False)
                 else:
@@ -179,7 +182,8 @@ class _GuiWorkspaceCatalogController:
                         settings_selector.addItem(workspace_id, workspace_id)
                     selected_index = settings_selector.findData(settings_target_id)
                     if selected_index < 0:
-                        selected_index = 0
+                        settings_selector.addItem(f"{settings_target_id} (unavailable)", settings_target_id)
+                        selected_index = settings_selector.count() - 1
                     settings_selector.setCurrentIndex(selected_index)
                     settings_selector.setEnabled(True)
             finally:
@@ -207,6 +211,7 @@ class _GuiWorkspaceCatalogController:
         workspace_id = str(selector.itemData(index) or "").strip()
         if not workspace_id:
             return
+        window._settings_workspace_target_generation = int(getattr(window, "_settings_workspace_target_generation", 0)) + 1
         window.settings_workspace_target_id = workspace_id
         window._settings_workspace_target_pinned = True
         window._workspace_counts_footer_cache.pop(workspace_id, None)
@@ -240,11 +245,10 @@ class _GuiWorkspaceCatalogController:
         window._pending_control_actions.add("refresh_flows")
         window._pending_control_action_tokens["refresh_flows"] = window._workspace_binding_token()
         presentation.refresh_action_buttons(window)
-        start_worker_thread(
+        start_workspace_job(
             window,
             target=self._refresh_flows_worker,
             args=(
-                window,
                 {
                     "paths": window.workspace_paths,
                     "action_context": action_context,
@@ -253,8 +257,8 @@ class _GuiWorkspaceCatalogController:
             ),
         )
 
-    def _refresh_flows_worker(self, window: "DataEngineWindow", action_kwargs: dict[str, object]) -> None:
-        with timed_operation(window._ui_timing_log_path, scope="gui.action", event="refresh_flows"):
+    def _refresh_flows_worker(self, window: "DataEngineWindow", job: WorkspaceJob, action_kwargs: dict[str, object]) -> None:
+        with timed_operation(job.timing_log_path, scope="gui.action", event="refresh_flows"):
             result = window.command_service.refresh_flows(**action_kwargs)
         if window.ui_closing:
             return
@@ -263,7 +267,7 @@ class _GuiWorkspaceCatalogController:
                 "refresh_flows",
                 window._control_action_payload(
                     result,
-                    token=window._pending_control_action_tokens.get("refresh_flows"),
+                    token=job.token,
                 ),
             )
         except RuntimeError:
@@ -273,6 +277,7 @@ class _GuiWorkspaceCatalogController:
         if action_name not in {"refresh_flows", "request_control", "reset_flow"}:
             return
         window._pending_control_actions.discard(action_name)
+        window._pending_control_action_tokens.pop(action_name, None)
         presentation.refresh_action_buttons(window)
         if window.ui_closing:
             return
@@ -624,11 +629,11 @@ class _GuiFlowPresentationController:
         window._pending_control_actions.add("request_control")
         window._pending_control_action_tokens["request_control"] = window._workspace_binding_token()
         self.refresh_action_buttons(window)
-        start_worker_thread(window, target=self._request_control_worker, args=(window,))
+        start_workspace_job(window, target=self._request_control_worker)
 
-    def _request_control_worker(self, window: "DataEngineWindow") -> None:
-        with timed_operation(window._ui_timing_log_path, scope="gui.action", event="request_control"):
-            result = self.command_service.request_control(window.runtime_binding.daemon_manager)
+    def _request_control_worker(self, window: "DataEngineWindow", job: WorkspaceJob) -> None:
+        with timed_operation(job.timing_log_path, scope="gui.action", event="request_control"):
+            result = self.command_service.request_control(job.binding.daemon_manager)
         if window.ui_closing:
             return
         try:
@@ -636,7 +641,7 @@ class _GuiFlowPresentationController:
                 "request_control",
                 window._control_action_payload(
                     result,
-                    token=window._pending_control_action_tokens.get("request_control"),
+                    token=job.token,
                 ),
             )
         except RuntimeError:
@@ -710,20 +715,20 @@ class _GuiFlowPresentationController:
         window._pending_control_actions.add("reset_flow")
         window._pending_control_action_tokens["reset_flow"] = window._workspace_binding_token()
         self.refresh_action_buttons(window)
-        start_worker_thread(window, target=self._reset_flow_worker, args=(window, window.selected_flow_name))
+        start_workspace_job(window, target=self._reset_flow_worker, args=(window.selected_flow_name,))
 
-    def _reset_flow_worker(self, window: "DataEngineWindow", flow_name: str) -> None:
+    def _reset_flow_worker(self, window: "DataEngineWindow", job: WorkspaceJob, flow_name: str) -> None:
         error_text: str | None = None
         try:
             with timed_operation(
-                window._ui_timing_log_path,
+                job.timing_log_path,
                 scope="gui.action",
                 event="reset_flow",
                 fields={"flow": flow_name},
             ):
                 result = self.command_service.reset_flow(
-                    paths=window.workspace_paths,
-                    runtime_cache_ledger=window.runtime_binding.runtime_cache_ledger,
+                    paths=job.paths,
+                    runtime_cache_ledger=job.binding.runtime_cache_ledger,
                     flow_name=flow_name,
                 )
             error_text = result.error_text
@@ -736,7 +741,7 @@ class _GuiFlowPresentationController:
                 "reset_flow",
                 window._control_action_payload(
                     {"flow_name": flow_name, "error_text": error_text},
-                    token=window._pending_control_action_tokens.get("reset_flow"),
+                    token=job.token,
                 ),
             )
         except RuntimeError:

@@ -119,7 +119,6 @@ def bootstrap_gui_window(window: "DataEngineWindow", *, theme_name: str, service
     window.signals = UiSignals()
     window.signals.run_finished.connect(window._finish_run)
     window.signals.runtime_finished.connect(window._finish_runtime)
-    window.signals.daemon_startup_finished.connect(window._finish_daemon_startup)
     window.signals.daemon_sync_finished.connect(window._finish_daemon_sync)
     window.signals.control_action_finished.connect(window._finish_control_action)
     window.signals.daemon_update_available.connect(window._sync_from_daemon)

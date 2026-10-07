@@ -68,6 +68,32 @@ _PREVIEW_ROW_LIMIT_MAX = 500_000
 _TABLE_RENDER_BATCH_SIZE = 500
 _PREVIEW_DISTINCT_VALUE_LIMIT = 500
 _PREVIEW_MODE_TOP = "top"
+_RETIRED_PARQUET_LOADERS: set[QThread] = set()
+
+
+def _finish_retired_parquet_loaders() -> None:
+    for loader in tuple(_RETIRED_PARQUET_LOADERS):
+        loader.wait()
+        _RETIRED_PARQUET_LOADERS.discard(loader)
+        loader.deleteLater()
+
+
+def _retire_parquet_loader(loader: QThread) -> None:
+    """Keep a detached query alive until its thread has actually finished."""
+    application = QApplication.instance()
+    if application is not None and not application.property("dataEngineParquetRetirement"):
+        application.aboutToQuit.connect(_finish_retired_parquet_loaders)
+        application.setProperty("dataEngineParquetRetirement", True)
+    _RETIRED_PARQUET_LOADERS.add(loader)
+
+    def release() -> None:
+        if loader in _RETIRED_PARQUET_LOADERS:
+            _RETIRED_PARQUET_LOADERS.remove(loader)
+            loader.deleteLater()
+
+    loader.finished.connect(release)
+    if not loader.isRunning():
+        release()
 
 
 def _dtype_supports_text_filter(dtype: pl.DataType) -> bool:
@@ -245,7 +271,8 @@ class _ParquetPreviewLoader(QThread):
 
     def run(self) -> None:
         try:
-            lazy_frame = pl.scan_parquet(self._output_path)
+            files = _parquet_metadata_paths(self._output_path)
+            lazy_frame = pl.scan_parquet(files)
             schema = lazy_frame.collect_schema()
             query = lazy_frame
             filter_expressions = []
@@ -254,7 +281,7 @@ class _ParquetPreviewLoader(QThread):
                 if expression is not None:
                     filter_expressions.append(expression)
                     query = query.filter(expression)
-            row_count = None if self._active_filters else _parquet_row_count_from_metadata(self._output_path)
+            row_count = None if self._active_filters else _parquet_manifest_row_count(files)
             if row_count is None:
                 row_count = (
                     query.select(pl.len().alias("__row_count__"))
@@ -264,8 +291,7 @@ class _ParquetPreviewLoader(QThread):
                 )
             if filter_expressions or self._sort_columns:
                 preview = _top_parquet_preview_by_row_index(
-                    lazy_frame,
-                    self._output_path,
+                    files,
                     filter_expressions=tuple(filter_expressions),
                     sort_columns=self._sort_columns,
                     row_limit=self._preview_row_limit,
@@ -276,7 +302,7 @@ class _ParquetPreviewLoader(QThread):
             preview_label = f"showing top {self._preview_row_limit} rows"
             summary = f"{row_count} rows - {len(schema.names())} columns - {preview_label}"
             self.preview_loaded.emit(schema, preview, summary)
-        except Exception as exc:  # pragma: no cover - defensive UI fallback
+        except BaseException as exc:  # Native Polars panics derive directly from BaseException.
             self.load_failed.emit(str(exc))
 
 
@@ -343,7 +369,7 @@ class _DistinctValueLoader(QThread):
                 else:
                     values.append((str(value), value))
             self.values_loaded.emit(self._column_name, self._token, values, truncated)
-        except Exception as exc:  # pragma: no cover - defensive UI fallback
+        except BaseException as exc:  # Keep native query failures inside the background UI boundary.
             self.load_failed.emit(self._column_name, self._token, str(exc))
 
 
@@ -1355,7 +1381,7 @@ class _ParquetExplorerWidget(QWidget):
         self.setObjectName("outputPreviewExplorer")
         self._output_path = Path(output_path)
         self._timing_log_path = timing_log_path
-        self._lazy_frame = pl.scan_parquet(self._output_path)
+        self._shutdown = False
         self._schema = None
         self._current_preview = pl.DataFrame()
         self._active_filters: dict[str, ColumnFilter] = {}
@@ -1450,6 +1476,11 @@ class _ParquetExplorerWidget(QWidget):
         self.preview_limit_spin.setEnabled(True)
 
     def shutdown_background_work(self) -> None:
+        if self._shutdown:
+            return
+        self._shutdown = True
+        self._table_render_generation += 1
+        self._pending_preview_refresh = False
         if self._filter_popup is not None:
             self._filter_popup.close()
             self._filter_popup = None
@@ -1467,13 +1498,17 @@ class _ParquetExplorerWidget(QWidget):
         preview_loader = self._preview_loader
         self._preview_loader = None
         if preview_loader is not None:
-            preview_loader.wait(5000)
-            preview_loader.deleteLater()
+            preview_loader.preview_loaded.disconnect()
+            preview_loader.load_failed.disconnect()
+            preview_loader.finished.disconnect()
+            _retire_parquet_loader(preview_loader)
         distinct_loaders = list(self._distinct_loaders)
         self._distinct_loaders.clear()
         for loader in distinct_loaders:
-            loader.wait(5000)
-            loader.deleteLater()
+            loader.values_loaded.disconnect()
+            loader.load_failed.disconnect()
+            loader.finished.disconnect()
+            _retire_parquet_loader(loader)
         self._active_distinct_requests.clear()
         self._active_preview_request_id = None
         self._active_filters.clear()
@@ -1555,6 +1590,8 @@ class _ParquetExplorerWidget(QWidget):
         self._refresh_preview()
 
     def request_filter_values(self, column_name: str, search_text: str, token: int) -> None:
+        if self._shutdown:
+            return
         if self._filter_popup is None or self._filter_popup._column_name != column_name:
             return
         value_filter = self._filter_popup.distinct_list_column_filter()
@@ -1598,6 +1635,8 @@ class _ParquetExplorerWidget(QWidget):
         loader.start()
 
     def _refresh_preview(self) -> None:
+        if self._shutdown:
+            return
         if self._preview_loader is not None:
             self._pending_preview_refresh = True
             return
@@ -1688,6 +1727,8 @@ class _ParquetExplorerWidget(QWidget):
         return QPoint(section_bottom.x(), section_bottom.y() + 2)
 
     def _handle_distinct_values_loaded(self, column_name: str, token: int, values: object, truncated: bool) -> None:
+        if self._shutdown:
+            return
         value_filter = None
         if (
             self._filter_popup is not None
@@ -1731,6 +1772,8 @@ class _ParquetExplorerWidget(QWidget):
             self._filter_popup.set_values(loaded_values, note=note, complete_domain=complete_domain)
 
     def _handle_distinct_values_failed(self, column_name: str, token: int, message: str) -> None:
+        if self._shutdown:
+            return
         request_id = self._active_distinct_requests.pop((column_name, token), None)
         append_timing_line(
             self._timing_log_path,
@@ -1757,6 +1800,8 @@ class _ParquetExplorerWidget(QWidget):
         loader.deleteLater()
 
     def _handle_preview_loaded(self, schema: object, preview: object, summary: str) -> None:
+        if self._shutdown:
+            return
         request_id = self._active_preview_request_id
         self._active_preview_request_id = None
         self._schema = schema
@@ -1782,6 +1827,8 @@ class _ParquetExplorerWidget(QWidget):
             self.request_filter_values(self._filter_popup._column_name, "", self._filter_popup._search_token)
 
     def _handle_preview_failed(self, message: str) -> None:
+        if self._shutdown:
+            return
         request_id = self._active_preview_request_id
         self._active_preview_request_id = None
         self.table.setEnabled(False)
@@ -1801,6 +1848,8 @@ class _ParquetExplorerWidget(QWidget):
         )
 
     def _handle_preview_finished(self) -> None:
+        if self._shutdown:
+            return
         loader = self._preview_loader
         self._preview_loader = None
         if loader is not None:
@@ -2321,7 +2370,10 @@ def _build_distinct_value_filter_expression(
 
 
 def _parquet_row_count_from_metadata(path: Path) -> int | None:
-    files = _parquet_metadata_paths(path)
+    return _parquet_manifest_row_count(_parquet_metadata_paths(path))
+
+
+def _parquet_manifest_row_count(files: tuple[Path, ...]) -> int | None:
     if not files:
         return None
     try:
@@ -2336,7 +2388,7 @@ def _parquet_metadata_paths(path: Path) -> tuple[Path, ...]:
         return tuple(
             sorted(
                 (Path(match) for match in glob_module.glob(path_text, recursive=True) if Path(match).is_file()),
-                key=lambda item: str(item).lower(),
+                key=str,
             )
         )
     return (path,) if path.is_file() else ()
@@ -2368,14 +2420,15 @@ def _sorted_top_parquet_preview(
 
 
 def _top_parquet_preview_by_row_index(
-    query: pl.LazyFrame,
-    path: Path,
+    files: tuple[Path, ...],
     *,
     filter_expressions: tuple[pl.Expr, ...],
     sort_columns: tuple[tuple[str, bool], ...],
     row_limit: int,
     schema_names: tuple[str, ...],
 ) -> pl.DataFrame:
+    # Row IDs and lookup offsets must describe the same immutable scan manifest.
+    query = pl.scan_parquet(files)
     row_index_column = _preview_row_index_column(schema_names)
     order_column = _preview_order_column(schema_names, row_index_column)
     indexed_query = query.with_row_index(row_index_column)
@@ -2391,7 +2444,7 @@ def _top_parquet_preview_by_row_index(
     if not row_ids:
         return query.head(0).collect()
     file_scoped_preview = _collect_preview_rows_by_file_row_ids(
-        path,
+        files,
         row_ids=row_ids,
         row_index_column=row_index_column,
         order_column=order_column,
@@ -2416,13 +2469,13 @@ def _top_parquet_preview_by_row_index(
 
 
 def _collect_preview_rows_by_file_row_ids(
-    path: Path,
+    files: tuple[Path, ...],
     *,
     row_ids: list[int],
     row_index_column: str,
     order_column: str,
 ) -> pl.DataFrame | None:
-    file_offsets = _parquet_file_row_offsets(path)
+    file_offsets = _parquet_file_row_offsets(files)
     if not file_offsets:
         return None
     remaining_rows = list(enumerate(row_ids))
@@ -2460,8 +2513,7 @@ def _collect_preview_rows_by_file_row_ids(
     )
 
 
-def _parquet_file_row_offsets(path: Path) -> tuple[tuple[Path, int, int], ...]:
-    files = _parquet_metadata_paths(path)
+def _parquet_file_row_offsets(files: tuple[Path, ...]) -> tuple[tuple[Path, int, int], ...]:
     if not files:
         return ()
     offsets: list[tuple[Path, int, int]] = []

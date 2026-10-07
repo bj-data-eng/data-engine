@@ -43,10 +43,11 @@ def workspace_vscode_settings(
     workspace_root: Path,
     *,
     app_root: Path,
+    workspace_id: str | None = None,
     interpreter_path: Path | None = None,
 ) -> dict[str, object]:
-    """Return VS Code settings for one workspace root."""
-    workspace_id = validate_workspace_id(workspace_root.name)
+    """Return VS Code settings retaining the resolved workspace id or explicit alias."""
+    workspace_id = validate_workspace_id(workspace_id if workspace_id is not None else workspace_root.name)
     terminal_env = {
         "DATA_ENGINE_APP_ROOT": str(app_root),
         "DATA_ENGINE_WORKSPACE_ROOT": str(workspace_root),
@@ -111,6 +112,7 @@ def write_workspace_vscode_settings(
     workspace_root: Path,
     *,
     app_root: Path,
+    workspace_id: str | None = None,
     interpreter_path: Path | None = None,
     overwrite: bool = False,
 ) -> Path | None:
@@ -124,6 +126,7 @@ def write_workspace_vscode_settings(
             workspace_vscode_settings(
                 workspace_root,
                 app_root=app_root,
+                workspace_id=workspace_id,
                 interpreter_path=interpreter_path,
             ),
             indent=2,
@@ -218,6 +221,7 @@ class WorkspaceProvisioningService:
         settings_path = write_workspace_vscode_settings(
             workspace_root,
             app_root=workspace_paths.app_root,
+            workspace_id=workspace_paths.workspace_id,
             interpreter_path=interpreter_path,
             overwrite=False,
         )

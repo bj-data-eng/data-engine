@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from data_engine.domain import FlowLogEntry, FlowRunState
+from data_engine.domain.time import parse_utc_text
 from data_engine.views.presentation import format_seconds
 
 
@@ -68,7 +69,12 @@ def _status_visual_state(status: str) -> str:
 
 def _display_duration_seconds(run_state: FlowRunState) -> float | None:
     if run_state.status in {"started", "stopping"}:
-        started_at = (
+        summary_event = run_state.summary_entry.event if run_state.summary_entry is not None else None
+        started_at = parse_utc_text(
+            summary_event.started_at_utc
+            if summary_event is not None and summary_event.step_name is None
+            else None
+        ) or (
             run_state.entries[0].created_at_utc
             if run_state.entries
             else (run_state.summary_entry.created_at_utc if run_state.summary_entry is not None else None)

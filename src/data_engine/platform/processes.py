@@ -30,7 +30,6 @@ from data_engine.platform.posix_watchdog import (
 
 _WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _WINDOWS_SYNCHRONIZE = 0x00100000
-_WINDOWS_STILL_ACTIVE = 259
 _WINDOWS_WAIT_OBJECT_0 = 0
 _WINDOWS_WAIT_TIMEOUT = 258
 _WINDOWS_WAIT_FAILED = 0xFFFFFFFF
@@ -808,12 +807,19 @@ def _inspect_windows_process_identity(pid: int) -> ProcessIdentity | None:
 def _inspect_windows_process_identity_from_handle(
     pid: int, handle
 ) -> ProcessIdentity | None:
-    first_creation_time = _read_windows_creation_time(handle, pid=pid)
-    executable_path = _read_windows_executable(handle, pid=pid)
     if not _windows_process_handle_is_active(handle, pid=pid):
         return None
-    process_session_id = _read_windows_session_id(pid)
-    second_creation_time = _read_windows_creation_time(handle, pid=pid)
+    try:
+        first_creation_time = _read_windows_creation_time(handle, pid=pid)
+        executable_path = _read_windows_executable(handle, pid=pid)
+        if not _windows_process_handle_is_active(handle, pid=pid):
+            return None
+        process_session_id = _read_windows_session_id(pid)
+        second_creation_time = _read_windows_creation_time(handle, pid=pid)
+    except ProcessInspectionError:
+        if not _windows_process_handle_is_active(handle, pid=pid):
+            return None
+        raise
     if second_creation_time != first_creation_time:
         raise ProcessInspectionError(
             f"Local process {pid} changed while its identity was inspected."
@@ -1384,28 +1390,16 @@ def process_is_running(pid: int | None, *, treat_defunct_as_dead: bool = True) -
 
 def _windows_process_is_running(pid: int) -> bool:
     """Return whether one Windows process id exists and has not exited."""
-    kernel32 = ctypes.windll.kernel32
-    kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
-    kernel32.OpenProcess.restype = ctypes.c_void_p
-    kernel32.GetExitCodeProcess.argtypes = [
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_ulong),
-    ]
-    kernel32.GetExitCodeProcess.restype = ctypes.c_int
-    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-    kernel32.CloseHandle.restype = ctypes.c_int
-    handle = kernel32.OpenProcess(
-        _WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid
-    )
-    if not handle:
-        return False
     try:
-        exit_code = ctypes.c_ulong()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+        handle = _open_windows_process(pid)
+        if handle is None:
             return False
-        return exit_code.value == _WINDOWS_STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
+        try:
+            return _windows_process_handle_is_active(handle, pid=pid)
+        finally:
+            _close_windows_process(handle)
+    except ProcessInspectionError:
+        return False
 
 
 def process_status(pid: int) -> str | None:
@@ -1457,23 +1451,33 @@ def _list_posix_processes() -> list[ProcessInfo]:
 
 
 def _list_windows_processes() -> list[ProcessInfo]:
-    result = subprocess.run(
-        [
-            "powershell.exe",
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$processes = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, CommandLine; "
-            "if ($null -eq $processes) { '[]' } else { $processes | ConvertTo-Json -Compress -Depth 3 }",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$ErrorActionPreference = 'Stop'; "
+                "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
+                "$OutputEncoding = [Console]::OutputEncoding; "
+                "$processes = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, CommandLine; "
+                "if ($null -eq $processes) { '[]' } else { $processes | ConvertTo-Json -Compress -Depth 3 }",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if not isinstance(result.stdout, bytes):
+            raise ProcessInspectionError("Unable to inspect the local process table.")
+        # Decode on this thread so invalid bytes become a controlled inspection error.
+        payload = result.stdout.decode("utf-8", errors="strict").strip()
+    except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
+        raise ProcessInspectionError(
+            "Unable to inspect the local process table."
+        ) from exc
     if result.returncode != 0:
         raise ProcessInspectionError("Unable to inspect the local process table.")
-    payload = result.stdout.strip()
     if not payload:
         return []
     try:

@@ -71,9 +71,6 @@ class GuiControlMixin:
     def _ensure_daemon_started(self: "DataEngineWindow") -> bool:
         return self.runtime_controller.ensure_daemon_started(self)
 
-    def _start_daemon_worker(self: "DataEngineWindow") -> None:
-        self.runtime_controller.start_daemon_worker(self)
-
     def _finish_daemon_startup(self: "DataEngineWindow", success: bool, error_text: str) -> None:
         present_finish_daemon_startup(self, success, error_text)
 
@@ -83,6 +80,9 @@ class GuiControlMixin:
     def _finish_control_action(self: "DataEngineWindow", action_name: str, payload: object) -> None:
         token, inner_payload = self._unwrap_control_action_payload(payload)
         if token is not None and not self._matches_workspace_binding_token(token):
+            return
+        if action_name == "daemon_startup":
+            self._finish_daemon_startup(inner_payload["success"], inner_payload["error_text"])
             return
         if action_name in {"refresh_flows", "request_control", "reset_flow"}:
             self.flow_controller.finish_control_action(self, action_name, inner_payload)

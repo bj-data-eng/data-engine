@@ -230,7 +230,7 @@ def test_run_process_listing_uses_windows_powershell_json(monkeypatch):
                     "CommandLine": "python -m data_engine.ui.gui.launcher",
                 },
             ]
-        )
+        ).encode("utf-8")
 
     monkeypatch.setattr("data_engine.platform.processes._HOST_OS_NAME", "nt")
     monkeypatch.setattr(

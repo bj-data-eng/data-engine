@@ -89,7 +89,9 @@ def handle_close_event(window: "DataEngineWindow", event: "QCloseEvent") -> None
         if should_shutdown_daemon and hasattr(window, "_shutdown_daemon_on_close"):
             window._shutdown_daemon_on_close()
     if hasattr(window, "runtime_binding_service") and hasattr(window, "runtime_binding"):
-        window.runtime_binding_service.close_binding(window.runtime_binding)
+        from data_engine.ui.gui.controllers.jobs import retire_workspace_binding
+
+        retire_workspace_binding(window, window.runtime_binding)
     super(type(window), window).closeEvent(event)
 
 

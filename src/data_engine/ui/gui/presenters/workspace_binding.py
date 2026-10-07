@@ -9,6 +9,7 @@ from data_engine.domain import DaemonStatusState, OperationSessionState, Operato
 from data_engine.platform.instrumentation import maybe_start_viztracer
 from data_engine.services import DaemonUpdateSubscription
 from data_engine.ui.gui.helpers import register_client_session
+from data_engine.ui.gui.controllers.jobs import retire_workspace_binding
 from data_engine.ui.gui.presenters.workspace_settings import refresh_workspace_root_controls
 
 if TYPE_CHECKING:
@@ -91,7 +92,7 @@ def rebind_workspace_context(
         manager=window.runtime_binding.daemon_manager,
         clock=window._monotonic,
     )
-    window.runtime_binding_service.close_binding(old_binding)
+    retire_workspace_binding(window, old_binding)
     register_client_session(window)
     window._ui_timing_log_path = (
         window.workspace_paths.runtime_state_dir / "ui_timing.log"

@@ -52,6 +52,7 @@ from data_engine.ui.gui.rendering.artifacts import (
     _build_distinct_value_filter_expression,
     _export_frame_to_excel,
     _ParquetPreviewLoader,
+    _parquet_metadata_paths,
     _parquet_row_count_from_metadata,
     _sorted_top_parquet_preview,
     _top_parquet_preview_by_row_index,
@@ -1114,8 +1115,7 @@ def test_top_parquet_preview_by_row_index_matches_filtered_head(tmp_path):
     frame.write_parquet(output_path)
 
     result = _top_parquet_preview_by_row_index(
-        pl.scan_parquet(output_path),
-        output_path,
+        (output_path,),
         filter_expressions=(pl.col("workflow").is_in(["Appeals"]),),
         sort_columns=(),
         row_limit=2,
@@ -1139,8 +1139,7 @@ def test_top_parquet_preview_by_row_index_matches_filtered_sorted_head(tmp_path)
     frame.write_parquet(output_path)
 
     result = _top_parquet_preview_by_row_index(
-        pl.scan_parquet(output_path),
-        output_path,
+        (output_path,),
         filter_expressions=(pl.col("workflow").is_in(["Appeals"]),),
         sort_columns=(("claim_id", False),),
         row_limit=2,
@@ -1163,8 +1162,7 @@ def test_top_parquet_preview_by_row_index_fetches_scattered_rows_across_files(tm
     expected = pl.concat([first, second], how="vertical").sort("employee_id").head(4)
 
     result = _top_parquet_preview_by_row_index(
-        pl.scan_parquet(glob_path),
-        glob_path,
+        _parquet_metadata_paths(glob_path),
         filter_expressions=(),
         sort_columns=(("employee_id", False),),
         row_limit=4,
@@ -2553,10 +2551,12 @@ def test_daemon_startup_worker_shuts_down_late_orphaned_daemon_when_window_close
     monkeypatch.setattr(window.runtime_binding_service, "close_binding", _close_binding)
     monkeypatch.setattr(window.runtime_binding_service, "count_live_client_sessions", lambda binding: 0)
     monkeypatch.setattr(window.daemon_service, "is_live", lambda paths: True)
-    monkeypatch.setattr(window, "_shutdown_daemon_on_close", lambda: shutdown_calls.append(window.workspace_paths))
+    monkeypatch.setattr(window, "_daemon_request", lambda paths, payload, **kwargs: shutdown_calls.append(paths))
 
-    worker = threading.Thread(target=window.runtime_controller.start_daemon_worker, args=(window,), daemon=True)
-    worker.start()
+    from data_engine.ui.gui.controllers.jobs import start_workspace_job
+
+    start_workspace_job(window, target=window.runtime_controller.start_daemon_worker)
+    worker, = window._worker_threads_snapshot()
     assert entered_spawn.wait(timeout=1.0)
 
     window.ui_closing = True
@@ -7833,7 +7833,7 @@ def test_daemon_wait_worker_schedules_sync_when_projection_changes(qapp, monkeyp
         monkeypatch.setattr(
             window,
             "_schedule_daemon_update_batch",
-            lambda batch: scheduled.append(batch.snapshot.projection_version) or window.daemon_subscription.stop(),
+            lambda batch, *, token: scheduled.append(batch.snapshot.projection_version) or window.daemon_subscription.stop(),
         )
 
         window._daemon_wait_worker()
@@ -7867,7 +7867,7 @@ def test_daemon_wait_worker_skips_sync_when_projection_is_unchanged(qapp, monkey
             return previous_snapshot
 
         window.daemon_state_service.wait_for_update = _wait_for_update
-        monkeypatch.setattr(window, "_schedule_daemon_update_batch", lambda batch: scheduled.append(batch.snapshot.projection_version))
+        monkeypatch.setattr(window, "_schedule_daemon_update_batch", lambda batch, *, token: scheduled.append(batch.snapshot.projection_version))
 
         window._daemon_wait_worker()
 

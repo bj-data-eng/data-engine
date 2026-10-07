@@ -59,7 +59,6 @@ class UiSignals(QObject):
 
     run_finished = Signal(object, object, object)
     runtime_finished = Signal(object, object, object)
-    daemon_startup_finished = Signal(bool, str)
     daemon_sync_finished = Signal(object)
     control_action_finished = Signal(str, object)
     daemon_update_available = Signal()

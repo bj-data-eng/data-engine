@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from data_engine.domain import FlowCatalogEntry, FlowLogEntry, OperationSessionState, RuntimeStepEvent
 from data_engine.services.runtime_state import RunLiveSnapshot
 from data_engine.views import build_selected_flow_presentation
+from data_engine.views.runs import _display_duration_seconds
 
 
 def _card() -> FlowCatalogEntry:
@@ -281,4 +284,53 @@ def _entry_to_group(entry: FlowLogEntry):
     from data_engine.domain import FlowRunState
 
     return FlowRunState.group_entries((entry,))[0]
+
+
+@pytest.mark.parametrize("authoritative", [False, True])
+@pytest.mark.parametrize("live_runs", [None, {}])
+def test_empty_live_truth_reconciles_only_when_available_and_authoritative(authoritative, live_runs):
+    groups = tuple(_entry_to_group(_run_group(status, status=status)) for status in ("started", "stopping", "success", "failed", "stopped"))
+    presentation = build_selected_flow_presentation(
+        card=_card(), tracker=OperationSessionState.empty(), flow_states={},
+        run_groups=groups, selected_run_key=groups[0].key,
+        live_runs=live_runs, live_truth_authoritative=authoritative,
+    )
+    expected = groups[2:] if authoritative and live_runs is not None else groups
+    assert presentation.run_groups == expected
+    assert presentation.selected_run_key == expected[0].key
+
+
+@pytest.mark.parametrize("state", ["running", "stopping"])
+@pytest.mark.parametrize("step_only_history", [False, True])
+def test_live_run_duration_uses_run_start_while_step_uses_step_start(state, step_only_history):
+    card = _card()
+    now = datetime.now(UTC)
+    started = now - timedelta(seconds=60)
+    step_started = now - timedelta(seconds=3)
+    live = RunLiveSnapshot(
+        run_id="live", flow_name=card.name, group_name=card.group, source_path=None,
+        state=state, started_at_utc=started.isoformat(), elapsed_seconds=60.0,
+        current_step_name="Write", current_step_started_at_utc=step_started.isoformat(),
+    )
+    history = ()
+    if step_only_history:
+        entry = FlowLogEntry(
+            line="step-only history", kind="flow", flow_name=card.name,
+            created_at_utc=step_started,
+            event=RuntimeStepEvent(run_id="live", flow_name=card.name, step_name="Read", source_label="-", status="success"),
+        )
+        history = (_entry_to_group(entry),)
+    presentation = build_selected_flow_presentation(
+        card=card, tracker=OperationSessionState.empty(), flow_states={},
+        run_groups=history, selected_run_key=None, max_visible_runs=1,
+        live_runs={live.run_id: live}, live_truth_authoritative=True,
+    )
+    run, = presentation.visible_run_groups
+    assert 60.0 <= _display_duration_seconds(run) < 65.0
+    assert run.summary_entry.created_at_utc == started
+    assert run.summary_entry.event.step_name is None
+    step = run.steps[-1]
+    assert step.entry.created_at_utc == step_started
+    assert step.entry.event.step_name == "Write"
+    assert 3.0 <= step.elapsed_seconds < 8.0
 

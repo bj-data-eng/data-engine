@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 import hashlib
@@ -149,6 +150,9 @@ class WorkspaceConfigContext:
     ``context.config`` reads files from ``<workspace>/config/*.toml`` on demand.
     It returns dictionaries so flows can keep environment-specific settings out
     of Python modules without introducing a larger configuration framework.
+    Each returned mapping owns independent nested values. Names are single file
+    stems, and resolved files must remain inside the workspace config directory.
+    These lookup rules define the helper contract for trusted authored Python.
 
     Attributes
     ----------
@@ -186,24 +190,53 @@ class WorkspaceConfigContext:
         if config_dir is None or not config_dir.is_dir():
             self._names = ()
             return self._names
-        self._names = tuple(
-            path.stem
-            for path in sorted(config_dir.glob("*.toml"))
-            if path.is_file() and not path.name.startswith(".")
-        )
+        names = []
+        for path in sorted(config_dir.glob("*.toml")):
+            if not path.is_file() or path.name.startswith("."):
+                continue
+            try:
+                self._config_path(path.stem)
+            except FlowValidationError:
+                continue
+            names.append(path.stem)
+        self._names = tuple(names)
         return self._names
 
+    def _config_path(self, name: str) -> Path:
+        config_dir = self.config_dir
+        if config_dir is None:
+            raise FlowValidationError("Config lookup requires an authored workspace.")
+        config_path = config_dir / f"{name}.toml"
+        try:
+            resolved_dir = config_dir.resolve()
+            resolved_workspace = self.workspace_root.resolve()
+            resolved_path = config_path.resolve()
+        except (OSError, RuntimeError) as exc:
+            raise FlowValidationError(f"Config path cannot be resolved: {config_path}") from exc
+        if not resolved_dir.is_relative_to(resolved_workspace) or not resolved_path.is_relative_to(resolved_dir):
+            raise FlowValidationError(f"Config file must remain inside the workspace config directory: {config_path}")
+        return resolved_path
+
     def get(self, name: str) -> dict[str, object] | None:
-        """Return one parsed config mapping when available."""
+        """Return an independent parsed mapping for a single contained file stem.
+
+        Missing files return None. Invalid stems and paths redirected outside
+        the workspace config directory raise FlowValidationError.
+        """
         normalized_name = str(name).strip()
         if not normalized_name:
             raise FlowValidationError("config.get() name must be non-empty.")
-        if normalized_name in self._cache:
-            return dict(self._cache[normalized_name])
+        if (
+            normalized_name in {".", ".."}
+            or any(character in normalized_name for character in '/\\:\x00')
+        ):
+            raise FlowValidationError("Config name must be a single file stem.")
         config_dir = self.config_dir
         if config_dir is None:
             return None
-        config_path = config_dir / f"{normalized_name}.toml"
+        config_path = self._config_path(normalized_name)
+        if normalized_name in self._cache:
+            return deepcopy(self._cache[normalized_name])
         if not config_path.is_file():
             return None
         try:
@@ -212,7 +245,7 @@ class WorkspaceConfigContext:
         except tomllib.TOMLDecodeError as exc:
             raise FlowValidationError(f"Config file {config_path} is not valid TOML: {exc}") from exc
         self._cache[normalized_name] = parsed
-        return dict(parsed)
+        return deepcopy(parsed)
 
     def require(self, name: str) -> dict[str, object]:
         """Return one parsed config mapping or fail loudly when missing."""
