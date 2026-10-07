@@ -339,7 +339,7 @@ Behavior:
   deterministic source candidate.
 - `preview(...)` is not available from inside compiled flow modules.
 
-`preview(...)` is for notebooks, REPLs, and direct flow-module authoring. Use
+`preview(...)` is for Python REPLs and direct flow-module authoring. Use
 `run_once()` when you need completed runtime contexts rather than just the
 previewed value.
 

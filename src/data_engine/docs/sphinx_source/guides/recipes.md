@@ -7,7 +7,7 @@ instead shows how the authoring pieces fit together.
 When a recipe matches a shipped starter flow, the starter flow name is called out explicitly.
 
 For quick dataframe inspection while authoring, `save_as=`/`use=` are the
-notebook-friendly way to pause on a named intermediate, and
+interactive way to pause on a named intermediate, and
 `context.debug.save_frame(...)` is the runtime-friendly way to keep a dataframe
 visible in the app's Debug view.
 

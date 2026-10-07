@@ -162,22 +162,18 @@ def main(argv: list[str] | None = None) -> int:
             valid_cards = [card for card in cards if card.valid]
             manual_names = [card.name for card in valid_cards if card.mode == "manual"]
             flow_names = {card.name for card in valid_cards}
-            notebook_names = {
-                f"{paths.workspace_id}_nb_poll",
-                f"{paths.workspace_id}_nb_schedule",
-                f"{paths.workspace_id}_nb_manual",
-            }
+            starter_names = {"example_mirror", "example_schedule", "example_manual", "example_database_dimensions"}
             record_check(paths.workspace_root.exists(), f"{paths.workspace_id}: workspace root exists", failures)
             record_check(paths.flow_modules_dir.exists(), f"{paths.workspace_id}: flow_modules exists", failures)
             record_check(args.run_once_flow in manual_names, f"{paths.workspace_id}: manual flow {args.run_once_flow} exists", failures)
-            record_check(notebook_names <= flow_names, f"{paths.workspace_id}: notebook flows discovered", failures)
+            record_check(starter_names <= flow_names, f"{paths.workspace_id}: Python flows discovered", failures)
             print_kv(f"{paths.workspace_id}.workspace_root", paths.workspace_root)
             print_kv(f"{paths.workspace_id}.runtime_db_path", paths.runtime_db_path)
             print_kv(f"{paths.workspace_id}.cache_dir", paths.workspace_cache_dir)
             print_kv(f"{paths.workspace_id}.manual_flows", ", ".join(manual_names) or "(none)")
-            for notebook_name in sorted(notebook_names):
-                compiled_path = paths.compiled_flow_modules_dir / f"{notebook_name}.py"
-                record_check(compiled_path.exists(), f"{paths.workspace_id}: compiled notebook module {notebook_name}.py exists", failures)
+            for flow_name in sorted(starter_names):
+                compiled_path = paths.compiled_flow_modules_dir / f"{flow_name}.py"
+                record_check(compiled_path.exists(), f"{paths.workspace_id}: mirrored Python module {flow_name}.py exists", failures)
 
         if len({str(paths.runtime_db_path) for paths in workspace_paths}) != len(workspace_paths):
             failures.append("Runtime DB paths are not isolated per workspace.")

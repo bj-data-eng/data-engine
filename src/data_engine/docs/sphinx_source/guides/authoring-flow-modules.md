@@ -1,8 +1,7 @@
 # Authoring Flow Modules
 
-Flow modules can be authored as either Python files or notebooks and live in:
+Flow modules are authored as Python files and live in:
 
-- `workspaces/<workspace_id>/flow_modules/<name>.ipynb`
 - `workspaces/<workspace_id>/flow_modules/<name>.py`
 
 Reusable helper modules can live in:
@@ -14,7 +13,7 @@ Each flow module should export:
 - optional `DESCRIPTION`
 - `build() -> Flow`
 
-Notebook-authored flow modules are compiled into runtime-ready Python modules before discovery and execution. They follow the same contract as `.py` modules: keep top-level cells side-effect free, export `build()`, and use the filename as the durable flow identity.
+Python flow modules are mirrored into workspace-local runtime artifacts before discovery and execution. Keep module-level code side-effect free, export `build()`, and use the filename as the durable flow identity.
 
 The flow-module filename is the durable flow identity used by discovery and runtime state. If you rename the file, you are effectively creating a different flow as far as the system is concerned.
 
@@ -47,7 +46,7 @@ Keep module import-time code side-effect free. The app needs to discover flows s
 
 Do that work inside steps instead.
 
-Use `build().preview(use="name")` from an external notebook, REPL, or script while iterating when you want to inspect a saved intermediate result without promoting it to a separate step. `preview()` is not available from inside compiled flow modules.
+Use `build().preview(use="name")` from a Python REPL or script while iterating when you want to inspect a saved intermediate result without promoting it to a separate step. `preview()` is not available from inside compiled flow modules.
 
 ## Step style
 
@@ -91,7 +90,7 @@ That simplicity is the intended authoring experience. Flow modules should feel l
 - keep import-time code side-effect free
 - keep expensive work inside steps
 - use `save_as=` and `use=` to preserve intermediate objects in `context.objects`
-- use `build().preview(use="name")` from an external notebook, REPL, or script when you want to inspect one saved intermediate object quickly
+- use `build().preview(use="name")` from a Python REPL or script when you want to inspect one saved intermediate object quickly
 - use `collect(...)` when you want a batch of files as `FileRef` items
 - use `map(...)` or `step_each(...)` when the same callable should run once per batch item
 - use `context.source` for source-relative paths
@@ -116,7 +115,7 @@ Usually worth avoiding:
 
 ## Helper modules
 
-Helper modules are regular Python files under `flow_modules/flow_helpers/`. They are compiled into workspace-local runtime artifacts and are importable from both notebook-authored and Python-authored flows.
+Helper modules are regular Python files under `flow_modules/flow_helpers/`. They are mirrored into workspace-local runtime artifacts and are importable from Python flows.
 
 Use `flow_modules/flow_helpers/` for workspace-local code that belongs to one
 workspace. Use public helpers from `data_engine.helpers` for reusable package
@@ -201,26 +200,6 @@ That example shows `map(...)` in context:
 - later `step(...)` callables operate on the whole batch result
 
 There is no separate config layer that turns one flow module into multiple named flow variants after build time.
-
-## Notebook-authored vs Python-authored modules
-
-Both notebook and Python flow modules participate in the same discovery model:
-
-- they export one `build() -> Flow`
-- they can import helper modules
-- they compile into runtime-ready Python modules
-
-Python modules are usually better for:
-
-- shared flows
-- helper-heavy logic
-- larger code review surfaces
-
-Notebooks are usually better for:
-
-- exploratory authoring
-- iterative preview-driven development
-- flows that benefit from inline inspection while being built
 
 ## A practical authoring checklist
 

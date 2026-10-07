@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -78,12 +77,6 @@ def build_smoke_environment(
             data_folder_name=data_folder_name,
             schedule_interval=schedule_interval,
         )
-        create_notebook_flow_modules(
-            target_workspace,
-            workspace_id=workspace_id,
-            data_folder_name=data_folder_name,
-            schedule_interval=schedule_interval,
-        )
 
 
 def create_python_flow_modules(
@@ -118,33 +111,6 @@ def create_python_flow_modules(
             flow_dir / "docs2_parallel_manual.py",
             _python_parallel_manual_source(data_folder_name=data_folder_name),
         )
-
-
-def create_notebook_flow_modules(
-    target_workspace: Path,
-    *,
-    workspace_id: str,
-    data_folder_name: str,
-    schedule_interval: str = "30s",
-) -> None:
-    """Write starter notebook-authored flow modules into one workspace."""
-    flow_dir = target_workspace / "flow_modules"
-    create_notebook_flow_module(
-        flow_dir / f"{workspace_id}_nb_poll.ipynb",
-        _poll_notebook_source(workspace_id=workspace_id, data_folder_name=data_folder_name),
-    )
-    create_notebook_flow_module(
-        flow_dir / f"{workspace_id}_nb_schedule.ipynb",
-        _schedule_notebook_source(
-            workspace_id=workspace_id,
-            data_folder_name=data_folder_name,
-            schedule_interval=schedule_interval,
-        ),
-    )
-    create_notebook_flow_module(
-        flow_dir / f"{workspace_id}_nb_manual.ipynb",
-        _manual_notebook_source(workspace_id=workspace_id, data_folder_name=data_folder_name),
-    )
 
 
 def create_smoke_data_root(
@@ -255,28 +221,6 @@ def _write_docs_workbook(
     summary_sheet.append(("Sheet", "Rows", "Columns"))
     summary_sheet.append(("Docs", rows_per_workbook, column_count))
     workbook.save(path)
-
-
-def create_notebook_flow_module(path: Path, source_text: str) -> None:
-    """Write one single-cell notebook flow module."""
-    notebook = {
-        "cells": [
-            {
-                "cell_type": "code",
-                "execution_count": None,
-                "metadata": {},
-                "outputs": [],
-                "source": [line if line.endswith("\n") else f"{line}\n" for line in source_text.splitlines()],
-            }
-        ],
-        "metadata": {
-            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-            "language_info": {"name": "python"},
-        },
-        "nbformat": 4,
-        "nbformat_minor": 5,
-    }
-    path.write_text(json.dumps(notebook, indent=2), encoding="utf-8")
 
 
 def write_text_file(path: Path, text: str) -> None:
@@ -640,119 +584,11 @@ def build():
     )
 
 
-def _poll_notebook_source(*, workspace_id: str, data_folder_name: str) -> str:
-    return f"""from __future__ import annotations
-
-import polars as pl
-
-from data_engine import Flow
-
-DESCRIPTION = "Notebook-authored poll flow for smoke testing."
-
-
-def read_docs(context):
-    return pl.read_excel(context.source.path)
-
-
-def write_target(context):
-    output = context.mirror.with_suffix(".parquet")
-    context.current.write_parquet(output)
-    return output
-
-
-def build():
-    return (
-        Flow(name="{workspace_id}_nb_poll", group="Notebook")
-        .watch(
-            mode="poll",
-            source="../../../{data_folder_name}/Input/docs_flat",
-            interval="5s",
-            extensions=[".xlsx", ".xls", ".xlsm"],
-            settle=1,
-        )
-        .mirror(root="../../../{data_folder_name}/Output/{workspace_id}_nb_poll")
-        .step(read_docs, label="Read Excel")
-        .step(write_target, label="Write Parquet")
-    )
-"""
-
-
-def _schedule_notebook_source(*, workspace_id: str, data_folder_name: str, schedule_interval: str = "30s") -> str:
-    return f"""from __future__ import annotations
-
-import polars as pl
-
-from data_engine import Flow
-
-DESCRIPTION = "Notebook-authored schedule flow for smoke testing."
-
-
-def read_settings(context):
-    first_sheet = pl.read_excel(context.source.path, sheet_id=1)
-    docs_sheet = pl.read_excel(context.source.path, sheet_name="Docs")
-    return pl.concat((first_sheet, docs_sheet), how="vertical_relaxed")
-
-
-def write_example_schedule(context):
-    output = context.mirror.with_suffix(".parquet")
-    context.current.write_parquet(output)
-    return output
-
-
-def build():
-    return (
-        Flow(name="{workspace_id}_nb_schedule", group="Notebook")
-        .watch(mode="schedule", run_as="batch", interval="{schedule_interval}", source="../../../{data_folder_name}/Settings/single_watch.xlsx")
-        .mirror(root="../../../{data_folder_name}/Output/{workspace_id}_nb_schedule")
-        .step(read_settings, save_as="settings_df", label="Read Excel")
-        .step(write_example_schedule, use="settings_df", label="Write Parquet")
-    )
-"""
-
-
-def _manual_notebook_source(*, workspace_id: str, data_folder_name: str) -> str:
-    return f"""import polars as pl
-
-from data_engine import Flow
-
-DESCRIPTION = "Notebook-authored manual flow for smoke testing."
-
-
-def read_docs(file_ref):
-    return pl.read_excel(file_ref.path)
-
-
-def combine_docs(context):
-    frames = tuple(context.current)
-    if not frames:
-        return pl.DataFrame()
-    return pl.concat(frames, how="vertical_relaxed")
-
-
-def write_target(context):
-    output = context.mirror.file("manual_docs.parquet")
-    context.current.write_parquet(output)
-    return output
-
-
-def build():
-    return (
-        Flow(name="{workspace_id}_nb_manual", group="Notebook")
-        .mirror(root="../../../{data_folder_name}/Output/{workspace_id}_nb_manual")
-        .collect([".xlsx"], root="../../../{data_folder_name}/Input/docs_flat", label="Collect Files")
-        .map(read_docs, label="Read Excel")
-        .step(combine_docs, label="Combine Docs")
-        .step(write_target, label="Write Parquet")
-    )
-"""
-
-
 __all__ = [
     "DEFAULT_WORKSPACE_IDS",
     "build_parser",
     "build_smoke_environment",
     "build_temp_smoke_environment",
-    "create_notebook_flow_modules",
     "create_python_flow_modules",
     "create_smoke_data_root",
     "main",

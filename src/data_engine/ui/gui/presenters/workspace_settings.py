@@ -322,7 +322,7 @@ def _workspace_module_count(flow_modules_dir: Path) -> int:
     return sum(
         1
         for path in flow_modules_dir.iterdir()
-        if path.is_file() and path.suffix in {".py", ".ipynb"} and path.name != "__init__.py"
+        if path.is_file() and path.suffix == ".py" and path.name != "__init__.py"
     )
 
 

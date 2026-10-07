@@ -79,7 +79,7 @@ def step(context) -> object:
 
 The return value always becomes `context.current`.
 
-`use=` on a step loads a saved object from `context.objects` into `context.current` before the callable runs. `use="current"` leaves the current value in place. `save_as=` stores the returned value back into `context.objects` for later steps, previews, or notebook inspection. The runtime owns `current`, so `save_as="current"` is rejected.
+`use=` on a step loads a saved object from `context.objects` into `context.current` before the callable runs. `use="current"` leaves the current value in place. `save_as=` stores the returned value back into `context.objects` for later steps, previews, or interactive inspection. The runtime owns `current`, so `save_as="current"` is rejected.
 
 `label=` overrides the step display name. When omitted, Data Engine derives the label from the callable name.
 
@@ -108,7 +108,7 @@ Steps can save and reuse values:
 - `use="current"` leaves the current runtime value in place
 - `save_as="current"` is invalid
 
-In an external notebook or REPL, those saved names are also the easiest way to inspect intermediates:
+In a Python script or REPL, those saved names are also the easiest way to inspect intermediates:
 
 ```python
 build().preview(use="clean_df").head(10)
@@ -251,7 +251,7 @@ if context.debug is not None:
 
 ## Discovery
 
-The desktop UI and Python entrypoints discover flows from compiled `.py` and `.ipynb` flow modules.
+The desktop UI and Python entrypoints discover authored `.py` flow modules through workspace-local runtime copies.
 
 Each discovered flow module contributes:
 
@@ -280,8 +280,6 @@ An authored workspace typically contains:
 - `flow_modules/flow_helpers/`
 - `config/`
 - `databases/`
-
-Notebook-authored flows are compiled into the same discovery surface as Python-authored flows, so both authoring styles participate in the same workspace layout and runtime rules.
 
 The desktop app binds to one workspace at a time. When the selected workspace changes, the app reloads:
 

@@ -361,7 +361,7 @@ The authored-workspace settings are for the "open just one workspace" workflow.
 
 ## Flow-module compilation
 
-Flow modules authored as notebooks or Python files are compiled into machine-local runtime artifacts before discovery and execution.
+Authored Python flow modules are mirrored into machine-local runtime artifacts before discovery and execution.
 
 That compilation path intentionally favors structural correctness over filesystem timing quirks:
 

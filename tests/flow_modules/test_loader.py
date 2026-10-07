@@ -10,7 +10,7 @@ from data_engine.core.model import FlowValidationError
 from data_engine.flow_modules.flow_module_loader import compiled_flow_module_context, current_compiled_flow_module_dir, discover_flow_module_definitions, in_compiled_flow_module_context, load_flow_module_definition
 
 
-def _write_notebook(path, source_lines: list[str]) -> None:
+def _write_unsupported_notebook(path, source_lines: list[str]) -> None:
     path.write_text(
         json.dumps(
             {
@@ -30,12 +30,56 @@ def _write_notebook(path, source_lines: list[str]) -> None:
     )
 
 
+def _write_python_module(path, source_lines: list[str]) -> None:
+    path.write_text("".join(source_lines), encoding="utf-8")
+
+
+def test_discovery_ignores_notebook_sources_and_cached_notebook_modules(tmp_path):
+    workspace = tmp_path / "workspace"
+    flow_dir = workspace / "flow_modules"
+    flow_dir.mkdir(parents=True)
+    _write_unsupported_notebook(flow_dir / "removed.ipynb", [
+        "from data_engine import Flow\n",
+        "def build():\n",
+        "    return Flow(group='Tests').step(lambda context: 1)\n",
+    ])
+    _, compiled_dir = flow_module_loader.resolve_flow_module_paths(data_root=workspace)
+    compiled_dir.mkdir(parents=True, exist_ok=True)
+    (compiled_dir / "removed.py").write_text(
+        "from data_engine import Flow\ndef build():\n"
+        "    return Flow(group='Tests').step(lambda context: 1)\n",
+        encoding="utf-8",
+    )
+
+    assert discover_flow_module_definitions(data_root=workspace) == ()
+    with pytest.raises(FlowValidationError, match="not available"):
+        load_flow_module_definition("removed", data_root=workspace)
+
+
+def test_python_flow_runs_when_unsupported_notebook_has_same_stem(tmp_path):
+    workspace = tmp_path / "workspace"
+    flow_dir = workspace / "flow_modules"
+    flow_dir.mkdir(parents=True)
+    (flow_dir / "demo.py").write_text(
+        "from data_engine import Flow\ndef build():\n"
+        "    return Flow(group='Tests').step(lambda context: 42, save_as='answer')\n",
+        encoding="utf-8",
+    )
+    _write_unsupported_notebook(flow_dir / "demo.ipynb", ["raise RuntimeError('unsupported source')\n"])
+
+    flow = load_flow_module_definition("demo", data_root=workspace).build()
+    assert flow.preview() == 42
+    contexts = flow.run_once()
+    assert contexts[0].current == 42
+    assert contexts[0].objects["answer"] == 42
+
+
 def test_load_flow_module_definition_reads_description_and_flow_label(tmp_path):
     workspace = tmp_path / "workspace"
     flow_modules_dir = workspace / "flow_modules"
     flow_modules_dir.mkdir(parents=True)
-    _write_notebook(
-        flow_modules_dir / "demo.ipynb",
+    _write_python_module(
+        flow_modules_dir / "demo.py",
         [
             'DESCRIPTION = "Example description"\n',
             "from data_engine import Flow\n",
@@ -56,8 +100,8 @@ def test_load_flow_module_definition_defaults_flow_label_from_module_name(tmp_pa
     workspace = tmp_path / "workspace"
     flow_modules_dir = workspace / "flow_modules"
     flow_modules_dir.mkdir(parents=True)
-    _write_notebook(
-        flow_modules_dir / "docs_summary.ipynb",
+    _write_python_module(
+        flow_modules_dir / "docs_summary.py",
         [
             "from data_engine import Flow\n",
             "def build():\n",
@@ -77,7 +121,7 @@ def test_load_flow_module_definition_rejects_missing_build(tmp_path):
     workspace = tmp_path / "workspace"
     flow_modules_dir = workspace / "flow_modules"
     flow_modules_dir.mkdir(parents=True)
-    _write_notebook(flow_modules_dir / "bad.ipynb", ['DESCRIPTION = "Bad"\n'])
+    _write_python_module(flow_modules_dir / "bad.py", ['DESCRIPTION = "Bad"\n'])
 
     with pytest.raises(FlowValidationError, match="does not export a callable build"):
         load_flow_module_definition("bad", data_root=workspace)
@@ -87,8 +131,8 @@ def test_load_flow_module_definition_rejects_build_with_parameters(tmp_path):
     workspace = tmp_path / "workspace"
     flow_modules_dir = workspace / "flow_modules"
     flow_modules_dir.mkdir(parents=True)
-    _write_notebook(
-        flow_modules_dir / "bad.ipynb",
+    _write_python_module(
+        flow_modules_dir / "bad.py",
         [
             "from data_engine import Flow\n",
             "def build(flow):\n",
@@ -104,8 +148,8 @@ def test_load_flow_module_definition_rejects_non_string_description(tmp_path):
     workspace = tmp_path / "workspace"
     flow_modules_dir = workspace / "flow_modules"
     flow_modules_dir.mkdir(parents=True)
-    _write_notebook(
-        flow_modules_dir / "bad.ipynb",
+    _write_python_module(
+        flow_modules_dir / "bad.py",
         [
             "DESCRIPTION = ['bad']\n",
             "from data_engine import Flow\n",
@@ -122,8 +166,8 @@ def test_guarded_build_rejects_non_flow_return(tmp_path):
     workspace = tmp_path / "workspace"
     flow_modules_dir = workspace / "flow_modules"
     flow_modules_dir.mkdir(parents=True)
-    _write_notebook(
-        flow_modules_dir / "bad.ipynb",
+    _write_python_module(
+        flow_modules_dir / "bad.py",
         [
             "def build():\n",
             "    return object()\n",
@@ -141,8 +185,8 @@ def test_discover_flow_module_definitions_skips_helper_modules(tmp_path):
     compiled_dir = tmp_path / "data_engine" / "artifacts" / "workspace_cache" / "workspace" / "compiled_flow_modules"
     flow_modules_dir.mkdir(parents=True)
     compiled_dir.mkdir(parents=True)
-    _write_notebook(
-        flow_modules_dir / "demo.ipynb",
+    _write_python_module(
+        flow_modules_dir / "demo.py",
         [
             "from data_engine import Flow\n",
             "def build():\n",
@@ -190,8 +234,8 @@ def test_load_flow_module_definition_resolves_relative_flow_paths_from_compiled_
     data_dir = tmp_path / "data" / "Input" / "docs_flat"
     flow_modules_dir.mkdir(parents=True)
     data_dir.mkdir(parents=True)
-    _write_notebook(
-        flow_modules_dir / "demo.ipynb",
+    _write_python_module(
+        flow_modules_dir / "demo.py",
         [
             "from data_engine import Flow\n",
             "def build():\n",
@@ -342,7 +386,7 @@ def test_load_flow_module_definition_reports_missing_compiled_module_with_source
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(flow_module_loader, "compile_stale_flow_module_notebooks", lambda data_root=None: ())
+    monkeypatch.setattr(flow_module_loader, "prepare_flow_modules", lambda data_root=None: ())
     monkeypatch.setattr(flow_module_loader, "resolve_flow_module_paths", lambda data_root=None: (flow_modules_dir, compiled_dir))
 
     with pytest.raises(FlowValidationError, match="could not be compiled from"):
@@ -380,4 +424,3 @@ def test_load_flow_module_definition_overrides_flow_name_with_module_name(tmp_pa
     definition = load_flow_module_definition("docs_demo", data_root=workspace)
     with pytest.raises(FlowValidationError, match="must not override the module-defined flow name"):
         definition.build()
-

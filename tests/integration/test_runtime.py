@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from queue import Queue
 import threading
@@ -239,33 +238,14 @@ def test_grouped_runtime_keeps_groups_sequential_and_independent():
     assert set(order) == {"a1", "a2", "b1"}
 
 
-def test_temporary_workspace_flow_modules_compile_and_load_from_notebooks(tmp_path):
+def test_temporary_workspace_python_flow_is_discovered_and_executed(tmp_path):
     workspace = tmp_path / "workspace"
-    flow_modules_dir = workspace / "flow_modules"
-    flow_modules_dir.mkdir(parents=True)
-    notebook_path = flow_modules_dir / "demo.ipynb"
-    notebook_path.write_text(
-        json.dumps(
-            {
-                "cells": [
-                    {
-                        "cell_type": "code",
-                        "metadata": {},
-                        "source": [
-                            "from data_engine import Flow\n",
-                            'DESCRIPTION = "Temporary compiled flow"\n',
-                            "def build():\n",
-                            '    return Flow(name="demo", label="Demo", group="Tests").step(lambda context: context.current)\n',
-                        ],
-                    }
-                ],
-                "metadata": {},
-                "nbformat": 4,
-                "nbformat_minor": 5,
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_workspace_flow_module(workspace, "demo", """
+        from data_engine import Flow
+        DESCRIPTION = "Temporary Python flow"
+        def build():
+            return Flow(group="Tests").step(lambda context: 42, save_as="answer")
+    """)
 
     definition = load_flow_module_definition("demo", data_root=workspace)
     flow = definition.build()
@@ -274,6 +254,10 @@ def test_temporary_workspace_flow_modules_compile_and_load_from_notebooks(tmp_pa
     assert flow.name == "demo"
     assert flow.group == "Tests"
     assert [item.name for item in discovered] == ["demo"]
+    assert flow.preview(use="answer") == 42
+    result = flow.run_once()[0]
+    assert result.current == 42
+    assert result.objects["answer"] == 42
 
 
 def test_directory_poll_processes_many_files_end_to_end(tmp_path):
@@ -848,4 +832,3 @@ def test_scheduler_host_keeps_running_when_one_scheduled_flow_fails():
     assert len(jobs) == 2
     assert any(run.status == "failed" for run in failing_runs)
     assert len([run for run in healthy_runs if run.status == "success"]) >= 2
-

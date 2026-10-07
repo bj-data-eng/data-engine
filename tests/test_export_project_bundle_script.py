@@ -31,9 +31,9 @@ def test_build_archive_includes_project_source_and_excludes_artifacts_and_worksp
     (root / "INSTALL" / "BUILD DOCS.command").write_text("build\n", encoding="utf-8")
     (root / "INSTALL" / "BUILD DOCS.bat").write_text("build\r\n", encoding="utf-8")
     (workspaces / "example_workspace" / "flow_modules").mkdir(parents=True)
-    (workspaces / "example_workspace" / "flow_modules" / "demo.ipynb").write_text("{}", encoding="utf-8")
+    (workspaces / "example_workspace" / "flow_modules" / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
     (workspaces / "docs2" / "flow_modules").mkdir(parents=True)
-    (workspaces / "docs2" / "flow_modules" / "other.ipynb").write_text("{}", encoding="utf-8")
+    (workspaces / "docs2" / "flow_modules" / "other.py").write_text("{}", encoding="utf-8")
     (workspaces / "example_workspace" / ".workspace_state" / "leased").mkdir(parents=True)
     (workspaces / "example_workspace" / ".workspace_state" / "leased" / "example_workspace").write_text("owned\n", encoding="utf-8")
     (root / "artifacts" / "documentation" / "_build" / "html").mkdir(parents=True)
@@ -55,8 +55,8 @@ def test_build_archive_includes_project_source_and_excludes_artifacts_and_worksp
     assert "INSTALL/BUILD DOCS.command" in members
     assert "INSTALL/BUILD DOCS.bat" in members
     assert "repo.code-workspace" in members
-    assert "workspaces/example_workspace/flow_modules/demo.ipynb" not in members
-    assert "workspaces/docs2/flow_modules/other.ipynb" not in members
+    assert "workspaces/example_workspace/flow_modules/demo.py" not in members
+    assert "workspaces/docs2/flow_modules/other.py" not in members
     assert "artifacts/workspace_cache/example_workspace/compiled_flow_modules/demo.py" not in members
     assert "artifacts/runtime_state/example_workspace/runtime_ledger.sqlite" not in members
     assert "artifacts/documentation/_build/html/index.html" not in members

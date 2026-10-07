@@ -42,7 +42,7 @@ workspaces/
 
 The parts you will usually author directly are:
 
-- `flow_modules/`: runnable flows in `.py` or `.ipynb`
+- `flow_modules/`: runnable flows in `.py`
 - `flow_modules/flow_helpers/`: reusable helper modules imported from flows
 - `config/`: workspace-local TOML files available through `context.config`
 - `databases/`: a conventional home for workspace-local databases used through `context.database(...)`
@@ -54,14 +54,11 @@ The app can provision that shape for you without overwriting existing content.
 
 Flow module sources are authored in:
 
-- `workspaces/<workspace_id>/flow_modules/<name>.ipynb`
 - `workspaces/<workspace_id>/flow_modules/<name>.py`
 
 Reusable helper modules live in:
 
 - `workspaces/<workspace_id>/flow_modules/flow_helpers/<name>.py`
-
-Notebook-authored flow modules (`.ipynb`) run in the normal install. The optional notebook extra only adds Jupyter authoring tools.
 
 Compiled runtime modules are generated into machine-local artifacts.
 Those runtime artifacts are isolated per workspace, so helper imports with the same module names stay workspace-local.
@@ -237,9 +234,9 @@ build().preview()
 build().preview(use="raw_df")
 ```
 
-That is often the fastest way to sanity-check a flow while you are still writing it. `preview()` is not available from inside compiled flow modules, so use it from an external notebook, REPL, or script.
+That is often the fastest way to sanity-check a flow while you are still writing it. `preview()` is not available from inside compiled flow modules, so use it from a Python REPL or script.
 
-For poll flows that watch a folder, `preview(...)` uses one deterministic startup source as a representative notebook preview.
+For poll flows that watch a folder, `preview(...)` uses one deterministic startup source as a representative preview.
 
 ## Manual, poll, and schedule at a glance
 

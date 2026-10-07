@@ -12,7 +12,7 @@ Data Engine is a code-defined workflow runtime. A flow is the `Flow` object retu
 - `step(fn, use=..., save_as=..., label=...)`: one generic runtime step
 - `map(fn, use=..., save_as=..., label=...)`: one callable applied across the current batch
 - `step_each(fn, use=..., save_as=..., label=...)`: readability-first alias for `map(...)`
-- `preview(use=...)`: notebook-style helper that returns one named saved object or the final current value
+- `preview(use=...)`: interactive helper that returns one named saved object or the final current value
 - `FlowContext`: mutable per-run state shared across steps
 - `max_parallel`: optional source-scoped concurrency limit for eligible watched flows, defaulting to `1`
 
@@ -157,7 +157,7 @@ The UI does not:
 ## Workspace Layout
 
 - `src/data_engine/`: runtime package and desktop UI
-- `workspaces/<workspace_id>/flow_modules/`: authored flow modules (`.py` or `.ipynb`)
+- `workspaces/<workspace_id>/flow_modules/`: authored flow modules (`.py`)
 - `workspaces/<workspace_id>/.workspace_state/`: shared lease/checkpoint state for one workspace
 - `artifacts/workspace_cache/<workspace_id>/compiled_flow_modules/`: compiled/importable flow modules
 - `artifacts/runtime_state/<workspace_id>/`: generated local runtime ledger state
@@ -172,5 +172,5 @@ The sibling starter-data trees are starter content only. Real path bindings belo
 
 - `tests/daemon/test_live_runtime_suite.py` is the end-to-end live smoke entrypoint
 - it generates temporary workspaces and temporary data roots from scratch
-- it verifies both Python-authored and notebook-authored poll, schedule, and manual flow modules
+- it verifies Python-authored poll, schedule, and manual flow modules
 - it verifies one-daemon-per-workspace, run/start/stop/shutdown, and lease cleanup

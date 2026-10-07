@@ -121,7 +121,7 @@ class FlowRuntime:
             self._close_runtime_resources()
 
     def preview(self, *, use: str | None = None):
-        """Run exactly one flow for notebook-style inspection and return one object."""
+        """Run exactly one flow for interactive inspection and return one object."""
         try:
             self._validate()
             if len(self.flows) != 1:

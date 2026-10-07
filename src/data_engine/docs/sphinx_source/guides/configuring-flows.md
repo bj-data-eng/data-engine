@@ -2,7 +2,7 @@
 
 Per-flow configuration lives in the fluent `Flow` chain, not in TOML.
 
-That applies to both `.py` and `.ipynb` flow modules: the authored `Flow(...)` definition is the runtime contract, and workspace-local TOML in `config/` is for step logic and runtime parameters consumed by your code.
+For `.py` flow modules, the authored `Flow(...)` definition is the runtime contract, and workspace-local TOML in `config/` is for step logic and runtime parameters consumed by your code.
 
 For the method-by-method tour, see [Flow Methods](flow-methods.md). For the
 step-time runtime object, see [FlowContext](flow-context.md). For complete
@@ -181,7 +181,7 @@ Examples:
 
 Those fields affect the authoring experience directly:
 
-- `save_as=` creates stable names for later steps and notebook previews by storing the result in `context.objects`
+- `save_as=` creates stable names for later steps and interactive previews by storing the result in `context.objects`
 - `use=` loads one of those saved names into `context.current` before the callable runs
 - `label=` controls the display name in the UI
 - `save_as="current"` is rejected because `current` is owned by the runtime

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.helpers import _flow_path_base_dir, _title_case_words
 from data_engine.core.model import FlowExecutionError, FlowValidationError
-from data_engine.flow_modules.flow_module_compiler import compile_stale_flow_module_notebooks, resolve_flow_module_paths
+from data_engine.flow_modules.flow_module_compiler import prepare_flow_modules, resolve_flow_module_paths
 from data_engine.platform.workspace_models import APP_INTERNAL_ID
 
 if TYPE_CHECKING:
@@ -37,11 +37,11 @@ class FlowModuleDefinition:
 
 
 def _load_module(name: str, *, data_root: Path | None = None):
-    compile_stale_flow_module_notebooks(data_root=data_root)
+    prepare_flow_modules(data_root=data_root)
     flow_modules_dir, compiled_flow_modules_dir = resolve_flow_module_paths(data_root=data_root)
     module_path = compiled_flow_modules_dir / f"{name}.py"
-    if not module_path.exists():
-        source_path = _authored_flow_module_source_path(name, flow_modules_dir=flow_modules_dir)
+    source_path = _authored_flow_module_source_path(name, flow_modules_dir=flow_modules_dir)
+    if source_path is None or not module_path.exists():
         if source_path is not None:
             raise FlowValidationError(
                 f"Flow module {name!r} could not be compiled from {source_path}. No compiled module was produced."
@@ -75,20 +75,16 @@ def _load_module(name: str, *, data_root: Path | None = None):
 
 
 def _authored_flow_module_source_path(name: str, *, flow_modules_dir: Path) -> Path | None:
-    """Return the authored notebook or Python source path for one flow module when present."""
-    for suffix in (".py", ".ipynb"):
-        source_path = flow_modules_dir / f"{name}{suffix}"
-        if source_path.exists():
-            return source_path
-    return None
+    """Return the authored Python source path for one flow module when present."""
+    source_path = flow_modules_dir / f"{name}.py"
+    return source_path if source_path.is_file() else None
 
 
 def _available_flow_module_names(*, flow_modules_dir: Path) -> tuple[str, ...]:
     """Return the authored flow-module names currently present in one workspace."""
     names = {
         path.stem
-        for pattern in ("*.py", "*.ipynb")
-        for path in flow_modules_dir.glob(pattern)
+        for path in flow_modules_dir.glob("*.py")
         if path.name != "__init__.py" and not path.stem.startswith("_")
     }
     return tuple(sorted(names))
@@ -225,7 +221,7 @@ def load_flow_module_definition(name: str, *, data_root: Path | None = None) -> 
 
 def discover_flow_module_definitions(*, data_root: Path | None = None) -> tuple[FlowModuleDefinition, ...]:
     """Discover and load all compiled flow-module definitions from the workspace."""
-    compile_stale_flow_module_notebooks(data_root=data_root)
+    prepare_flow_modules(data_root=data_root)
     flow_modules_dir, compiled_flow_modules_dir = resolve_flow_module_paths(data_root=data_root)
     if not flow_modules_dir.is_dir():
         return ()
@@ -233,7 +229,7 @@ def discover_flow_module_definitions(*, data_root: Path | None = None) -> tuple[
         return ()
 
     discovered: list[FlowModuleDefinition] = []
-    for module_path in sorted(compiled_flow_modules_dir.glob("*.py")):
+    for module_path in sorted(flow_modules_dir.glob("*.py")):
         if module_path.name == "__init__.py" or module_path.stem.startswith("_"):
             continue
         discovered.append(load_flow_module_definition(module_path.stem, data_root=data_root))
