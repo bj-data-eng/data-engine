@@ -9,7 +9,7 @@ from data_engine.hosts.daemon.manager import WorkspaceDaemonManager
 from data_engine.platform.workspace_models import WorkspacePaths, authored_workspace_is_available
 from data_engine.services import DaemonStateService
 
-from data_engine.application.runtime import RuntimeApplication
+from data_engine.application.runtime import FLOW_DEFINITION_COMMAND_TIMEOUT_SECONDS, RuntimeApplication
 
 
 @dataclass(frozen=True)
@@ -106,7 +106,7 @@ class OperatorControlApplication:
         action_context: OperatorActionContext,
         has_automated_flows: bool,
         blocked_status_text: str,
-        timeout: float = 2.0,
+        timeout: float = FLOW_DEFINITION_COMMAND_TIMEOUT_SECONDS,
     ) -> OperatorActionResult:
         """Validate and request automated engine start."""
         if not authored_workspace_is_available(paths):
@@ -195,7 +195,7 @@ class OperatorControlApplication:
         paths: WorkspacePaths,
         action_context: OperatorActionContext,
         has_authored_workspace: bool,
-        timeout: float = 5.0,
+        timeout: float = FLOW_DEFINITION_COMMAND_TIMEOUT_SECONDS,
     ) -> FlowRefreshResult:
         """Validate and request one flow refresh while preserving local reload behavior."""
         if action_context.engine_busy or action_context.manual_run_active:

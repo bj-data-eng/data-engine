@@ -601,7 +601,6 @@ class GuiRuntimeController:
             "action_context": action_context,
             "has_automated_flows": any(card.valid and card.mode in {"poll", "schedule"} for card in window.flow_cards.values()),
             "blocked_status_text": self._blocked_status_text(window),
-            "timeout": 5.0,
         }
         self._begin_control_action(window, "start_runtime", target=self._start_runtime_worker, args=(window, action_kwargs))
 

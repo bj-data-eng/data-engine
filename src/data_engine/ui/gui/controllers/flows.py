@@ -249,7 +249,6 @@ class _GuiWorkspaceCatalogController:
                     "paths": window.workspace_paths,
                     "action_context": action_context,
                     "has_authored_workspace": window._has_authored_workspace(),
-                    "timeout": 5.0,
                 },
             ),
         )
@@ -679,7 +678,6 @@ class _GuiFlowPresentationController:
             paths=window.workspace_paths,
             action_context=action_context,
             has_authored_workspace=window._has_authored_workspace(),
-            timeout=5.0,
         )
         if result.error_text is not None:
             window._show_message_box_later(

@@ -128,7 +128,8 @@ def _mirror_helper_modules(helper_modules_dir: Path, compiled_helper_modules_dir
         if source_path.is_dir():
             target_path.mkdir(parents=True, exist_ok=True)
             continue
-        _atomic_copy_file(source_path, target_path)
+        if not _files_have_same_content(source_path, target_path):
+            _atomic_copy_file(source_path, target_path)
 
     init_path = compiled_helper_modules_dir / "__init__.py"
     if not init_path.exists():
@@ -144,6 +145,18 @@ def _mirror_helper_modules(helper_modules_dir: Path, compiled_helper_modules_dir
             shutil.rmtree(existing_path, ignore_errors=True)
         else:
             existing_path.unlink(missing_ok=True)
+
+
+def _files_have_same_content(source_path: Path, target_path: Path) -> bool:
+    """Compare helper content in bounded chunks, including same-mtime edits."""
+    try:
+        with source_path.open("rb") as source, target_path.open("rb") as target:
+            while chunk := source.read(64 * 1024):
+                if chunk != target.read(len(chunk)):
+                    return False
+            return target.read(1) == b""
+    except FileNotFoundError:
+        return False
 
 
 def _remove_orphaned_compiled_modules(modules_dir: Path, authored_names: set[str]) -> None:

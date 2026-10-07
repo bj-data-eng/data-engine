@@ -152,3 +152,39 @@ def test_prepare_flow_modules_removes_orphaned_helper_directories_even_when_not_
 
     assert (compiled_helper_modules_dir / "labels.py").read_text(encoding="utf-8") == "FLOW_LABEL = 'Updated Demo'\n"
     assert orphan_dir.exists() is False
+
+
+def test_helper_mirroring_skips_unchanged_files_and_detects_same_mtime_edits(tmp_path, monkeypatch):
+    import data_engine.flow_modules.flow_module_compiler as compiler
+
+    workspace = tmp_path / "workspace"
+    helper_dir = workspace / "flow_modules" / "flow_helpers"
+    helper_dir.mkdir(parents=True)
+    helper_path = helper_dir / "payload.bin"
+    original = b"a" * (128 * 1024) + b"b"
+    helper_path.write_bytes(original)
+    prepare_flow_modules(data_root=workspace)
+    compiled_path = resolve_workspace_paths(workspace_root=workspace).compiled_flow_modules_dir / "flow_helpers" / "payload.bin"
+    original_stat = helper_path.stat()
+    compiled_mtime = compiled_path.stat().st_mtime_ns
+    copy_calls = []
+    original_copy = compiler._atomic_copy_file
+
+    def record_copy(source, target):
+        copy_calls.append(source)
+        original_copy(source, target)
+
+    monkeypatch.setattr(compiler, "_atomic_copy_file", record_copy)
+
+    prepare_flow_modules(data_root=workspace)
+
+    assert copy_calls == []
+    assert compiled_path.stat().st_mtime_ns == compiled_mtime
+
+    updated = original[:-1] + b"c"
+    helper_path.write_bytes(updated)
+    os.utime(helper_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    prepare_flow_modules(data_root=workspace)
+
+    assert copy_calls == [helper_path]
+    assert compiled_path.read_bytes() == updated

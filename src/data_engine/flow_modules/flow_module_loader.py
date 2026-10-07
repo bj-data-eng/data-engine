@@ -36,9 +36,7 @@ class FlowModuleDefinition:
     build: Callable[[], "Flow"]
 
 
-def _load_module(name: str, *, data_root: Path | None = None):
-    prepare_flow_modules(data_root=data_root)
-    flow_modules_dir, compiled_flow_modules_dir = resolve_flow_module_paths(data_root=data_root)
+def _load_module(name: str, *, flow_modules_dir: Path, compiled_flow_modules_dir: Path):
     module_path = compiled_flow_modules_dir / f"{name}.py"
     source_path = _authored_flow_module_source_path(name, flow_modules_dir=flow_modules_dir)
     if source_path is None or not module_path.exists():
@@ -169,7 +167,40 @@ def _compiled_flow_module_import_guard(compiled_flow_modules_dir: Path):
 
 def load_flow_module_definition(name: str, *, data_root: Path | None = None) -> FlowModuleDefinition:
     """Load one compiled flow-module definition by module name."""
-    module, module_path, flow_modules_dir = _load_module(name, data_root=data_root)
+    return load_flow_module_definitions((name,), data_root=data_root)[0]
+
+
+def load_flow_module_definitions(
+    names: tuple[str, ...],
+    *,
+    data_root: Path | None = None,
+) -> tuple[FlowModuleDefinition, ...]:
+    """Prepare the workspace once and load the requested definitions in order."""
+    if not names:
+        return ()
+    prepare_flow_modules(data_root=data_root)
+    flow_modules_dir, compiled_flow_modules_dir = resolve_flow_module_paths(data_root=data_root)
+    return tuple(
+        _load_prepared_flow_module_definition(
+            name,
+            flow_modules_dir=flow_modules_dir,
+            compiled_flow_modules_dir=compiled_flow_modules_dir,
+        )
+        for name in names
+    )
+
+
+def _load_prepared_flow_module_definition(
+    name: str,
+    *,
+    flow_modules_dir: Path,
+    compiled_flow_modules_dir: Path,
+) -> FlowModuleDefinition:
+    module, module_path, flow_modules_dir = _load_module(
+        name,
+        flow_modules_dir=flow_modules_dir,
+        compiled_flow_modules_dir=compiled_flow_modules_dir,
+    )
 
     build = getattr(module, "build", None)
     if build is None or not callable(build):
@@ -232,7 +263,13 @@ def discover_flow_module_definitions(*, data_root: Path | None = None) -> tuple[
     for module_path in sorted(flow_modules_dir.glob("*.py")):
         if module_path.name == "__init__.py" or module_path.stem.startswith("_"):
             continue
-        discovered.append(load_flow_module_definition(module_path.stem, data_root=data_root))
+        discovered.append(
+            _load_prepared_flow_module_definition(
+                module_path.stem,
+                flow_modules_dir=flow_modules_dir,
+                compiled_flow_modules_dir=compiled_flow_modules_dir,
+            )
+        )
     return tuple(discovered)
 
 
@@ -267,4 +304,5 @@ __all__ = [
     "discover_flow_module_definitions",
     "in_compiled_flow_module_context",
     "load_flow_module_definition",
+    "load_flow_module_definitions",
 ]

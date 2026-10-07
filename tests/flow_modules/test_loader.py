@@ -34,6 +34,50 @@ def _write_python_module(path, source_lines: list[str]) -> None:
     path.write_text("".join(source_lines), encoding="utf-8")
 
 
+@pytest.mark.parametrize("discover", [True, False], ids=["catalog", "selected-flows"])
+def test_batch_loading_prepares_workspace_once_and_reloads_helper_edits(tmp_path, monkeypatch, discover):
+    workspace = tmp_path / "workspace"
+    helper_dir = workspace / "flow_modules" / "flow_helpers"
+    helper_dir.mkdir(parents=True)
+    helper_path = helper_dir / "labels.py"
+    helper_path.write_text("LABEL = 'Original'\n", encoding="utf-8")
+    for name in ("alpha", "beta", "gamma"):
+        (workspace / "flow_modules" / f"{name}.py").write_text(
+            "from data_engine import Flow\n"
+            "from flow_helpers.labels import LABEL\n"
+            "def build():\n"
+            "    return Flow(group='Tests', label=LABEL).step(lambda context: 1)\n",
+            encoding="utf-8",
+        )
+    prepare_calls = []
+    original_prepare = flow_module_loader.prepare_flow_modules
+
+    def prepare_once(*, data_root=None):
+        prepare_calls.append(data_root)
+        return original_prepare(data_root=data_root)
+
+    monkeypatch.setattr(flow_module_loader, "prepare_flow_modules", prepare_once)
+    names = ("gamma", "alpha")
+
+    def load():
+        if discover:
+            return discover_flow_module_definitions(data_root=workspace)
+        return flow_module_loader.load_flow_module_definitions(names, data_root=workspace)
+
+    definitions = load()
+
+    assert prepare_calls == [workspace]
+    assert tuple(definition.name for definition in definitions) == (("alpha", "beta", "gamma") if discover else names)
+    assert all(definition.build().label == "Original" for definition in definitions)
+
+    helper_path.write_text("LABEL = 'Updated!'\n", encoding="utf-8")
+    prepare_calls.clear()
+    definitions = load()
+
+    assert prepare_calls == [workspace]
+    assert all(definition.build().label == "Updated!" for definition in definitions)
+
+
 def test_discovery_ignores_notebook_sources_and_cached_notebook_modules(tmp_path):
     workspace = tmp_path / "workspace"
     flow_dir = workspace / "flow_modules"

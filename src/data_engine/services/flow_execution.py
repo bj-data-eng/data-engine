@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from data_engine.flow_modules.flow_module_loader import discover_flow_module_definitions, load_flow_module_definition
+from data_engine.flow_modules.flow_module_loader import discover_flow_module_definitions, load_flow_module_definition, load_flow_module_definitions
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow as CoreFlow
@@ -38,6 +38,9 @@ class FlowExecutionService:
 
     def load_flows(self, names: tuple[str, ...], *, workspace_root: Path | None = None) -> tuple["CoreFlow", ...]:
         """Return executable flow definitions for the requested names."""
+        if self._load_flow is _default_load_flow:
+            definitions = load_flow_module_definitions(names, data_root=workspace_root)
+            return tuple(definition.build() for definition in definitions)
         return tuple(self.load_flow(name, workspace_root=workspace_root) for name in names)
 
     def discover_flows(self, *, workspace_root: Path | None = None) -> tuple["CoreFlow", ...]:

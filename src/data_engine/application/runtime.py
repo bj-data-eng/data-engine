@@ -25,6 +25,7 @@ from data_engine.services import DaemonService, DaemonStateService, SharedStateS
 
 
 _FLOW_RESET_TIMEOUT_SECONDS = 120.0
+FLOW_DEFINITION_COMMAND_TIMEOUT_SECONDS = 120.0
 
 
 @dataclass(frozen=True)
@@ -263,13 +264,13 @@ class RuntimeApplication:
             timeout=timeout,
         )
 
-    def start_engine(self, paths: WorkspacePaths, *, timeout: float = 2.0) -> DaemonCommandResult:
+    def start_engine(self, paths: WorkspacePaths, *, timeout: float = FLOW_DEFINITION_COMMAND_TIMEOUT_SECONDS) -> DaemonCommandResult:
         """Request automated runtime start through the daemon."""
         if not authored_workspace_is_available(paths):
             return DaemonCommandResult(ok=False, error="Workspace root is no longer available.")
         return self._spawn_and_request(paths, {"command": "start_engine"}, timeout=timeout)
 
-    def refresh_flows(self, paths: WorkspacePaths, *, timeout: float = 5.0) -> DaemonCommandResult:
+    def refresh_flows(self, paths: WorkspacePaths, *, timeout: float = FLOW_DEFINITION_COMMAND_TIMEOUT_SECONDS) -> DaemonCommandResult:
         """Request one daemon-side flow refresh through the daemon."""
         return self._spawn_and_request(paths, {"command": "refresh_flows"}, timeout=timeout)
 

@@ -28,6 +28,33 @@ def test_flow_execution_service_uses_injected_loader_and_discovery(tmp_path):
     assert discover_calls == [tmp_path]
 
 
+def test_flow_execution_service_prepares_selected_flows_as_one_batch(tmp_path, monkeypatch):
+    import data_engine.flow_modules.flow_module_loader as loader
+
+    flow_dir = tmp_path / "flow_modules"
+    flow_dir.mkdir()
+    for name in ("alpha", "beta"):
+        (flow_dir / f"{name}.py").write_text(
+            "from data_engine import Flow\n"
+            "def build():\n"
+            "    return Flow(group='Tests').step(lambda context: 1)\n",
+            encoding="utf-8",
+        )
+    calls = []
+    original_prepare = loader.prepare_flow_modules
+
+    def prepare(*, data_root=None):
+        calls.append(data_root)
+        return original_prepare(data_root=data_root)
+
+    monkeypatch.setattr(loader, "prepare_flow_modules", prepare)
+
+    flows = FlowExecutionService().load_flows(("beta", "alpha"), workspace_root=tmp_path)
+
+    assert calls == [tmp_path]
+    assert tuple(flow.name for flow in flows) == ("beta", "alpha")
+
+
 def test_runtime_execution_service_constructs_runtime_objects():
     flow = Flow(name="docs", group="Docs")
 

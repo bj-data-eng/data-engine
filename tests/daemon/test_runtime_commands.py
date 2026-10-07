@@ -535,8 +535,11 @@ def test_start_engine_retries_after_empty_automated_flow_snapshot(tmp_path, monk
         monkeypatch.setattr(service, "_load_flow_cards", _fake_load_flow_cards)
         monkeypatch.setattr(
             service.flow_execution_service,
-            "load_flow",
-            lambda name, workspace_root=None: Flow(name=name, group="Demo").step(lambda context: 1, label="Emit Value"),
+            "load_flows",
+            lambda names, workspace_root=None: tuple(
+                Flow(name=name, group="Demo").step(lambda context: 1, label="Emit Value")
+                for name in names
+            ),
         )
         monkeypatch.setattr(
             service.runtime_execution_service,
@@ -811,8 +814,8 @@ def test_start_engine_returns_build_failure_details(tmp_path, monkeypatch):
         )
         monkeypatch.setattr(
             service.flow_execution_service,
-            "load_flow",
-            lambda name, workspace_root=None: (_ for _ in ()).throw(RuntimeError(f"{name} build boom")),
+            "load_flows",
+            lambda names, workspace_root=None: (_ for _ in ()).throw(RuntimeError(f"{names[0]} build boom")),
         )
 
         response = service._handle_command({"command": "start_engine"})  # noqa: SLF001

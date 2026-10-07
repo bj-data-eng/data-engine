@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from data_engine.application import RuntimeApplication
 from data_engine.domain import (
     DaemonLifecyclePolicy,
@@ -293,6 +295,25 @@ def test_runtime_application_flow_reset_propagates_long_running_timeout(tmp_path
     assert daemon_service.request_calls == [
         (workspace_root, {"command": "reset_flow", "name": "large_history"}, 120.0)
     ]
+
+
+@pytest.mark.parametrize("command", ["start_engine", "refresh_flows"])
+def test_definition_commands_allow_slow_loading_and_preserve_explicit_timeouts(tmp_path, command):
+    workspace = tmp_path / "workspace"
+    (workspace / "flow_modules").mkdir(parents=True)
+    paths = resolve_workspace_paths(workspace_root=workspace)
+    daemon_service = _FakeDaemonService()
+    action = getattr(_runtime_app(daemon_service=daemon_service), command)
+
+    result = action(paths)
+
+    assert result.ok is True
+    assert daemon_service.request_calls[-1] == (workspace, {"command": command}, 120.0)
+
+    result = action(paths, timeout=0.25)
+
+    assert result.ok is True
+    assert daemon_service.request_calls[-1] == (workspace, {"command": command}, 0.25)
 
 
 def test_runtime_application_completes_manual_run_failure_without_manual_modal_for_automated_flow() -> None:
