@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
+from traceback import format_exception
 from typing import TYPE_CHECKING, Protocol
 
 from data_engine.core.model import FlowExecutionError, FlowStoppedError, FlowValidationError
@@ -365,7 +366,7 @@ class FlowRunExecutor:
                         step_label=step.label,
                         function_name=step.function_name,
                         source_path=source_path,
-                        detail=f"{type(exc).__name__}: {exc}",
+                        detail=self._exception_detail(exc),
                     )
                     elapsed_ms = step_elapsed_ms
                     self.ports.state_writer.record_step_finished(
@@ -518,7 +519,7 @@ class FlowRunExecutor:
                     step_label=step.label,
                     function_name=step.function_name,
                     source_path=source_path,
-                    detail=f"{type(exc).__name__}: {exc}",
+                    detail=self._exception_detail(exc),
                 ) from exc
             context.current = result
             if step.save_as is not None:
@@ -527,6 +528,12 @@ class FlowRunExecutor:
                     context.current = result
                     return context
         return context
+
+    @staticmethod
+    def _exception_detail(exc: Exception) -> str:
+        # Persist text only: traceback frames and their dataframe locals stay out of history.
+        traceback_text = "".join(format_exception(exc)).rstrip()
+        return f"{type(exc).__name__}: {exc}\n\nPython traceback:\n{traceback_text}"
 
     def _ensure_runtime_sources_available(self, flow: "Flow", context: FlowContext, source_path: "Path | None") -> None:
         trigger = flow.trigger

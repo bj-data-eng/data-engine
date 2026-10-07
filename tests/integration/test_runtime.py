@@ -8,9 +8,11 @@ from textwrap import dedent
 
 import duckdb
 import polars as pl
+import pytest
 
 from data_engine.authoring.flow import Flow, load_flow
-from data_engine.core.model import FlowStoppedError
+from data_engine.core.model import FlowExecutionError, FlowStoppedError
+from data_engine.domain import StructuredErrorState
 from data_engine.core.primitives import Batch
 from data_engine.flow_modules.flow_module_loader import discover_flow_module_definitions, load_flow_module_definition
 from data_engine.hosts.scheduler import SchedulerHost
@@ -18,6 +20,9 @@ from data_engine.runtime.engine import RuntimeEngine
 from data_engine.runtime.execution import FlowRuntime, GroupedFlowRuntime
 from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services import FlowCatalogService, FlowExecutionService
+from data_engine.services.logs import LogService
+from data_engine.services.operator_queries import HistoryQueryService
+from data_engine.services.runtime_history import RuntimeHistoryService
 from data_engine.views.models import qt_flow_cards_from_entries
 
 
@@ -26,6 +31,95 @@ def _write_workspace_flow_module(workspace_root: Path, name: str, source: str) -
     flow_modules_dir = workspace_root / "flow_modules"
     flow_modules_dir.mkdir(parents=True, exist_ok=True)
     (flow_modules_dir / f"{name}.py").write_text(dedent(source).strip() + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("execution", ["run_once", "run_once_and_discard", "preview"])
+@pytest.mark.parametrize("lazy", [False, True], ids=["eager", "lazy"])
+@pytest.mark.parametrize("wrapped", [False, True], ids=["direct", "wrapped"])
+def test_polars_helper_failure_survives_execution_history_and_missing_logs(tmp_path, execution, lazy, wrapped):
+    workspace = tmp_path / "workspace"
+    _write_workspace_flow_module(
+        workspace,
+        "polars_error_chain",
+        """
+        import polars as pl
+        from data_engine import Flow
+        from flow_helpers.error_chain import prepare_values, transform_values
+
+        def transform(context):
+            frame = prepare_values(pl.DataFrame({'value': [1, 2]}), LAZY)
+            return transform_values(frame)
+
+        def build():
+            return Flow(group='Tests').step(transform, label='Transform Values')
+        """.replace("LAZY", repr(lazy)),
+    )
+    helpers = workspace / "flow_modules" / "flow_helpers"
+    helpers.mkdir()
+    (helpers / "error_chain.py").write_text(
+        "import polars as pl\n"
+        "def prepare_values(frame, lazy):\n"
+        "    frame = frame.lazy() if lazy else frame\n"
+        "    return frame.with_columns(pl.col('value') + 1)\n"
+        "def select_missing(frame):\n"
+        "    frame = frame.select(pl.col('missing'))\n"
+        "    return frame.collect() if isinstance(frame, pl.LazyFrame) else frame\n"
+        "def transform_values(frame):\n"
+        "    try:\n"
+        "        return select_missing(frame)\n"
+        "    except Exception as exc:\n"
+        f"        if {wrapped!r}:\n"
+        "            raise ValueError('Helper pipeline failed') from exc\n"
+        "        raise\n",
+        encoding="utf-8",
+    )
+    flow = load_flow_module_definition("polars_error_chain", data_root=workspace).build()
+    ledger = RuntimeCacheLedger(tmp_path / "cache.sqlite")
+    engine = RuntimeEngine(runtime_ledger=ledger)
+    try:
+        with pytest.raises(FlowExecutionError) as caught:
+            getattr(engine, execution)(flow)
+        failure = caught.value
+        cause = failure.__cause__
+        if wrapped:
+            assert isinstance(cause, ValueError)
+            assert "Helper pipeline failed" in failure.detail
+            assert "The above exception was the direct cause" in failure.detail
+            cause = cause.__cause__
+        assert isinstance(cause, pl.exceptions.ColumnNotFoundError)
+        assert "ColumnNotFoundError" in failure.detail
+        assert 'column "missing"' in failure.detail
+        assert "in transform" in failure.detail
+        assert "in select_missing" in failure.detail
+        assert "error_chain.py" in failure.detail
+        if lazy:
+            assert "Resolved plan until failure" in failure.detail
+        structured = StructuredErrorState.parse(str(failure))
+        assert structured is not None
+        assert "Python traceback:" not in structured.detail
+        assert "in select_missing" in structured.raw_text
+        if execution == "preview":
+            assert ledger.runs.list() == ()
+            return
+        run, = ledger.runs.list(flow_name=flow.name)
+        step, = ledger.step_outputs.list_for_run(run.run_id)
+        assert run.status == step.status == "failed"
+        assert run.error_text == step.error_text == str(failure)
+        assert ledger.step_outputs.list_active(run_id=run.run_id) == ()
+        assert ledger.logs.list(run_id=run.run_id)
+        ledger.logs.delete_flow(flow.name)
+        history = HistoryQueryService(log_service=LogService())
+        group = history.get_run_group_detail(ledger, run_id=run.run_id, flow_name=flow.name)
+        assert group is not None
+        assert group.status == "failed"
+        failed_step, = group.steps
+        assert failed_step.status == "failed"
+        assert failed_step.entry in group.entries
+        title, error_text = RuntimeHistoryService().error_text_for_entry(ledger, group, failed_step.entry)
+        assert title == "Transform Values Error"
+        assert error_text == str(failure)
+    finally:
+        ledger.close()
 
 
 def _build_workspace_surface(workspace_root: Path) -> None:

@@ -99,6 +99,10 @@ def _build_run_log_preview_rows(window: "DataEngineWindow", run_group: "FlowRunS
         entry.event is not None and entry.event.step_name is not None
         for entry in run_group.entries
     )
+    has_failed_step = any(
+        entry.event is not None and entry.event.step_name is not None and entry.event.status == "failed"
+        for entry in run_group.entries
+    )
     for entry in run_group.entries:
         event = entry.event
         if event is None or event.step_name is None:
@@ -106,7 +110,7 @@ def _build_run_log_preview_rows(window: "DataEngineWindow", run_group: "FlowRunS
                 has_step_entries
                 and event is not None
                 and event.step_name is None
-                and event.status in {"success", "failed", "stopped"}
+                and (event.status in {"success", "stopped"} or (event.status == "failed" and has_failed_step))
             ):
                 continue
             rows.append(_preview_row_for_entry(window, entry))

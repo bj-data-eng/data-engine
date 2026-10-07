@@ -31,6 +31,7 @@ class StructuredErrorState:
             r'(?: \(function (?P<function>[^)]+)\))?'
             r'(?: for source "(?P<source>[^"]+)")?: (?P<detail>.+)',
             text,
+            flags=re.DOTALL,
         )
         if step_match is not None:
             fields = [
@@ -47,7 +48,7 @@ class StructuredErrorState:
             return cls(
                 title="Flow Failed",
                 fields=tuple(fields),
-                detail=step_match.group("detail"),
+                detail=step_match.group("detail").partition("\n\nPython traceback:\n")[0],
                 raw_text=text,
             )
 
@@ -55,6 +56,7 @@ class StructuredErrorState:
             r'Flow module "(?P<flow_module>[^"]+)" failed during build\(\)'
             r'(?: in (?P<function>[^:]+))?: (?P<detail>.+)',
             text,
+            flags=re.DOTALL,
         )
         if build_match is not None:
             fields = [
@@ -71,7 +73,11 @@ class StructuredErrorState:
                 raw_text=text,
             )
 
-        import_match = re.fullmatch(r'Flow module "(?P<flow_module>[^"]+)" failed during import: (?P<detail>.+)', text)
+        import_match = re.fullmatch(
+            r'Flow module "(?P<flow_module>[^"]+)" failed during import: (?P<detail>.+)',
+            text,
+            flags=re.DOTALL,
+        )
         if import_match is not None:
             return cls(
                 title="Flow Module Failed",

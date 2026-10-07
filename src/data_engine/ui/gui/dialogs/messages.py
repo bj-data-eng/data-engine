@@ -28,11 +28,19 @@ def show_message_box(window: "DataEngineWindow", *, title: str, text: str, tone:
     layout.setSpacing(14)
 
     structured = structured_error_content(text) if tone == "error" else None
+    if tone == "error":
+        dialog.resize(760, 560)
     title_label = QLabel(structured.title if structured is not None else title, dialog)
     title_label.setObjectName("sectionTitle")
     layout.addWidget(title_label)
 
-    if structured is None:
+    if structured is None and tone == "error":
+        body = QTextEdit(dialog)
+        body.setObjectName("outputPreviewText")
+        body.setReadOnly(True)
+        body.setPlainText(text)
+        layout.addWidget(body, 1)
+    elif structured is None:
         body_label = QLabel(text, dialog)
         body_label.setWordWrap(True)
         body_label.setObjectName("errorText" if tone == "error" else "bodyText")

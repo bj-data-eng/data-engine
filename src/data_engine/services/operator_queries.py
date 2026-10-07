@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from data_engine.core.model import FlowValidationError
-from data_engine.domain import FlowCatalogLike, FlowCatalogState, FlowLogEntry, FlowRunState, FlowSummaryRow, RuntimeStepEvent, short_source_label
+from data_engine.domain import FlowCatalogLike, FlowCatalogState, FlowLogEntry, FlowRunState, FlowSummaryRow, RunStepState, RuntimeStepEvent, short_source_label
 from data_engine.domain.time import parse_utc_text
 from data_engine.services.flow_catalog import FlowCatalogService
 from data_engine.services.logs import LogService
@@ -417,7 +417,7 @@ class HistoryQueryService:
         flow_name: str | None = None,
         limit: int = 500,
     ) -> FlowRunState | None:
-        """Return one detailed grouped run queried on demand from the runtime ledger."""
+        """Return saved run/step lifecycle detail with any available diagnostic logs."""
         entries_from_ledger = getattr(self.log_service, "entries_from_ledger", None)
         if callable(entries_from_ledger):
             entries = entries_from_ledger(
@@ -428,14 +428,49 @@ class HistoryQueryService:
             )
         else:
             entries = ()
-        grouped = FlowRunState.group_entries(entries)
-        for group in grouped:
-            if group.key[1] == run_id:
-                return group
         persisted_run = ledger.runs.get(run_id)
         if persisted_run is None:
+            return next((group for group in FlowRunState.group_entries(entries) if group.key[1] == run_id), None)
+        if flow_name is not None and persisted_run.flow_name != flow_name:
             return None
-        return self._summary_flow_run(persisted_run)
+        summary = self._summary_flow_run(persisted_run)
+        step_entries: list[FlowLogEntry] = []
+        steps: list[RunStepState] = []
+        for step_run in ledger.step_outputs.list_for_run(run_id):
+            event = RuntimeStepEvent(
+                run_id=run_id,
+                flow_name=persisted_run.flow_name,
+                step_name=step_run.step_label,
+                source_label=summary.source_label,
+                status=step_run.status,
+                elapsed_seconds=None if step_run.elapsed_ms is None else step_run.elapsed_ms / 1000.0,
+            )
+            entry = FlowLogEntry(
+                line=FlowLogEntry.format_runtime_message(
+                    f"run={run_id} flow={persisted_run.flow_name} step={step_run.step_label} "
+                    f"source={persisted_run.source_path or '-'} status={step_run.status}"
+                ),
+                kind="flow",
+                flow_name=persisted_run.flow_name,
+                event=event,
+                created_at_utc=parse_utc_text(step_run.finished_at_utc or step_run.started_at_utc),
+            )
+            step_entries.append(entry)
+            steps.append(RunStepState(step_run.step_label, step_run.status, event.elapsed_seconds, entry))
+        # Run/step records own lifecycle truth; logs can lag or already have been pruned.
+        detail_entries = tuple(step_entries) + tuple(entry for entry in entries if entry.event is None)
+        if summary.summary_entry is not None:
+            detail_entries += (summary.summary_entry,)
+        return FlowRunState(
+            key=summary.key,
+            display_label=summary.display_label,
+            source_label=summary.source_label,
+            status=summary.status,
+            elapsed_seconds=summary.elapsed_seconds,
+            summary_entry=summary.summary_entry,
+            steps=tuple(steps),
+            entries=detail_entries,
+        )
 
     @staticmethod
     def _summary_flow_run(run) -> FlowRunState:

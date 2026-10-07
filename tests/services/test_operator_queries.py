@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from data_engine.authoring.flow import Flow
@@ -165,6 +167,33 @@ def test_history_query_service_returns_step_elapsed_seconds_from_real_ledger(tmp
 
     assert len(steps) == 1
     assert steps[0].elapsed_seconds == 1.5
+
+
+def test_history_detail_prefers_saved_failure_over_stale_started_logs(tmp_path):
+    ledger = RuntimeCacheLedger(tmp_path / "cache.sqlite")
+    started_at = datetime.now(UTC)
+    started = started_at.isoformat()
+    finished = (started_at + timedelta(seconds=1)).isoformat()
+    try:
+        ledger.runs.record_started(run_id="failed-helper", flow_name="docs", group_name="Tests", source_path=None, started_at_utc=started)
+        step_id = ledger.step_outputs.record_started(run_id="failed-helper", flow_name="docs", step_label="Transform", started_at_utc=started)
+        ledger.step_outputs.record_finished(step_run_id=step_id, status="failed", finished_at_utc=finished, elapsed_ms=1000, error_text="ComputeError: bad cast")
+        ledger.runs.record_finished(run_id="failed-helper", status="failed", finished_at_utc=finished, error_text="ComputeError: bad cast")
+        ledger.logs.append(level="INFO", message="run=failed-helper flow=docs step=Transform source=None status=started", created_at_utc=started, run_id="failed-helper", flow_name="docs", step_label="Transform")
+
+        history = HistoryQueryService(log_service=LogService())
+        detail = history.get_run_group_detail(ledger, run_id="failed-helper", flow_name="docs")
+
+        assert detail is not None
+        assert detail.status == "failed"
+        step, = detail.steps
+        assert step.status == "failed"
+        assert step.elapsed_seconds == 1.0
+        assert step.entry.created_at_utc.isoformat() == finished
+        assert len(detail.entries) == 2
+        assert history.get_run_group_detail(ledger, run_id="failed-helper", flow_name="other") is None
+    finally:
+        ledger.close()
 
 
 def test_flow_catalog_entry_from_flow_builds_expected_metadata():

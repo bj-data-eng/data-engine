@@ -6487,7 +6487,8 @@ def test_run_log_preview_keeps_unfinished_started_step_rows_visible(qapp, monkey
         _dispose_window(qapp, window)
 
 
-def test_run_log_preview_omits_redundant_run_terminal_rows_when_step_rows_exist(qapp, monkeypatch):
+@pytest.mark.parametrize("status", ["success", "failed", "stopped"])
+def test_run_log_preview_omits_redundant_run_terminal_rows_when_step_rows_exist(qapp, monkeypatch, status):
     del monkeypatch
     window = _make_window()
     try:
@@ -6505,7 +6506,7 @@ def test_run_log_preview_omits_redundant_run_terminal_rows_when_step_rows_exist(
                 ),
             ),
             FlowLogEntry(
-                line="run=abc flow=docs_summary step=Collect Claim Files source=input.xlsx status=success elapsed=0.4",
+                line=f"run=abc flow=docs_summary step=Collect Claim Files source=input.xlsx status={status} elapsed=0.4",
                 kind="flow",
                 flow_name="docs_summary",
                 event=RuntimeStepEvent(
@@ -6513,12 +6514,12 @@ def test_run_log_preview_omits_redundant_run_terminal_rows_when_step_rows_exist(
                     flow_name="docs_summary",
                     step_name="Collect Claim Files",
                     source_label="input.xlsx",
-                    status="success",
+                    status=status,
                     elapsed_seconds=0.4,
                 ),
             ),
             FlowLogEntry(
-                line="run=abc flow=docs_summary source=input.xlsx status=failed elapsed=0.8",
+                line=f"run=abc flow=docs_summary source=input.xlsx status={status} elapsed=0.8",
                 kind="flow",
                 flow_name="docs_summary",
                 event=RuntimeStepEvent(
@@ -6526,7 +6527,7 @@ def test_run_log_preview_omits_redundant_run_terminal_rows_when_step_rows_exist(
                     flow_name="docs_summary",
                     step_name=None,
                     source_label="input.xlsx",
-                    status="failed",
+                    status=status,
                     elapsed_seconds=0.8,
                 ),
             ),
@@ -6547,8 +6548,8 @@ def test_run_log_preview_omits_redundant_run_terminal_rows_when_step_rows_exist(
             assert message is not None
             messages.append(message.text())
         assert any("&gt; <i>started</i>" in message for message in messages)
-        assert any("Collect Claim Files" in message and "success" in message for message in messages)
-        assert not any("&gt; <i>failed</i>" in message for message in messages)
+        assert any("Collect Claim Files" in message and status in message for message in messages)
+        assert not any(f"&gt; <i>{status}</i>" in message for message in messages)
     finally:
         if window.run_log_preview_dialog is not None:
             window.run_log_preview_dialog.close()
