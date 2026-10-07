@@ -5,18 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from contextlib import contextmanager
 from contextvars import ContextVar
-from importlib.abc import MetaPathFinder
-from importlib.util import module_from_spec, spec_from_file_location
 import inspect
 from pathlib import Path
-import sys
-from types import ModuleType
 from typing import TYPE_CHECKING, Callable
 
 from data_engine.core.helpers import _flow_path_base_dir, _title_case_words
 from data_engine.core.model import FlowExecutionError, FlowValidationError
 from data_engine.flow_modules.flow_module_compiler import prepare_flow_modules, resolve_flow_module_paths
-from data_engine.platform.workspace_models import APP_INTERNAL_ID
+from data_engine.flow_modules.import_namespace import WorkspaceImportNamespace
 
 if TYPE_CHECKING:
     from data_engine.core.flow import Flow
@@ -36,7 +32,10 @@ class FlowModuleDefinition:
     build: Callable[[], "Flow"]
 
 
-def _load_module(name: str, *, flow_modules_dir: Path, compiled_flow_modules_dir: Path):
+def _load_module(
+    name: str, *, flow_modules_dir: Path, compiled_flow_modules_dir: Path,
+    namespace: WorkspaceImportNamespace,
+):
     module_path = compiled_flow_modules_dir / f"{name}.py"
     source_path = _authored_flow_module_source_path(name, flow_modules_dir=flow_modules_dir)
     if source_path is None or not module_path.exists():
@@ -52,14 +51,9 @@ def _load_module(name: str, *, flow_modules_dir: Path, compiled_flow_modules_dir
             )
         raise FlowValidationError(f"Flow module {name!r} is not available in {flow_modules_dir}.")
 
-    module_name = f"{APP_INTERNAL_ID}_user_flow_module_{name}"
     try:
-        spec = spec_from_file_location(module_name, module_path)
-        if spec is None or spec.loader is None:
-            raise FlowValidationError(f"Flow module {name!r} could not be loaded from {module_path}.")
-        module = module_from_spec(spec)
-        with compiled_flow_module_context(flow_modules_dir), _compiled_flow_module_import_guard(module_path.parent):
-            spec.loader.exec_module(module)
+        with compiled_flow_module_context(flow_modules_dir):
+            module = namespace.load(name)
     except FlowValidationError:
         raise
     except Exception as exc:
@@ -88,83 +82,6 @@ def _available_flow_module_names(*, flow_modules_dir: Path) -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
-class _WorkspaceFlowModuleFinder(MetaPathFinder):
-    """Resolve workspace-local helper imports from one compiled flow-module directory."""
-
-    def __init__(self, compiled_flow_modules_dir: Path) -> None:
-        self.compiled_flow_modules_dir = compiled_flow_modules_dir
-        self.local_module_names = {
-            path.stem
-            for path in compiled_flow_modules_dir.glob("*.py")
-            if path.name != "__init__.py" and not path.stem.startswith("_")
-        }
-
-    def matches_module(self, fullname: str) -> bool:
-        top_level = fullname.split(".", 1)[0]
-        return top_level in self.local_module_names or fullname == "flow_helpers" or fullname.startswith("flow_helpers.")
-
-    def find_spec(self, fullname: str, path: object = None, target: object = None):
-        del path, target
-        if fullname == "flow_helpers":
-            package_dir = self.compiled_flow_modules_dir / "flow_helpers"
-            init_path = package_dir / "__init__.py"
-            if not init_path.exists():
-                return None
-            return spec_from_file_location(
-                fullname,
-                init_path,
-                submodule_search_locations=[str(package_dir)],
-            )
-        if fullname.startswith("flow_helpers."):
-            relative_name = fullname.removeprefix("flow_helpers.").replace(".", "/")
-            module_path = self.compiled_flow_modules_dir / "flow_helpers" / f"{relative_name}.py"
-            if module_path.exists():
-                return spec_from_file_location(fullname, module_path)
-            package_dir = self.compiled_flow_modules_dir / "flow_helpers" / relative_name
-            init_path = package_dir / "__init__.py"
-            if init_path.exists():
-                return spec_from_file_location(
-                    fullname,
-                    init_path,
-                    submodule_search_locations=[str(package_dir)],
-                )
-            return None
-        if "." in fullname or fullname not in self.local_module_names:
-            return None
-        module_path = self.compiled_flow_modules_dir / f"{fullname}.py"
-        if not module_path.exists():
-            return None
-        return spec_from_file_location(fullname, module_path)
-
-
-@contextmanager
-def _compiled_flow_module_import_guard(compiled_flow_modules_dir: Path):
-    """Temporarily isolate workspace-local helper imports during flow-module loading."""
-    finder = _WorkspaceFlowModuleFinder(compiled_flow_modules_dir)
-    saved_modules: dict[str, ModuleType] = {}
-    managed_names = [
-        name
-        for name in list(sys.modules)
-        if finder.matches_module(name)
-    ]
-    for name in managed_names:
-        module = sys.modules.pop(name, None)
-        if module is not None:
-            saved_modules[name] = module
-    sys.meta_path.insert(0, finder)
-    try:
-        yield
-    finally:
-        try:
-            sys.meta_path.remove(finder)
-        except ValueError:
-            pass
-        for name in list(sys.modules):
-            if finder.matches_module(name):
-                sys.modules.pop(name, None)
-        sys.modules.update(saved_modules)
-
-
 def load_flow_module_definition(name: str, *, data_root: Path | None = None) -> FlowModuleDefinition:
     """Load one compiled flow-module definition by module name."""
     return load_flow_module_definitions((name,), data_root=data_root)[0]
@@ -180,11 +97,13 @@ def load_flow_module_definitions(
         return ()
     prepare_flow_modules(data_root=data_root)
     flow_modules_dir, compiled_flow_modules_dir = resolve_flow_module_paths(data_root=data_root)
+    namespace = WorkspaceImportNamespace(compiled_flow_modules_dir)
     return tuple(
         _load_prepared_flow_module_definition(
             name,
             flow_modules_dir=flow_modules_dir,
             compiled_flow_modules_dir=compiled_flow_modules_dir,
+            namespace=namespace,
         )
         for name in names
     )
@@ -195,11 +114,13 @@ def _load_prepared_flow_module_definition(
     *,
     flow_modules_dir: Path,
     compiled_flow_modules_dir: Path,
+    namespace: WorkspaceImportNamespace,
 ) -> FlowModuleDefinition:
     module, module_path, flow_modules_dir = _load_module(
         name,
         flow_modules_dir=flow_modules_dir,
         compiled_flow_modules_dir=compiled_flow_modules_dir,
+        namespace=namespace,
     )
 
     build = getattr(module, "build", None)
@@ -240,6 +161,7 @@ def _load_prepared_flow_module_definition(
             name=name,
             label=built.label or _title_case_words(name, empty="Flow"),
             _workspace_root=flow_modules_dir.parent.resolve(),
+            _module_namespace=namespace,
         )
 
     return FlowModuleDefinition(
@@ -251,7 +173,7 @@ def _load_prepared_flow_module_definition(
 
 
 def discover_flow_module_definitions(*, data_root: Path | None = None) -> tuple[FlowModuleDefinition, ...]:
-    """Discover and load all compiled flow-module definitions from the workspace."""
+    """Discover workspace definitions, representing invalid modules with a failing build."""
     prepare_flow_modules(data_root=data_root)
     flow_modules_dir, compiled_flow_modules_dir = resolve_flow_module_paths(data_root=data_root)
     if not flow_modules_dir.is_dir():
@@ -260,16 +182,28 @@ def discover_flow_module_definitions(*, data_root: Path | None = None) -> tuple[
         return ()
 
     discovered: list[FlowModuleDefinition] = []
+    namespace = WorkspaceImportNamespace(compiled_flow_modules_dir)
     for module_path in sorted(flow_modules_dir.glob("*.py")):
         if module_path.name == "__init__.py" or module_path.stem.startswith("_"):
             continue
-        discovered.append(
-            _load_prepared_flow_module_definition(
+        try:
+            definition = _load_prepared_flow_module_definition(
                 module_path.stem,
                 flow_modules_dir=flow_modules_dir,
                 compiled_flow_modules_dir=compiled_flow_modules_dir,
+                namespace=namespace,
             )
-        )
+        except Exception as exc:
+            message = str(exc)
+
+            def invalid_build(message=message):
+                raise FlowValidationError(message)
+
+            definition = FlowModuleDefinition(
+                name=module_path.stem, description=None,
+                module_path=compiled_flow_modules_dir / module_path.name, build=invalid_build,
+            )
+        discovered.append(definition)
     return tuple(discovered)
 
 

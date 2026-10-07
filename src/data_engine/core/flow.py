@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import inspect
 from pathlib import Path
 from typing import Callable
@@ -75,6 +75,7 @@ class Flow:
     steps: tuple[StepSpec, ...] = ()
     manual_inputs: tuple[ManualInputSpec, ...] = ()
     _workspace_root: Path | None = None
+    _module_namespace: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.name is not None and (not isinstance(self.name, str) or not self.name.strip()):
