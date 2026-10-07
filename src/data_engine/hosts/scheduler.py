@@ -50,11 +50,13 @@ class SchedulerHost:
         *,
         runtime_engine: RuntimeEngine | None = None,
         scheduler: SchedulerPort | None = None,
+        admission_stop_event: Event | None = None,
         job_id_prefix: str = "data-engine:schedule:",
     ) -> None:
         self.runtime_engine = runtime_engine or RuntimeEngine()
         self.scheduler = scheduler or BackgroundScheduler()
         self.job_id_prefix = job_id_prefix
+        self._admission_stop_event = admission_stop_event or Event()
         self._lock = Lock()
         self._job_ids: set[str] = set()
 
@@ -74,10 +76,12 @@ class SchedulerHost:
 
     def shutdown(self, *, wait: bool = True) -> None:
         """Stop the underlying scheduler."""
+        self._admission_stop_event.set()
         self.scheduler.shutdown(wait=wait)
 
     def run_until_stopped(self, flows: tuple["Flow", ...], stop_event: Event) -> tuple[ScheduledFlowJob, ...]:
         """Run scheduled flow jobs until ``stop_event`` is set."""
+        self._admission_stop_event = stop_event
         jobs = self.rebuild_jobs(flows)
         if not jobs:
             return jobs
@@ -126,6 +130,8 @@ class SchedulerHost:
         return tuple(jobs)
 
     def _run_flow(self, flow: "Flow") -> object:
+        if self._admission_stop_event.is_set():
+            return None
         result = self.runtime_engine.run_once(flow)
         return release_completed_results(result)
 

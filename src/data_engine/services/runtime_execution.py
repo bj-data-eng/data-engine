@@ -214,7 +214,10 @@ class RuntimeExecutionService:
                 runtime_ledger=runtime_ledger,
                 workspace_id=workspace_id,
             )
-            scheduler_host = self._scheduler_host_factory(runtime_engine=scheduler_engine)
+            scheduler_host = self._scheduler_host_factory(
+                runtime_engine=scheduler_engine,
+                admission_stop_event=runtime_stop_event,
+            )
             scheduler_jobs = scheduler_host.rebuild_jobs(scheduled_flows)
         try:
             if scheduler_jobs and scheduler_host is not None:

@@ -45,6 +45,7 @@ class DaemonCommandHandler:
                 return {
                     "ok": True,
                     "status": self.state_sync.status_payload(
+                        since_daemon_id=payload.get("since_daemon_id"),
                         since_version=since_version,
                         since_event_sequence=since_event_sequence,
                     ),
@@ -64,6 +65,7 @@ class DaemonCommandHandler:
                 return {
                     "ok": True,
                     "status": self.state_sync.wait_for_status_payload(
+                        since_daemon_id=payload.get("since_daemon_id"),
                         since_version=since_version,
                         since_event_sequence=since_event_sequence,
                         timeout_seconds=timeout_seconds,

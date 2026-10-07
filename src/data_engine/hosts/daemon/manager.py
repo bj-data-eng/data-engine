@@ -143,6 +143,7 @@ class WorkspaceDaemonManager:
             if self._last_snapshot is not None and self._last_snapshot.projection_version > 0:
                 request_payload["since_version"] = self._last_snapshot.projection_version
                 request_payload["since_event_sequence"] = self._last_snapshot.event_sequence
+                request_payload["since_daemon_id"] = self._last_snapshot.daemon_id
             try:
                 response = daemon_request(
                     self.paths,
@@ -177,7 +178,7 @@ class WorkspaceDaemonManager:
             return self._snapshot_from_status_dict(status, assume_live=True, transport_mode="heartbeat")
 
     def wait_for_update(self, *, timeout_seconds: float = 5.0) -> WorkspaceDaemonSnapshot:
-        """Wait for one daemon projection update, reusing the last known version when available."""
+        """Wait for a projection update using the last daemon generation and counters."""
         with timed_operation(
             self._timing_log_path(),
             scope="client.daemon",
@@ -204,6 +205,7 @@ class WorkspaceDaemonManager:
                         "request_id": request_id,
                         "since_version": since_version,
                         "since_event_sequence": since_event_sequence,
+                        "since_daemon_id": self._last_snapshot.daemon_id if self._last_snapshot is not None else None,
                         "timeout_ms": max(int(timeout_seconds * 1000.0), 0),
                     },
                     timeout=max(timeout_seconds + 1.0, 2.0),
@@ -261,7 +263,28 @@ class WorkspaceDaemonManager:
             snapshot = self._lease_snapshot()
             self._last_snapshot = snapshot
             return snapshot
-        if bool(status.get("unchanged")) and self._last_snapshot is not None:
+        if bool(status.get("unchanged")) and (
+            self._last_snapshot is None
+            or not self._last_snapshot.daemon_id
+            or status.get("daemon_id") != self._last_snapshot.daemon_id
+        ):
+            try:
+                response = daemon_request(self.paths, {"command": "daemon_status"}, timeout=2.0)
+                full_status = response.get("status") if response.get("ok") else None
+            except DaemonClientError:
+                full_status = None
+            if not isinstance(full_status, dict) or full_status.get("unchanged"):
+                full_status = None
+            return self._snapshot_from_status_dict(
+                full_status,
+                assume_live=assume_live,
+                transport_mode=transport_mode,
+            )
+        if (
+            bool(status.get("unchanged"))
+            and self._last_snapshot is not None
+            and status.get("daemon_id") == self._last_snapshot.daemon_id
+        ):
             self._sync_misses = 0
             snapshot = WorkspaceDaemonSnapshot(
                 live=assume_live,

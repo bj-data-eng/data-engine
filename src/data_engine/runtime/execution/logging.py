@@ -68,12 +68,15 @@ class _SharedQueuedRuntimeLogSink:
 
     def release(self) -> None:
         should_close = False
-        with self._lock:
-            if self._refcount > 0:
-                self._refcount -= 1
-            should_close = self._refcount == 0 and not self._closed
-            if should_close:
-                self._closed = True
+        with _SHARED_QUEUED_SINKS_LOCK:
+            with self._lock:
+                if self._refcount > 0:
+                    self._refcount -= 1
+                should_close = self._refcount == 0 and not self._closed
+                if should_close:
+                    self._closed = True
+                    if _SHARED_QUEUED_SINKS.get(self.log_sink) is self:
+                        del _SHARED_QUEUED_SINKS[self.log_sink]
         if should_close:
             self._queue.put(None)
             self._worker.join()
@@ -84,7 +87,7 @@ class _SharedQueuedRuntimeLogSink:
             self._raise_if_failed()
             if self._closed:
                 raise RuntimeError("Queued runtime log sink is already closed.")
-        self._queue.put(row)
+            self._queue.put(row)
 
     @property
     def closed(self) -> bool:
@@ -164,6 +167,7 @@ class QueuedRuntimeLogSinkHandle:
     def __init__(self, shared_sink: _SharedQueuedRuntimeLogSink) -> None:
         self._shared_sink = shared_sink
         self._closed = False
+        self._lock = threading.RLock()
         self._shared_sink.acquire()
 
     def append(
@@ -176,24 +180,26 @@ class QueuedRuntimeLogSinkHandle:
         flow_name: str | None = None,
         step_label: str | None = None,
     ) -> None:
-        if self._closed:
-            raise RuntimeError("Queued runtime log sink handle is already closed.")
-        self._shared_sink.append(
-            PersistedLogEntry(
-                id=-1,
-                run_id=run_id,
-                flow_name=flow_name,
-                step_label=step_label,
-                level=level,
-                message=message,
-                created_at_utc=created_at_utc,
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Queued runtime log sink handle is already closed.")
+            self._shared_sink.append(
+                PersistedLogEntry(
+                    id=-1,
+                    run_id=run_id,
+                    flow_name=flow_name,
+                    step_label=step_label,
+                    level=level,
+                    message=message,
+                    created_at_utc=created_at_utc,
+                )
             )
-        )
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
         self._shared_sink.release()
 
 

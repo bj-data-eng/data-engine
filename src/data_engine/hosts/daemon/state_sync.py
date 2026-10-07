@@ -27,15 +27,18 @@ class DaemonStateSyncHandler:
         *,
         since_version: int | None = None,
         since_event_sequence: int | None = None,
+        since_daemon_id: str | None = None,
     ) -> dict[str, Any]:
+        """Return full state unless both counters and the daemon generation match."""
         service = self.service
         projection = service.runtime_projector.snapshot()
         recent_events = ()
         events_truncated = False
-        if since_event_sequence is not None:
+        if since_event_sequence is not None and since_daemon_id == service.daemon_id:
             recent_events, events_truncated = service.runtime_projector.events_since(since_event_sequence)
         if (
             since_version is not None
+            and since_daemon_id == service.daemon_id
             and since_version == projection.version
             and since_event_sequence is not None
             and since_event_sequence == projection.event_sequence
@@ -78,8 +81,11 @@ class DaemonStateSyncHandler:
         since_version: int,
         since_event_sequence: int,
         timeout_seconds: float,
+        since_daemon_id: str | None = None,
     ) -> dict[str, Any]:
-        """Wait for one projection change and return the resulting status payload."""
+        """Wait on the current generation, or return full state for a different cursor."""
+        if since_daemon_id != self.service.daemon_id:
+            return self.status_payload()
         projection, recent_events, events_truncated = self.service.runtime_projector.wait_for_change(
             since_version=since_version,
             since_event_sequence=since_event_sequence,

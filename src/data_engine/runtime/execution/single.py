@@ -257,7 +257,7 @@ class FlowRuntime:
                         result = future.result()
                         self._release_completed_context(result)
                         _submit_next_job()
-                except Exception:
+                except BaseException:
                     for future in future_to_job:
                         future.cancel()
                     raise
@@ -287,7 +287,7 @@ class FlowRuntime:
                     index = future_to_index.pop(future)
                     results_by_index[index] = future.result()
                     _submit_next_job()
-            except Exception:
+            except BaseException:
                 for future in future_to_index:
                     future.cancel()
                 raise
@@ -307,10 +307,17 @@ class FlowRuntime:
         if self.runtime_stop_event is not None and self.runtime_stop_event.is_set():
             return
         if queue:
+            active_keys = {
+                self.polling.job_key(pending_job.flow, pending_job.source_path)
+                for pending_job, _ in pending_futures.values()
+            }
             queue_length = len(queue)
             for _ in range(queue_length):
                 job = queue.popleft()
                 key = self.polling.job_key(job.flow, job.source_path)
+                if key in active_keys:
+                    queue.append(job)
+                    continue
                 flow_name = job.flow.name
                 active_count = sum(1 for pending_job, _ in pending_futures.values() if pending_job.flow.name == flow_name)
                 active_group_flow_names = {
@@ -328,6 +335,7 @@ class FlowRuntime:
                 future = executor.submit(self._execute_job_in_thread, job)
                 results_count = len(results) if results is not None else 0
                 pending_futures[future] = (job, results_count + len(pending_futures))
+                active_keys.add(key)
         self._drain_completed_jobs(pending_futures, results=results)
 
     def _execute_job_in_thread(self, job: QueuedRunJob) -> FlowContext:

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any
 from typing import TYPE_CHECKING, Protocol
 
@@ -26,11 +27,14 @@ class _RuntimeEventPublisher(Protocol):
 
 @dataclass(frozen=True)
 class DaemonRuntimeExecutionStatePublisher:
-    """Wrap execution-state writes and publish daemon runtime events."""
+    """Publish execution events and track active rows within one execution scope."""
 
     delegate: object
     runtime_cache_ledger: RuntimeCacheStore
     publish_event: _RuntimeEventPublisher
+    _activity_lock: Lock = field(default_factory=Lock, repr=False, compare=False)
+    _active_run_ids: set[str] = field(default_factory=set, repr=False, compare=False)
+    _active_step_ids: set[int] = field(default_factory=set, repr=False, compare=False)
 
     def record_run_started(
         self,
@@ -48,6 +52,8 @@ class DaemonRuntimeExecutionStatePublisher:
             source_path=source_path,
             started_at_utc=started_at_utc,
         )
+        with self._activity_lock:
+            self._active_run_ids.add(run_id)
         run = self.runtime_cache_ledger.runs.get(run_id)
         self.publish_event(
             "runtime.run_started",
@@ -76,6 +82,8 @@ class DaemonRuntimeExecutionStatePublisher:
             finished_at_utc=finished_at_utc,
             error_text=error_text,
         )
+        with self._activity_lock:
+            self._active_run_ids.discard(run_id)
         self.publish_event(
             "runtime.run_finished",
             payload={
@@ -105,6 +113,8 @@ class DaemonRuntimeExecutionStatePublisher:
             step_label=step_label,
             started_at_utc=started_at_utc,
         )
+        with self._activity_lock:
+            self._active_step_ids.add(step_run_id)
         run = self.runtime_cache_ledger.runs.get(run_id)
         step_run = self.runtime_cache_ledger.step_outputs.get(step_run_id)
         self.publish_event(
@@ -141,6 +151,8 @@ class DaemonRuntimeExecutionStatePublisher:
             error_text=error_text,
             output_path=output_path,
         )
+        with self._activity_lock:
+            self._active_step_ids.discard(step_run_id)
         self.publish_event(
             "runtime.step_finished",
             payload={
@@ -178,6 +190,45 @@ class DaemonRuntimeExecutionStatePublisher:
             error_text=error_text,
         )
 
+    def reconcile_owned_activity(
+        self,
+        *,
+        status: str,
+        finished_at_utc: str,
+        error_text: str | None = None,
+    ) -> tuple[int, int]:
+        """Finish this publisher's remaining activity after its workers have drained."""
+        with self._activity_lock:
+            run_ids = tuple(self._active_run_ids)
+            step_ids = tuple(self._active_step_ids)
+        run_count = step_count = 0
+        for step_id in step_ids:
+            step = self.runtime_cache_ledger.step_outputs.get(step_id)
+            if step is not None and step.status == "started":
+                self.record_step_finished(
+                    step_run_id=step_id,
+                    status=status,
+                    finished_at_utc=finished_at_utc,
+                    elapsed_ms=step.elapsed_ms,
+                    error_text=step.error_text or error_text,
+                    output_path=step.output_path,
+                )
+                step_count += 1
+        for run_id in run_ids:
+            run = self.runtime_cache_ledger.runs.get(run_id)
+            if run is not None and run.status == "started":
+                self.record_run_finished(
+                    run_id=run_id,
+                    status=status,
+                    finished_at_utc=finished_at_utc,
+                    error_text=run.error_text or error_text,
+                )
+                run_count += 1
+        with self._activity_lock:
+            self._active_run_ids.difference_update(run_ids)
+            self._active_step_ids.difference_update(step_ids)
+        return run_count, step_count
+
 
 class DaemonRuntimeCacheProxy:
     """Borrow one daemon runtime cache ledger while publishing projection events."""
@@ -197,6 +248,20 @@ class DaemonRuntimeCacheProxy:
     def close(self) -> None:
         """Keep the borrowed daemon ledger open for the owning service."""
         return
+
+    def reconcile_owned_activity(
+        self,
+        *,
+        status: str,
+        finished_at_utc: str,
+        error_text: str | None = None,
+    ) -> tuple[int, int]:
+        """Reconcile only runs and steps recorded through this execution scope."""
+        return self.execution_state.reconcile_owned_activity(
+            status=status,
+            finished_at_utc=finished_at_utc,
+            error_text=error_text,
+        )
 
     def __getattr__(self, name: str):
         """Forward unknown runtime-ledger attributes to the wrapped cache store."""

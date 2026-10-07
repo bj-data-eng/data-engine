@@ -295,12 +295,17 @@ class DaemonHostState:
             return False
         self.engine_starting = True
         self.engine_start_thread = thread
+        self.engine_runtime_stop_event = threading.Event()
+        self.engine_flow_stop_event = threading.Event()
         return True
 
     def clear_engine_start_reservation(self) -> None:
         """Clear any in-progress engine startup reservation."""
         self.engine_starting = False
         self.engine_start_thread = None
+        self.runtime_stopping = False
+        if self.status == "stopping":
+            self.status = "idle"
 
     def reserve_manual_run(self, name: str, *, thread: threading.Thread) -> bool:
         """Reserve one manual run name before flow loading starts."""

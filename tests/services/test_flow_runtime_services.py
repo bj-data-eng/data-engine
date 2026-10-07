@@ -378,8 +378,9 @@ def test_runtime_execution_service_run_automated_splits_poll_and_schedule_flows(
             return tuple(flow.name for flow in self.flows)
 
     class _SchedulerHost:
-        def __init__(self, *, runtime_engine):
+        def __init__(self, *, runtime_engine, admission_stop_event):
             self.runtime_engine = runtime_engine
+            assert admission_stop_event is runtime_stop
             scheduler_calls.append(("init", runtime_engine))
 
         def rebuild_jobs(self, flows):
@@ -421,8 +422,9 @@ def test_runtime_execution_service_run_automated_waits_for_schedule_only_flows()
     scheduler_calls: list[str] = []
 
     class _SchedulerHost:
-        def __init__(self, *, runtime_engine):
+        def __init__(self, *, runtime_engine, admission_stop_event):
             self.runtime_engine = runtime_engine
+            assert admission_stop_event is runtime_stop
 
         def rebuild_jobs(self, flows):
             scheduler_calls.append(f"rebuild:{','.join(flow.name for flow in flows)}")

@@ -61,7 +61,7 @@ class GroupedFlowRuntime:
             ).run()
 
         results_by_group: dict[str, list[FlowContext]] = {name: [] for name in grouped}
-        errors: Queue[tuple[str, Exception]] = Queue()
+        errors: Queue[tuple[str, BaseException]] = Queue()
         threads: list[threading.Thread] = []
         internal_runtime_stop = self.runtime_stop_event or threading.Event()
         internal_flow_stop = self.flow_stop_event or threading.Event()
@@ -81,10 +81,9 @@ class GroupedFlowRuntime:
                     workspace_id=self.workspace_id,
                 )
                 results_by_group[group_name] = runtime.run()
-            except Exception as exc:  # pragma: no cover
+            except BaseException as exc:
                 errors.put((group_name, exc))
-                if not self.continuous:
-                    internal_runtime_stop.set()
+                internal_runtime_stop.set()
         try:
             for group_name, group_flows in grouped.items():
                 thread = threading.Thread(target=run_group, args=(group_name, group_flows), daemon=True)
@@ -94,8 +93,14 @@ class GroupedFlowRuntime:
             for thread in threads:
                 thread.join()
 
-            if not self.continuous and not errors.empty():
-                _, exc = errors.get()
+            if not errors.empty():
+                failures = []
+                while not errors.empty():
+                    failures.append(errors.get()[1])
+                exc = next(
+                    (failure for failure in failures if isinstance(failure, (KeyboardInterrupt, SystemExit, GeneratorExit))),
+                    failures[0],
+                )
                 raise exc
 
             ordered_results: list[FlowContext] = []

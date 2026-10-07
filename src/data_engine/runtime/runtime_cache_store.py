@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import logging
 import os
 from pathlib import Path
 from typing import Self
@@ -23,6 +24,8 @@ from data_engine.runtime.ledger_models import (
     PersistedStepRun,
 )
 from data_engine.runtime.sqlite_store import _RuntimeSqliteStore
+
+LOGGER = logging.getLogger(__name__)
 
 
 class _RuntimeCacheSchema(_RuntimeSqliteStore):
@@ -160,7 +163,10 @@ class RuntimeRunRepository:
             """,
             (status, finished_at_utc, error_text, run_id),
         )
-        self.prune_history(retention_days=self._store.HISTORY_RETENTION_DAYS)
+        try:
+            self.prune_history(retention_days=self._store.HISTORY_RETENTION_DAYS)
+        except Exception:
+            LOGGER.warning("Unable to prune runtime history after run completion.", exc_info=True)
 
     def get(self, run_id: str) -> PersistedRun | None:
         row = self._store._connection().execute(
@@ -319,31 +325,26 @@ class RuntimeRunRepository:
             raise ValueError("retention_days must be positive.")
         cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         connection = self._store._connection()
-        stale_run_ids = tuple(
-            str(row["run_id"])
-            for row in connection.execute(
-                """
-                SELECT run_id
-                FROM runs
-                WHERE COALESCE(finished_at_utc, started_at_utc) < ?
-                """,
+        expired_runs = """
+            SELECT run_id FROM runs
+            WHERE status IN ('success', 'failed', 'stopped')
+              AND COALESCE(finished_at_utc, started_at_utc) < ?
+        """
+        connection.execute("SAVEPOINT prune_history")
+        try:
+            connection.execute(f"DELETE FROM logs WHERE run_id IN ({expired_runs})", (cutoff,))
+            connection.execute(f"DELETE FROM step_runs WHERE run_id IN ({expired_runs})", (cutoff,))
+            connection.execute(
+                f"UPDATE file_state SET last_success_run_id = NULL WHERE last_success_run_id IN ({expired_runs})",
                 (cutoff,),
-            ).fetchall()
-        )
-        if not stale_run_ids:
-            return
-        placeholders = ", ".join("?" for _ in stale_run_ids)
-        connection.execute(f"DELETE FROM logs WHERE run_id IN ({placeholders})", stale_run_ids)
-        connection.execute(f"DELETE FROM step_runs WHERE run_id IN ({placeholders})", stale_run_ids)
-        connection.execute(f"DELETE FROM runs WHERE run_id IN ({placeholders})", stale_run_ids)
-        connection.execute(
-            f"""
-            UPDATE file_state
-            SET last_success_run_id = NULL
-            WHERE last_success_run_id IN ({placeholders})
-            """,
-            stale_run_ids,
-        )
+            )
+            connection.execute(f"DELETE FROM runs WHERE run_id IN ({expired_runs})", (cutoff,))
+        except BaseException:
+            connection.execute("ROLLBACK TO prune_history")
+            connection.execute("RELEASE prune_history")
+            raise
+        else:
+            connection.execute("RELEASE prune_history")
 
 
 class RuntimeStepOutputRepository:
@@ -1160,7 +1161,7 @@ class RuntimeCacheLedger(_RuntimeCacheSchema):
                 finished_at_utc=finished_at_utc,
                 error_text=error_text,
             )
-        except Exception:
+        except BaseException:
             connection.rollback()
             raise
         else:

@@ -330,7 +330,7 @@ class FlowRunExecutor:
                 )
                 try:
                     result = step.fn(context)
-                except FlowStoppedError as exc:
+                except (FlowStoppedError, KeyboardInterrupt, SystemExit, GeneratorExit) as exc:
                     step_elapsed_ms = max(int((monotonic() - step_started) * 1000), 0)
                     self._mark_timing(
                         "step_fn_stopped",
@@ -349,7 +349,7 @@ class FlowRunExecutor:
                         error_text=str(exc),
                     )
                     raise
-                except Exception as exc:
+                except BaseException as exc:
                     step_elapsed_ms = max(int((monotonic() - step_started) * 1000), 0)
                     self._mark_timing(
                         "step_fn_error",
@@ -422,7 +422,7 @@ class FlowRunExecutor:
                         "step_elapsed_ms": elapsed_ms,
                     },
                 )
-        except FlowStoppedError as exc:
+        except (FlowStoppedError, KeyboardInterrupt, SystemExit, GeneratorExit) as exc:
             finished_at_utc = utcnow_text()
             self.ports.log_emitter.log_flow_event(run_id, context.flow_name, source_path, status="stopped", elapsed=monotonic() - run_started)
             self.ports.state_writer.record_run_finished(run_id=run_id, status="stopped", finished_at_utc=finished_at_utc, error_text=str(exc))
@@ -442,7 +442,7 @@ class FlowRunExecutor:
                     error_text=str(exc),
                 )
             raise
-        except Exception as exc:
+        except BaseException as exc:
             elapsed = monotonic() - run_started
             finished_at_utc = utcnow_text()
             failed_step = step.label if "step" in locals() else None
@@ -510,9 +510,9 @@ class FlowRunExecutor:
             self._load_current_for_step(context, step)
             try:
                 result = step.fn(context)
-            except FlowStoppedError:
+            except (FlowStoppedError, KeyboardInterrupt, SystemExit, GeneratorExit):
                 raise
-            except Exception as exc:
+            except BaseException as exc:
                 raise FlowExecutionError(
                     flow_name=context.flow_name,
                     phase="step",
@@ -530,7 +530,7 @@ class FlowRunExecutor:
         return context
 
     @staticmethod
-    def _exception_detail(exc: Exception) -> str:
+    def _exception_detail(exc: BaseException) -> str:
         # Persist text only: traceback frames and their dataframe locals stay out of history.
         traceback_text = "".join(format_exception(exc)).rstrip()
         return f"{type(exc).__name__}: {exc}\n\nPython traceback:\n{traceback_text}"

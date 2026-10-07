@@ -27,11 +27,13 @@ from data_engine.runtime.shared_state import (
     checkpoint_workspace_state as _checkpoint_workspace_state,
     claim_workspace as _claim_workspace,
     initialize_workspace_state,
+    hydrate_local_runtime_state,
     read_lease_metadata,
     read_runtime_snapshot_generation,
     release_workspace as _release_workspace,
     remove_lease_metadata as _remove_lease_metadata,
     resolve_workspace_bundle,
+    WorkspaceLeaseLostError,
 )
 
 from .support import _owner_process_kwargs, _write_demo_flow, resolve_workspace_paths
@@ -91,6 +93,118 @@ def test_shutdown_releases_workspace_even_if_final_checkpoint_fails(tmp_path, mo
     assert tombstone.pid == service.process_identity.pid
     assert tombstone.process_start_key == service.process_identity.start_key
     assert tombstone.containment_nonce == service.containment_nonce
+
+
+def test_control_handoff_publishes_history_and_logs_before_releasing_lease(tmp_path, monkeypatch):
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(tmp_path / "app"))
+    workspace_root = tmp_path / "shared" / "default"
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    successor = RuntimeCacheLedger(tmp_path / "successor.sqlite")
+    service.initialize()
+    try:
+        assert service._handle_command({"command": "run_flow", "name": "demo", "wait": True}) == {"ok": True}
+        service.runtime_cache_ledger.logs.append(
+            level="INFO", message="after periodic checkpoint", flow_name="demo", created_at_utc=utcnow_text(),
+        )
+        runs = service.runtime_cache_ledger.runs.list()
+        steps = service.runtime_cache_ledger.step_outputs.list()
+        logs = service.runtime_cache_ledger.logs.list()
+        assert runs and steps and logs
+        old_generation = read_runtime_snapshot_generation(paths)
+        assert relinquish_workspace_for_control_request(service, "next-machine", "next-host")
+        assert not service.state.workspace_owned
+        assert read_lease_metadata(paths) is None
+        assert read_runtime_snapshot_generation(paths) != old_generation
+        assert hydrate_local_runtime_state(paths, successor)
+        assert successor.runs.list() == runs
+        assert successor.step_outputs.list() == steps
+        assert successor.logs.list() == logs
+    finally:
+        successor.close()
+        service._shutdown()
+
+
+def test_control_handoff_failed_final_checkpoint_retains_lease_and_retries(tmp_path, monkeypatch):
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(tmp_path / "app"))
+    workspace_root = tmp_path / "shared" / "default"
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    checkpoint = service._checkpoint_once
+    original_token = service.state.lease_token
+    original_metadata = read_lease_metadata(paths)
+    try:
+        def fail(**kwargs):
+            raise OSError("snapshot unavailable")
+
+        monkeypatch.setattr(service, "_checkpoint_once", fail)
+        assert not relinquish_workspace_for_control_request(service, "next-machine", "next-host")
+        assert service.state.workspace_owned
+        assert service.state.lease_token == original_token
+        assert read_lease_metadata(paths) == original_metadata
+        assert not service.host.shutdown_event.is_set()
+        assert service.state.work_draining
+        monkeypatch.setattr(service, "_checkpoint_once", checkpoint)
+        assert relinquish_workspace_for_control_request(service, "next-machine", "next-host")
+        assert not service.state.workspace_owned
+    finally:
+        service._shutdown()
+
+
+def test_control_handoff_fenced_final_checkpoint_refuses_success(tmp_path, monkeypatch):
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(tmp_path / "app"))
+    workspace_root = tmp_path / "shared" / "default"
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    service.initialize()
+    try:
+        def fenced(**kwargs):
+            raise WorkspaceLeaseLostError("successor owns lease")
+
+        monkeypatch.setattr(service, "_checkpoint_once", fenced)
+        monkeypatch.setattr(service.shared_state_adapter, "release_workspace", lambda *args, **kwargs: pytest.fail("must not release successor lease"))
+        assert not relinquish_workspace_for_control_request(service, "next-machine", "next-host")
+        assert not service.state.workspace_owned
+        assert service.state.status == "lease lost"
+    finally:
+        service._shutdown()
+
+
+def test_control_handoff_stale_token_preserves_successor_checkpoint_and_lease(tmp_path, monkeypatch):
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(tmp_path / "app"))
+    workspace_root = tmp_path / "shared" / "default"
+    _write_demo_flow(workspace_root)
+    paths = resolve_workspace_paths(workspace_root=workspace_root)
+    service = DataEngineDaemonService(paths)
+    successor = RuntimeCacheLedger(tmp_path / "successor.sqlite")
+    service.initialize()
+    successor_token = None
+    try:
+        _release_workspace(paths, lease_token=service.state.lease_token)
+        successor_token = _claim_workspace(paths)
+        assert successor_token and successor_token != service.state.lease_token
+        now = utcnow_text()
+        checkpoint_workspace_state(
+            paths, successor, workspace_id=paths.workspace_id,
+            machine_id="next-machine", host_name="next-host", daemon_id="next-daemon", pid=101,
+            status="idle", started_at_utc=now, last_checkpoint_at_utc=now, app_version="0.1.0",
+        )
+        metadata = read_lease_metadata(paths)
+        generation = read_runtime_snapshot_generation(paths)
+        assert not relinquish_workspace_for_control_request(service, "next-machine", "next-host")
+        assert read_lease_metadata(paths) == metadata
+        assert read_runtime_snapshot_generation(paths) == generation
+        service.shared_state_adapter.assert_workspace_lease(paths, lease_token=successor_token)
+        assert not service.state.workspace_owned
+    finally:
+        service._shutdown()
+        if successor_token is not None:
+            _release_workspace(paths, lease_token=successor_token)
+        successor.close()
 
 
 def test_control_handoff_keeps_ownership_until_noncooperative_manual_worker_exits(tmp_path, monkeypatch):

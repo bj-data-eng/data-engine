@@ -799,6 +799,7 @@ def test_workspace_daemon_manager_reuses_cached_snapshot_when_projection_is_unch
     assert requests[0]["command"] == "daemon_status"
     assert "since_version" not in requests[0]
     assert requests[1]["since_version"] == 7
+    assert requests[1]["since_daemon_id"] == "daemon-a"
     assert first.projection_version == 7
     assert first.daemon_id == "daemon-a"
     assert first.transport_mode == "heartbeat"
@@ -923,6 +924,7 @@ def test_workspace_daemon_manager_wait_for_update_uses_wait_command_and_reuses_s
     assert requests[1]["command"] == "wait_for_daemon_status"
     assert requests[1]["since_version"] == 7
     assert requests[1]["timeout_ms"] == 1500
+    assert requests[1]["since_daemon_id"] == "daemon-a"
     assert second.projection_version == 8
     assert second.daemon_id == "daemon-a"
     assert second.transport_mode == "subscription"

@@ -174,6 +174,15 @@ def relinquish_workspace_for_control_request(
             "control request handoff deferred active_workers=" + ",".join(drain_result.remaining_workers)
         )
         return False
+    try:
+        service._checkpoint_once(status="stopping")
+    except (WorkspaceLeaseLostError, WorkspaceStateCorruptError):
+        handle_workspace_lease_lost(service, reason="final handoff checkpoint was fenced")
+        return False
+    except Exception:
+        service._debug_log("control request handoff deferred: final checkpoint failed")
+        service._debug_log(traceback.format_exc().rstrip())
+        return False
     release_workspace_claim(
         service,
         leased_by_machine_id=requester_machine_id,

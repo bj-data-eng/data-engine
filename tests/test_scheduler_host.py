@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from threading import Event, Thread
+
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -103,4 +105,37 @@ def test_scheduler_host_forwards_lifecycle_to_scheduler():
 
     assert scheduler.started is True
     assert scheduler.shutdown_wait is False
+
+
+def test_scheduler_host_rejects_callbacks_after_admission_stop_without_cancelling_active_work():
+    scheduler = _FakeScheduler()
+    stop = Event()
+    started, release = Event(), Event()
+    calls = []
+
+    class Engine:
+        def run_once(self, flow):
+            calls.append(flow.name)
+            started.set()
+            assert release.wait(3)
+            return [flow.name]
+
+    host = SchedulerHost(runtime_engine=Engine(), scheduler=scheduler, admission_stop_event=stop)
+    flow = Flow(name="scheduled", group="Docs").watch(mode="schedule", interval="5m").step(lambda context: 1)
+    host.rebuild_jobs((flow,))
+    job = next(iter(scheduler.jobs.values()))
+    results = []
+    worker = Thread(target=lambda: results.append(job["func"](*job["args"])))
+    worker.start()
+    try:
+        assert started.wait(3)
+        stop.set()
+        assert job["func"](*job["args"]) is None
+        assert worker.is_alive()
+        assert calls == ["scheduled"]
+    finally:
+        release.set()
+        worker.join(3)
+    assert not worker.is_alive()
+    assert results == [["scheduled"]]
 

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 from data_engine.core.primitives import WatchSpec
 from data_engine.runtime.execution.context import QueuedRunJob
 from data_engine.domain.source_state import SourceSignature
+from data_engine.platform.paths import stable_path_identity_text
 from data_engine.runtime.file_watch import PollingWatcher, iter_candidate_paths
 
 if TYPE_CHECKING:
@@ -88,7 +89,7 @@ class RuntimePollingSupport:
         queued_keys.add(key)
 
     def job_key(self, flow: "Flow", source_path: Path | None) -> tuple[str, str | None]:
-        return (flow.name, str(source_path) if source_path is not None else None)
+        return (flow.name, stable_path_identity_text(source_path) if source_path is not None else None)
 
     def stale_poll_sources(self, flow: "Flow") -> list[Path | None]:
         current_source_paths: set[str] = set()
@@ -101,9 +102,8 @@ class RuntimePollingSupport:
         if trigger.run_as == "batch" and trigger.source.is_dir():
             for source_path in iter_candidate_paths(trigger.source, extensions=trigger.extensions, recursive=True, allow_missing=True):
                 current_source_paths.add(self.source_state_store.normalize_path(source_path))
-                if self.is_poll_source_stale(flow, source_path):
+                if not stale and self.is_poll_source_stale(flow, source_path):
                     stale.append(None)
-                    break
             self.source_state_store.prune_missing(flow_name=flow.name, current_source_paths=current_source_paths)
             return stale
         for source_path in self.startup_sources(flow, allow_missing=True):

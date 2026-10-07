@@ -112,7 +112,8 @@ def test_daemon_service_initializes_and_serves_commands(tmp_path, monkeypatch):
         service._shutdown()  # noqa: SLF001 - direct daemon lifecycle test
 
 
-def test_daemon_status_returns_unchanged_when_projection_version_matches(tmp_path, monkeypatch):
+@pytest.mark.parametrize("command", ["daemon_status", "wait_for_daemon_status"])
+def test_daemon_status_returns_unchanged_when_projection_version_matches(tmp_path, monkeypatch, command):
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -129,7 +130,12 @@ def test_daemon_status_returns_unchanged_when_projection_version_matches(tmp_pat
         assert version >= 1
 
         unchanged = service._handle_command(  # noqa: SLF001 - direct daemon contract test
-            {"command": "daemon_status", "since_version": version, "since_event_sequence": event_sequence}
+            {
+                "command": command,
+                "since_version": version,
+                "since_event_sequence": event_sequence,
+                "since_daemon_id": service.daemon_id,
+            }
         )
 
         assert unchanged["ok"] is True
@@ -142,6 +148,33 @@ def test_daemon_status_returns_unchanged_when_projection_version_matches(tmp_pat
         }
     finally:
         service._shutdown()  # noqa: SLF001 - direct daemon lifecycle test
+
+
+@pytest.mark.parametrize("command", ["daemon_status", "wait_for_daemon_status"])
+@pytest.mark.parametrize("generation", [None, "previous-daemon"])
+def test_daemon_status_requires_generation_match_for_cursor_reuse(tmp_path, monkeypatch, command, generation):
+    monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(tmp_path / "app"))
+    workspace_root = tmp_path / "shared" / "default"
+    _write_demo_flow(workspace_root)
+    service = DataEngineDaemonService(resolve_workspace_paths(workspace_root=workspace_root))
+    service.initialize()
+    try:
+        initial = service._handle_command({"command": "daemon_status"})["status"]
+        monkeypatch.setattr(service.runtime_projector, "wait_for_change", lambda **kwargs: pytest.fail("generation mismatch must not wait"))
+        response = service._handle_command({
+            "command": command,
+            "since_version": initial["projection_version"],
+            "since_event_sequence": initial["event_sequence"],
+            "since_daemon_id": generation,
+            "timeout_ms": 30000,
+        })
+        assert response["ok"]
+        assert not response["status"].get("unchanged")
+        assert response["status"]["workspace_owned"] == initial["workspace_owned"]
+        assert response["status"]["engine_active"] == initial["engine_active"]
+        assert response["status"]["daemon_id"] == service.daemon_id
+    finally:
+        service._shutdown()
 
 
 def test_wait_for_daemon_status_returns_after_projection_change(tmp_path, monkeypatch):
@@ -176,6 +209,7 @@ def test_wait_for_daemon_status_returns_after_projection_change(tmp_path, monkey
                     "command": "wait_for_daemon_status",
                     "since_version": version,
                     "since_event_sequence": event_sequence,
+                    "since_daemon_id": service.daemon_id,
                     "timeout_ms": 500,
                 }
             )

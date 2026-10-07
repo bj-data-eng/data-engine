@@ -75,11 +75,13 @@ class ContinuousRuntimeLoop:
                         continue
                     self._sleep_until_next_poll(watch_entries)
             finally:
-                self.runtime.wait_for_dispatched_jobs(pending_futures, results=None)
-                for entry in watch_entries:
-                    watcher = entry["watcher"]
-                    if isinstance(watcher, PollingWatcher):
-                        watcher.stop()
+                try:
+                    self.runtime.wait_for_dispatched_jobs(pending_futures, results=None)
+                finally:
+                    for entry in watch_entries:
+                        watcher = entry["watcher"]
+                        if isinstance(watcher, PollingWatcher):
+                            watcher.stop()
         return results
 
     def _wait_for_activity(
