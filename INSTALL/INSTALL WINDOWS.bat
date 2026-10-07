@@ -68,6 +68,7 @@ if errorlevel 1 (
 
 echo.
 echo Installing Data Engine with dev extras...
+set "PIP_BUILD_CONSTRAINT=%CONSTRAINTS_FILE%"
 "%VENV_PYTHON%" -m pip install --constraint "%CONSTRAINTS_FILE%" -e "%PROJECT_ROOT%[dev]"
 if errorlevel 1 (
   echo.

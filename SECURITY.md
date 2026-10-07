@@ -31,11 +31,14 @@ Data Engine uses several layers of dependency control:
   local environment resolves the same reviewed dependency set.
 - Build isolation dependencies are pinned because the build process generates
   the packaged Sphinx documentation.
+- The GitHub release build applies `PIP_CONSTRAINT` to tooling installs and
+  `PIP_BUILD_CONSTRAINT` to isolated build dependencies. Installer scripts also
+  set build constraints after upgrading pip to the reviewed version.
 
 Use constrained installs for normal local work:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --constraint requirements\constraints.txt -e ".[dev]"
+.\.venv\Scripts\python.exe -m pip install --constraint requirements\constraints.txt --build-constraint requirements\constraints.txt -e ".[dev]"
 ```
 
 Use the hash-locked runtime file when installing only the reviewed Windows
@@ -59,6 +62,7 @@ Run these checks before accepting dependency changes:
 For packaging changes, also verify the project still builds cleanly:
 
 ```powershell
+$env:PIP_BUILD_CONSTRAINT = (Resolve-Path requirements\constraints.txt).Path
 .\.venv\Scripts\python.exe -m build
 .\.venv\Scripts\python.exe -m twine check dist\*
 ```

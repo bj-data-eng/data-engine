@@ -41,6 +41,7 @@ fi
 
 echo "Installing docs build dependencies..."
 "$VENV_PYTHON" -m pip install --constraint "$CONSTRAINTS_FILE" --upgrade pip
+export PIP_BUILD_CONSTRAINT="$CONSTRAINTS_FILE"
 "$VENV_PYTHON" -m pip install --constraint "$CONSTRAINTS_FILE" -e "${PROJECT_ROOT}[docs]"
 
 echo "Building packaged docs..."

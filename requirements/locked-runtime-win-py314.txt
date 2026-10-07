@@ -2,7 +2,7 @@
 #
 # Generated from pyproject.toml runtime dependencies using pip download
 # with requirements/constraints.txt applied, then hashing the downloaded
-# wheels in workspaces/_local/wheelhouse.
+# wheels in an ignored wheelhouse under workspaces/_local/.
 #
 # Target environment: Windows, CPython 3.14, amd64.
 # Install with:
@@ -14,30 +14,30 @@
 
 apscheduler==3.11.3 \
     --hash=sha256:bbeb2ec02d23d3c06a6c07ed7f0f3939ada6680eb121fae809a69bb42c537a30
-duckdb==1.5.4 \
-    --hash=sha256:6dcbb81a1276bc48deb4d562bce4f8895e4fc6348750a096e30052345c6d6552
+duckdb==1.5.6 \
+    --hash=sha256:ebcbd09cd8578ab1093393e9b16289cda0e8f1791ac595bf00eb5bad75c3cf00
 et-xmlfile==2.0.0 \
     --hash=sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa
 fastexcel==0.20.2 \
     --hash=sha256:ce28748390ae6a7d286ba29d8ee2badcfb6478d32ed700db6c2030de32a16e7b
-numpy==2.5.1 \
-    --hash=sha256:24d0eb82c0541d3415a33425db64ae439dffccd7b4dbcb30e7c35120205c506a
+numpy==2.5.3 \
+    --hash=sha256:2c25dfa72943e4336ddb6b0ee4277b47a0c85bede0807530ec68103bf58e2c10
 openpyxl==3.1.5 \
     --hash=sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2
-polars==1.42.1 \
-    --hash=sha256:3c0c65cdfa21a621650c4bdcbbccf93964d052fd766c3e70e84a55d961c259fd
-polars-runtime-32==1.42.1 \
-    --hash=sha256:e9364c26da389a8b7339e4d29e20a3d12af730247e6ed3b7804bddce2477f428
-pyarrow==25.0.0 \
-    --hash=sha256:2e093efbecb5317372f819228fa4b4e6157eee48d3f0a7b0303705ebf81a7104
-pyside6==6.11.1 \
-    --hash=sha256:0968877ab1fb4ef3587a284da6fe05e8647ada56a6a3750b6395188e01f4aba6
-pyside6-addons==6.11.1 \
-    --hash=sha256:0d13c4dfd671b050a48e4f8d8ddc724b7248f9c0437e7fc47fdf316278572923
-pyside6-essentials==6.11.1 \
-    --hash=sha256:63311bd48e32c584599ab04b9ef7c324082374cd2c9fa533f978fb893bb47e40
-shiboken6==6.11.1 \
-    --hash=sha256:c2c6863aa80ec18c0f82cea3417837b279cdc60024ac17123461dc9042577df7
+polars==1.44.2 \
+    --hash=sha256:1bb331f17a40d9d931101533dcd33637b66edc61eb377b07020dac16a0f0377b
+polars-runtime-32==1.44.2 \
+    --hash=sha256:8598e7a20efba70bb74978c7df7af7c606ff4d79b9b48fdd808250b189bc9a13
+pyarrow==25.0.1 \
+    --hash=sha256:f729cfdbd36fd99d543b67a914d2de044c84ebe45be8b34902b299b608c15c8f
+pyside6==6.11.2 \
+    --hash=sha256:3201d67e3c10be2eaedd3910ff0f02351eca7e88c95a291cde5e7f2f55ef207f
+pyside6-addons==6.11.2 \
+    --hash=sha256:f449ea4431da20e7b86752cca8d166f93434516fe417f981c27e5f8e1b554407
+pyside6-essentials==6.11.2 \
+    --hash=sha256:c8a29def77032773a30879f7f24415b5395ad08592d147c170824ef4c735dfc1
+shiboken6==6.11.2 \
+    --hash=sha256:6ab0eba1c904455df621f9a6df3ca2bb896bab8670572d2bc4e37804ae91f19a
 tzdata==2026.3 \
     --hash=sha256:dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931
 tzlocal==5.4.4 \
