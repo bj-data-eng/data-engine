@@ -478,8 +478,7 @@ def _topology_lock(paths: WorkspacePaths) -> Iterator[None]:
             if os.name == "nt":
                 import msvcrt
 
-                if os.fstat(descriptor).st_size == 0:
-                    os.write(descriptor, b"\0")
+                # Byte-range locks work past EOF; an initialization write can race a lock owner.
                 os.lseek(descriptor, 0, os.SEEK_SET)
                 msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
             else:

@@ -194,8 +194,7 @@ def _authkey_mutation_lock(authkey_path: Path):
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         acquired = False
         try:
-            if os.fstat(fd).st_size == 0:
-                os.write(fd, b"\0")
+            # Lock the empty file directly instead of writing into a competing owner's lock.
             deadline = time.monotonic() + _DAEMON_AUTHKEY_LOCK_TIMEOUT_SECONDS
             while True:
                 try:
