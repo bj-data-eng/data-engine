@@ -1119,7 +1119,7 @@ def test_top_parquet_preview_by_row_index_matches_filtered_head(tmp_path):
         filter_expressions=(pl.col("workflow").is_in(["Appeals"]),),
         sort_columns=(),
         row_limit=2,
-        schema_names=tuple(frame.columns),
+        schema=frame.schema,
     )
 
     assert result.to_dict(as_series=False) == frame.filter(pl.col("workflow").is_in(["Appeals"])).head(2).to_dict(
@@ -1143,7 +1143,7 @@ def test_top_parquet_preview_by_row_index_matches_filtered_sorted_head(tmp_path)
         filter_expressions=(pl.col("workflow").is_in(["Appeals"]),),
         sort_columns=(("claim_id", False),),
         row_limit=2,
-        schema_names=tuple(frame.columns),
+        schema=frame.schema,
     )
 
     assert result.to_dict(as_series=False) == frame.filter(pl.col("workflow").is_in(["Appeals"])).sort(
@@ -1166,7 +1166,7 @@ def test_top_parquet_preview_by_row_index_fetches_scattered_rows_across_files(tm
         filter_expressions=(),
         sort_columns=(("employee_id", False),),
         row_limit=4,
-        schema_names=tuple(first.columns),
+        schema=first.schema,
     )
 
     assert result.to_dict(as_series=False) == expected.to_dict(as_series=False)
@@ -3286,27 +3286,32 @@ def test_dataframes_view_connects_single_parquet_file(qapp, tmp_path):
 
 
 def test_dataframes_view_connects_parquet_folder(qapp, tmp_path):
-    first_path = tmp_path / "a.parquet"
-    nested_dir = tmp_path / "nested"
-    nested_dir.mkdir()
+    source_dir = tmp_path / "dataset"
+    first_path = source_dir / "a.parquet"
+    nested_dir = source_dir / "nested"
+    nested_dir.mkdir(parents=True)
     second_path = nested_dir / "b.parquet"
-    ignored_path = tmp_path / "notes.txt"
+    ignored_path = source_dir / "notes.txt"
     pl.DataFrame({"claim_id": [1]}).write_parquet(first_path)
-    pl.DataFrame({"claim_id": [2]}).write_parquet(second_path)
+    pl.DataFrame({"claim_id": [2], "status": ["OPEN"]}).write_parquet(second_path)
     ignored_path.write_text("skip", encoding="utf-8")
 
     window = _make_window()
     try:
         window.dataframes_button.click()
         qapp.processEvents()
-        window._connect_dataframe_path(tmp_path)
+        window._connect_dataframe_path(source_dir)
 
         table = window.dataframe_preview_layout.itemAt(0).widget().findChild(QTableWidget, "outputPreviewTable")
         assert table is not None
-        assert window.dataframe_source_input.text() == str(tmp_path)
+        assert window.dataframe_source_input.text() == str(source_dir)
         assert window._dataframe_preview_path.as_posix().endswith("/**/*.parquet")
         _process_ui_until(qapp, lambda: table.rowCount() == 2)
         assert window.dataframe_preview_title_label.text() == "2 parquet files"
+        assert table.columnCount() == 2
+        assert table.item(0, 1).text() == ""
+        assert table.item(1, 1).text() == "OPEN"
+        assert "2 rows - 2 columns" in window.dataframe_preview_summary_label.text()
     finally:
         _dispose_window(qapp, window)
 

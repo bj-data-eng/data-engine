@@ -272,7 +272,7 @@ class _ParquetPreviewLoader(QThread):
     def run(self) -> None:
         try:
             files = _parquet_metadata_paths(self._output_path)
-            lazy_frame = pl.scan_parquet(files)
+            lazy_frame = _scan_parquet_dataset(files)
             schema = lazy_frame.collect_schema()
             query = lazy_frame
             filter_expressions = []
@@ -295,7 +295,7 @@ class _ParquetPreviewLoader(QThread):
                     filter_expressions=tuple(filter_expressions),
                     sort_columns=self._sort_columns,
                     row_limit=self._preview_row_limit,
-                    schema_names=tuple(schema.names()),
+                    schema=schema,
                 )
             else:
                 preview = query.head(self._preview_row_limit).collect()
@@ -336,7 +336,7 @@ class _DistinctValueLoader(QThread):
 
     def run(self) -> None:
         try:
-            query = pl.scan_parquet(self._output_path)
+            query = _scan_parquet_dataset(_parquet_metadata_paths(self._output_path))
             schema = query.collect_schema()
             for active_name, column_filter in self._active_filters.items():
                 if active_name == self._column_name:
@@ -2394,6 +2394,24 @@ def _parquet_metadata_paths(path: Path) -> tuple[Path, ...]:
     return (path,) if path.is_file() else ()
 
 
+def _scan_parquet_dataset(files: tuple[Path, ...], *, schema: pl.Schema | None = None) -> pl.LazyFrame:
+    """Scan a fixed manifest with all physical columns and typed nulls for missing ones."""
+    if not files:
+        raise FileNotFoundError("No Parquet files were found for this source.")
+    if schema is None:
+        schema = pl.Schema()
+        for file_path in files:
+            for column_name, dtype in pl.read_parquet_schema(file_path).items():
+                existing_dtype = schema.get(column_name)
+                if existing_dtype is not None and existing_dtype != dtype:
+                    raise pl.exceptions.SchemaError(
+                        f"Parquet column {column_name!r} has conflicting types: "
+                        f"{existing_dtype} and {dtype} in {file_path.name!r}."
+                    )
+                schema[column_name] = dtype
+    return pl.scan_parquet(files, schema=schema, missing_columns="insert", glob=False)
+
+
 def _sort_parquet_preview_query(query: pl.LazyFrame, sort_columns: tuple[tuple[str, bool], ...]) -> pl.LazyFrame:
     return query.sort(
         [column_name for column_name, _descending in sort_columns],
@@ -2425,10 +2443,11 @@ def _top_parquet_preview_by_row_index(
     filter_expressions: tuple[pl.Expr, ...],
     sort_columns: tuple[tuple[str, bool], ...],
     row_limit: int,
-    schema_names: tuple[str, ...],
+    schema: pl.Schema,
 ) -> pl.DataFrame:
     # Row IDs and lookup offsets must describe the same immutable scan manifest.
-    query = pl.scan_parquet(files)
+    query = _scan_parquet_dataset(files, schema=schema)
+    schema_names = tuple(schema.names())
     row_index_column = _preview_row_index_column(schema_names)
     order_column = _preview_order_column(schema_names, row_index_column)
     indexed_query = query.with_row_index(row_index_column)
@@ -2448,6 +2467,7 @@ def _top_parquet_preview_by_row_index(
         row_ids=row_ids,
         row_index_column=row_index_column,
         order_column=order_column,
+        schema=schema,
     )
     if file_scoped_preview is not None:
         return file_scoped_preview
@@ -2474,6 +2494,7 @@ def _collect_preview_rows_by_file_row_ids(
     row_ids: list[int],
     row_index_column: str,
     order_column: str,
+    schema: pl.Schema,
 ) -> pl.DataFrame | None:
     file_offsets = _parquet_file_row_offsets(files)
     if not file_offsets:
@@ -2498,7 +2519,7 @@ def _collect_preview_rows_by_file_row_ids(
         local_start = min(local_ids)
         local_count = max(local_ids) - local_start + 1
         frames.append(
-            pl.scan_parquet(file_path)
+            _scan_parquet_dataset((file_path,), schema=schema)
             .with_row_index(row_index_column)
             .slice(local_start, local_count)
             .join(row_order, on=row_index_column, how="inner")

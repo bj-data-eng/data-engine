@@ -137,6 +137,8 @@ def test_clear_retains_running_queries_and_rejects_late_results(qapp, tmp_path, 
 
 
 def test_background_query_panics_reach_ui_failure_signals(tmp_path, monkeypatch):
+    pl.DataFrame({"id": [1]}).write_parquet(tmp_path / "input.parquet")
+
     def panic(*args, **kwargs):
         raise pl.exceptions.PanicException("native query failed")
 
