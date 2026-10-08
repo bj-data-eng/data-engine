@@ -260,6 +260,12 @@ class WorkspaceIoLayer:
                 app_version=app_version,
             )
         else:
+            def capture_export_token(token: object) -> None:
+                nonlocal change_token
+                # Receipt metadata is persisted before this token; later flow
+                # writes still invalidate it and require another checkpoint.
+                change_token = token
+
             committed_generation_id = checkpoint_runtime_workspace_state(
                 paths,
                 ledger,
@@ -276,6 +282,7 @@ class WorkspaceIoLayer:
                 last_checkpoint_at_utc=last_checkpoint_at_utc,
                 app_version=app_version,
                 heartbeat_interval_seconds=heartbeat_interval_seconds,
+                on_export_change_token=capture_export_token,
             )
             with self._lock:
                 self._checkpoint_state[workspace_key] = _CheckpointState(

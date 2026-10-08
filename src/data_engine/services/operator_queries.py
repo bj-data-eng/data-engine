@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -444,6 +444,7 @@ class HistoryQueryService:
                 source_label=summary.source_label,
                 status=step_run.status,
                 elapsed_seconds=None if step_run.elapsed_ms is None else step_run.elapsed_ms / 1000.0,
+                started_at_utc=step_run.started_at_utc,
             )
             entry = FlowLogEntry(
                 line=FlowLogEntry.format_runtime_message(
@@ -460,7 +461,11 @@ class HistoryQueryService:
         # Run/step records own lifecycle truth; logs can lag or already have been pruned.
         detail_entries = tuple(step_entries) + tuple(entry for entry in entries if entry.event is None)
         if summary.summary_entry is not None:
-            detail_entries += (summary.summary_entry,)
+            detail_entries += (replace(
+                summary.summary_entry,
+                created_at_utc=parse_utc_text(persisted_run.finished_at_utc or persisted_run.started_at_utc),
+            ),)
+        detail_entries = tuple(sorted(detail_entries, key=lambda entry: entry.created_at_utc))
         return FlowRunState(
             key=summary.key,
             display_label=summary.display_label,
@@ -488,6 +493,7 @@ class HistoryQueryService:
             source_label=short_source_label(run.source_path),
             status=status,
             elapsed_seconds=run.elapsed_seconds,
+            started_at_utc=run.started_at_utc,
         )
         summary_entry = FlowLogEntry(
             line=(

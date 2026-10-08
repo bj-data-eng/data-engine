@@ -114,6 +114,7 @@ class _RuntimeCacheSchema(_RuntimeSqliteStore):
             """
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_flow_started ON runs(flow_name, started_at_utc DESC)")
+        connection.execute("CREATE TABLE IF NOT EXISTS exported_snapshot_generations (generation_id TEXT PRIMARY KEY)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_status_started ON runs(status, started_at_utc, run_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_step_runs_run ON step_runs(run_id, id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_step_runs_status_id ON step_runs(status, id)")
@@ -891,6 +892,32 @@ class RuntimeSnapshotRepository:
         generation_id = str(row["generation_id"]).strip()
         return generation_id or None
 
+    def contains_generation(self, generation_id: str) -> bool:
+        """Return whether this cache already contains an applied or exported snapshot."""
+        return self.applied_generation_id() == generation_id or self._store._connection().execute(
+            "SELECT 1 FROM exported_snapshot_generations WHERE generation_id = ?", (generation_id,)
+        ).fetchone() is not None
+
+    def record_export(self, generation_id: str, *, previous_generation_id: str | None) -> None:
+        """Record local provenance before publication, retaining at most two receipts.
+
+        Keep the currently published receipt until its replacement is visible.
+        A crash on either side of manifest publication must preserve newer local
+        rows; recording provenance afterwards would leave a destructive gap.
+        """
+        connection = self._store._connection()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                "DELETE FROM exported_snapshot_generations WHERE generation_id IS NOT ?", (previous_generation_id,)
+            )
+            connection.execute("INSERT OR IGNORE INTO exported_snapshot_generations VALUES (?)", (generation_id,))
+        except BaseException:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+
     def replace(
         self,
         *,
@@ -907,16 +934,16 @@ class RuntimeSnapshotRepository:
         connection = self._store._connection()
         connection.execute("BEGIN IMMEDIATE")
         try:
-            current_row = connection.execute(
-                "SELECT generation_id FROM shared_snapshot_state WHERE singleton = 1"
-            ).fetchone()
-            if current_row is not None and str(current_row["generation_id"]) == normalized_generation_id:
+            # Recheck inside the write transaction: the manifest may have
+            # advanced to our own export while its files were being read.
+            if self.contains_generation(normalized_generation_id):
                 connection.rollback()
                 return False
             connection.execute("DELETE FROM step_runs")
             connection.execute("DELETE FROM logs")
             connection.execute("DELETE FROM runs")
             connection.execute("DELETE FROM file_state")
+            connection.execute("DELETE FROM exported_snapshot_generations")
             if runs:
                 connection.executemany(
                     """
@@ -1134,6 +1161,7 @@ class RuntimeCacheLedger(_RuntimeCacheSchema):
             connection.execute("DELETE FROM runs")
             connection.execute("DELETE FROM file_state")
             connection.execute("DELETE FROM shared_snapshot_state")
+            connection.execute("DELETE FROM exported_snapshot_generations")
         except Exception:
             connection.rollback()
             raise

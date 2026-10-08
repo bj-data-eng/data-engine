@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
@@ -11,6 +11,7 @@ from data_engine.application.runtime import RuntimeApplication
 from data_engine.domain import (
     ActiveRunState,
     FlowActivityState,
+    ManualRunState,
     OperationFlowState,
     OperationRowState,
     OperationSessionState,
@@ -52,6 +53,7 @@ class EngineSnapshot:
     transport: TransportStateName = "heartbeat"
     stop_requested: bool = False
     active_flow_names: tuple[str, ...] = ()
+    local_process_dead: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,6 +110,7 @@ class WorkspaceSnapshot:
     flows: dict[str, FlowLiveSummary]
     active_runs: dict[str, RunLiveSnapshot]
     notices: tuple[OperatorNotice, ...] = ()
+    manual_runs: tuple[ManualRunState, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -153,12 +156,6 @@ def runtime_session_from_workspace_snapshot(snapshot: WorkspaceSnapshot) -> Runt
         if snapshot.engine.state in {"running", "stopping"}
         else ()
     )
-    engine_flow_names = set(snapshot.engine.active_flow_names)
-    manual_runs = {
-        run.group_name: run.flow_name
-        for run in snapshot.active_runs.values()
-        if run.flow_name not in engine_flow_names and run.state in {"starting", "running", "stopping"}
-    }
     return RuntimeSessionState(
         workspace_owned=snapshot.control.state != "leased" or snapshot.control.leased_by_machine_id is None,
         leased_by_machine_id=snapshot.control.leased_by_machine_id,
@@ -166,8 +163,9 @@ def runtime_session_from_workspace_snapshot(snapshot: WorkspaceSnapshot) -> Runt
         runtime_active=snapshot.engine.state in {"running", "stopping"},
         runtime_stopping=snapshot.engine.state == "stopping",
         active_runtime_flow_names=active_engine_flow_names,
-        manual_runs=(),
-    ).with_manual_runs_map(manual_runs)
+        manual_runs=snapshot.manual_runs,
+        local_process_dead=snapshot.engine.local_process_dead,
+    )
 
 
 def _safe_parse_utc_text(value: object) -> datetime | None:
@@ -387,6 +385,7 @@ class RuntimeStateService:
             ),
             stop_requested=stop_requested,
             active_flow_names=active_flow_names,
+            local_process_dead=runtime_session.local_process_dead,
         )
 
     @staticmethod
@@ -475,6 +474,8 @@ class RuntimeStateService:
             snapshot.engine.state,
             snapshot.engine.stop_requested,
             snapshot.engine.active_flow_names,
+            snapshot.engine.local_process_dead,
+            snapshot.manual_runs,
             flow_items,
             run_items,
             tuple((notice.notice_id, notice.level, notice.text, notice.created_at_utc) for notice in snapshot.notices),
@@ -530,6 +531,15 @@ class RuntimeStateService:
             fallback=presentation.operation_tracker,
             now=now,
         )
+        if runtime_session.local_process_dead:
+            operation_tracker = OperationSessionState(flow_states={
+                name: replace(state, rows={
+                    label: replace(row, status="stopped", started_at=None)
+                    if row.status == "running" else row
+                    for label, row in state.rows.items()
+                })
+                for name, state in operation_tracker.flow_states.items()
+            })
         effective_runtime_session = self._effective_runtime_session(
             runtime_session,
             active_runtime_flow_names=presentation.active_runtime_flow_names,
@@ -637,6 +647,7 @@ class RuntimeStateService:
             flows=flow_summaries,
             active_runs=active_runs,
             notices=(),
+            manual_runs=runtime_session.manual_runs,
         )
         previous_signature = self._snapshot_signature(previous) if previous is not None else None
         current_signature = self._snapshot_signature(provisional)
@@ -654,6 +665,7 @@ class RuntimeStateService:
             flows=flow_summaries,
             active_runs=active_runs,
             notices=(),
+            manual_runs=runtime_session.manual_runs,
         )
         self._publish_snapshot_events(previous, snapshot)
         self._last_workspace_snapshots[workspace_id] = snapshot
@@ -756,6 +768,7 @@ class RuntimeStateService:
             flows=flow_summaries,
             active_runs=active_runs,
             notices=previous.notices,
+            manual_runs=runtime_session.manual_runs,
         )
         prior_signature = self._snapshot_signature(previous)
         current_signature = self._snapshot_signature(provisional)
@@ -770,6 +783,7 @@ class RuntimeStateService:
             flows=flow_summaries,
             active_runs=active_runs,
             notices=previous.notices,
+            manual_runs=runtime_session.manual_runs,
         )
         self._publish_snapshot_events(previous, snapshot)
         self._last_workspace_snapshots[previous.workspace_id] = snapshot

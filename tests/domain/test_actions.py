@@ -151,7 +151,6 @@ def test_selected_flow_state_does_not_treat_engine_owned_flow_as_manual_running(
                 },
             )(),
         },
-        engine_active_flow_names=("docs_summary",),
     )
 
     assert selected.live_state == "running"
@@ -177,7 +176,6 @@ def test_selected_flow_state_keeps_group_blocked_when_engine_owns_same_group_wit
         },
         active_flow_states={"running", "polling", "scheduled", "stopping flow", "stopping runtime"},
         live_runs={},
-        engine_active_flow_names=("docs_summary",),
     )
     context = OperatorActionContext(
         runtime_session=RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("docs_summary",)),

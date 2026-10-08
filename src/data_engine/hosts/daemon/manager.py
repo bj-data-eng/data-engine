@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import os
+from threading import RLock
 
 from data_engine.domain import ActiveRunState, FlowActivityState, WorkspaceControlState
 from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.app import DaemonClientError, daemon_request, is_daemon_live
 from data_engine.hosts.daemon.constants import STALE_AFTER_SECONDS
+from data_engine.hosts.daemon.client import exited_local_daemon_id
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.platform.instrumentation import new_request_id, timed_operation
 from data_engine.platform.machine_identity import host_name_text, machine_id_text
@@ -74,6 +76,7 @@ class WorkspaceDaemonManager:
         self._daemon_live = False
         self._sync_misses = 0
         self._last_snapshot: WorkspaceDaemonSnapshot | None = None
+        self._snapshot_lock = RLock()
 
     @property
     def daemon_live(self) -> bool:
@@ -109,6 +112,7 @@ class WorkspaceDaemonManager:
                 )
                 self._last_snapshot = snapshot
                 return snapshot
+            requested_from = self._last_snapshot
             try:
                 live = is_daemon_live(self.paths)
             except Exception:
@@ -116,6 +120,9 @@ class WorkspaceDaemonManager:
             self._daemon_live = live
             if not live:
                 self._sync_misses += 1
+                exited = self._confirmed_exit_snapshot(requested_from)
+                if exited is not None:
+                    return exited
                 if self._sync_misses < self.max_sync_misses and self._last_snapshot is not None:
                     return WorkspaceDaemonSnapshot(
                         live=False,
@@ -139,11 +146,12 @@ class WorkspaceDaemonManager:
                 self._last_snapshot = snapshot
                 return snapshot
             request_id = new_request_id("status")
+            requested_from = self._last_snapshot
             request_payload: dict[str, object] = {"command": "daemon_status", "request_id": request_id}
-            if self._last_snapshot is not None and self._last_snapshot.projection_version > 0:
-                request_payload["since_version"] = self._last_snapshot.projection_version
-                request_payload["since_event_sequence"] = self._last_snapshot.event_sequence
-                request_payload["since_daemon_id"] = self._last_snapshot.daemon_id
+            if requested_from is not None and requested_from.projection_version > 0:
+                request_payload["since_version"] = requested_from.projection_version
+                request_payload["since_event_sequence"] = requested_from.event_sequence
+                request_payload["since_daemon_id"] = requested_from.daemon_id
             try:
                 response = daemon_request(
                     self.paths,
@@ -153,6 +161,9 @@ class WorkspaceDaemonManager:
             except DaemonClientError:
                 self._daemon_live = False
                 self._sync_misses += 1
+                exited = self._confirmed_exit_snapshot(requested_from)
+                if exited is not None:
+                    return exited
                 if self._last_snapshot is not None:
                     return WorkspaceDaemonSnapshot(
                         live=False,
@@ -175,7 +186,7 @@ class WorkspaceDaemonManager:
                 self._last_snapshot = snapshot
                 return snapshot
             status = response.get("status") if response.get("ok") else None
-            return self._snapshot_from_status_dict(status, assume_live=True, transport_mode="heartbeat")
+            return self._snapshot_from_status_dict(status, assume_live=True, transport_mode="heartbeat", requested_from=requested_from)
 
     def wait_for_update(self, *, timeout_seconds: float = 5.0) -> WorkspaceDaemonSnapshot:
         """Wait for a projection update using the last daemon generation and counters."""
@@ -195,8 +206,9 @@ class WorkspaceDaemonManager:
             if not live:
                 return self.sync()
             request_id = new_request_id("wait-status")
-            since_version = self._last_snapshot.projection_version if self._last_snapshot is not None else 0
-            since_event_sequence = self._last_snapshot.event_sequence if self._last_snapshot is not None else 0
+            requested_from = self._last_snapshot
+            since_version = requested_from.projection_version if requested_from is not None else 0
+            since_event_sequence = requested_from.event_sequence if requested_from is not None else 0
             try:
                 response = daemon_request(
                     self.paths,
@@ -205,7 +217,7 @@ class WorkspaceDaemonManager:
                         "request_id": request_id,
                         "since_version": since_version,
                         "since_event_sequence": since_event_sequence,
-                        "since_daemon_id": self._last_snapshot.daemon_id if self._last_snapshot is not None else None,
+                        "since_daemon_id": requested_from.daemon_id if requested_from is not None else None,
                         "timeout_ms": max(int(timeout_seconds * 1000.0), 0),
                     },
                     timeout=max(timeout_seconds + 1.0, 2.0),
@@ -213,7 +225,7 @@ class WorkspaceDaemonManager:
             except DaemonClientError:
                 return self.sync()
             status = response.get("status") if response.get("ok") else None
-            return self._snapshot_from_status_dict(status, assume_live=True, transport_mode="subscription")
+            return self._snapshot_from_status_dict(status, assume_live=True, transport_mode="subscription", requested_from=requested_from)
 
     def _timing_log_path(self):
         if not self.workspace_configured:
@@ -251,14 +263,62 @@ class WorkspaceDaemonManager:
             leased_by_host_name=None if workspace_owned else owner_host_text,
         )
 
+    def _confirmed_exit_snapshot(
+        self, requested_from: WorkspaceDaemonSnapshot | None,
+    ) -> WorkspaceDaemonSnapshot | None:
+        """Fence a dead generation without overwriting a newer concurrent sync."""
+        with self._snapshot_lock:
+            current = self._last_snapshot
+            if current is not requested_from:
+                return current
+            daemon_id = exited_local_daemon_id(self.paths)
+            if daemon_id is None:
+                if current is not None and current.source == "exited" and self._lease_snapshot().workspace_owned:
+                    return current
+                return None
+            same_generation = current is not None and current.daemon_id == daemon_id
+            self._last_snapshot = replace(
+                self._lease_snapshot(), source="exited", daemon_id=daemon_id,
+                projection_version=current.projection_version if same_generation else 0,
+                event_sequence=current.event_sequence if same_generation else 0,
+            )
+            return self._last_snapshot
+
     def _snapshot_from_status_dict(
         self,
         status: object,
         *,
         assume_live: bool,
         transport_mode: str,
+        requested_from: WorkspaceDaemonSnapshot | None = None,
     ) -> WorkspaceDaemonSnapshot:
         """Normalize one raw daemon status payload into a client snapshot."""
+        with self._snapshot_lock:
+            current = self._last_snapshot
+            if current is not None and current.source == "exited" and not isinstance(status, dict):
+                return current
+            if isinstance(status, dict) and current is not None and current.daemon_id:
+                response_id = status.get("daemon_id")
+                if response_id == current.daemon_id:
+                    if current.source == "exited":
+                        return current
+                    if (
+                        int(status.get("event_sequence", current.event_sequence) or 0) < current.event_sequence
+                        or int(status.get("projection_version", current.projection_version) or 0) < current.projection_version
+                    ):
+                        return current
+                elif requested_from is not None and response_id == requested_from.daemon_id:
+                    return current
+            return self._normalize_status_dict(status, assume_live=assume_live, transport_mode=transport_mode)
+
+    def _normalize_status_dict(
+        self,
+        status: object,
+        *,
+        assume_live: bool,
+        transport_mode: str,
+    ) -> WorkspaceDaemonSnapshot:
+        """Install one status while the snapshot lock is held."""
         if not isinstance(status, dict):
             snapshot = self._lease_snapshot()
             self._last_snapshot = snapshot

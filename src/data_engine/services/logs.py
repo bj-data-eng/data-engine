@@ -120,6 +120,9 @@ class LogService:
                 persisted_id=entry.id,
             )
             for entry in persisted_entries
+            if run_id is None
+            or getattr(entry, "run_id", None) == run_id
+            or ((event := parse_runtime_message(entry.message)) is not None and event.run_id == run_id)
         )
         if flow_name is None and run_id is None:
             return hydrated_entries
@@ -127,7 +130,6 @@ class LogService:
             entry
             for entry in hydrated_entries
             if (flow_name is None or entry.flow_name == flow_name)
-            and (run_id is None or (entry.event is not None and entry.event.run_id == run_id))
         )
 
 

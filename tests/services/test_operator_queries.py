@@ -196,6 +196,25 @@ def test_history_detail_prefers_saved_failure_over_stale_started_logs(tmp_path):
         ledger.close()
 
 
+def test_history_detail_interleaves_diagnostics_and_step_completions(tmp_path):
+    ledger = RuntimeCacheLedger(tmp_path / "cache.sqlite")
+    start = datetime.now(UTC)
+    times = [(start + timedelta(seconds=i)).isoformat() for i in range(5)]
+    try:
+        ledger.runs.record_started(run_id="run", flow_name="docs", group_name="Docs", source_path=None, started_at_utc=times[0])
+        for label, begin, end in (("First", 0, 1), ("Second", 2, 3)):
+            step_id = ledger.step_outputs.record_started(run_id="run", flow_name="docs", step_label=label, started_at_utc=times[begin])
+            ledger.step_outputs.record_finished(step_run_id=step_id, status="success", finished_at_utc=times[end], elapsed_ms=1000)
+        ledger.logs.append(level="INFO", message="between steps", created_at_utc=times[2], run_id="run", flow_name="docs")
+        ledger.runs.record_finished(run_id="run", status="success", finished_at_utc=times[4])
+        detail = HistoryQueryService(log_service=LogService()).get_run_group_detail(ledger, run_id="run", flow_name="docs")
+        assert detail is not None
+        assert [entry.created_at_utc.isoformat() for entry in detail.entries] == [times[1], times[2], times[3], times[4]]
+        assert [step.step_name for step in detail.steps] == ["First", "Second"]
+    finally:
+        ledger.close()
+
+
 def test_flow_catalog_entry_from_flow_builds_expected_metadata():
     flow = Flow(name="daily_summary", group="Docs").step(lambda context: context, label="Read Docs")
     entry = flow_catalog_entry_from_flow(flow, description="Loads docs")

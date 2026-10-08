@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -70,6 +70,7 @@ def build_selected_flow_presentation(
     max_visible_runs: int | None = None,
     live_runs: Mapping[str, LiveRunLike] | None = None,
     live_truth_authoritative: bool = False,
+    local_process_dead: bool = False,
 ) -> SelectedFlowPresentation:
     """Return the selected-flow detail state and normalized run selection."""
     if card is None:
@@ -79,6 +80,23 @@ def build_selected_flow_presentation(
             visible_run_groups=(),
             selected_run_key=None,
             empty_text="Select one flow to see details.",
+        )
+    if local_process_dead:
+        live_runs = None
+        run_groups = tuple(
+            replace(
+                group,
+                status="stopped",
+                steps=tuple(
+                    replace(step, status="stopped")
+                    if step.status not in {"success", "failed", "stopped", "finished"}
+                    else step
+                    for step in group.steps
+                ),
+            )
+            if group.status not in {"success", "failed", "stopped"}
+            else group
+            for group in run_groups
         )
     live_flow_runs = _live_runs_for_flow(flow_name=card.name, live_runs=live_runs)
     detail_state = SelectedFlowDetailState.from_flow(
@@ -144,12 +162,24 @@ def _effective_run_groups(
             continue
         merged.append(group)
 
-    daemon_only_runs = sorted(
-        (run for run in live_flow_runs if run.run_id not in included_live_run_ids),
-        key=_live_run_sort_key,
-    )
+    daemon_only_runs = (run for run in live_flow_runs if run.run_id not in included_live_run_ids)
     merged.extend(_overlay_live_run(None, run) for run in daemon_only_runs)
-    return tuple(merged)
+    return tuple(sorted(merged, key=_run_group_sort_key))
+
+
+def _run_group_sort_key(group: FlowRunState) -> tuple[datetime, str]:
+    """Order saved and live groups by whole-run start with stable tie breaking."""
+    summary = group.summary_entry
+    started = (
+        parse_utc_text(summary.event.started_at_utc)
+        if summary is not None and summary.event is not None
+        else None
+    )
+    if started is None:
+        started = min((entry.created_at_utc for entry in group.entries), default=None)
+    if started is None and summary is not None:
+        started = summary.created_at_utc
+    return (started or datetime.min.replace(tzinfo=UTC), group.key[1])
 
 
 def _live_runs_for_flow(
@@ -313,17 +343,6 @@ def _run_group_status_from_live_state(state: str) -> str:
     if normalized in {"success", "failed", "stopped", "stopping"}:
         return normalized
     return "started"
-
-
-def _live_run_sort_key(live_run: LiveRunLike) -> tuple[datetime, str]:
-    """Return a stable chronological sort key for daemon-only live runs."""
-    timestamp = (
-        parse_utc_text(live_run.started_at_utc)
-        or parse_utc_text(live_run.current_step_started_at_utc)
-        or parse_utc_text(live_run.finished_at_utc)
-        or datetime.now(UTC)
-    )
-    return (timestamp, live_run.run_id)
 
 
 __all__ = ["SelectedFlowPresentation", "build_selected_flow_presentation"]

@@ -3,12 +3,49 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
 import data_engine.daemon_bootstrap as daemon_bootstrap
 
 from .support import _TEST_CONTAINMENT_NONCE
+
+
+@pytest.mark.parametrize("native_fault", [False, True])
+def test_bootstrap_retains_fault_trace_and_uncaught_error_in_private_log(tmp_path, native_fault):
+    log = tmp_path / "daemon-crash.log"
+    code = """
+import faulthandler, os, sys
+from data_engine import daemon_bootstrap
+def app(argv):
+    assert '--diagnostic-log' not in argv
+    assert faulthandler.is_enabled()
+    if sys.argv[2] == 'True':
+        if os.name == 'nt':
+            import ctypes
+            ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)
+        else:
+            import resource
+            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        os.abort()
+    faulthandler.dump_traceback()
+    raise RuntimeError('diagnostic sentinel')
+daemon_bootstrap.main(
+    ['--containment-nonce', 'a' * 64, '--diagnostic-log', sys.argv[1]],
+    arm_watchdog_func=lambda **kwargs: None,
+    verify_windows_containment_func=lambda nonce: None,
+    app_main_func=app,
+)
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(log), str(native_fault)], capture_output=True, timeout=15)
+    assert result.returncode != 0
+    assert log.exists()
+    output = log.read_text()
+    assert ("Fatal Python error" if native_fault else "diagnostic sentinel") in output
+    assert "Current thread" in output
+    if os.name != "nt":
+        assert log.stat().st_mode & 0o777 == 0o600
 
 
 def test_posix_bootstrap_arms_watchdog_before_loading_daemon_app(monkeypatch):

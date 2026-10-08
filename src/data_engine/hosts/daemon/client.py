@@ -986,6 +986,22 @@ def _same_machine_live_lease_process(paths: WorkspacePaths) -> int | None:
     return record.process_identity.pid
 
 
+def local_daemon_has_exited(paths: WorkspacePaths) -> bool:
+    """Confirm exit of an exact local lease owner; uncertainty is not death."""
+    return exited_local_daemon_id(paths) is not None
+
+
+def exited_local_daemon_id(paths: WorkspacePaths) -> str | None:
+    """Return the verified dead local generation, preserving its identity fence."""
+    try:
+        record = _same_machine_lease_process(paths)
+        if record is not None and not _expected_process_is_running(record.process_identity):
+            return record.daemon_id
+    except (DaemonClientError, OSError, ValueError):
+        pass
+    return None
+
+
 def _reachable_daemon_process(
     paths: WorkspacePaths,
 ) -> _DaemonProcessRecord | None:
@@ -1186,6 +1202,8 @@ def _wait_for_fresh_local_daemon(paths: WorkspacePaths) -> bool:
     metadata = _same_machine_lease_metadata(paths)
     if metadata is None:
         return False
+    if local_daemon_has_exited(paths):
+        return False
     if is_daemon_live(paths):
         return True
     age_seconds = _lease_checkpoint_age_seconds(metadata)
@@ -1200,13 +1218,15 @@ def _wait_for_fresh_local_daemon(paths: WorkspacePaths) -> bool:
 
 
 def _should_force_recover_local_lease(paths: WorkspacePaths) -> bool:
-    """Return whether an unreachable same-machine lease is stale enough to reclaim."""
+    """Return whether a local owner exited or its unreachable lease is stale."""
     metadata = _same_machine_unreachable_lease_metadata(paths)
     if metadata is None:
         return False
     lease_token = metadata.get("lease_token")
     if not isinstance(lease_token, str):
         return False
+    if local_daemon_has_exited(paths):
+        return True
     return _SHARED_STATE_ADAPTER.lease_is_stale(
         paths,
         lease_token=lease_token,
@@ -1215,11 +1235,17 @@ def _should_force_recover_local_lease(paths: WorkspacePaths) -> bool:
 
 
 def _recover_broken_local_lease(paths: WorkspacePaths) -> bool:
-    """Recover one unreachable same-machine lease after it becomes stale."""
+    """Drain a verified exited owner, or use normal stale-lease recovery."""
     metadata = _same_machine_unreachable_lease_metadata(paths)
     lease_token = metadata.get("lease_token") if isinstance(metadata, dict) else None
     if not isinstance(lease_token, str):
         return False
+    record = _same_machine_lease_process(paths)
+    if record is not None and not _expected_process_is_running(record.process_identity):
+        # A failed containment drain must propagate: the predecessor's
+        # children may still be doing work, so stale recovery is unsafe.
+        _finish_verified_daemon_exit(paths, record, windows_job=None)
+        return True
     return _SHARED_STATE_ADAPTER.recover_stale_workspace(
         paths,
         lease_token=lease_token,
@@ -1991,6 +2017,8 @@ def spawn_daemon_process(
             containment_nonce,
             "--lifecycle-policy",
             lifecycle_policy.value,
+            "--diagnostic-log",
+            str(paths.runtime_state_dir / "daemon-crash.log"),
         ]
 
         def _persist_ready_identity(ready_identity: ProcessIdentity) -> None:

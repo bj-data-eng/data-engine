@@ -127,12 +127,7 @@ class GuiRuntimeController:
         snapshot = getattr(window, "workspace_snapshot", None)
         if snapshot is None:
             return {run.group_name for run in window.runtime_session.manual_runs}
-        engine_flow_names = set(snapshot.engine.active_flow_names)
-        return {
-            run.group_name
-            for run in snapshot.active_runs.values()
-            if run.flow_name not in engine_flow_names and run.state in {"starting", "running", "stopping"}
-        }
+        return {run.group_name for run in snapshot.manual_runs}
 
     @staticmethod
     def _mark_pending_manual_run_request(window: "DataEngineWindow", *, flow_name: str, group_name: str | None) -> None:
@@ -168,6 +163,19 @@ class GuiRuntimeController:
             if now - requested_at_monotonic >= 10.0:
                 pending.pop(group_name, None)
 
+    @staticmethod
+    def _obsolete_daemon_status(window: "DataEngineWindow", incoming: DaemonStatusState) -> bool:
+        """Reject queued state superseded by a newer version or confirmed death."""
+        current = getattr(window, "daemon_status", None)
+        return bool(
+            current is not None and current.daemon_id
+            and incoming.daemon_id == current.daemon_id
+            and (
+                incoming.projection_version < current.projection_version
+                or (current.source == "exited" and incoming.source != "exited")
+            )
+        )
+
     def _apply_daemon_live_snapshot(self, window: "DataEngineWindow", batch: DaemonUpdateBatch) -> tuple[set[str], bool]:
         workspace_snapshot = getattr(window, "workspace_snapshot", None)
         if workspace_snapshot is None:
@@ -199,6 +207,8 @@ class GuiRuntimeController:
         if batch is None or window.ui_closing:
             return
         if token is not None and not window._matches_workspace_binding_token(token):
+            return
+        if self._obsolete_daemon_status(window, DaemonStatusState.from_snapshot(batch.snapshot)):
             return
         if batch.requires_full_sync or not window._has_authored_workspace():
             self.sync_from_daemon(window)
@@ -376,7 +386,6 @@ class GuiRuntimeController:
     def finish_daemon_sync(self, window: "DataEngineWindow", payload: object) -> None:
         if not isinstance(payload, dict) or not window._matches_workspace_binding_token(payload.get("workspace_token")):
             return
-        rerun_requested = False
         try:
             error = payload.get("error")
             if error is not None:
@@ -390,6 +399,9 @@ class GuiRuntimeController:
             projection = payload.get("projection")
             workspace_snapshot = payload.get("workspace_snapshot")
             if sync_state is None or projection is None or workspace_snapshot is None:
+                return
+            incoming_status = sync_state.daemon_status
+            if self._obsolete_daemon_status(window, incoming_status):
                 return
             window._last_daemon_sync_error_text = None
             previous_workspace_snapshot = getattr(window, "workspace_snapshot", None)
@@ -422,8 +434,10 @@ class GuiRuntimeController:
             window._daemon_sync_in_progress = False
             rerun_requested = window._daemon_sync_pending and not window.ui_closing
             window._daemon_sync_pending = False
-        if rerun_requested:
-            self.sync_from_daemon(window)
+            # Rejected, unchanged, and failed results can all have a newer
+            # refresh queued behind them. Dispatch it even on early return.
+            if rerun_requested:
+                self.sync_from_daemon(window)
 
     def ensure_daemon_started(self, window: "DataEngineWindow") -> bool:
         if not window._has_authored_workspace():

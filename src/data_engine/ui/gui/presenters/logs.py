@@ -52,6 +52,9 @@ def refresh_log_view(window: "DataEngineWindow") -> None:
         live_truth_authoritative=bool(
             workspace_snapshot is not None and workspace_snapshot.engine.daemon_live
         ),
+        local_process_dead=bool(
+            workspace_snapshot is not None and workspace_snapshot.engine.local_process_dead
+        ),
     )
     visible_run_groups = tuple(reversed(presentation.visible_run_groups))
     visible_run_key_signature = tuple(run_group.key for run_group in visible_run_groups)

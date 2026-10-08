@@ -83,6 +83,7 @@ class RuntimeSessionState:
     runtime_stopping: bool = False
     active_runtime_flow_names: tuple[str, ...] = ()
     manual_runs: tuple[ManualRunState, ...] = ()
+    local_process_dead: bool = False
 
     @classmethod
     def empty(cls) -> "RuntimeSessionState":
@@ -120,12 +121,13 @@ class RuntimeSessionState:
             runtime_stopping=snapshot.runtime_stopping,
             active_runtime_flow_names=active_runtime_flow_names,
             manual_runs=manual_runs,
+            local_process_dead=getattr(snapshot, "source", None) == "exited",
         )
 
     @property
     def control_available(self) -> bool:
         """Return whether the current workstation may issue control actions."""
-        return self.workspace_owned or self.leased_by_machine_id is None
+        return not self.local_process_dead and (self.workspace_owned or self.leased_by_machine_id is None)
 
     @property
     def manual_run_active(self) -> bool:
@@ -244,6 +246,7 @@ class DaemonStatusState:
                 "runtime_stopping": self.engine_stopping,
                 "active_engine_flow_names": self.active_engine_flow_names,
                 "manual_runs": self.manual_run_names,
+                "source": self.source,
             })(),
             flow_cards,
         )
@@ -292,19 +295,17 @@ class WorkspaceControlState:
         control_status_text: str | None
         takeover_remaining_seconds: int | None = None
 
-        if status.source == "none":
+        if status.source == "exited":
+            control_status_text = "Local engine is unavailable"
+        elif status.source == "none":
             control_status_text = None
         elif status.workspace_owned:
             if daemon_startup_in_progress:
                 control_status_text = "Trying to restore local control..."
-            elif checkpoint_at is None:
-                control_status_text = "This Workstation has control"
+            elif not daemon_live:
+                control_status_text = "Local engine is not responding"
             else:
-                age = max((now - checkpoint_at).total_seconds(), 0.0)
-                if age >= CONTROL_CHECKPOINT_INTERVAL_SECONDS and not daemon_live:
-                    control_status_text = "Local engine is not responding"
-                else:
-                    control_status_text = "This Workstation has control"
+                control_status_text = "This Workstation has control"
         else:
             owner = status.leased_by_host_name or status.leased_by_machine_id or "Another machine"
             if local_request_pending:

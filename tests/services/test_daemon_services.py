@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
+
+from data_engine.runtime.shared_state import WorkspaceTransitionInProgressError
 
 from data_engine.domain import DaemonLifecyclePolicy, FlowActivityState, RuntimeStepEvent, WorkspaceControlState
 from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
@@ -22,6 +25,51 @@ def test_daemon_service_forwards_spawn_request(tmp_path):
 
     assert service.spawn(paths, lifecycle_policy=DaemonLifecyclePolicy.EPHEMERAL) == "spawned"
     assert calls == [(paths.workspace_root, DaemonLifecyclePolicy.EPHEMERAL)]
+
+
+def test_subscription_recovers_from_lease_transition_without_losing_live_state():
+    snapshot = WorkspaceDaemonSnapshot(
+        live=True, workspace_owned=True, leased_by_machine_id=None,
+        runtime_active=True, runtime_stopping=False, manual_runs=(),
+        last_checkpoint_at_utc=None, source="daemon", projection_version=2,
+    )
+    stop = threading.Event()
+    updates = []
+
+    class Manager:
+        _last_snapshot = replace(snapshot, projection_version=1, runtime_active=False)
+        attempts = 0
+
+        def wait_for_update(self, *, timeout_seconds):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise WorkspaceTransitionInProgressError("lease rename in progress")
+            self._last_snapshot = snapshot
+            return snapshot
+
+    def on_update(batch):
+        updates.append(batch.snapshot)
+        stop.set()
+
+    manager = Manager()
+    DaemonStateService().run_subscription_loop(
+        manager, stop_event=stop, workspace_available=lambda: True,
+        on_update=on_update, timeout_seconds=0.0,
+    )
+    assert updates == [snapshot]
+    assert manager.attempts == 2
+
+
+def test_manual_reservation_change_updates_actions_without_active_file_runs():
+    before = WorkspaceDaemonSnapshot(
+        live=True, workspace_owned=True, leased_by_machine_id=None,
+        runtime_active=True, runtime_stopping=False, manual_runs=(),
+        last_checkpoint_at_utc=None, source="daemon", active_engine_flow_names=("poll",),
+    )
+    after = replace(before, manual_runs=("poll",), projection_version=1)
+    batch = DaemonStateService.diff_update_batch(before, after)
+    assert "poll" in batch.changed_flow_names
+    assert any(update.lane == "run_lifecycle" for update in batch.updates)
 
 
 def test_daemon_service_forwards_request_liveness_and_error_type(tmp_path):
@@ -536,4 +584,3 @@ def test_merge_update_batches_unions_lane_payloads():
 
     assert merged.snapshot.projection_version == 3
     assert "flow_activity" in {update.lane for update in merged.updates}
-

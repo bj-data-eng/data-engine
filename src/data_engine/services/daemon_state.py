@@ -5,14 +5,19 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 from dataclasses import dataclass
+import logging
 from threading import Event, Thread
 from typing import Literal
 
 from data_engine.domain import FlowLogEntry, RuntimeStepEvent, WorkspaceControlState, short_source_label
 from data_engine.domain.time import parse_utc_text
 from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot
+from data_engine.hosts.daemon.client import DaemonClientError
 from data_engine.hosts.daemon.shared_state import DaemonSharedStateAdapter
 from data_engine.platform.workspace_models import WorkspacePaths
+from data_engine.runtime.shared_state import WorkspaceStateCorruptError, WorkspaceTransitionInProgressError
+
+_LOGGER = logging.getLogger(__name__)
 
 DaemonLaneName = Literal["control", "engine", "flow_activity", "run_lifecycle", "step_activity", "log_events"]
 
@@ -415,13 +420,24 @@ class DaemonStateService:
         suppression, and lane-scoped batch derivation. Surfaces provide only the
         stop signal and the update sink.
         """
+        last_error: str | None = None
         while not stop_event.is_set():
             if not workspace_available():
                 if stop_event.wait(timeout_seconds):
                     return
                 continue
             previous_snapshot = getattr(manager, "_last_snapshot", None)
-            snapshot = self.wait_for_update(manager, timeout_seconds=timeout_seconds)
+            try:
+                snapshot = self.wait_for_update(manager, timeout_seconds=timeout_seconds)
+            except (DaemonClientError, OSError, WorkspaceTransitionInProgressError, WorkspaceStateCorruptError) as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                if error != last_error:
+                    _LOGGER.warning("Daemon subscription will retry: %s", error)
+                    last_error = error
+                if stop_event.wait(max(timeout_seconds, 0.05)):
+                    return
+                continue
+            last_error = None
             if stop_event.is_set():
                 return
             if previous_snapshot is not None and snapshot == previous_snapshot:
@@ -494,6 +510,9 @@ class DaemonStateService:
         changed_activity_flows = _changed_flow_activity_names(previous, current)
         if changed_activity_flows:
             updates.append(DaemonLaneUpdate("flow_activity", flow_names=changed_activity_flows))
+        if current.manual_runs != previous.manual_runs:
+            manual_flows = tuple(sorted(set(current.manual_runs) | set(previous.manual_runs)))
+            updates.append(DaemonLaneUpdate("run_lifecycle", flow_names=manual_flows))
         updates.extend(_updates_from_recent_events(current))
         return DaemonUpdateBatch(snapshot=current, updates=tuple(updates), requires_full_sync=False)
 

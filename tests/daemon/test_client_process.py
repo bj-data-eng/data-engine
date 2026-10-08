@@ -536,6 +536,7 @@ def test_workspace_daemon_manager_treats_live_same_machine_lease_as_locally_owne
     )
     monkeypatch.setattr("data_engine.hosts.daemon.manager.is_daemon_live", lambda paths: False)
     monkeypatch.setattr("data_engine.hosts.daemon.manager._lease_pid_is_live", lambda metadata: True)
+    monkeypatch.setattr(daemon_client, "_expected_process_is_running", lambda identity: True)
 
     manager = WorkspaceDaemonManager(paths)
     snapshot = manager.sync()
@@ -1876,6 +1877,7 @@ def test_spawn_daemon_process_waits_for_fresh_same_machine_startup(tmp_path, mon
     )
 
     live_checks = iter([False, False, True])
+    monkeypatch.setattr(daemon_client, "_expected_process_is_running", lambda identity: True)
     monkeypatch.setattr("data_engine.hosts.daemon.client.is_daemon_live", lambda paths: next(live_checks))
     monkeypatch.setattr("data_engine.hosts.daemon.client.time.sleep", lambda _seconds: None)
 
@@ -1888,6 +1890,7 @@ def test_spawn_daemon_process_waits_for_fresh_same_machine_startup(tmp_path, mon
 
 
 def test_spawn_daemon_process_does_not_recover_recent_same_machine_unreachable_lease(tmp_path, monkeypatch):
+    monkeypatch.setattr(daemon_client, "local_daemon_has_exited", lambda paths: False)
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))
@@ -2760,6 +2763,7 @@ def test_daemon_message_encoding_requires_json_object():
 
 
 def test_daemon_service_refuses_same_machine_observer_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr(daemon_client, "_expected_process_is_running", lambda identity: True)
     app_root = tmp_path / "data_engine"
     workspace_root = tmp_path / "shared" / "default"
     monkeypatch.setenv(DATA_ENGINE_APP_ROOT_ENV_VAR, str(app_root))

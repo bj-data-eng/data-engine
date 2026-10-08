@@ -118,12 +118,7 @@ def shutdown_daemon_on_close(window: "DataEngineWindow") -> None:
         engine_state = "stopping" if runtime_stopping else "running" if runtime_active else "idle"
     manual_run_active = bool(getattr(runtime_session, "manual_run_active", False))
     if workspace_snapshot is not None:
-        engine_flow_names = set(getattr(workspace_snapshot.engine, "active_flow_names", ()))
-        manual_run_active = any(
-            run.flow_name not in engine_flow_names
-            and run.state in {"starting", "running", "stopping"}
-            for run in getattr(workspace_snapshot, "active_runs", {}).values()
-        )
+        manual_run_active = bool(workspace_snapshot.manual_runs)
     try:
         if not window._is_daemon_live(window.workspace_paths):
             return

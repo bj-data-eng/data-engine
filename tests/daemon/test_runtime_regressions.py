@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from threading import Event, Thread
+from threading import Event, RLock, Thread
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +9,7 @@ import pytest
 from data_engine.authoring.flow import Flow
 from data_engine.hosts.daemon.app import DataEngineDaemonService
 from data_engine.hosts.daemon.composition import DaemonHostDependencies, DaemonHostIdentity
-from data_engine.hosts.daemon.manager import WorkspaceDaemonManager
+from data_engine.hosts.daemon.manager import WorkspaceDaemonManager, WorkspaceDaemonSnapshot
 from data_engine.hosts.daemon.runtime_events import DaemonRuntimeEvent, DaemonRuntimeProjector
 from data_engine.hosts.daemon.runtime_ledger import DaemonRuntimeCacheProxy
 from data_engine.hosts.daemon.state_sync import DaemonStateSyncHandler
@@ -17,6 +17,53 @@ from data_engine.runtime.runtime_db import RuntimeCacheLedger, utcnow_text
 from data_engine.services.runtime_execution import RuntimeExecutionService
 
 from .support import _TEST_CONTAINMENT_NONCE, _test_process_identity
+from tests.services.support import resolve_workspace_paths
+
+
+@pytest.mark.parametrize("owner_alive", [False, True])
+def test_disconnection_clears_work_only_after_exact_local_owner_exits(tmp_path, monkeypatch, owner_alive):
+    from data_engine.hosts.daemon import client
+    from data_engine.domain import ActiveRunState, RuntimeSessionState
+
+    manager = WorkspaceDaemonManager(resolve_workspace_paths(workspace_root=tmp_path / "workspace"))
+    manager._last_snapshot = WorkspaceDaemonSnapshot(
+        live=True, workspace_owned=True, leased_by_machine_id=None, runtime_active=True,
+        runtime_stopping=False, manual_runs=("poll",), last_checkpoint_at_utc=utcnow_text(),
+        source="daemon", daemon_id="old", active_engine_flow_names=("poll",),
+        active_runs=(ActiveRunState("run", "poll", "Poll", None, "running"),),
+    )
+    manager.shared_state_adapter.read_lease_metadata = lambda paths: {
+        "machine_id": manager.machine_id, "last_checkpoint_at_utc": utcnow_text(),
+    }
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.is_daemon_live", lambda paths: False)
+    monkeypatch.setattr(client, "_same_machine_lease_process", lambda paths: SimpleNamespace(daemon_id="old", process_identity=_test_process_identity(123)))
+    monkeypatch.setattr(client, "_expected_process_is_running", lambda identity: owner_alive)
+    previous = manager._last_snapshot
+    snapshot = manager.sync()
+    if owner_alive:
+        assert snapshot.source == "cached"
+        assert snapshot.runtime_active and snapshot.active_runs
+    else:
+        assert snapshot.source == "exited"
+        assert not snapshot.runtime_active and not snapshot.active_runs and not snapshot.manual_runs
+        assert not RuntimeSessionState.from_daemon_snapshot(snapshot, ()).control_available
+        for starting in (False, True):
+            control = manager.control_state(snapshot, daemon_startup_in_progress=starting)
+            assert control.control_status_text == "Local engine is unavailable"
+        delayed = _status_handler("old", owned=True, active=True).status_payload()
+        assert manager._snapshot_from_status_dict(
+            delayed, assume_live=True, transport_mode="subscription", requested_from=previous,
+        ) is snapshot
+        assert manager._snapshot_from_status_dict(
+            None, assume_live=True, transport_mode="heartbeat", requested_from=snapshot,
+        ) is snapshot
+        monkeypatch.setattr(client, "_same_machine_lease_process", lambda paths: None)
+        assert manager.sync() is snapshot
+        replacement = _status_handler("replacement", owned=True, active=False).status_payload()
+        restored = manager._snapshot_from_status_dict(
+            replacement, assume_live=True, transport_mode="heartbeat", requested_from=snapshot,
+        )
+        assert restored.live and restored.daemon_id == "replacement"
 
 
 @pytest.fixture
@@ -48,6 +95,36 @@ def service(tmp_path):
     )
     yield obj
     ledger.close()
+
+
+def test_dead_local_lease_recovers_without_waiting_for_staleness(tmp_path, monkeypatch):
+    from data_engine.hosts.daemon import client
+    paths = resolve_workspace_paths(workspace_root=tmp_path / "workspace")
+    record = SimpleNamespace(daemon_id="old", process_identity=_test_process_identity(123))
+    metadata = {"lease_token": "token", "last_checkpoint_at_utc": utcnow_text()}
+    drained = []
+    monkeypatch.setattr(client, "_same_machine_unreachable_lease_metadata", lambda paths: metadata)
+    monkeypatch.setattr(client, "_same_machine_lease_process", lambda paths: record)
+    monkeypatch.setattr(client, "_expected_process_is_running", lambda identity: False)
+    monkeypatch.setattr(client._SHARED_STATE_ADAPTER, "lease_is_stale", lambda *args, **kwargs: False)
+    monkeypatch.setattr(client, "_finish_verified_daemon_exit", lambda paths, owner, **kwargs: drained.append(owner))
+    monkeypatch.setattr(client._SHARED_STATE_ADAPTER, "recover_stale_workspace", lambda *args, **kwargs: False)
+    assert client._should_force_recover_local_lease(paths)
+    assert client._recover_broken_local_lease(paths)
+    assert drained == [record]
+
+
+def test_remote_or_unverifiable_owner_is_not_confirmed_dead(tmp_path, monkeypatch):
+    from data_engine.hosts.daemon import client
+    paths = resolve_workspace_paths(workspace_root=tmp_path / "workspace")
+    monkeypatch.setattr(client, "_same_machine_lease_process", lambda paths: None)
+    assert not client.local_daemon_has_exited(paths)
+
+    def unknown(paths):
+        raise client.DaemonClientError("identity cannot be verified")
+
+    monkeypatch.setattr(client, "_same_machine_lease_process", unknown)
+    assert not client.local_daemon_has_exited(paths)
 
 
 @pytest.mark.parametrize("shutdown_when_idle", [False, True])
@@ -94,6 +171,109 @@ def test_stop_during_reserved_startup_cancels_attempt_and_allows_next_start(serv
         starter.join(3)
         if service.state.engine_thread is not None:
             service.state.engine_thread.join(3)
+
+
+def test_concurrent_full_state_publication_cannot_roll_back_engine_start(service):
+    captured, release, starting, started = Event(), Event(), Event(), Event()
+    original = service._runtime_state_payload
+    failures = []
+
+    def capture():
+        payload = original()
+        if not payload["runtime_active"]:
+            captured.set()
+            assert release.wait(3)
+        return payload
+
+    service._runtime_state_payload = capture
+
+    def checkpoint():
+        try:
+            service._publish_runtime_event("workspace.checkpointed")
+        except BaseException as exc:
+            failures.append(exc)
+
+    def start():
+        try:
+            starting.set()
+            with service._state_lock:
+                service.state.begin_runtime(active_flow_names=("poll",))
+                service._publish_runtime_event("engine.started")
+            started.set()
+        except BaseException as exc:
+            failures.append(exc)
+
+    older = Thread(target=checkpoint)
+    newer = Thread(target=start)
+    older.start()
+    try:
+        assert captured.wait(3)
+        newer.start()
+        assert starting.wait(3)
+        # A start must not overtake the earlier full-state publication.
+        overtook = started.wait(0.1)
+        release.set()
+        older.join(3)
+        newer.join(3)
+        assert not older.is_alive() and not newer.is_alive()
+        assert not failures
+        assert service.runtime_projector.snapshot().runtime_active is True
+        assert not overtook
+    finally:
+        release.set()
+        older.join(3)
+        if newer.ident is not None:
+            newer.join(3)
+
+
+def test_checkpoint_cannot_resurrect_run_finished_during_state_capture(service):
+    writer = DaemonRuntimeCacheProxy(service.runtime_cache_ledger, publish_event=service._publish_runtime_event).execution_state
+    writer.record_run_started(run_id="owned", flow_name="poll", group_name="Poll", source_path=None)
+    captured, release, finishing, finished = Event(), Event(), Event(), Event()
+    original = service._runtime_state_payload
+    failures = []
+
+    def capture():
+        payload = original()
+        captured.set()
+        assert release.wait(3)
+        return payload
+
+    service._runtime_state_payload = capture
+
+    def checkpoint():
+        try:
+            service._publish_runtime_event("checkpoint.recorded")
+        except BaseException as exc:
+            failures.append(exc)
+
+    def finish():
+        try:
+            finishing.set()
+            writer.record_run_finished(run_id="owned", status="success", finished_at_utc=utcnow_text())
+            finished.set()
+        except BaseException as exc:
+            failures.append(exc)
+
+    older, newer = Thread(target=checkpoint), Thread(target=finish)
+    older.start()
+    try:
+        assert captured.wait(3)
+        newer.start()
+        assert finishing.wait(3)
+        overtook = finished.wait(0.1)
+        release.set()
+        older.join(3)
+        newer.join(3)
+        assert not older.is_alive() and not newer.is_alive()
+        assert not failures
+        assert service.runtime_projector.snapshot().active_runs == ()
+        assert not overtook
+    finally:
+        release.set()
+        older.join(3)
+        if newer.ident is not None:
+            newer.join(3)
 
 
 def test_engine_reconciliation_preserves_live_manual_run_and_successful_work(service):
@@ -231,6 +411,7 @@ def test_status_cursor_returns_full_new_generation_without_waiting(command, sinc
 def test_manager_refetches_full_state_for_mismatched_unchanged_generation(monkeypatch):
     manager = WorkspaceDaemonManager.__new__(WorkspaceDaemonManager)
     manager._last_snapshot = None
+    manager._snapshot_lock = RLock()
     manager._sync_misses = 0
     manager.paths = object()
     old = _status_handler("previous", owned=True, active=True).status_payload()
@@ -250,3 +431,47 @@ def test_manager_refetches_full_state_for_mismatched_unchanged_generation(monkey
     assert snapshot.daemon_id == "next"
     assert not snapshot.workspace_owned
     assert not snapshot.runtime_active
+
+
+@pytest.mark.parametrize("new_generation", [False, True])
+def test_delayed_long_poll_cannot_replace_newer_sync_state(tmp_path, monkeypatch, new_generation):
+    manager = WorkspaceDaemonManager(resolve_workspace_paths(workspace_root=tmp_path / "workspace"))
+    old = _status_handler("previous", owned=True, active=False).status_payload()
+    new = dict(_status_handler("next" if new_generation else "previous", owned=True, active=True).status_payload())
+    if not new_generation:
+        new["event_sequence"] = old["event_sequence"] + 1
+        new["projection_version"] = old["projection_version"] + 1
+    manager._snapshot_from_status_dict(old, assume_live=True, transport_mode="heartbeat")
+    waiting, release = Event(), Event()
+    returned, failures = [], []
+
+    def request(paths, payload, timeout):
+        if payload["command"] == "wait_for_daemon_status":
+            waiting.set()
+            assert release.wait(3)
+            return {"ok": True, "status": old}
+        return {"ok": True, "status": new}
+
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.is_daemon_live", lambda paths: True)
+    monkeypatch.setattr("data_engine.hosts.daemon.manager.daemon_request", request)
+
+    def wait():
+        try:
+            returned.append(manager.wait_for_update(timeout_seconds=0.1))
+        except BaseException as exc:
+            failures.append(exc)
+
+    thread = Thread(target=wait)
+    thread.start()
+    try:
+        assert waiting.wait(3)
+        current = manager.sync()
+        release.set()
+        thread.join(3)
+        assert not thread.is_alive()
+        assert not failures
+        assert returned == [current]
+        assert manager._last_snapshot.runtime_active
+    finally:
+        release.set()
+        thread.join(3)

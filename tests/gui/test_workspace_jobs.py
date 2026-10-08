@@ -313,6 +313,37 @@ def test_stale_daemon_sync_does_not_clear_current_sync_flags(window):
     assert window._daemon_sync_pending is True
 
 
+@pytest.mark.parametrize("pending", [False, True])
+@pytest.mark.parametrize("closing", [False, True])
+def test_delayed_full_sync_preserves_newer_streamed_state_and_queued_refresh(window, pending, closing):
+    controller = GuiRuntimeController(runtime_application=None, daemon_service=None, runtime_state_service=None, command_service=None)
+    current = SimpleNamespace(engine=SimpleNamespace(daemon_live=True), version=5)
+    window.workspace_snapshot = current
+    window.daemon_status = SimpleNamespace(daemon_id="daemon", projection_version=5)
+    window._daemon_sync_in_progress = True
+    window._daemon_sync_pending = pending
+    window.ui_closing = closing
+    applied = []
+    refreshed = []
+    controller._apply_runtime_projection = lambda *args, **kwargs: applied.append(kwargs)
+    controller.sync_from_daemon = lambda target: refreshed.append(
+        (target, target._daemon_sync_in_progress, target._daemon_sync_pending)
+    )
+    window.daemon_subscription = SimpleNamespace(mark_sync=lambda now: None)
+    window._monotonic = lambda: 1.0
+    controller.finish_daemon_sync(window, {
+        "workspace_token": window._workspace_binding_token(),
+        "sync_state": SimpleNamespace(daemon_status=SimpleNamespace(daemon_id="daemon", projection_version=4)),
+        "projection": SimpleNamespace(runtime_session=object(), operation_tracker=object(), flow_states={}, step_output_index=object()),
+        "workspace_snapshot": SimpleNamespace(engine=SimpleNamespace(daemon_live=True), version=6),
+    })
+    assert window.workspace_snapshot is current
+    assert not applied
+    assert not window._daemon_sync_in_progress
+    assert not window._daemon_sync_pending
+    assert refreshed == ([(window, False, False)] if pending and not closing else [])
+
+
 def test_daemon_sync_uses_captured_binding_catalog_and_startup_state(window):
     binding = window.runtime_binding
     card = object()

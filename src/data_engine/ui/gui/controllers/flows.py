@@ -394,11 +394,6 @@ class _GuiFlowPresentationController:
             ),
             engine_truth_known=workspace_snapshot is not None,
             live_runs=(workspace_snapshot.active_runs if workspace_snapshot is not None else None),
-            engine_active_flow_names=(
-                ()
-                if workspace_snapshot is None
-                else workspace_snapshot.engine.active_flow_names
-            ),
             has_automated_flows=any(flow_card.valid and flow_card.mode in {"poll", "schedule"} for flow_card in window.flow_cards.values()),
             workspace_available=window._has_authored_workspace(),
             local_request_pending=bool(self._control_snapshot(window) and self._control_snapshot(window).request_pending),
@@ -450,6 +445,9 @@ class _GuiFlowPresentationController:
             ),
             live_truth_authoritative=bool(
                 workspace_snapshot is not None and workspace_snapshot.engine.daemon_live
+            ),
+            local_process_dead=bool(
+                workspace_snapshot is not None and workspace_snapshot.engine.local_process_dead
             ),
         )
         if presentation.detail_state is None:

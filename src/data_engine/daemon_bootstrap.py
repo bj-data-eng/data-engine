@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import json
+import faulthandler
 import os
 import select
 import sys
@@ -19,6 +20,24 @@ _ARMED_WATCHDOG_PID_OPTION = "--armed-watchdog-pid"
 _LAUNCH_RELEASE_TIMEOUT_SECONDS = 30.0
 _MAX_LAUNCH_IDENTITY_BYTES = 16_384
 _HOST_OS_NAME = os.name
+
+
+def _configure_crash_log(path: str) -> None:
+    """Keep native faults and stderr in a private, launch-rotated local log."""
+    if os.path.exists(path) and os.path.getsize(path) >= 5 * 1024 * 1024:
+        os.replace(path, path + ".previous")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        if os.name != "nt":
+            os.fchmod(descriptor, 0o600)
+        os.dup2(descriptor, 2)
+    finally:
+        if descriptor != 2:
+            os.close(descriptor)
+    sys.stderr = open(2, "w", encoding="utf-8", buffering=1, closefd=False)
+    faulthandler.enable(file=sys.stderr, all_threads=True)
+    print(f"Daemon bootstrap pid={os.getpid()}", file=sys.stderr)
 
 
 def _containment_nonce_from_argv(argv: list[str]) -> str:
@@ -192,6 +211,14 @@ def main(
 ) -> int:
     """Establish platform containment, then import and run the daemon host."""
     arguments = list(sys.argv[1:] if argv is None else argv)
+    diagnostic_log = None
+    if "--diagnostic-log" in arguments:
+        index = arguments.index("--diagnostic-log")
+        if arguments.count("--diagnostic-log") != 1 or index + 1 == len(arguments):
+            raise SystemExit("The daemon bootstrap requires one diagnostic-log path.")
+        diagnostic_log = arguments[index + 1]
+        del arguments[index:index + 2]
+        _configure_crash_log(diagnostic_log)
     ready_fd, arguments = _extract_internal_integer_option(
         arguments,
         _LAUNCH_READY_FD_OPTION,
@@ -244,7 +271,7 @@ def main(
                         "The armed POSIX watchdog returned an invalid process identifier."
                     )
                 (exec_normal_stage_func or _exec_normal_posix_stage)(
-                    arguments,
+                    arguments + (["--diagnostic-log", diagnostic_log] if diagnostic_log is not None else []),
                     watchdog_pid=watchdog_pid,
                 )
                 raise RuntimeError("The normal daemon interpreter unexpectedly returned.")

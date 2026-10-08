@@ -17,7 +17,6 @@ def build_operator_action_context(
     engine_state: str = "idle",
     engine_truth_known: bool = False,
     live_runs: dict[str, object] | None = None,
-    engine_active_flow_names: tuple[str, ...] = (),
     has_automated_flows: bool,
     workspace_available: bool = True,
     local_request_pending: bool = False,
@@ -31,20 +30,7 @@ def build_operator_action_context(
         flow_groups_by_name=flow_groups_by_name,
         active_flow_states=active_flow_states,
         live_runs=live_runs,
-        engine_active_flow_names=engine_active_flow_names,
     )
-    live_manual_run_active = False
-    if live_runs is not None:
-        engine_flow_names = set(engine_active_flow_names)
-        for run in live_runs.values():
-            state = str(getattr(run, "state", "") or "").strip().lower()
-            flow_name = str(getattr(run, "flow_name", "") or "").strip()
-            if state not in {"starting", "running", "stopping"}:
-                continue
-            if flow_name in engine_flow_names:
-                continue
-            live_manual_run_active = True
-            break
     return OperatorActionContext(
         runtime_session=runtime_session,
         selected_flow=selected_flow,
@@ -52,7 +38,7 @@ def build_operator_action_context(
         engine_state=engine_state,
         engine_truth_known=engine_truth_known,
         live_truth_known=live_runs is not None,
-        live_manual_run_active=live_manual_run_active,
+        live_manual_run_active=runtime_session.manual_run_active,
         workspace_available=workspace_available,
         local_request_pending=local_request_pending,
         overlay=PendingWorkspaceActionOverlay() if overlay is None else overlay,

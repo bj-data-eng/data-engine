@@ -14,7 +14,7 @@ import shutil
 import stat
 import threading
 import time
-from typing import Any, Iterator, Literal, Mapping, Protocol
+from typing import Any, Callable, Iterator, Literal, Mapping, Protocol
 from uuid import uuid4
 
 import polars as pl
@@ -58,6 +58,10 @@ class _SnapshotRepository(Protocol):
     ]: ...
 
     def applied_generation_id(self) -> str | None: ...
+
+    def contains_generation(self, generation_id: str) -> bool: ...
+
+    def record_export(self, generation_id: str, *, previous_generation_id: str | None) -> None: ...
 
     def replace(
         self,
@@ -379,7 +383,13 @@ def _marker_token(entry: Path, *, workspace_id: str, recovery: bool = False) -> 
         return None
     if _LEASE_TOKEN_PATTERN.fullmatch(token) is None:
         raise WorkspaceStateCorruptError(f"Workspace {workspace_id!r} has an invalid lease marker name.")
-    if _is_redirecting_path(entry) or not entry.is_dir():
+    try:
+        marker_stat = os.stat(entry, follow_symlinks=False)
+    except FileNotFoundError as exc:
+        raise WorkspaceTransitionInProgressError(
+            f"Workspace {workspace_id!r} lease marker moved during inspection."
+        ) from exc
+    if _is_redirecting_path(entry) or not stat.S_ISDIR(marker_stat.st_mode):
         raise WorkspaceStateCorruptError(f"Workspace {workspace_id!r} has a non-directory lease marker.")
     return token
 
@@ -432,7 +442,7 @@ def resolve_workspace_bundle(
     *,
     retries: int = _PARQUET_READ_RETRIES,
 ) -> WorkspaceBundlePaths | None:
-    """Resolve the single current bundle, retrying across a recovery rename."""
+    """Resolve the single current bundle, retrying across lease renames."""
     retry_count = max(retries, 1)
     for attempt in range(retry_count):
         try:
@@ -1061,6 +1071,7 @@ def checkpoint_workspace_state(
     last_checkpoint_at_utc: str,
     app_version: str | None,
     heartbeat_interval_seconds: float | None = None,
+    on_export_change_token: Callable[[object], None] | None = None,
 ) -> str:
     """Heartbeat first, then atomically publish a token-fenced runtime snapshot."""
     current_generation = read_runtime_snapshot_generation(paths, lease_token=lease_token)
@@ -1124,16 +1135,23 @@ def checkpoint_workspace_state(
         heartbeat_thread.start()
     snapshot_generation_id = uuid4().hex
     try:
-        runs, step_runs, logs, file_states = ledger.snapshots.export()
-        _publish_shared_runtime_snapshot(
-            paths,
-            lease_token=lease_token,
-            snapshot_generation_id=snapshot_generation_id,
-            runs=runs,
-            step_runs=step_runs,
-            logs=logs,
-            file_states=file_states,
-        )
+        # Serialize receipt pruning with publication: overlapping checkpoints
+        # must not discard provenance for a generation still being published.
+        with _snapshot_publication_lock(paths, lease_token=lease_token):
+            previous_generation = read_runtime_snapshot_generation(paths, lease_token=lease_token)
+            ledger.snapshots.record_export(snapshot_generation_id, previous_generation_id=previous_generation)
+            if on_export_change_token is not None:
+                on_export_change_token(ledger.snapshot_change_token())
+            runs, step_runs, logs, file_states = ledger.snapshots.export()
+            _publish_shared_runtime_snapshot(
+                paths,
+                lease_token=lease_token,
+                snapshot_generation_id=snapshot_generation_id,
+                runs=runs,
+                step_runs=step_runs,
+                logs=logs,
+                file_states=file_states,
+            )
     finally:
         heartbeat_stop.set()
         if heartbeat_thread is not None:
@@ -1205,7 +1223,7 @@ def write_lease_metadata(
 def hydrate_local_runtime_state(paths: WorkspacePaths, ledger: RuntimeSnapshotStore) -> bool:
     """Replace local SQLite runtime tables from the current committed bundle."""
     snapshot_generation_id = read_runtime_snapshot_generation(paths)
-    if snapshot_generation_id is None or ledger.snapshots.applied_generation_id() == snapshot_generation_id:
+    if snapshot_generation_id is None or ledger.snapshots.contains_generation(snapshot_generation_id):
         return False
     snapshot = _read_consistent_runtime_snapshot(paths)
     if snapshot is None:

@@ -82,6 +82,29 @@ def _claim(paths) -> str:
     return lease_token
 
 
+def test_resolve_bundle_retries_when_enumerated_lease_is_released(tmp_path, monkeypatch):
+    paths = resolve_workspace_paths(workspace_root=tmp_path / "workspace")
+    token = _claim(paths)
+    original = shared_state_module._directory_entries
+    moved = False
+
+    def enumerate_and_release(path):
+        nonlocal moved
+        entries = original(path)
+        if path == paths.leased_markers_dir and entries and not moved:
+            moved = True
+            entries[0].rename(paths.available_markers_dir / paths.workspace_id)
+        return entries
+
+    monkeypatch.setattr(shared_state_module, "_directory_entries", enumerate_and_release)
+    bundle = resolve_workspace_bundle(paths)
+    assert moved
+    assert token
+    assert bundle is not None
+    assert bundle.state == "available"
+    assert bundle.lease_token is None
+
+
 def _current_lease_token(paths) -> str:
     initialize_workspace_state(paths)
     bundle = resolve_workspace_bundle(paths)
@@ -541,6 +564,64 @@ def test_checkpoint_workspace_state_commits_all_four_typed_empty_artifacts(tmp_p
         frame = pl.read_parquet(artifacts[artifact_name])
         assert frame.height == 0
         assert tuple(frame.columns) == columns
+
+
+@pytest.mark.parametrize("publication_interrupted", [None, "before", "after"])
+@pytest.mark.parametrize("manifest_advanced", [False, True])
+def test_restart_preserves_own_cache_tail_but_hydrates_another_cache(tmp_path, monkeypatch, publication_interrupted, manifest_advanced):
+    paths = resolve_workspace_paths(workspace_root=tmp_path / "workspace")
+    cache_path = tmp_path / "cache.sqlite"
+    ledger = RuntimeCacheLedger(cache_path)
+    started = utcnow_text()
+
+    def checkpoint(source):
+        return checkpoint_workspace_state(
+            paths, source, workspace_id=paths.workspace_id, machine_id="machine-a",
+            host_name="test-host", daemon_id="daemon-a", pid=101, status="idle",
+            started_at_utc=started, last_checkpoint_at_utc=started, app_version="0.5.0",
+        )
+
+    ledger.runs.record_started(run_id="saved", flow_name="demo", group_name="Demo", source_path=None, started_at_utc=started)
+    checkpoint(ledger)
+    if publication_interrupted:
+        original = shared_state_module._publish_shared_runtime_snapshot
+
+        def publish_then_interrupt(*args, **kwargs):
+            if publication_interrupted == "after":
+                original(*args, **kwargs)
+            raise RuntimeError("process interrupted at manifest publication")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(shared_state_module, "_publish_shared_runtime_snapshot", publish_then_interrupt)
+            with pytest.raises(RuntimeError, match="process interrupted"):
+                checkpoint(ledger)
+    receipts = ledger._connection().execute("SELECT COUNT(*) FROM exported_snapshot_generations").fetchone()[0]
+    assert receipts <= 2
+    ledger.runs.record_started(run_id="tail", flow_name="demo", group_name="Demo", source_path=None, started_at_utc=started)
+    ledger.step_outputs.record_started(run_id="tail", flow_name="demo", step_label="Read", started_at_utc=started)
+    ledger.logs.append(level="INFO", message="after checkpoint", created_at_utc=started, run_id="tail", flow_name="demo")
+    ledger.close()
+    ledger = RuntimeCacheLedger(cache_path)
+    other = RuntimeCacheLedger(tmp_path / "other.sqlite")
+    try:
+        with monkeypatch.context() as patch:
+            if manifest_advanced:
+                # The cheap first read saw an older remote manifest; the
+                # consistent snapshot read then sees our own newer export.
+                patch.setattr(shared_state_module, "read_runtime_snapshot_generation", lambda paths: "f" * 32)
+            assert hydrate_local_runtime_state(paths, ledger) is False
+        assert {run.run_id for run in ledger.runs.list()} == {"saved", "tail"}
+        assert [row.run_id for row in ledger.step_outputs.list()] == ["tail"]
+        assert [entry.message for entry in ledger.logs.list(run_id="tail")] == ["after checkpoint"]
+        assert hydrate_local_runtime_state(paths, other) is True
+        assert {run.run_id for run in other.runs.list()} == {"saved"}
+        other.runs.record_started(run_id="remote", flow_name="demo", group_name="Demo", source_path=None, started_at_utc=started)
+        checkpoint(other)
+        assert hydrate_local_runtime_state(paths, ledger) is True
+        assert {run.run_id for run in ledger.runs.list()} == {"saved", "remote"}
+    finally:
+        ledger.close()
+        other.close()
 
 
 def test_hydrate_same_generation_skips_all_parquet_and_sqlite_replacement(tmp_path, monkeypatch):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import pytest
 
 from data_engine.domain import (
     ActiveRunState,
@@ -16,7 +17,52 @@ from data_engine.domain import (
 )
 from data_engine.runtime.ledger_models import PersistedRun
 from data_engine.runtime.runtime_db import RuntimeCacheLedger
-from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, FlowLiveSummary, RuntimeStateService, WorkspaceSnapshot
+from data_engine.services.runtime_state import ControlSnapshot, EngineSnapshot, FlowLiveSummary, RuntimeStateService, WorkspaceSnapshot, runtime_session_from_workspace_snapshot
+
+
+def test_manual_ownership_survives_snapshot_round_trip_between_file_runs():
+    from types import SimpleNamespace
+
+    card = SimpleNamespace(name="poll", group="Docs", mode="poll", state="polling", valid=True)
+    previous = WorkspaceSnapshot(
+        workspace_id="test", version=1, control=ControlSnapshot(state="available"),
+        engine=EngineSnapshot(state="running", daemon_live=True, active_flow_names=("poll",)),
+        flows={}, active_runs={},
+    )
+    status = DaemonStatusState(
+        workspace_owned=True, leased_by_machine_id=None, engine_active=True,
+        engine_stopping=False, active_engine_flow_names=("poll",),
+        manual_run_names=("poll",), source="daemon", projection_version=2,
+    )
+    service = RuntimeStateService(runtime_binding_service=SimpleNamespace(), log_service=SimpleNamespace())
+    snapshot = service.incremental_snapshot_from_daemon(previous, flow_cards=(card,), daemon_status=status)
+    session = runtime_session_from_workspace_snapshot(snapshot)
+    assert session.runtime_active
+    assert session.manual_flow_name_for_group("Docs") == "poll"
+    from data_engine.views.actions import build_operator_action_context
+
+    context = build_operator_action_context(
+        card=card, flow_states={}, runtime_session=session, flow_groups_by_name={"poll": "Docs"},
+        active_flow_states={"running"}, engine_state="running", engine_truth_known=True,
+        live_runs={}, has_automated_flows=True,
+    )
+    assert context.manual_run_active
+    assert context.selected_manual_running
+
+
+def test_explicit_manual_reservation_gates_stop_when_engine_owns_same_flow():
+    from types import SimpleNamespace
+    from data_engine.views.actions import build_operator_action_context
+
+    card = SimpleNamespace(name="poll", group="Docs", mode="poll", state="polling", valid=True)
+    session = RuntimeSessionState(runtime_active=True, active_runtime_flow_names=("poll",)).with_manual_runs_map({"Docs": "poll"})
+    context = build_operator_action_context(
+        card=card, flow_states={}, runtime_session=session, flow_groups_by_name={"poll": "Docs"},
+        active_flow_states={"running"}, engine_state="running", engine_truth_known=True,
+        live_runs={}, has_automated_flows=True,
+    )
+    assert context.manual_run_active
+    assert context.selected_manual_running
 
 
 def test_runtime_state_service_returns_unified_workspace_snapshot():
@@ -162,7 +208,8 @@ def test_runtime_state_service_returns_unified_workspace_snapshot():
     assert projection.step_output_index == "step-index"
 
 
-def test_rebuild_projection_rebuilds_operation_tracker_from_persisted_step_runs(tmp_path):
+@pytest.mark.parametrize("owner_exited", [False, True])
+def test_rebuild_projection_rebuilds_operation_tracker_from_persisted_step_runs(tmp_path, owner_exited):
     ledger = RuntimeCacheLedger.open_default(data_root=tmp_path / "workspace")
     wall_now = datetime.now(UTC)
     started_read = (wall_now - timedelta(seconds=10)).isoformat()
@@ -252,11 +299,17 @@ def test_rebuild_projection_rebuilds_operation_tracker_from_persisted_step_runs(
         )
         service = RuntimeStateService(runtime_binding_service=_BindingService(), log_service=_LogService())
 
+        from data_engine.hosts.daemon.manager import WorkspaceDaemonSnapshot
+        snapshot = WorkspaceDaemonSnapshot(
+            live=False, workspace_owned=True, leased_by_machine_id=None,
+            runtime_active=False, runtime_stopping=False, manual_runs=(),
+            last_checkpoint_at_utc=None, source="exited" if owner_exited else "cached",
+        )
         projection = service.rebuild_projection(
             binding,
             runtime_application=_RuntimeApp(),
             flow_cards=(card,),
-            runtime_session=RuntimeSessionState.empty(),
+            runtime_session=RuntimeSessionState.from_daemon_snapshot(snapshot, (card,)),
             now=100.0,
         )
 
@@ -264,9 +317,12 @@ def test_rebuild_projection_rebuilds_operation_tracker_from_persisted_step_runs(
         write_state = projection.operation_tracker.row_state("poller", "Write")
         assert read_state == OperationRowState(status="idle", elapsed_seconds=1.25)
         assert write_state is not None
-        assert write_state.status == "running"
-        assert write_state.started_at is not None
-        assert 96.5 <= write_state.started_at <= 97.5
+        assert write_state.status == ("stopped" if owner_exited else "running")
+        if owner_exited:
+            assert write_state.started_at is None
+        else:
+            assert write_state.started_at is not None
+            assert 96.5 <= write_state.started_at <= 97.5
         assert write_state.elapsed_seconds is None
     finally:
         ledger.close()

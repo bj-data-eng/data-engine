@@ -283,20 +283,24 @@ class DataEngineDaemonService:
         include_state: bool = True,
     ) -> None:
         """Publish one daemon runtime event with the latest full state payload."""
-        event_payload: dict[str, object] = {}
-        if include_state:
-            event_payload["state"] = self._runtime_state_payload()
-        if payload:
-            event_payload.update(payload)
-        self.runtime_event_bus.publish(
-            DaemonRuntimeEvent(
-                workspace_id=self.paths.workspace_id,
-                event_type=event_type,
-                timestamp_utc=utcnow_text(),
-                correlation_id=correlation_id,
-                payload=event_payload,
+        # Use the mutation lock so a captured full state cannot be published
+        # after a later state transition or a state-free lifecycle event.
+        # Hot-path events still avoid full-state database reads.
+        with self._state_lock:
+            event_payload: dict[str, object] = {}
+            if include_state:
+                event_payload["state"] = self._runtime_state_payload()
+            if payload:
+                event_payload.update(payload)
+            self.runtime_event_bus.publish(
+                DaemonRuntimeEvent(
+                    workspace_id=self.paths.workspace_id,
+                    event_type=event_type,
+                    timestamp_utc=utcnow_text(),
+                    correlation_id=correlation_id,
+                    payload=event_payload,
+                )
             )
-        )
 
     def initialize(self) -> None:
         initialize_service(self)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from dataclasses import replace
 
 import pytest
 
@@ -85,8 +86,8 @@ def test_selected_flow_presentation_prefers_daemon_live_runs_for_nonterminal_his
 def test_selected_flow_presentation_keeps_terminal_history_and_adds_daemon_only_live_runs() -> None:
     card = _card()
     run_groups = (
-        _entry_to_group(_run_group("finished-1", status="success")),
-        _entry_to_group(_run_group("finished-2", status="failed")),
+        _entry_to_group(replace(_run_group("finished-1", status="success"), created_at_utc=datetime(2026, 4, 18, 11, 57, tzinfo=UTC))),
+        _entry_to_group(replace(_run_group("finished-2", status="failed"), created_at_utc=datetime(2026, 4, 18, 11, 58, tzinfo=UTC))),
     )
     live_runs = {
         "live-1": RunLiveSnapshot(
@@ -286,6 +287,36 @@ def _entry_to_group(entry: FlowLogEntry):
     return FlowRunState.group_entries((entry,))[0]
 
 
+def test_live_only_older_run_stays_before_newer_persisted_history():
+    card = _card()
+    now = datetime.now(UTC)
+    saved = _entry_to_group(replace(_run_group("saved", status="success"), created_at_utc=now))
+    live = RunLiveSnapshot(
+        run_id="live", flow_name=card.name, group_name=card.group, source_path=None,
+        state="running", started_at_utc=(now - timedelta(minutes=1)).isoformat(),
+    )
+    presentation = build_selected_flow_presentation(
+        card=card, tracker=OperationSessionState.empty(), flow_states={}, run_groups=(saved,),
+        selected_run_key=saved.key, live_runs={"live": live}, live_truth_authoritative=True,
+    )
+    assert tuple(run.key[1] for run in presentation.run_groups) == ("live", "saved")
+    assert presentation.selected_run_key == saved.key
+
+
+def test_confirmed_daemon_exit_stops_unfinished_history_without_hiding_it():
+    card = _card()
+    unfinished = _entry_to_group(_run_group("unfinished", status="started"))
+    completed = _entry_to_group(_run_group("completed", status="success"))
+    presentation = build_selected_flow_presentation(
+        card=card, tracker=OperationSessionState.empty(), flow_states={},
+        run_groups=(unfinished, completed), selected_run_key=unfinished.key,
+        local_process_dead=True,
+    )
+    assert [run.status for run in presentation.run_groups] == ["stopped", "success"]
+    assert presentation.run_groups[0].entries == unfinished.entries
+    assert presentation.selected_run_key == unfinished.key
+
+
 @pytest.mark.parametrize("authoritative", [False, True])
 @pytest.mark.parametrize("live_runs", [None, {}])
 def test_empty_live_truth_reconciles_only_when_available_and_authoritative(authoritative, live_runs):
@@ -333,4 +364,3 @@ def test_live_run_duration_uses_run_start_while_step_uses_step_start(state, step
     assert step.entry.created_at_utc == step_started
     assert step.entry.event.step_name == "Write"
     assert 3.0 <= step.elapsed_seconds < 8.0
-

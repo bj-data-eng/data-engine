@@ -209,11 +209,7 @@ def refresh_workspace_visibility_panel(window: "DataEngineWindow") -> None:
         else window.runtime_session
     )
     if target_is_current and workspace_snapshot is not None and workspace_snapshot.engine.daemon_live:
-        manual_run_active = any(
-            run.flow_name not in set(workspace_snapshot.engine.active_flow_names)
-            and run.state in {"starting", "running", "stopping"}
-            for run in workspace_snapshot.active_runs.values()
-        )
+        manual_run_active = bool(workspace_snapshot.manual_runs)
         has_active_work = workspace_snapshot.engine.state in {"starting", "running", "stopping"} or manual_run_active
         runtime_stopping = workspace_snapshot.engine.state == "stopping"
         control_available = current_runtime_session.control_available

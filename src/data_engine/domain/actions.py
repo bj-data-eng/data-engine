@@ -120,27 +120,6 @@ class SelectedFlowState:
         return ""
 
     @staticmethod
-    def _live_manual_running_for_card(
-        card: FlowCatalogLike | None,
-        live_runs: Mapping[str, Any] | None,
-        *,
-        engine_active_flow_names: Container[str] = (),
-    ) -> bool:
-        if card is None or not live_runs:
-            return False
-        for run in live_runs.values():
-            if str(getattr(run, "flow_name", "") or "").strip() != card.name:
-                continue
-            if card.name in engine_active_flow_names:
-                continue
-            if str(getattr(run, "group_name", "") or "").strip() != str(card.group or "").strip():
-                continue
-            state = str(getattr(run, "state", "") or "").strip().lower()
-            if state in {"starting", "running", "stopping"}:
-                return True
-        return False
-
-    @staticmethod
     def _live_group_active_for_card(
         card: FlowCatalogLike | None,
         live_runs: Mapping[str, Any] | None,
@@ -167,18 +146,13 @@ class SelectedFlowState:
         flow_groups_by_name: Mapping[str, str],
         active_flow_states: Container[str],
         live_runs: Mapping[str, Any] | None = None,
-        engine_active_flow_names: Container[str] = (),
     ) -> "SelectedFlowState":
         """Build one selected-flow state from current runtime and selection inputs."""
         if card is None:
             return cls(card=None)
         state = flow_states.get(card.name, card.state)
         live_state = cls._live_state_for_card(card, live_runs)
-        live_manual_running = cls._live_manual_running_for_card(
-            card,
-            live_runs,
-            engine_active_flow_names=engine_active_flow_names,
-        )
+        live_manual_running = card.name == runtime_session.manual_flow_name_for_group(card.group)
         live_group_active = cls._live_group_active_for_card(card, live_runs)
         return cls(
             card=card,
