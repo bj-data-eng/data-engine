@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from data_engine.domain.logs import format_runtime_message
 from data_engine.ui.gui.preview_models import ConfigPreviewRequest, OutputPreviewRequest, RunLogPreviewRequest
 from data_engine.ui.gui.rendering import (
     build_preview_summary_text,
@@ -103,8 +104,17 @@ def _build_run_log_preview_rows(window: "DataEngineWindow", run_group: "FlowRunS
         entry.event is not None and entry.event.step_name is not None and entry.event.status == "failed"
         for entry in run_group.entries
     )
+    summary_entry = run_group.summary_entry
+    failure_detail = (
+        format_runtime_message(summary_entry.line).strip()
+        if run_group.status == "failed" and summary_entry is not None
+        else None
+    )
     for entry in run_group.entries:
         event = entry.event
+        # Inspect owns the failure detail; retain ordinary diagnostics in the list.
+        if event is None and failure_detail is not None and entry.line.strip() == failure_detail:
+            continue
         if event is None or event.step_name is None:
             if (
                 has_step_entries
